@@ -75,7 +75,7 @@ async def test_infinite_query_fetch_next_pages():
 	class S(ps.State):
 		calls: int = 0
 
-		@ps.infinite_query(initial_page_param=0, retries=0)
+		@ps.infinite_query(initial_page_param=0, retries=0, key=("projects",))
 		async def projects(self, page_param: int) -> ProjectsPage:
 			self.calls += 1
 			await asyncio.sleep(0)
@@ -85,10 +85,6 @@ async def test_infinite_query_fetch_next_pages():
 		@projects.get_next_page_param
 		def _get_next(self, pages: list[Page[ProjectsPage, int]]) -> int | None:
 			return pages[-1].data["next"]
-
-		@projects.key
-		def _key(self):
-			return ("projects",)
 
 	s = S()
 	q = s.projects
@@ -111,11 +107,37 @@ async def test_infinite_query_fetch_next_pages():
 
 @pytest.mark.asyncio
 @with_render_session
+async def test_infinite_query_requires_key():
+	class S(ps.State):
+		inf_query: Any = ps.infinite_query
+
+		@inf_query(initial_page_param=0, retries=0)
+		async def nums(self, page_param: int) -> int:
+			return page_param
+
+		@nums.get_next_page_param
+		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
+			return None
+
+	with pytest.raises(RuntimeError, match="key is required"):
+		_ = S().nums
+
+
+@pytest.mark.asyncio
+@with_render_session
 async def test_infinite_query_initial_data_used_on_key_change_with_keep_previous_true():
 	class S(ps.State):
 		uid: int = 1
 
-		@ps.infinite_query(initial_page_param=0, retries=0, keep_previous_data=True)
+		def _projects_key(self) -> ps.QueryKey:
+			return ("projects", self.uid)
+
+		@ps.infinite_query(
+			initial_page_param=0,
+			retries=0,
+			keep_previous_data=True,
+			key=_projects_key,
+		)
 		async def projects(self, page_param: int) -> ProjectsPage:
 			await asyncio.sleep(0.02)
 			return {"items": [self.uid], "next": None}
@@ -128,10 +150,6 @@ async def test_infinite_query_initial_data_used_on_key_change_with_keep_previous
 		def _initial(self):
 			data: ProjectsPage = {"items": [0], "next": None}
 			return [Page(data, 0)]
-
-		@projects.key
-		def _key(self):
-			return ("projects", self.uid)
 
 	s = S()
 	q = s.projects
@@ -155,7 +173,11 @@ async def test_infinite_query_wait_is_side_effect_free_and_ensure_starts_fetch()
 
 	class S(ps.State):
 		@ps.infinite_query(
-			initial_page_param=0, retries=0, fetch_on_mount=False, max_pages=0
+			initial_page_param=0,
+			retries=0,
+			fetch_on_mount=False,
+			max_pages=0,
+			key=("inf-ensure",),
 		)
 		async def nums(self, page_param: int) -> int:
 			nonlocal calls
@@ -166,10 +188,6 @@ async def test_infinite_query_wait_is_side_effect_free_and_ensure_starts_fetch()
 		@nums.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
 			return None
-
-		@nums.key
-		def _key(self):
-			return ("inf-ensure",)
 
 	s = S()
 	q = s.nums
@@ -191,7 +209,7 @@ async def test_infinite_query_wait_is_side_effect_free_and_ensure_starts_fetch()
 @with_render_session
 async def test_infinite_query_max_pages_trims_forward():
 	class S(ps.State):
-		@ps.infinite_query(initial_page_param=0, max_pages=2, retries=0)
+		@ps.infinite_query(initial_page_param=0, max_pages=2, retries=0, key=("nums",))
 		async def nums(self, page_param: int) -> int:
 			await asyncio.sleep(0)
 			return page_param
@@ -199,10 +217,6 @@ async def test_infinite_query_max_pages_trims_forward():
 		@nums.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
 			return pages[-1].param + 1 if pages[-1].param < 3 else None
-
-		@nums.key
-		def _key(self):
-			return ("nums",)
 
 	s = S()
 	q = s.nums
@@ -225,7 +239,7 @@ async def test_infinite_query_max_pages_trims_forward():
 @with_render_session
 async def test_infinite_query_fetch_previous_pages():
 	class S(ps.State):
-		@ps.infinite_query(initial_page_param=1, retries=0)
+		@ps.infinite_query(initial_page_param=1, retries=0, key=("nums-prev",))
 		async def nums(self, page_param: int) -> int:
 			await asyncio.sleep(0)
 			return page_param
@@ -237,10 +251,6 @@ async def test_infinite_query_fetch_previous_pages():
 		@nums.get_previous_page_param
 		def _get_prev(self, pages: list[Page[int, int]]) -> int | None:
 			return pages[0].param - 1 if pages[0].param > 0 else None
-
-		@nums.key
-		def _key(self):
-			return ("nums-prev",)
 
 	s = S()
 	q = s.nums
@@ -262,7 +272,7 @@ async def test_infinite_query_fetch_previous_pages():
 @with_render_session
 async def test_infinite_query_page_error_sets_error():
 	class S(ps.State):
-		@ps.infinite_query(initial_page_param=0, retries=0)
+		@ps.infinite_query(initial_page_param=0, retries=0, key=("fail-page",))
 		async def sometimes_fail(self, page_param: int) -> int:
 			await asyncio.sleep(0)
 			if page_param == 1:
@@ -272,10 +282,6 @@ async def test_infinite_query_page_error_sets_error():
 		@sometimes_fail.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int:
 			return pages[-1].param + 1
-
-		@sometimes_fail.key
-		def _key(self):
-			return ("fail-page",)
 
 	s = S()
 	q = s.sometimes_fail
@@ -298,7 +304,7 @@ async def test_infinite_query_page_error_sets_error():
 @with_render_session
 async def test_infinite_query_page_param_decorators():
 	class S(ps.State):
-		@ps.infinite_query(initial_page_param=1)
+		@ps.infinite_query(initial_page_param=1, key=("decorator-params",))
 		async def nums(self, page_param: int):
 			await asyncio.sleep(0)
 			return page_param
@@ -310,10 +316,6 @@ async def test_infinite_query_page_param_decorators():
 		@nums.get_previous_page_param
 		def _prev(self, pages: list[Page[int, int]]) -> int | None:
 			return pages[0].param - 1 if pages[0].param > 0 else None
-
-		@nums.key
-		def _key(self):
-			return ("decorator-params",)
 
 	s = S()
 	q = s.nums
@@ -337,7 +339,7 @@ async def test_infinite_query_refetch_refetches_all_pages_sequentially():
 	class S(ps.State):
 		called: list[int] = []
 
-		@ps.infinite_query(initial_page_param=0, stale_time=5)
+		@ps.infinite_query(initial_page_param=0, stale_time=5, key=("refetch-reset",))
 		async def nums(self, page_param: int) -> RefetchPage:
 			self.called.append(page_param)
 			await asyncio.sleep(0)
@@ -349,10 +351,6 @@ async def test_infinite_query_refetch_refetches_all_pages_sequentially():
 		@nums.get_next_page_param
 		def _next(self, pages: list[Page[RefetchPage, int]]) -> int | None:
 			return pages[-1].data["next"]
-
-		@nums.key
-		def _key(self):
-			return ("refetch-reset",)
 
 	s = S()
 	q = s.nums
@@ -371,7 +369,7 @@ async def test_infinite_query_refetch_recomputes_next_params():
 	class S(ps.State):
 		stop_after_first: bool = False
 
-		@ps.infinite_query(initial_page_param=0)
+		@ps.infinite_query(initial_page_param=0, key=("refetch-recompute",))
 		async def nums(self, page_param: int) -> RefetchPage:
 			await asyncio.sleep(0)
 			next_val = (
@@ -384,10 +382,6 @@ async def test_infinite_query_refetch_recomputes_next_params():
 		@nums.get_next_page_param
 		def _next(self, pages: list[Page[RefetchPage, int]]) -> int | None:
 			return pages[-1].data["next"]
-
-		@nums.key
-		def _key(self):
-			return ("refetch-recompute",)
 
 	s = S()
 	q = s.nums
@@ -416,7 +410,7 @@ async def test_infinite_query_refetch_page_filter():
 	class S(ps.State):
 		versions: dict[int, int] = {0: 0, 1: 0}
 
-		@ps.infinite_query(initial_page_param=0)
+		@ps.infinite_query(initial_page_param=0, key=("refetch-filter",))
 		async def nums(self, page_param: int) -> VersionedPage:
 			await asyncio.sleep(0)
 			return {
@@ -428,10 +422,6 @@ async def test_infinite_query_refetch_page_filter():
 		@nums.get_next_page_param
 		def _next(self, pages: list[Page[VersionedPage, int]]) -> int | None:
 			return pages[-1].data["next"]
-
-		@nums.key
-		def _key(self):
-			return ("refetch-filter",)
 
 	s = S()
 	q = s.nums
@@ -454,7 +444,7 @@ async def test_infinite_query_refetch_page_filter():
 @with_render_session
 async def test_infinite_query_set_initial_data_api_and_cache_helpers():
 	class S(ps.State):
-		@ps.infinite_query(initial_page_param=0, stale_time=5)
+		@ps.infinite_query(initial_page_param=0, stale_time=5, key=("inf-set-initial",))
 		async def nums(self, page_param: int) -> RefetchPage:
 			await asyncio.sleep(0)
 			return {"page": page_param, "next": None}
@@ -462,10 +452,6 @@ async def test_infinite_query_set_initial_data_api_and_cache_helpers():
 		@nums.get_next_page_param
 		def _next(self, pages: list[Page[RefetchPage, int]]) -> int | None:
 			return None
-
-		@nums.key
-		def _key(self):
-			return ("inf-set-initial",)
 
 	s = S()
 	q = s.nums
@@ -484,7 +470,11 @@ async def test_infinite_query_set_initial_data_api_and_cache_helpers():
 @with_render_session
 async def test_infinite_query_set_initial_data_no_effect_after_load():
 	class S(ps.State):
-		@ps.infinite_query(initial_page_param=0, stale_time=5)
+		@ps.infinite_query(
+			initial_page_param=0,
+			stale_time=5,
+			key=("inf-no-effect-after-load",),
+		)
 		async def nums(self, page_param: int) -> RefetchPage:
 			await asyncio.sleep(0)
 			return {"page": page_param, "next": None}
@@ -492,10 +482,6 @@ async def test_infinite_query_set_initial_data_no_effect_after_load():
 		@nums.get_next_page_param
 		def _next(self, pages: list[Page[RefetchPage, int]]) -> int | None:
 			return None
-
-		@nums.key
-		def _key(self):
-			return ("inf-no-effect-after-load",)
 
 	s = S()
 	q = s.nums
@@ -519,7 +505,12 @@ async def test_infinite_query_fetch_page_basic():
 	fetch_count = 0
 
 	class S(ps.State):
-		@ps.infinite_query(initial_page_param=0, max_pages=3, retries=0)
+		@ps.infinite_query(
+			initial_page_param=0,
+			max_pages=3,
+			retries=0,
+			key=("fetch-page-basic",),
+		)
 		async def nums(self, page_param: int) -> int:
 			nonlocal fetch_count
 			fetch_count += 1
@@ -529,10 +520,6 @@ async def test_infinite_query_fetch_page_basic():
 		@nums.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
 			return pages[-1].param + 1 if pages[-1].param < 10 else None
-
-		@nums.key
-		def _key(self):
-			return ("fetch-page-basic",)
 
 	s = S()
 	q = s.nums
@@ -574,7 +561,11 @@ async def test_infinite_query_fetch_page_jumps_to_new_page():
 
 	class S(ps.State):
 		@ps.infinite_query(
-			initial_page_param=0, max_pages=4, retries=0, fetch_on_mount=False
+			initial_page_param=0,
+			max_pages=4,
+			retries=0,
+			fetch_on_mount=False,
+			key=("fetch-page-jump",),
 		)
 		async def nums(self, page_param: int) -> int:
 			nonlocal fetch_count
@@ -585,10 +576,6 @@ async def test_infinite_query_fetch_page_jumps_to_new_page():
 		@nums.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
 			return pages[-1].param + 1 if pages[-1].param < 10 else None
-
-		@nums.key
-		def _key(self):
-			return ("fetch-page-jump",)
 
 	s = S()
 	q = s.nums
@@ -622,7 +609,11 @@ async def test_infinite_query_fetch_page_no_pages_exists():
 
 	class S(ps.State):
 		@ps.infinite_query(
-			initial_page_param=0, max_pages=4, retries=0, fetch_on_mount=False
+			initial_page_param=0,
+			max_pages=4,
+			retries=0,
+			fetch_on_mount=False,
+			key=("fetch-page-no-pages",),
 		)
 		async def nums(self, page_param: int) -> int:
 			nonlocal fetch_count
@@ -633,10 +624,6 @@ async def test_infinite_query_fetch_page_no_pages_exists():
 		@nums.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
 			return pages[-1].param + 1 if pages[-1].param < 10 else None
-
-		@nums.key
-		def _key(self):
-			return ("fetch-page-no-pages",)
 
 	s = S()
 	q = s.nums
@@ -655,13 +642,74 @@ async def test_infinite_query_fetch_page_no_pages_exists():
 
 @pytest.mark.asyncio
 @with_render_session
+async def test_infinite_query_fetch_page_clear():
+	"""Test that fetch_page with clear=True refetches and clears other pages."""
+	fetch_count = 0
+
+	class S(ps.State):
+		@ps.infinite_query(
+			initial_page_param=0,
+			retries=0,
+			fetch_on_mount=False,
+			key=("fetch-page-clear",),
+		)
+		async def nums(self, page_param: int) -> int:
+			nonlocal fetch_count
+			fetch_count += 1
+			await asyncio.sleep(0)
+			return page_param * 10 + fetch_count
+
+		@nums.get_next_page_param
+		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
+			return pages[-1].param + 1 if pages[-1].param < 10 else None
+
+	s = S()
+	q = s.nums
+
+	# Load several pages
+	await q.fetch_page(0)
+	await q.fetch_next_page()
+	await q.fetch_next_page()
+	await q.fetch_next_page()
+	assert q.page_params == [0, 1, 2, 3]
+	assert fetch_count == 4
+
+	# Refetch page 0 with clear=True - should refetch and clear all other pages
+	result = await q.fetch_page(0, clear=True)
+	assert result.status == "success"
+	assert result.data == 5  # 0*10 + 5 (refetched)
+	assert q.pages == [5]
+	assert q.page_params == [0]
+	assert fetch_count == 5
+
+	# Load more pages again
+	await q.fetch_next_page()
+	await q.fetch_next_page()
+	assert q.page_params == [0, 1, 2]
+	assert fetch_count == 7
+
+	# Refetch page 1 (middle page) with clear=True - should clear and keep only page 1
+	result = await q.fetch_page(1, clear=True)
+	assert result.status == "success"
+	assert result.data == 18  # 1*10 + 8
+	assert q.pages == [18]
+	assert q.page_params == [1]
+
+
+@pytest.mark.asyncio
+@with_render_session
 async def test_infinite_query_retry_on_initial_fetch():
 	"""Test that infinite query retries on initial fetch failure."""
 
 	class S(ps.State):
 		attempts: int = 0
 
-		@ps.infinite_query(initial_page_param=0, retries=2, retry_delay=0.01)
+		@ps.infinite_query(
+			initial_page_param=0,
+			retries=2,
+			retry_delay=0.01,
+			key=("retry-initial",),
+		)
 		async def failing_query(self, page_param: int) -> int:
 			self.attempts += 1
 			if self.attempts < 3:  # Fail first 2 attempts
@@ -671,10 +719,6 @@ async def test_infinite_query_retry_on_initial_fetch():
 		@failing_query.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
 			return None
-
-		@failing_query.key
-		def _key(self):
-			return ("retry-initial",)
 
 	s = S()
 	q = s.failing_query
@@ -693,7 +737,12 @@ async def test_infinite_query_retry_on_fetch_page():
 	class S(ps.State):
 		attempts: int = 0
 
-		@ps.infinite_query(initial_page_param=0, retries=2, retry_delay=0.01)
+		@ps.infinite_query(
+			initial_page_param=0,
+			retries=2,
+			retry_delay=0.01,
+			key=("retry-fetch-page",),
+		)
 		async def failing_query(self, page_param: int) -> int:
 			self.attempts += 1
 			# Fail attempts 2 and 3 (when refetching page 0)
@@ -704,10 +753,6 @@ async def test_infinite_query_retry_on_fetch_page():
 		@failing_query.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
 			return pages[-1].param + 1 if pages[-1].param < 2 else None
-
-		@failing_query.key
-		def _key(self):
-			return ("retry-fetch-page",)
 
 	s = S()
 	q = s.failing_query
@@ -733,7 +778,12 @@ async def test_infinite_query_retry_exhausted():
 	class S(ps.State):
 		attempts: int = 0
 
-		@ps.infinite_query(initial_page_param=0, retries=1, retry_delay=0.01)
+		@ps.infinite_query(
+			initial_page_param=0,
+			retries=1,
+			retry_delay=0.01,
+			key=("retry-exhausted",),
+		)
 		async def failing_query(self, page_param: int) -> int:
 			self.attempts += 1
 			raise ValueError(f"attempt {self.attempts}")
@@ -741,10 +791,6 @@ async def test_infinite_query_retry_exhausted():
 		@failing_query.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
 			return None
-
-		@failing_query.key
-		def _key(self):
-			return ("retry-exhausted",)
 
 	s = S()
 	q = s.failing_query
@@ -765,7 +811,12 @@ async def test_infinite_query_refetch_interval():
 	class S(ps.State):
 		calls: int = 0
 
-		@ps.infinite_query(initial_page_param=0, retries=0, refetch_interval=0.05)
+		@ps.infinite_query(
+			initial_page_param=0,
+			retries=0,
+			refetch_interval=0.05,
+			key=("interval-items",),
+		)
 		async def items(self, page_param: int) -> int:
 			self.calls += 1
 			await asyncio.sleep(0)
@@ -774,10 +825,6 @@ async def test_infinite_query_refetch_interval():
 		@items.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
 			return None  # Single page
-
-		@items.key
-		def _key(self):
-			return ("interval-items",)
 
 	s = S()
 	q = s.items
@@ -802,7 +849,12 @@ async def test_infinite_query_refetch_interval_zero_fetches_on_mount_only():
 	class S(ps.State):
 		calls: int = 0
 
-		@ps.infinite_query(initial_page_param=0, retries=0, refetch_interval=0)
+		@ps.infinite_query(
+			initial_page_param=0,
+			retries=0,
+			refetch_interval=0,
+			key=("interval-zero",),
+		)
 		async def items(self, page_param: int) -> int:
 			self.calls += 1
 			await asyncio.sleep(0)
@@ -811,10 +863,6 @@ async def test_infinite_query_refetch_interval_zero_fetches_on_mount_only():
 		@items.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
 			return None
-
-		@items.key
-		def _key(self):
-			return ("interval-zero",)
 
 	s = S()
 	q = s.items
@@ -837,7 +885,12 @@ async def test_infinite_query_refetch_interval_stops_on_dispose():
 	class S(ps.State):
 		calls: int = 0
 
-		@ps.infinite_query(initial_page_param=0, retries=0, refetch_interval=0.05)
+		@ps.infinite_query(
+			initial_page_param=0,
+			retries=0,
+			refetch_interval=0.05,
+			key=("interval-dispose",),
+		)
 		async def items(self, page_param: int) -> int:
 			self.calls += 1
 			await asyncio.sleep(0)
@@ -846,10 +899,6 @@ async def test_infinite_query_refetch_interval_stops_on_dispose():
 		@items.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
 			return None
-
-		@items.key
-		def _key(self):
-			return ("interval-dispose",)
 
 	s = S()
 	q = s.items
@@ -959,7 +1008,7 @@ async def test_infinite_query_cancel_fetch_cancels_inflight_request():
 		fetch_started: list[int] = []
 		fetch_completed: list[int] = []
 
-		@ps.infinite_query(initial_page_param=0, retries=0)
+		@ps.infinite_query(initial_page_param=0, retries=0, key=("cancel-inflight",))
 		async def slow_query(self, page_param: int) -> int:
 			self.fetch_started.append(page_param)
 			# Slow fetch - gives time for cancellation
@@ -970,10 +1019,6 @@ async def test_infinite_query_cancel_fetch_cancels_inflight_request():
 		@slow_query.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
 			return pages[-1].param + 1 if pages[-1].param < 5 else None
-
-		@slow_query.key
-		def _key(self):
-			return ("cancel-inflight",)
 
 	s = S()
 	q = s.slow_query
@@ -1013,7 +1058,7 @@ async def test_infinite_query_cancel_fetch_next_page_cancels_inflight():
 		fetch_started: list[int] = []
 		fetch_completed: list[int] = []
 
-		@ps.infinite_query(initial_page_param=0, retries=0)
+		@ps.infinite_query(initial_page_param=0, retries=0, key=("cancel-fetch-next",))
 		async def slow_query(self, page_param: int) -> int:
 			self.fetch_started.append(page_param)
 			await asyncio.sleep(0.015)
@@ -1023,10 +1068,6 @@ async def test_infinite_query_cancel_fetch_next_page_cancels_inflight():
 		@slow_query.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
 			return pages[-1].param + 1 if pages[-1].param < 5 else None
-
-		@slow_query.key
-		def _key(self):
-			return ("cancel-fetch-next",)
 
 	s = S()
 	q = s.slow_query
@@ -1091,6 +1132,7 @@ async def test_infinite_query_multiple_observers_use_own_fetch_fn():
 			gc_time=10,
 			stale_time=0,
 			fetch_on_mount=False,
+			key=("shared",),
 		)
 		async def data(self, page_param: int) -> str:
 			result = f"{self._name}-{self.suffix}-{page_param}"
@@ -1101,10 +1143,6 @@ async def test_infinite_query_multiple_observers_use_own_fetch_fn():
 		@data.get_next_page_param
 		def _get_next(self, pages: list[Page[str, int]]) -> int | None:
 			return pages[-1].param + 1 if pages[-1].param < 2 else None
-
-		@data.key
-		def _data_key(self):
-			return ("shared",)  # Same key for all instances
 
 	# Create two state instances with different suffix values
 	s1 = S("state1", suffix="A")
@@ -1169,7 +1207,9 @@ async def test_infinite_query_second_observer_does_not_refetch_inflight():
 	allow_finish = asyncio.Event()
 
 	class S(ps.State):
-		@ps.infinite_query(initial_page_param=0, retries=0)
+		@ps.infinite_query(
+			initial_page_param=0, retries=0, key=("inflight-no-refetch",)
+		)
 		async def data(self, page_param: int) -> int:
 			fetch_started.append(page_param)
 			await allow_finish.wait()
@@ -1179,10 +1219,6 @@ async def test_infinite_query_second_observer_does_not_refetch_inflight():
 		@data.get_next_page_param
 		def _get_next(self, pages: list[Page[int, int]]) -> int | None:
 			return None
-
-		@data.key
-		def _data_key(self):
-			return ("inflight-no-refetch",)
 
 	s1 = S()
 	q1 = s1.data
@@ -1220,7 +1256,12 @@ async def test_infinite_query_fetch_previous_uses_correct_fetch_fn():
 		def __init__(self, suffix: str):
 			self.suffix = suffix
 
-		@ps.infinite_query(initial_page_param=5, retries=0, gc_time=10)
+		@ps.infinite_query(
+			initial_page_param=5,
+			retries=0,
+			gc_time=10,
+			key=("shared-prev",),
+		)
 		async def data(self, page_param: int) -> str:
 			fetch_log.append((self.suffix, page_param))
 			await asyncio.sleep(0)
@@ -1233,10 +1274,6 @@ async def test_infinite_query_fetch_previous_uses_correct_fetch_fn():
 		@data.get_previous_page_param
 		def _get_prev(self, pages: list[Page[str, int]]) -> int | None:
 			return pages[0].param - 1 if pages[0].param > 0 else None
-
-		@data.key
-		def _key(self):
-			return ("shared-prev",)
 
 	s1 = S(suffix="X")
 	s2 = S(suffix="Y")
@@ -1275,7 +1312,12 @@ async def test_infinite_query_wait_after_invalidate_uses_correct_fetch_fn():
 		def __init__(self, suffix: str):
 			self.suffix = suffix
 
-		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10)
+		@ps.infinite_query(
+			initial_page_param=0,
+			retries=0,
+			gc_time=10,
+			key=("wait-invalidate",),
+		)
 		async def data(self, page_param: int) -> str:
 			fetch_log.append((self.suffix, page_param))
 			await asyncio.sleep(0)
@@ -1284,10 +1326,6 @@ async def test_infinite_query_wait_after_invalidate_uses_correct_fetch_fn():
 		@data.get_next_page_param
 		def _get_next(self, pages: list[Page[str, int]]) -> int | None:
 			return pages[-1].param + 1 if pages[-1].param < 2 else None
-
-		@data.key
-		def _key(self):
-			return ("wait-invalidate",)
 
 	s1 = S(suffix="A")
 	s2 = S(suffix="B")
@@ -1328,7 +1366,11 @@ async def test_infinite_query_concurrent_fetch_next_uses_correct_fetch_fn():
 			self.suffix = suffix
 
 		@ps.infinite_query(
-			initial_page_param=0, retries=0, gc_time=10, fetch_on_mount=False
+			initial_page_param=0,
+			retries=0,
+			gc_time=10,
+			fetch_on_mount=False,
+			key=("concurrent-fetch-next",),
 		)
 		async def data(self, page_param: int) -> str:
 			fetch_log.append((self.suffix, page_param))
@@ -1338,10 +1380,6 @@ async def test_infinite_query_concurrent_fetch_next_uses_correct_fetch_fn():
 		@data.get_next_page_param
 		def _get_next(self, pages: list[Page[str, int]]) -> int | None:
 			return pages[-1].param + 1 if pages[-1].param < 5 else None
-
-		@data.key
-		def _key(self):
-			return ("concurrent-fetch-next",)
 
 	s1 = S(suffix="X")
 	s2 = S(suffix="Y")
@@ -1380,7 +1418,12 @@ async def test_infinite_query_refetch_with_cancel_uses_correct_fetch_fn():
 		def __init__(self, suffix: str):
 			self.suffix = suffix
 
-		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10)
+		@ps.infinite_query(
+			initial_page_param=0,
+			retries=0,
+			gc_time=10,
+			key=("cancel-refetch",),
+		)
 		async def data(self, page_param: int) -> str:
 			fetch_started.append((self.suffix, page_param))
 			await asyncio.sleep(0.015)  # Long enough to allow cancellation
@@ -1390,10 +1433,6 @@ async def test_infinite_query_refetch_with_cancel_uses_correct_fetch_fn():
 		@data.get_next_page_param
 		def _get_next(self, pages: list[Page[str, int]]) -> int | None:
 			return pages[-1].param + 1 if pages[-1].param < 2 else None
-
-		@data.key
-		def _key(self):
-			return ("cancel-refetch",)
 
 	s1 = S(suffix="A")
 	s2 = S(suffix="B")
@@ -1439,7 +1478,12 @@ async def test_infinite_query_result_dispose_cancels_in_flight_fetch():
 	fetch_log: list[str] = []
 
 	class S(ps.State):
-		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10)
+		@ps.infinite_query(
+			initial_page_param=0,
+			retries=0,
+			gc_time=10,
+			key=("dispose-cancel-inf",),
+		)
 		async def data(self, page_param: int) -> str:
 			fetch_log.append("started")
 			fetch_started.set()
@@ -1450,10 +1494,6 @@ async def test_infinite_query_result_dispose_cancels_in_flight_fetch():
 		@data.get_next_page_param
 		def _get_next(self, pages: list[Page[str, int]]) -> int | None:
 			return pages[-1].param + 1 if pages[-1].param < 5 else None
-
-		@data.key
-		def _key(self):
-			return ("dispose-cancel-inf",)
 
 	s = S()
 	q = s.data
@@ -1495,7 +1535,11 @@ async def test_infinite_query_result_dispose_cancels_pending_actions():
 			self.name = name
 
 		@ps.infinite_query(
-			initial_page_param=0, retries=0, gc_time=10, fetch_on_mount=False
+			initial_page_param=0,
+			retries=0,
+			gc_time=10,
+			fetch_on_mount=False,
+			key=("dispose-pending",),
 		)
 		async def data(self, page_param: int) -> str:
 			fetch_log.append((self.name, page_param))
@@ -1506,10 +1550,6 @@ async def test_infinite_query_result_dispose_cancels_pending_actions():
 		@data.get_next_page_param
 		def _get_next(self, pages: list[Page[str, int]]) -> int | None:
 			return pages[-1].param + 1 if pages[-1].param < 5 else None
-
-		@data.key
-		def _key(self):
-			return ("dispose-pending",)
 
 	s1 = S("s1")
 	s2 = S("s2")
@@ -1568,7 +1608,11 @@ async def test_infinite_query_result_dispose_does_not_cancel_other_observer_fetc
 			self.name = name
 
 		@ps.infinite_query(
-			initial_page_param=0, retries=0, gc_time=10, fetch_on_mount=False
+			initial_page_param=0,
+			retries=0,
+			gc_time=10,
+			fetch_on_mount=False,
+			key=("dispose-other",),
 		)
 		async def data(self, page_param: int) -> str:
 			fetch_log.append((self.name, "started"))
@@ -1580,10 +1624,6 @@ async def test_infinite_query_result_dispose_does_not_cancel_other_observer_fetc
 		@data.get_next_page_param
 		def _get_next(self, pages: list[Page[str, int]]) -> int | None:
 			return pages[-1].param + 1 if pages[-1].param < 5 else None
-
-		@data.key
-		def _key(self):
-			return ("dispose-other",)
 
 	s1 = S("s1")
 	s2 = S("s2")
@@ -1621,7 +1661,15 @@ async def test_infinite_query_key_change_cancels_pending_actions():
 	class S(ps.State):
 		user_id: int = 1
 
-		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10)
+		def _projects_key(self) -> ps.QueryKey:
+			return ("projects", self.user_id)
+
+		@ps.infinite_query(
+			initial_page_param=0,
+			retries=0,
+			gc_time=10,
+			key=_projects_key,
+		)
 		async def projects(self, page_param: int) -> ProjectsPage:
 			uid = self.user_id
 			fetch_log.append((uid, "started"))
@@ -1633,10 +1681,6 @@ async def test_infinite_query_key_change_cancels_pending_actions():
 		@projects.get_next_page_param
 		def _get_next(self, pages: list[Page[ProjectsPage, int]]) -> int | None:
 			return pages[-1].data["next"]
-
-		@projects.key
-		def _key(self):
-			return ("projects", self.user_id)
 
 	s = S()
 	q = s.projects
@@ -1678,8 +1722,17 @@ async def test_infinite_query_key_change_starts_new_fetch():
 	class S(ps.State):
 		user_id: int = 1
 
+		def _projects_key(self) -> ps.QueryKey:
+			return ("projects", self.user_id)
+
 		# Use stale_time=1000 to ensure new queries are considered stale and auto-fetch
-		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10, stale_time=1000)
+		@ps.infinite_query(
+			initial_page_param=0,
+			retries=0,
+			gc_time=10,
+			stale_time=1000,
+			key=_projects_key,
+		)
 		async def projects(self, page_param: int) -> ProjectsPage:
 			uid = self.user_id
 			fetch_log.append((uid, "started"))
@@ -1691,10 +1744,6 @@ async def test_infinite_query_key_change_starts_new_fetch():
 		@projects.get_next_page_param
 		def _get_next(self, pages: list[Page[ProjectsPage, int]]) -> int | None:
 			return pages[-1].data["next"]
-
-		@projects.key
-		def _key(self):
-			return ("projects", self.user_id)
 
 	s = S()
 	q = s.projects
@@ -1725,6 +1774,51 @@ async def test_infinite_query_key_change_starts_new_fetch():
 
 @pytest.mark.asyncio
 @with_render_session
+async def test_infinite_query_callable_list_key_updates_on_inplace_change():
+	"""Callable list keys should be normalized so in-place changes update the key."""
+
+	class S(ps.State):
+		user_id: int = 1
+		key_parts: list[Any]
+
+		def __init__(self):
+			self.key_parts = ["projects", 1]
+
+		def _projects_key(self) -> ps.QueryKey:
+			_ = self.user_id  # ensure reactive dependency
+			return self.key_parts
+
+		@ps.infinite_query(
+			initial_page_param=0,
+			retries=0,
+			gc_time=10,
+			fetch_on_mount=False,
+			key=_projects_key,
+		)
+		async def projects(self, page_param: int) -> ProjectsPage:
+			return {"items": [self.user_id * 10 + page_param], "next": None}
+
+		@projects.get_next_page_param
+		def _get_next(self, pages: list[Page[ProjectsPage, int]]) -> int | None:
+			return pages[-1].data["next"]
+
+	s = S()
+	q = s.projects
+	await q.fetch_page(0)
+	assert q._query().key == ("projects", 1)  # pyright: ignore[reportPrivateUsage]
+
+	# Mutate list in-place and trigger recompute
+	s.key_parts[1] = 2
+	s.user_id = 2
+
+	assert await wait_for(
+		lambda: q._query().key == ("projects", 2),  # pyright: ignore[reportPrivateUsage]
+		timeout=0.2,
+	)
+
+
+@pytest.mark.asyncio
+@with_render_session
 async def test_infinite_query_key_change_does_not_affect_other_observer():
 	"""
 	Test that when one observer's key changes, it doesn't affect another observer
@@ -1741,8 +1835,17 @@ async def test_infinite_query_key_change_does_not_affect_other_observer():
 			self.name = name
 			self.user_id = user_id
 
+		def _projects_key(self) -> ps.QueryKey:
+			return ("projects", self.user_id)
+
 		# Use stale_time=1000 to ensure new queries are considered stale and auto-fetch
-		@ps.infinite_query(initial_page_param=0, retries=0, gc_time=10, stale_time=1000)
+		@ps.infinite_query(
+			initial_page_param=0,
+			retries=0,
+			gc_time=10,
+			stale_time=1000,
+			key=_projects_key,
+		)
 		async def projects(self, page_param: int) -> ProjectsPage:
 			uid = self.user_id
 			fetch_log.append((self.name, uid, "started"))
@@ -1754,10 +1857,6 @@ async def test_infinite_query_key_change_does_not_affect_other_observer():
 		@projects.get_next_page_param
 		def _get_next(self, pages: list[Page[ProjectsPage, int]]) -> int | None:
 			return pages[-1].data["next"]
-
-		@projects.key
-		def _key(self):
-			return ("projects", self.user_id)
 
 	# Two states observing the same key initially
 	s1 = S("s1", 1)

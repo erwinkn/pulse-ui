@@ -297,7 +297,9 @@ result = await state.update_name("New Name")
 
 ## @infinite_query
 
-Decorator for paginated queries.
+Decorator for paginated queries. **Infinite queries always require a key**—either via `key=` in the decorator or via `@query.key`.
+
+Why? Unlike regular queries, infinite queries accumulate multiple pages of data. If they supported automatic dependency tracking (like unkeyed queries), a dependency change would reset all loaded pages. This can cause confusing behavior since users may not expect their scroll position and loaded content to reset. Requiring an explicit key makes the caching behavior predictable and forces you to think about when pages should reset.
 
 ```python
 @overload
@@ -315,7 +317,7 @@ def infinite_query(
     initial_data_updated_at: float | datetime | None = None,
     enabled: bool = True,
     fetch_on_mount: bool = True,
-    key: QueryKey | None = None,
+    key: QueryKey = ...,  # required, or use @query.key
 ) -> InfiniteQueryProperty[T, TParam, TState]: ...
 ```
 
@@ -333,9 +335,11 @@ def infinite_query(
 | `retry_delay` | `float \| None` | `2.0` | Delay between retries in seconds |
 | `enabled` | `bool` | `True` | Whether query is enabled |
 | `fetch_on_mount` | `bool` | `True` | Fetch when component mounts |
-| `key` | `QueryKey \| None` | `None` | Static key for sharing across instances |
+| `key` | `QueryKey` | required | Query key (use `@query.key` for dynamic keys) |
 
 ### Usage
+
+With a static key:
 
 ```python
 class FeedState(ps.State):
@@ -343,30 +347,35 @@ class FeedState(ps.State):
     async def posts(self, cursor: str | None) -> list[Post]:
         return await api.get_posts(cursor=cursor)
 
+    @posts.get_next_page_param
+    def _next_cursor(self, pages: list[Page]) -> str | None:
+        return pages[-1].data[-1].id if pages and pages[-1].data else None
+```
+
+With a dynamic key (using `@query.key` decorator):
+
+```python
+class FeedState(ps.State):
+    feed_type: str = "recent"
+
+    @ps.infinite_query(initial_page_param=None)
+    async def posts(self, cursor: str | None) -> list[Post]:
+        return await api.get_posts(feed_type=self.feed_type, cursor=cursor)
+
     @posts.key
     def _posts_key(self):
-        return ("feed", self.feed_type)
+        return ("feed", self.feed_type)  # pages reset when feed_type changes
 
     @posts.get_next_page_param
     def _next_cursor(self, pages: list[Page]) -> str | None:
-        if not pages:
-            return None
-        last = pages[-1]
-        return last.data[-1].id if last.data else None
-
-    @posts.get_previous_page_param
-    def _prev_cursor(self, pages: list[Page]) -> str | None:
-        if not pages:
-            return None
-        first = pages[0]
-        return first.data[0].id if first.data else None
+        return pages[-1].data[-1].id if pages and pages[-1].data else None
 ```
 
 ### Required Decorators
 
 #### `@infinite_query_prop.key`
 
-Define the query key (required for infinite queries):
+Define a dynamic query key. Required if you didn't pass `key=` to the decorator:
 
 ```python
 @my_query.key
@@ -446,9 +455,9 @@ result = await state.posts.fetch_next_page()
 
 Fetch the previous page.
 
-#### `async fetch_page(page_param: TParam, *, cancel_fetch: bool = False) -> ActionResult[T | None]`
+#### `async fetch_page(page_param: TParam, *, cancel_fetch: bool = False, clear: bool = False) -> ActionResult[T | None]`
 
-Refetch a specific page by its parameter.
+Fetch a specific page by its parameter. If `clear=True`, clears all other pages and keeps only the fetched page—useful for resetting pagination to a specific page.
 
 #### `async refetch(*, cancel_fetch: bool = False, refetch_page: Callable | None = None) -> ActionResult[list[Page]]`
 

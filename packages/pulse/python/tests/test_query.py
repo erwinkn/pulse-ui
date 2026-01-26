@@ -79,7 +79,7 @@ async def test_query_store_list_key():
 async def test_query_store_rejects_unhashable_key():
 	store = QueryStore()
 
-	with pytest.raises(TypeError, match="QueryKey values must be hashable"):
+	with pytest.raises(TypeError, match="Query key contains unhashable value"):
 		store.ensure(("test", []))  # pyright: ignore[reportArgumentType]
 
 

@@ -52,7 +52,7 @@ def _write_gitignore_for_lock(lock_path: Path) -> None:
 	ensure_gitignore_has(lock_path.parent, lock_path.name)
 
 
-def _create_lock_file(lock_path: Path) -> None:
+def _create_lock_file(lock_path: Path, *, address: str, port: int) -> None:
 	"""Create a lock file with current process information."""
 	lock_path = Path(lock_path)
 	_write_gitignore_for_lock(lock_path)
@@ -61,18 +61,26 @@ def _create_lock_file(lock_path: Path) -> None:
 		info = _read_lock(lock_path) or {}
 		pid = int(info.get("pid", 0) or 0)
 		if pid and is_process_alive(pid):
+			existing_addr = info.get("address", address)
+			existing_port = info.get("port", port)
+			protocol = (
+				"http" if existing_addr in ("127.0.0.1", "localhost") else "https"
+			)
+			url = f"{protocol}://{existing_addr}:{existing_port}"
 			raise RuntimeError(
-				f"Another Pulse dev instance appears to be running (pid={pid}) for {lock_path.parent}."
+				f"Another Pulse dev instance is running at {url} (pid={pid})"
 			)
 		# Stale lock; continue to overwrite
 
-	payload = {
+	payload: dict[str, Any] = {
 		"pid": os.getpid(),
 		"created_at": int(time.time()),
 		"hostname": socket.gethostname(),
 		"platform": platform.platform(),
 		"python": platform.python_version(),
 		"cwd": os.getcwd(),
+		"address": address,
+		"port": port,
 	}
 	try:
 		lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -105,23 +113,34 @@ class FolderLock:
 	and know not to delete the lock on exit.
 
 	Example:
-	    with FolderLock(web_root):
+	    with FolderLock(web_root, address="localhost", port=8000):
 	        # Protected region
 	        pass
 	"""
 
-	def __init__(self, web_root: Path, *, filename: str = ".pulse/lock"):
+	def __init__(
+		self,
+		web_root: Path,
+		*,
+		address: str,
+		port: int,
+		filename: str = ".pulse/lock",
+	):
 		"""
 		Initialize FolderLock.
 
 		Args:
 		    web_root: Path to the web root directory
+		    address: Server address to store in lock file
+		    port: Server port to store in lock file
 		    filename: Name of the lock file (default: ".pulse/lock")
 		"""
 		self.lock_path: Path = lock_path_for_web_root(web_root, filename)
+		self.address: str = address
+		self.port: int = port
 
 	def __enter__(self):
-		_create_lock_file(self.lock_path)
+		_create_lock_file(self.lock_path, address=self.address, port=self.port)
 		return self
 
 	def __exit__(

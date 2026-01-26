@@ -233,7 +233,7 @@ def run(
 		)
 		commands.append(server_cmd)
 
-	with FolderLock(web_root):
+	with FolderLock(web_root, address=address, port=port):
 		try:
 			exit_code = execute_commands(
 				commands,

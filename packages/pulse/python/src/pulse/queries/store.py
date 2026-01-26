@@ -1,9 +1,9 @@
 import datetime as dt
-from collections.abc import Callable, Hashable
+from collections.abc import Callable
 from typing import Any, TypeVar, cast
 
 from pulse.helpers import MISSING, Missing
-from pulse.queries.common import QueryKey, normalize_key
+from pulse.queries.common import Key, QueryKey, normalize_key
 from pulse.queries.infinite_query import InfiniteQuery, Page
 from pulse.queries.query import RETRY_DELAY_DEFAULT, KeyedQuery
 
@@ -16,9 +16,7 @@ class QueryStore:
 	"""
 
 	def __init__(self):
-		self._entries: dict[
-			tuple[Hashable, ...], KeyedQuery[Any] | InfiniteQuery[Any, Any]
-		] = {}
+		self._entries: dict[Key, KeyedQuery[Any] | InfiniteQuery[Any, Any]] = {}
 
 	def items(self):
 		"""Iterate over all (key, query) pairs in the store."""

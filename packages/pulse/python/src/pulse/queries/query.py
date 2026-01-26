@@ -2,7 +2,7 @@ import asyncio
 import datetime as dt
 import inspect
 import time
-from collections.abc import Awaitable, Callable, Hashable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import (
 	TYPE_CHECKING,
@@ -26,6 +26,7 @@ from pulse.queries.common import (
 	ActionError,
 	ActionResult,
 	ActionSuccess,
+	Key,
 	OnErrorFn,
 	OnSuccessFn,
 	QueryKey,
@@ -266,7 +267,7 @@ class KeyedQuery(Generic[T], Disposable):
 	Multiple observers can share the same query.
 	"""
 
-	key: tuple[Hashable, ...]
+	key: Key
 	state: QueryState[T]
 	observers: "list[KeyedQueryResult[T]]"
 	_task: asyncio.Task[None] | None
@@ -278,7 +279,7 @@ class KeyedQuery(Generic[T], Disposable):
 
 	def __init__(
 		self,
-		key: tuple[Hashable, ...],
+		key: QueryKey,
 		retries: int = 3,
 		retry_delay: float = RETRY_DELAY_DEFAULT,
 		initial_data: T | Missing | None = MISSING,
@@ -286,7 +287,7 @@ class KeyedQuery(Generic[T], Disposable):
 		gc_time: float = 300.0,
 		on_dispose: Callable[[Any], None] | None = None,
 	):
-		self.key = key
+		self.key = normalize_key(key)
 		self.state = QueryState(
 			name=str(key),
 			retries=retries,
@@ -1058,7 +1059,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 	_initial_data_updated_at: float | dt.datetime | None
 	_enabled: bool
 	_initial_data: T | Callable[[TState], T] | Missing | None
-	_key: QueryKey | Callable[[TState], QueryKey] | None
+	_key: Key | Callable[[TState], Key] | None
 	# Not using OnSuccessFn and OnErrorFn since unions of callables are not well
 	# supported in the type system. We just need to be careful to use
 	# call_flexible to invoke these functions.
@@ -1089,7 +1090,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		elif callable(key):
 			key_fn = key
 
-			def normalized_key(state: TState) -> tuple[Hashable, ...]:
+			def normalized_key(state: TState) -> Key:
 				return normalize_key(key_fn(state))
 
 			self._key = normalized_key
@@ -1116,7 +1117,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 				f"Cannot use @{self.name}.key decorator when a key is already provided to @query(key=...)."
 			)
 
-		def normalized_key(state: TState) -> tuple[Hashable, ...]:
+		def normalized_key(state: TState) -> Key:
 			return normalize_key(fn(state))
 
 		self._key = normalized_key
@@ -1287,6 +1288,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 def query(
 	fn: Callable[[TState], Awaitable[T]],
 	*,
+	key: QueryKey | Callable[[TState], QueryKey] | None = None,
 	stale_time: float = 0.0,
 	gc_time: float | None = 300.0,
 	refetch_interval: float | None = None,
@@ -1296,7 +1298,6 @@ def query(
 	initial_data_updated_at: float | dt.datetime | None = None,
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
-	key: QueryKey | Callable[[TState], QueryKey] | None = None,
 ) -> QueryProperty[T, TState]: ...
 
 
@@ -1304,6 +1305,7 @@ def query(
 def query(
 	fn: None = None,
 	*,
+	key: QueryKey | Callable[[TState], QueryKey] | None = None,
 	stale_time: float = 0.0,
 	gc_time: float | None = 300.0,
 	refetch_interval: float | None = None,
@@ -1313,13 +1315,13 @@ def query(
 	initial_data_updated_at: float | dt.datetime | None = None,
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
-	key: QueryKey | Callable[[TState], QueryKey] | None = None,
 ) -> Callable[[Callable[[TState], Awaitable[T]]], QueryProperty[T, TState]]: ...
 
 
 def query(
 	fn: Callable[[TState], Awaitable[T]] | None = None,
 	*,
+	key: QueryKey | Callable[[TState], QueryKey] | None = None,
 	stale_time: float = 0.0,
 	gc_time: float | None = 300.0,
 	refetch_interval: float | None = None,
@@ -1329,7 +1331,6 @@ def query(
 	initial_data_updated_at: float | dt.datetime | None = None,
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
-	key: QueryKey | Callable[[TState], QueryKey] | None = None,
 ) -> (
 	QueryProperty[T, TState]
 	| Callable[[Callable[[TState], Awaitable[T]]], QueryProperty[T, TState]]

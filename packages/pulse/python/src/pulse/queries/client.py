@@ -1,10 +1,10 @@
 import datetime as dt
-from collections.abc import Callable, Hashable
+from collections.abc import Callable
 from typing import Any, TypeVar, overload
 
 from pulse.context import PulseContext
 from pulse.helpers import MISSING
-from pulse.queries.common import ActionResult, QueryKey, QueryKeys, normalize_key
+from pulse.queries.common import ActionResult, Key, QueryKey, QueryKeys, normalize_key
 from pulse.queries.infinite_query import InfiniteQuery, Page
 from pulse.queries.query import KeyedQuery
 from pulse.queries.store import QueryStore
@@ -15,13 +15,13 @@ T = TypeVar("T")
 QueryFilter = (
 	QueryKey  # exact key match (tuple or list)
 	| QueryKeys  # explicit set of keys
-	| Callable[[tuple[Hashable, ...]], bool]  # predicate function
+	| Callable[[Key], bool]  # predicate function
 )
 
 
 def _normalize_filter(
 	filter: QueryFilter | None,
-) -> tuple[tuple[Hashable, ...] | None, Callable[[tuple[Hashable, ...]], bool] | None]:
+) -> tuple[Key | None, Callable[[Key], bool] | None]:
 	"""Return normalized exact key (if any) and a predicate for filtering."""
 	if filter is None:
 		return None, None
@@ -34,7 +34,7 @@ def _normalize_filter(
 	return exact_key, lambda k: k == exact_key
 
 
-def _prefix_filter(prefix: QueryKey) -> Callable[[tuple[Hashable, ...]], bool]:
+def _prefix_filter(prefix: QueryKey) -> Callable[[Key], bool]:
 	"""Create a predicate that matches keys starting with the given prefix."""
 	normalized = normalize_key(prefix)
 	prefix_len = len(normalized)
@@ -95,7 +95,7 @@ class QueryClient:
 		Returns:
 			The KeyedQuery instance, or None if not found.
 		"""
-		return self._get_store().get(normalize_key(key))
+		return self._get_store().get(key)
 
 	def get_infinite(self, key: QueryKey) -> InfiniteQuery[Any, Any] | None:
 		"""Get an existing infinite query by key.
@@ -106,7 +106,7 @@ class QueryClient:
 		Returns:
 			The InfiniteQuery instance, or None if not found.
 		"""
-		return self._get_store().get_infinite(normalize_key(key))
+		return self._get_store().get_infinite(key)
 
 	def get_all(
 		self,
@@ -252,7 +252,7 @@ class QueryClient:
 	@overload
 	def set_data(
 		self,
-		key_or_filter: QueryKeys | Callable[[tuple[Hashable, ...]], bool],
+		key_or_filter: QueryKeys | Callable[[Key], bool],
 		data: Callable[[Any], Any],
 		*,
 		updated_at: float | dt.datetime | None = None,
@@ -260,7 +260,7 @@ class QueryClient:
 
 	def set_data(
 		self,
-		key_or_filter: QueryKey | QueryKeys | Callable[[tuple[Hashable, ...]], bool],
+		key_or_filter: QueryKey | QueryKeys | Callable[[Key], bool],
 		data: Any | Callable[[Any], Any],
 		*,
 		updated_at: float | dt.datetime | None = None,
@@ -331,17 +331,14 @@ class QueryClient:
 	@overload
 	def invalidate(
 		self,
-		key_or_filter: QueryKeys | Callable[[tuple[Hashable, ...]], bool] | None = None,
+		key_or_filter: QueryKeys | Callable[[Key], bool] | None = None,
 		*,
 		cancel_refetch: bool = False,
 	) -> int: ...
 
 	def invalidate(
 		self,
-		key_or_filter: QueryKey
-		| QueryKeys
-		| Callable[[tuple[Hashable, ...]], bool]
-		| None = None,
+		key_or_filter: QueryKey | QueryKeys | Callable[[Key], bool] | None = None,
 		*,
 		cancel_refetch: bool = False,
 	) -> bool | int:
@@ -525,7 +522,7 @@ class QueryClient:
 			True if query existed and was removed, False otherwise.
 		"""
 		store = self._get_store()
-		entry = store.get_any(normalize_key(key))
+		entry = store.get_any(key)
 		if entry is None:
 			return False
 		entry.dispose()

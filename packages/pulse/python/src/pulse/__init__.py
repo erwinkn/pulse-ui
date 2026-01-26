@@ -1328,6 +1328,7 @@ from pulse.queries.client import queries as queries
 from pulse.queries.common import ActionError as ActionError
 from pulse.queries.common import ActionResult as ActionResult
 from pulse.queries.common import ActionSuccess as ActionSuccess
+from pulse.queries.common import Key as Key
 from pulse.queries.common import QueryKey as QueryKey
 from pulse.queries.common import QueryKeys as QueryKeys
 from pulse.queries.common import QueryStatus as QueryStatus

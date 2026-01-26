@@ -3,7 +3,7 @@ import datetime as dt
 import inspect
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable, Hashable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import (
 	Any,
@@ -27,6 +27,7 @@ from pulse.queries.common import (
 	ActionError,
 	ActionResult,
 	ActionSuccess,
+	Key,
 	OnErrorFn,
 	OnSuccessFn,
 	QueryKey,
@@ -143,7 +144,7 @@ class InfiniteQueryConfig(QueryConfig[list[Page[T, TParam]]], Generic[T, TParam]
 class InfiniteQuery(Generic[T, TParam], Disposable):
 	"""Paginated query that stores data as a list of Page(data, param)."""
 
-	key: tuple[Hashable, ...]
+	key: Key
 	cfg: InfiniteQueryConfig[T, TParam]
 
 	@property
@@ -235,7 +236,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 
 	def __init__(
 		self,
-		key: tuple[Hashable, ...],
+		key: QueryKey,
 		*,
 		initial_page_param: TParam,
 		get_next_page_param: Callable[[list[Page[T, TParam]]], TParam | None],
@@ -250,7 +251,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		gc_time: float = 300.0,
 		on_dispose: Callable[[Any], None] | None = None,
 	):
-		self.key = key
+		self.key = normalize_key(key)
 
 		self.cfg = InfiniteQueryConfig(
 			retries=retries,
@@ -1164,7 +1165,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 		Callable[[TState, list[Page[T, TParam]]], TParam | None] | None
 	)
 	_max_pages: int
-	_key: QueryKey | Callable[[TState], QueryKey] | None
+	_key: Key | Callable[[TState], Key] | None
 	# Not using OnSuccessFn and OnErrorFn since unions of callables are not well
 	# supported in the type system. We just need to be careful to use
 	# call_flexible to invoke these functions.
@@ -1213,7 +1214,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 		elif callable(key):
 			key_fn = key
 
-			def normalized_key(state: TState) -> tuple[Hashable, ...]:
+			def normalized_key(state: TState) -> Key:
 				return normalize_key(key_fn(state))
 
 			self._key = normalized_key
@@ -1230,7 +1231,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 				f"Cannot use @{self.name}.key decorator when a key is already provided to @infinite_query(key=...)."
 			)
 
-		def normalized_key(state: TState) -> tuple[Hashable, ...]:
+		def normalized_key(state: TState) -> Key:
 			return normalize_key(fn(state))
 
 		self._key = normalized_key
@@ -1413,6 +1414,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 def infinite_query(
 	fn: Callable[[TState, TParam], Awaitable[T]],
 	*,
+	key: QueryKey | Callable[[TState], QueryKey] | None = None,
 	initial_page_param: TParam,
 	max_pages: int = 0,
 	stale_time: float = 0.0,
@@ -1424,7 +1426,6 @@ def infinite_query(
 	initial_data_updated_at: float | dt.datetime | None = None,
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
-	key: QueryKey | Callable[[TState], QueryKey],
 ) -> InfiniteQueryProperty[T, TParam, TState]: ...
 
 
@@ -1432,6 +1433,7 @@ def infinite_query(
 def infinite_query(
 	fn: None = None,
 	*,
+	key: QueryKey | Callable[[TState], QueryKey] | None = None,
 	initial_page_param: TParam,
 	max_pages: int = 0,
 	stale_time: float = 0.0,
@@ -1443,7 +1445,6 @@ def infinite_query(
 	initial_data_updated_at: float | dt.datetime | None = None,
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
-	key: QueryKey | Callable[[TState], QueryKey],
 ) -> Callable[
 	[Callable[[TState, Any], Awaitable[T]]],
 	InfiniteQueryProperty[T, TParam, TState],
@@ -1453,6 +1454,7 @@ def infinite_query(
 def infinite_query(
 	fn: Callable[[TState, TParam], Awaitable[T]] | None = None,
 	*,
+	key: QueryKey | Callable[[TState], QueryKey] | None = None,
 	initial_page_param: TParam,
 	max_pages: int = 0,
 	stale_time: float = 0.0,
@@ -1464,7 +1466,6 @@ def infinite_query(
 	initial_data_updated_at: float | dt.datetime | None = None,
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
-	key: QueryKey | Callable[[TState], QueryKey] | None = None,
 ) -> (
 	InfiniteQueryProperty[T, TParam, TState]
 	| Callable[

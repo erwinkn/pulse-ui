@@ -4,13 +4,16 @@ Proxy handler for forwarding requests to React Router server in single-server mo
 
 import asyncio
 import logging
-from typing import cast
+from collections.abc import AsyncGenerator
+from contextlib import suppress
+from typing import Any, cast
 
 import httpx
 import websockets
 from fastapi.responses import StreamingResponse
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
+from starlette.types import Message, Receive, Scope, Send
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from websockets.typing import Subprotocol
 
@@ -18,20 +21,20 @@ from pulse.context import PulseContext
 from pulse.cookies import parse_cookie_header
 
 logger = logging.getLogger(__name__)
+_DISCONNECT_POLL_INTERVAL = 0.1
 
 
-class ReactProxy:
+class _ReactProxyBase:
 	"""
-	Handles proxying HTTP requests and WebSocket connections to React Router server.
-
-	In single-server mode, the Python server proxies unmatched routes to the React
-	dev server. This proxy rewrites URLs in responses to use the external server
-	address instead of the internal React server address.
+	Shared React proxy helpers and WebSocket forwarding.
 	"""
 
 	react_server_address: str
 	server_address: str
 	_client: httpx.AsyncClient | None
+	_active_responses: set[httpx.Response]
+	_active_websockets: set[Any]
+	_closing: asyncio.Event
 
 	def __init__(self, react_server_address: str, server_address: str):
 		"""
@@ -42,6 +45,9 @@ class ReactProxy:
 		self.react_server_address = react_server_address
 		self.server_address = server_address
 		self._client = None
+		self._active_responses = set()
+		self._active_websockets = set()
+		self._closing = asyncio.Event()
 
 	def rewrite_url(self, url: str) -> str:
 		"""Rewrite internal React server URLs to external server address."""
@@ -118,54 +124,60 @@ class ReactProxy:
 				subprotocols=subprotocols,
 				ping_interval=None,  # Let the target server handle ping/pong
 			) as target_ws:
-				# Accept client connection with the negotiated subprotocol
-				await websocket.accept(subprotocol=target_ws.subprotocol)
+				self._active_websockets.add(target_ws)
+				try:
+					# Accept client connection with the negotiated subprotocol
+					await websocket.accept(subprotocol=target_ws.subprotocol)
 
-				# Forward messages bidirectionally
-				async def forward_client_to_target():
-					try:
-						async for message in websocket.iter_text():
-							await target_ws.send(message)
-					except (WebSocketDisconnect, websockets.ConnectionClosed):
-						# Client disconnected, close target connection
-						logger.debug("Client disconnected, closing target connection")
+					# Forward messages bidirectionally
+					async def forward_client_to_target():
 						try:
-							await target_ws.close()
-						except Exception:
-							pass
-					except Exception as e:
-						logger.error(f"Error forwarding client message: {e}")
-						raise
-
-				async def forward_target_to_client():
-					try:
-						async for message in target_ws:
-							if isinstance(message, str):
-								await websocket.send_text(message)
-							else:
-								await websocket.send_bytes(message)
-					except (WebSocketDisconnect, websockets.ConnectionClosed) as e:
-						# Client or target disconnected, stop forwarding
-						logger.debug(
-							"Connection closed, stopping forward_target_to_client"
-						)
-						# If target disconnected, close client connection
-						if isinstance(e, websockets.ConnectionClosed):
+							async for message in websocket.iter_text():
+								await target_ws.send(message)
+						except (WebSocketDisconnect, websockets.ConnectionClosed):
+							# Client disconnected, close target connection
+							logger.debug(
+								"Client disconnected, closing target connection"
+							)
 							try:
-								await websocket.close()
+								await target_ws.close()
 							except Exception:
 								pass
-					except Exception as e:
-						logger.error(f"Error forwarding target message: {e}")
-						raise
+						except Exception as e:
+							logger.error(f"Error forwarding client message: {e}")
+							raise
 
-				# Run both forwarding tasks concurrently
-				# If one side closes, the other will detect it and stop gracefully
-				await asyncio.gather(
-					forward_client_to_target(),
-					forward_target_to_client(),
-					return_exceptions=True,
-				)
+					async def forward_target_to_client():
+						try:
+							async for message in target_ws:
+								if isinstance(message, str):
+									await websocket.send_text(message)
+								else:
+									await websocket.send_bytes(message)
+						except (WebSocketDisconnect, websockets.ConnectionClosed) as e:
+							# Client or target disconnected, stop forwarding
+							logger.debug(
+								"Connection closed, stopping forward_target_to_client"
+							)
+							# If target disconnected, close client connection
+							if isinstance(e, websockets.ConnectionClosed):
+								try:
+									await websocket.close()
+								except Exception:
+									pass
+						except Exception as e:
+							logger.error(f"Error forwarding target message: {e}")
+							raise
+
+					# Run both forwarding tasks concurrently
+					# If one side closes, the other will detect it and stop gracefully
+					await asyncio.gather(
+						forward_client_to_target(),
+						forward_target_to_client(),
+						return_exceptions=True,
+					)
+				finally:
+					self._active_websockets.discard(target_ws)
 
 		except (websockets.WebSocketException, websockets.ConnectionClosedError) as e:
 			logger.error(f"WebSocket proxy connection failed: {e}")
@@ -179,6 +191,30 @@ class ReactProxy:
 				code=1011,  # Internal Server Error
 				reason="Bad Gateway: Proxy error",
 			)
+
+	async def close(self):
+		"""Close the HTTP client."""
+		self._closing.set()
+		for response in list(self._active_responses):
+			self._active_responses.discard(response)
+			with suppress(Exception):
+				await response.aclose()
+		for websocket in list(self._active_websockets):
+			self._active_websockets.discard(websocket)
+			with suppress(Exception):
+				await websocket.close()
+		if self._client is not None:
+			await self._client.aclose()
+
+
+class ReactProxy(_ReactProxyBase):
+	"""
+	Handles proxying HTTP requests and WebSocket connections to React Router server.
+
+	In single-server mode, the Python server proxies unmatched routes to the React
+	dev server. This proxy rewrites URLs in responses to use the external server
+	address instead of the internal React server address.
+	"""
 
 	async def __call__(self, request: Request) -> Response:
 		"""
@@ -214,6 +250,7 @@ class ReactProxy:
 
 			# Send request with streaming
 			r = await self.client.send(req, stream=True)
+			self._active_responses.add(r)
 
 			# Rewrite headers that may contain internal React server URLs
 			response_headers: dict[str, str] = {}
@@ -222,14 +259,66 @@ class ReactProxy:
 					v = self.rewrite_url(v)
 				response_headers[k] = v
 
-			async def _iter():
+			async def _wait_disconnect() -> None:
+				while True:
+					if self._closing.is_set():
+						return
+					if await request.is_disconnected():
+						return
+					await asyncio.sleep(_DISCONNECT_POLL_INTERVAL)
+
+			async def _iter() -> AsyncGenerator[bytes, None]:
+				disconnect_task: asyncio.Task[None] = asyncio.create_task(
+					_wait_disconnect()
+				)
+				aiter = r.aiter_raw().__aiter__()
+				closed = False
+
+				async def _next_chunk() -> bytes:
+					return await aiter.__anext__()
+
 				try:
-					async for chunk in r.aiter_raw():
-						if await request.is_disconnected():
+					while True:
+						next_chunk_task: asyncio.Task[bytes] = asyncio.create_task(
+							_next_chunk()
+						)
+						done, _ = await asyncio.wait(
+							{next_chunk_task, disconnect_task},
+							return_when=asyncio.FIRST_COMPLETED,
+						)
+						if disconnect_task in done:
+							if next_chunk_task.done():
+								with suppress(
+									StopAsyncIteration,
+									asyncio.CancelledError,
+									Exception,
+								):
+									next_chunk_task.result()
+							else:
+								next_chunk_task.cancel()
+								with suppress(asyncio.CancelledError):
+									await next_chunk_task
+							await r.aclose()
+							closed = True
+							break
+						try:
+							chunk = next_chunk_task.result()
+						except StopAsyncIteration:
+							break
+						if disconnect_task.done():
 							break
 						yield chunk
+						if await request.is_disconnected():
+							await r.aclose()
+							closed = True
+							break
 				finally:
-					await r.aclose()
+					disconnect_task.cancel()
+					with suppress(asyncio.CancelledError):
+						await disconnect_task
+					if not closed:
+						await r.aclose()
+					self._active_responses.discard(r)
 
 			return StreamingResponse(
 				_iter(),
@@ -239,11 +328,181 @@ class ReactProxy:
 
 		except httpx.RequestError as e:
 			logger.error(f"Proxy request failed: {e}")
-			return PlainTextResponse(
-				"Bad Gateway: Could not reach React Router server", status_code=502
-			)
+		return PlainTextResponse(
+			"Bad Gateway: Could not reach React Router server", status_code=502
+		)
 
-	async def close(self):
-		"""Close the HTTP client."""
-		if self._client is not None:
-			await self._client.aclose()
+
+class ReactAsgiProxy(_ReactProxyBase):
+	"""
+	ASGI-level proxy for React Router requests.
+	"""
+
+	async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+		if scope["type"] != "http":
+			return
+
+		path = scope.get("path", "")
+		query_string = scope.get("query_string", b"")
+		url = self.react_server_address.rstrip("/") + path
+		if query_string:
+			url += "?" + query_string.decode("latin-1")
+
+		headers: list[tuple[str, str]] = []
+		cookie_header: str | None = None
+		raw_headers = cast(list[tuple[bytes, bytes]], scope.get("headers") or [])
+		for key, value in raw_headers:
+			key_str = key.decode("latin-1")
+			if key_str.lower() == "host":
+				continue
+			value_str = value.decode("latin-1")
+			if key_str.lower() == "cookie":
+				cookie_header = value_str
+				continue
+			headers.append((key_str, value_str))
+
+		ctx = PulseContext.get()
+		session = ctx.session
+		if session is not None:
+			session_cookie = session.get_cookie_value(ctx.app.cookie.name)
+			if session_cookie:
+				existing = parse_cookie_header(cookie_header)
+				if existing.get(ctx.app.cookie.name) != session_cookie:
+					existing[ctx.app.cookie.name] = session_cookie
+				cookie_header = "; ".join(
+					f"{key}={value}" for key, value in existing.items()
+				)
+		if cookie_header:
+			headers.append(("cookie", cookie_header))
+
+		receive_queue: asyncio.Queue[Message] = asyncio.Queue()
+		disconnect_event = asyncio.Event()
+
+		async def _pump_receive() -> None:
+			while True:
+				message = await receive()
+				await receive_queue.put(message)
+				if message["type"] == "http.disconnect":
+					disconnect_event.set()
+					return
+
+		receive_task = asyncio.create_task(_pump_receive())
+
+		async def _body() -> AsyncGenerator[bytes, None]:
+			while True:
+				message = await receive_queue.get()
+				if message["type"] == "http.disconnect":
+					disconnect_event.set()
+					return
+				if message["type"] != "http.request":
+					continue
+				body = message.get("body", b"")
+				if body:
+					yield body
+				if not message.get("more_body", False):
+					return
+
+		try:
+			req = self.client.build_request(
+				method=scope["method"],
+				url=url,
+				headers=headers,
+				content=_body(),
+			)
+			r = await self.client.send(req, stream=True)
+		except httpx.RequestError as e:
+			logger.error(f"Proxy request failed: {e}")
+			await send(
+				{
+					"type": "http.response.start",
+					"status": 502,
+					"headers": [(b"content-type", b"text/plain; charset=utf-8")],
+				}
+			)
+			await send(
+				{
+					"type": "http.response.body",
+					"body": b"Bad Gateway: Could not reach React Router server",
+					"more_body": False,
+				}
+			)
+			receive_task.cancel()
+			with suppress(asyncio.CancelledError):
+				await receive_task
+			return
+
+		self._active_responses.add(r)
+
+		response_headers: list[tuple[bytes, bytes]] = []
+		for key, value in r.headers.multi_items():
+			if key.lower() in ("location", "content-location"):
+				value = self.rewrite_url(value)
+			response_headers.append((key.encode("latin-1"), value.encode("latin-1")))
+
+		try:
+			await send(
+				{
+					"type": "http.response.start",
+					"status": r.status_code,
+					"headers": response_headers,
+				}
+			)
+		except Exception:
+			await r.aclose()
+			self._active_responses.discard(r)
+			receive_task.cancel()
+			with suppress(asyncio.CancelledError):
+				await receive_task
+			return
+
+		disconnect_task = asyncio.create_task(disconnect_event.wait())
+		aiter = r.aiter_raw().__aiter__()
+
+		async def _next_chunk() -> bytes:
+			return await aiter.__anext__()
+
+		try:
+			while True:
+				next_chunk_task: asyncio.Task[bytes] = asyncio.create_task(
+					_next_chunk()
+				)
+				done, _ = await asyncio.wait(
+					{next_chunk_task, disconnect_task},
+					return_when=asyncio.FIRST_COMPLETED,
+				)
+				if disconnect_task in done:
+					if not next_chunk_task.done():
+						next_chunk_task.cancel()
+						with suppress(asyncio.CancelledError):
+							await next_chunk_task
+					break
+				try:
+					chunk = next_chunk_task.result()
+				except StopAsyncIteration:
+					break
+				if disconnect_event.is_set():
+					break
+				await send(
+					{
+						"type": "http.response.body",
+						"body": chunk,
+						"more_body": True,
+					}
+				)
+			if not disconnect_event.is_set():
+				await send(
+					{
+						"type": "http.response.body",
+						"body": b"",
+						"more_body": False,
+					}
+				)
+		finally:
+			disconnect_task.cancel()
+			with suppress(asyncio.CancelledError):
+				await disconnect_task
+			receive_task.cancel()
+			with suppress(asyncio.CancelledError):
+				await receive_task
+			await r.aclose()
+			self._active_responses.discard(r)

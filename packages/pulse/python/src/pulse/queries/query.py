@@ -563,7 +563,8 @@ class KeyedQuery(Generic[T], Disposable):
 				)
 
 		if len(self.observers) == 0:
-			self.schedule_gc()
+			if not self.__disposed__:
+				self.schedule_gc()
 
 	def schedule_gc(self):
 		self.cancel_gc()

@@ -285,7 +285,6 @@ class RenderSession:
 		self._send_message = None
 		self._global_states = {}
 		self._global_queue = []
-		self.query_store = QueryStore()
 		self.connected = False
 		self.channels = ChannelsManager(self)
 		self.forms = FormRegistry(self)
@@ -293,6 +292,7 @@ class RenderSession:
 		self._pending_js_results = {}
 		self._tasks = TaskRegistry(name=f"render:{id}")
 		self._timers = TimerRegistry(tasks=self._tasks, name=f"render:{id}")
+		self.query_store = QueryStore()
 		self.prerender_queue_timeout = prerender_queue_timeout
 		self.detach_queue_timeout = detach_queue_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
@@ -574,9 +574,10 @@ class RenderSession:
 	# ---- Helpers ----
 
 	def close(self):
+		# Close all pending timers at the start, to avoid anything firing while we clean up
+		self._timers.cancel_all()
 		self.forms.dispose()
 		self._tasks.cancel_all()
-		self._timers.cancel_all()
 		for path in list(self.route_mounts.keys()):
 			self.detach(path, timeout=0)
 		self.route_mounts.clear()
@@ -597,6 +598,8 @@ class RenderSession:
 			if not fut.done():
 				fut.cancel()
 		self._pending_js_results.clear()
+		# Close any timer that may have been scheduled during cleanup (ex: query GC)
+		self._timers.cancel_all()
 		self._global_queue = []
 		self._send_message = None
 		self.connected = False

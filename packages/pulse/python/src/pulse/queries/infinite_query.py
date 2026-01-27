@@ -432,7 +432,8 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		self._cancel_observer_actions(observer)
 
 		if len(self._observers) == 0:
-			self.schedule_gc()
+			if not self.__disposed__:
+				self.schedule_gc()
 
 	def invalidate(
 		self,

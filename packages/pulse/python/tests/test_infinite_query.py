@@ -70,6 +70,56 @@ async def test_infinite_query_dispose_cancels_gc():
 
 
 @pytest.mark.asyncio
+async def test_infinite_query_gc_uses_render_timers():
+	app = ps.PulseContext.get().app
+	routes = RouteTree([])
+	session = RenderSession("test-session", routes)
+	query = session.query_store.ensure_infinite(
+		("inf", "gc-timers"),
+		initial_page_param=0,
+		get_next_page_param=lambda _pages: None,
+		gc_time=0.05,
+	)
+
+	app_handles = len(app._timers._handles)  # pyright: ignore[reportPrivateUsage]
+	assert len(session._timers._handles) == 0  # pyright: ignore[reportPrivateUsage]
+
+	with ps.PulseContext.update(render=session):
+		query.schedule_gc()
+
+	assert len(session._timers._handles) == 1  # pyright: ignore[reportPrivateUsage]
+	assert len(app._timers._handles) == app_handles  # pyright: ignore[reportPrivateUsage]
+
+	query.cancel_gc()
+	session._timers.cancel_all()  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
+async def test_infinite_query_unobserve_after_dispose_no_gc_handle():
+	async def fetcher(page_param: int) -> int:
+		return page_param
+
+	query: InfiniteQuery[int, int] = InfiniteQuery(
+		("inf", "unobserve"),
+		initial_page_param=0,
+		get_next_page_param=lambda _pages: None,
+		gc_time=0.01,
+	)
+	observer = InfiniteQueryResult(
+		Computed(lambda: query, name="inf_query(unobserve)"),
+		fetch_fn=fetcher,
+		gc_time=0.01,
+		fetch_on_mount=False,
+	)
+
+	query.dispose()
+	assert query._gc_handle is None  # pyright: ignore[reportPrivateUsage]
+
+	observer.dispose()
+	assert query._gc_handle is None  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
 @with_render_session
 async def test_infinite_query_fetch_next_pages():
 	class S(ps.State):

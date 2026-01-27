@@ -640,7 +640,9 @@ class ReactProxy:
 			return
 
 		assert proxy_response is not None
-		if disconnect_event.is_set() or self._closing.is_set():
+		closing = self._closing.is_set()
+		disconnected = disconnect_event.is_set()
+		if disconnected or closing:
 			proxy_response.close()
 			disconnect_task.cancel()
 			closing_task.cancel()
@@ -651,6 +653,24 @@ class ReactProxy:
 			watch_task.cancel()
 			with suppress(asyncio.CancelledError, Exception):
 				await watch_task
+			if closing and not disconnected:
+				with suppress(Exception):
+					await send(
+						{
+							"type": "http.response.start",
+							"status": 503,
+							"headers": [
+								(b"content-type", b"text/plain; charset=utf-8")
+							],
+						}
+					)
+					await send(
+						{
+							"type": "http.response.body",
+							"body": b"Service Unavailable: Proxy shutting down",
+							"more_body": False,
+						}
+					)
 			return
 		self._active_responses.add(proxy_response)
 

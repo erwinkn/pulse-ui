@@ -40,7 +40,6 @@ interface PulseProviderProps {
 ```ts
 interface PulseConfig {
   serverAddress: string;
-  internalServerAddress?: string;
   apiPrefix: string;
   connectionStatus: ConnectionStatusConfig;
 }
@@ -61,7 +60,6 @@ The connection status configuration controls when status messages appear:
 Other config fields:
 
 - **serverAddress** - Public base URL for WebSocket and client-side requests.
-- **internalServerAddress** - Optional base URL for server-side loaders. Defaults to `serverAddress`.
 - **apiPrefix** - Prefix for Pulse API endpoints (usually `/_pulse`).
 
 ### PulsePrerender

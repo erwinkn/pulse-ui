@@ -26,7 +26,6 @@ export interface ConnectionStatusConfig {
 
 export interface PulseConfig {
 	serverAddress: string;
-	internalServerAddress?: string;
 	connectionStatus: ConnectionStatusConfig;
 	apiPrefix: string;
 }

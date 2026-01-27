@@ -773,6 +773,32 @@ class TestReactProxyErrors:
 		assert sent[0]["status"] == 503
 		assert sent[-1]["type"] == "http.response.body"
 
+	@pytest.mark.asyncio
+	async def test_shutdown_after_response_ready_returns_service_unavailable(self):
+		proxy = ReactProxy(
+			react_server_address="http://localhost:5173",
+			server_address="http://localhost:8000",
+		)
+
+		async def _request(**_: Any) -> _StubResponse:
+			proxy._closing.set()  # pyright: ignore[reportPrivateUsage]
+			return _StubResponse(
+				status=200,
+				raw_headers=[(b"content-type", b"text/plain")],
+				read_body=b"ok",
+				content_length=2,
+			)
+
+		session = MagicMock()
+		session.request = AsyncMock(side_effect=_request)
+		session.close = AsyncMock()
+		proxy._session = session  # pyright: ignore[reportPrivateUsage]
+
+		sent = await _run_proxy(proxy, _make_asgi_scope("/"))
+
+		assert sent[0]["status"] == 503
+		assert sent[-1]["type"] == "http.response.body"
+
 
 class TestReactProxyCleanup:
 	@pytest.mark.asyncio

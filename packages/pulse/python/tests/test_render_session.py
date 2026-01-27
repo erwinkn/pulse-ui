@@ -1007,6 +1007,48 @@ async def test_session_close_cancels_tracked_timers():
 	assert fired is False
 
 
+@pytest.mark.asyncio
+async def test_session_close_cancels_cleanup_timers():
+	class TimerState(ps.State):
+		_render: RenderSession | None = None
+		_fired: bool = False
+
+		def capture_render(self) -> None:
+			self._render = ps.PulseContext.get().render
+
+		def on_dispose(self) -> None:
+			render = self._render
+			assert render is not None
+
+			def on_fire() -> None:
+				self._fired = True
+
+			render.schedule_later(0.05, on_fire)
+
+	state_box: list[TimerState] = []
+
+	@ps.component
+	def component():
+		state = ps.state(TimerState)
+		state.capture_render()
+		if not state_box:
+			state_box.append(state)
+		return ps.div()
+
+	routes = RouteTree([Route("a", component)])
+	session = RenderSession("test-id", routes)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	assert state_box
+	session.close()
+
+	await asyncio.sleep(0.1)
+	assert state_box[0]._fired is False
+
+
 def test_handle_api_result_ignores_unknown_id():
 	"""Test that handle_api_result silently ignores unknown correlation IDs."""
 	routes = RouteTree([Route("a", simple_component)])

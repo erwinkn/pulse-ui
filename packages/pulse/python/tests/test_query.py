@@ -56,6 +56,26 @@ async def test_query_store_create_and_get():
 
 
 @pytest.mark.asyncio
+async def test_query_gc_uses_render_timers():
+	app = ps.PulseContext.get().app
+	routes = RouteTree([])
+	session = RenderSession("test-session", routes)
+	query = session.query_store.ensure(("gc", "timers"), gc_time=0.05, retries=0)
+
+	app_handles = len(app._timers._handles)  # pyright: ignore[reportPrivateUsage]
+	assert len(session._timers._handles) == 0  # pyright: ignore[reportPrivateUsage]
+
+	with ps.PulseContext.update(render=session):
+		query.schedule_gc()
+
+	assert len(session._timers._handles) == 1  # pyright: ignore[reportPrivateUsage]
+	assert len(app._timers._handles) == app_handles  # pyright: ignore[reportPrivateUsage]
+
+	query.cancel_gc()
+	session._timers.cancel_all()  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
 async def test_query_store_list_key():
 	"""Test that list keys are normalized to tuples and work correctly."""
 	store = QueryStore()
@@ -116,6 +136,32 @@ async def test_query_entry_lifecycle():
 	assert entry.is_fetching.read() is False
 	assert entry.data.read() == "result"
 	assert entry.error.read() is None
+
+
+@pytest.mark.asyncio
+async def test_keyed_query_unobserve_after_dispose_no_gc_handle():
+	async def fetcher():
+		return "result"
+
+	query: KeyedQuery[str] = KeyedQuery(
+		("test", "unobserve"),
+		gc_time=0.01,
+		retries=0,
+		retry_delay=0.01,
+	)
+	query_computed = Computed(lambda: query, name="test_query(unobserve)")
+	observer = KeyedQueryResult(
+		query_computed,
+		fetch_fn=fetcher,
+		gc_time=0.01,
+		fetch_on_mount=False,
+	)
+
+	query.dispose()
+	assert query._gc_handle is None  # pyright: ignore[reportPrivateUsage]
+
+	observer.dispose()
+	assert query._gc_handle is None  # pyright: ignore[reportPrivateUsage]
 
 
 @pytest.mark.asyncio

@@ -765,6 +765,88 @@ class TestEdgeCases:
 		assert parent_effects[0] is not child_effects[0]
 
 
+class TestNoDoubleDispose:
+	"""Test that inline effects don't get double-disposed.
+
+	Inline effects are tracked by InlineEffectHookState. They should NOT also
+	be tracked as children of the parent render Effect's scope, otherwise
+	both disposal paths would run.
+	"""
+
+	def test_inline_effect_not_in_parent_scope(self):
+		"""Inline effects should not become children of a parent Effect."""
+		inline_effect_ref: list[Effect] = []
+
+		@ps.component
+		def Comp():
+			@ps.effect
+			def my_effect():
+				pass
+
+			inline_effect_ref.append(my_effect)
+			return None
+
+		# Create a parent Effect that renders the component
+		ctx = HookContext()
+		parent_effect_ref: list[Effect] = []
+
+		def parent_fn():
+			with ctx:
+				Comp.fn()
+
+		parent_effect = Effect(parent_fn, immediate=True)
+		parent_effect_ref.append(parent_effect)
+
+		# The inline effect should NOT be a child of the parent effect
+		assert len(inline_effect_ref) == 1
+		inline_effect = inline_effect_ref[0]
+		assert len(parent_effect.children) == 0, (
+			"Inline effects should not be registered as children of parent effects"
+		)
+		assert inline_effect.parent is None, (
+			"Inline effects should not have a parent effect set"
+		)
+
+		# Clean up
+		ctx.unmount()
+		parent_effect.dispose()
+
+	def test_inline_effect_dispose_only_once(self):
+		"""Inline effects should be disposed exactly once on unmount."""
+		dispose_count = 0
+
+		@ps.component
+		def Comp():
+			@ps.effect(immediate=True)
+			def my_effect():
+				def cleanup():
+					nonlocal dispose_count
+					dispose_count += 1
+
+				return cleanup
+
+			return None
+
+		# Simulate render within a parent Effect (like render Effect does)
+		ctx = HookContext()
+
+		def parent_fn():
+			with ctx:
+				Comp.fn()
+
+		parent_effect = Effect(parent_fn, immediate=True)
+
+		assert dispose_count == 0
+
+		# Dispose both - should not cause double-dispose
+		ctx.unmount()
+		parent_effect.dispose()
+
+		assert dispose_count == 1, (
+			f"Effect cleanup should run exactly once, got {dispose_count}"
+		)
+
+
 class TestIntegration:
 	def test_effect_with_init_state(self):
 		runs: list[int] = []

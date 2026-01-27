@@ -537,7 +537,13 @@ class ReactProxy:
 				{request_task, disconnect_task, closing_task},
 				return_when=asyncio.FIRST_COMPLETED,
 			)
-			if request_task not in done:
+			closing = self._closing.is_set()
+			disconnect_done = (
+				disconnect_task in done and not disconnect_task.cancelled()
+			)
+			disconnected = disconnect_event.is_set() or disconnect_done
+			should_send_unavailable = closing and not disconnected
+			if request_task not in done or request_task.cancelled():
 				request_task.cancel()
 				with suppress(asyncio.CancelledError, Exception):
 					await request_task
@@ -549,16 +555,24 @@ class ReactProxy:
 				watch_task.cancel()
 				with suppress(asyncio.CancelledError, Exception):
 					await watch_task
-				return
-			if request_task.cancelled():
-				for task in pending:
-					task.cancel()
-				for task in pending:
-					with suppress(asyncio.CancelledError, Exception):
-						await task
-				watch_task.cancel()
-				with suppress(asyncio.CancelledError, Exception):
-					await watch_task
+				if should_send_unavailable:
+					with suppress(Exception):
+						await send(
+							{
+								"type": "http.response.start",
+								"status": 503,
+								"headers": [
+									(b"content-type", b"text/plain; charset=utf-8")
+								],
+							}
+						)
+						await send(
+							{
+								"type": "http.response.body",
+								"body": b"Service Unavailable: Proxy shutting down",
+								"more_body": False,
+							}
+						)
 				return
 			proxy_response = request_task.result()
 		except asyncio.CancelledError:

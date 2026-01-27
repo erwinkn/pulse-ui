@@ -727,6 +727,52 @@ class TestReactProxyErrors:
 		assert sent[0]["status"] == 504
 		assert sent[-1]["type"] == "http.response.body"
 
+	@pytest.mark.asyncio
+	async def test_shutdown_returns_service_unavailable(self):
+		proxy = ReactProxy(
+			react_server_address="http://localhost:5173",
+			server_address="http://localhost:8000",
+		)
+		request_started = asyncio.Event()
+		wait_forever = asyncio.Event()
+
+		async def _request(**_: Any) -> _StubResponse:
+			request_started.set()
+			await wait_forever.wait()
+			return _StubResponse(
+				status=200,
+				raw_headers=[(b"content-type", b"text/plain")],
+				read_body=b"ok",
+				content_length=2,
+			)
+
+		session = MagicMock()
+		session.request = AsyncMock(side_effect=_request)
+		session.close = AsyncMock()
+		proxy._session = session  # pyright: ignore[reportPrivateUsage]
+
+		scope = _make_asgi_scope("/")
+		messages = [{"type": "http.request", "body": b"", "more_body": False}]
+		disconnect_event = asyncio.Event()
+		sent: list[Message] = []
+
+		async def receive() -> Message:
+			if messages:
+				return messages.pop(0)
+			await disconnect_event.wait()
+			return {"type": "http.disconnect"}
+
+		async def send(message: Message) -> None:
+			sent.append(message)
+
+		task = asyncio.create_task(proxy(scope, receive, send))
+		await request_started.wait()
+		await proxy.close()
+		await asyncio.wait_for(task, timeout=1)
+
+		assert sent[0]["status"] == 503
+		assert sent[-1]["type"] == "http.response.body"
+
 
 class TestReactProxyCleanup:
 	@pytest.mark.asyncio

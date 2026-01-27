@@ -250,6 +250,11 @@ class TestCodegen:
 			in layout_content
 		)
 		assert 'serverAddress: "http://localhost:8000"' in layout_content
+		assert 'internalServerAddress: "http://localhost:8000"' in layout_content
+		assert (
+			"const internalServerAddress = config.internalServerAddress ?? config.serverAddress;"
+			in layout_content
+		)
 
 		routes_ts_content = (pulse_app_dir / "routes.ts").read_text()
 		# routes.ts should be built from runtime route tree now

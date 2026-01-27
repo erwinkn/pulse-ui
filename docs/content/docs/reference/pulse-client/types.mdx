@@ -18,6 +18,8 @@ Configuration for the Pulse client.
 ```ts
 interface PulseConfig {
   serverAddress: string;
+  internalServerAddress?: string;
+  apiPrefix: string;
   connectionStatus: ConnectionStatusConfig;
 }
 ```

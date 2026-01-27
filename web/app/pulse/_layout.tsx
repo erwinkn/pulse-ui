@@ -7,6 +7,7 @@ import { useLoaderData } from "react-router";
 // This config is used to initialize the client
 export const config: PulseConfig = {
   serverAddress: "https://127.0.0.1:8010",
+  internalServerAddress: "https://127.0.0.1:8010",
   apiPrefix: "/_pulse",
   connectionStatus: {
     initialConnectingDelay: 2000,
@@ -29,7 +30,8 @@ export async function loader(args: LoaderFunctionArgs) {
   if (cookie) fwd.set("cookie", cookie);
   if (authorization) fwd.set("authorization", authorization);
   fwd.set("content-type", "application/json");
-  const res = await fetch(`https://127.0.0.1:8010${config.apiPrefix}/prerender`, {
+  const internalServerAddress = config.internalServerAddress ?? config.serverAddress;
+  const res = await fetch(`${internalServerAddress}${config.apiPrefix}/prerender`, {
     method: "POST",
     headers: fwd,
     body: JSON.stringify({ paths, routeInfo: extractServerRouteInfo(args) }),

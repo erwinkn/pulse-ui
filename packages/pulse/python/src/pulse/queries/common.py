@@ -34,12 +34,24 @@ class Key(tuple[Hashable, ...]):
 			parts = tuple(key)
 			try:
 				key_hash = hash(parts)
-			except TypeError:
-				raise TypeError("QueryKey values must be hashable") from None  # pyright: ignore[reportImplicitStringConcatenation]
+			except TypeError as e:
+				raise TypeError(
+					f"Query key contains unhashable value: {e}.\n\n"
+					f"Keys must contain only hashable values (strings, numbers, tuples).\n"
+					f"Got: {key!r}\n\n"
+					f"If using a dict or list inside the key, convert it to a tuple:\n"
+					f"    key=('users', tuple(user_ids))  # instead of list"
+				) from None
 			obj = super().__new__(cls, parts)
 			obj._hash = key_hash
 			return obj
-		raise TypeError("QueryKey must be a list or tuple of hashable values")
+		raise TypeError(
+			f"Query key must be a tuple or list, got {type(key).__name__}: {key!r}\n\n"
+			f"Examples of valid keys:\n"
+			f"    key=('users',)           # single-element tuple\n"
+			f"    key=('user', user_id)    # tuple with dynamic value\n"
+			f"    key=['posts', 'feed']    # list form also works"
+		)
 
 	@override
 	def __hash__(self) -> int:

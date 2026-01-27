@@ -432,7 +432,8 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		self._cancel_observer_actions(observer)
 
 		if len(self._observers) == 0:
-			self.schedule_gc()
+			if not self.__disposed__:
+				self.schedule_gc()
 
 	def invalidate(
 		self,
@@ -1310,7 +1311,15 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 		if self._key is None:
 			# pyright: ignore[reportImplicitStringConcatenation]
 			raise RuntimeError(
-				f"key is required for infinite query '{self.name}'. Provide a key via @infinite_query(key=...) or @{self.name}.key decorator."
+				f"Missing query key for @infinite_query '{self.name}'. "
+				f"A key is required to cache and share query results.\n\n"
+				f"Fix: Add key=(...) to the decorator or use the @{self.name}.key decorator:\n\n"
+				f"    @ps.infinite_query(initial_page_param=..., key=('my_query',))\n"
+				f"    async def {self.name}(self, param): ...\n\n"
+				f"Or with a dynamic key:\n\n"
+				f"    @{self.name}.key\n"
+				f"    def _{self.name}_key(self):\n"
+				f"        return ('my_query', self.some_param)"
 			)
 		raw_initial = (
 			call_flexible(self._initial_data, state)

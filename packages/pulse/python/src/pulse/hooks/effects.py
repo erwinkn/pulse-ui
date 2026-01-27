@@ -2,7 +2,7 @@ from collections.abc import Callable
 from typing import Any, override
 
 from pulse.hooks.core import HookMetadata, HookState, hooks
-from pulse.reactive import AsyncEffect, Effect
+from pulse.reactive import AsyncEffect, Effect, REACTIVE_CONTEXT
 
 
 class InlineEffectHookState(HookState):
@@ -33,6 +33,20 @@ class InlineEffectHookState(HookState):
 			if key not in self._seen_this_render:
 				self.effects[key].dispose()
 				del self.effects[key]
+		# Remove inline effects from the active render scope to avoid parent cleanup.
+		rc = REACTIVE_CONTEXT.get()
+		scope = rc.scope
+		if scope is None or not scope.effects:
+			return
+		for key in self._seen_this_render:
+			effect = self.effects.get(key)
+			if effect is None:
+				continue
+			try:
+				scope.effects.remove(effect)
+				effect.parent = None
+			except ValueError:
+				pass
 
 	def get_or_create(
 		self,

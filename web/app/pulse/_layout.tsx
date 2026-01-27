@@ -1,7 +1,4 @@
-from mako.template import Template
-
-LAYOUT_TEMPLATE = Template(
-	"""import { deserialize, extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";
+import { deserialize, extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";
 import { Outlet, data, type LoaderFunctionArgs, type ClientLoaderFunctionArgs } from "react-router";
 import { matchRoutes } from "react-router";
 import { rrPulseRouteTree } from "./routes.runtime";
@@ -9,12 +6,12 @@ import { useLoaderData } from "react-router";
 
 // This config is used to initialize the client
 export const config: PulseConfig = {
-  serverAddress: "${server_address}",
-  apiPrefix: "${api_prefix}",
+  serverAddress: "https://127.0.0.1:8010",
+  apiPrefix: "/_pulse",
   connectionStatus: {
-    initialConnectingDelay: ${int(connection_status.initial_connecting_delay * 1000)},
-    initialErrorDelay: ${int(connection_status.initial_error_delay * 1000)},
-    reconnectErrorDelay: ${int(connection_status.reconnect_error_delay * 1000)},
+    initialConnectingDelay: 2000,
+    initialErrorDelay: 8000,
+    reconnectErrorDelay: 8000,
   },
 };
 
@@ -33,8 +30,8 @@ export async function loader(args: LoaderFunctionArgs) {
   if (authorization) fwd.set("authorization", authorization);
   fwd.set("content-type", "application/json");
   // Internal server address for server-side loader requests.
-  const internalServerAddress = "${internal_server_address}";
-  const res = await fetch(`$${"{"}internalServerAddress}$${"{"}config.apiPrefix}/prerender`, {
+  const internalServerAddress = "https://127.0.0.1:8010";
+  const res = await fetch(`${internalServerAddress}${config.apiPrefix}/prerender`, {
     method: "POST",
     headers: fwd,
     body: JSON.stringify({ paths, routeInfo: extractServerRouteInfo(args) }),
@@ -70,7 +67,7 @@ export async function clientLoader(args: ClientLoaderFunctionArgs) {
       headers[key] = value as string;
     }
   }
-  const res = await fetch(`$${"{"}config.serverAddress}$${"{"}config.apiPrefix}/prerender`, {
+  const res = await fetch(`${config.serverAddress}${config.apiPrefix}/prerender`, {
     method: "POST",
     headers,
     credentials: "include",
@@ -99,5 +96,3 @@ export default function PulseLayout() {
   );
 }
 // Persist directives in sessionStorage for reuse in clientLoader is handled within the component
-"""
-)

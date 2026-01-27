@@ -1309,16 +1309,17 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 		)
 
 		if self._key is None:
+			# pyright: ignore[reportImplicitStringConcatenation]
 			raise RuntimeError(
 				f"Missing query key for @infinite_query '{self.name}'. "
-				f"A key is required to cache and share query results.\n\n"
-				f"Fix: Add key=(...) to the decorator or use the @{self.name}.key decorator:\n\n"
-				f"    @ps.infinite_query(initial_page_param=..., key=('my_query',))\n"
-				f"    async def {self.name}(self, param): ...\n\n"
-				f"Or with a dynamic key:\n\n"
-				f"    @{self.name}.key\n"
-				f"    def _{self.name}_key(self):\n"
-				f"        return ('my_query', self.some_param)"
+				+ "A key is required to cache and share query results.\n\n"
+				+ f"Fix: Add key=(...) to the decorator or use the @{self.name}.key decorator:\n\n"
+				+ "    @ps.infinite_query(initial_page_param=..., key=('my_query',))\n"
+				+ f"    async def {self.name}(self, param): ...\n\n"
+				+ "Or with a dynamic key:\n\n"
+				+ f"    @{self.name}.key\n"
+				+ f"    def _{self.name}_key(self):\n"
+				+ "        return ('my_query', self.some_param)"
 			)
 		raw_initial = (
 			call_flexible(self._initial_data, state)

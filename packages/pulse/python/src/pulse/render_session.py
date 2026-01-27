@@ -574,6 +574,7 @@ class RenderSession:
 	# ---- Helpers ----
 
 	def close(self):
+		# Close all pending timers at the start, to avoid anything firing while we clean up
 		self._timers.cancel_all()
 		self.forms.dispose()
 		self._tasks.cancel_all()
@@ -597,6 +598,7 @@ class RenderSession:
 			if not fut.done():
 				fut.cancel()
 		self._pending_js_results.clear()
+		# Close any timer that may have been scheduled during cleanup (ex: query GC)
 		self._timers.cancel_all()
 		self._global_queue = []
 		self._send_message = None

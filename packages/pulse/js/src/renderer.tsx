@@ -48,8 +48,8 @@ function parseCallbackPlaceholder(value: unknown): CallbackDelay | undefined {
 
 type ElementMeta = {
 	eval?: Set<string>;
-	cbKeys?: Set<string>;
 	path?: string;
+	callbacks?: Map<string, CallbackEntry>;
 };
 
 export class VDOMRenderer {
@@ -57,17 +57,17 @@ export class VDOMRenderer {
 	#path: string;
 	#registry: ComponentRegistry;
 
-	// Callback entries keyed by "path.prop"
-	#callbacks: Map<string, CallbackEntry>;
+	// Track callback entries for teardown.
+	#callbackEntries: Set<CallbackEntry>;
 
-	// Track eval keys + callback keys per ReactElement (not real props).
+	// Track eval keys + callback entries per ReactElement (not real props).
 	#metaMap: WeakMap<ReactElement, ElementMeta>;
 
 	constructor(client: PulseSocketIOClient, path: string, registry: ComponentRegistry = {}) {
 		this.#client = client;
 		this.#path = path;
 		this.#registry = registry;
-		this.#callbacks = new Map();
+		this.#callbackEntries = new Set();
 		this.#metaMap = new WeakMap();
 	}
 
@@ -237,65 +237,67 @@ export class VDOMRenderer {
 		entry.dueAt = null;
 	}
 
-	#firePending(entry: CallbackEntry, key: string) {
+	#firePending(entry: CallbackEntry, fire: (args: any[]) => void) {
 		const args = entry.lastArgs;
 		this.#clearPending(entry);
 		if (!args) return;
-		this.#client.invokeCallback(this.#path, key, args);
+		fire(args);
 	}
 
-	#scheduleDebounced(entry: CallbackEntry, key: string, delayMs: number, args: any[]) {
+	#scheduleDebounced(
+		entry: CallbackEntry,
+		delayMs: number,
+		args: any[],
+		fire: (args: any[]) => void,
+	) {
 		if (entry.timer) clearTimeout(entry.timer);
 		entry.lastArgs = args;
 		entry.dueAt = Date.now() + delayMs;
 		entry.timer = setTimeout(() => {
-			this.#firePending(entry, key);
+			this.#firePending(entry, fire);
 		}, delayMs);
 	}
 
-	#dropCallback(key: string) {
-		const entry = this.#callbacks.get(key);
+	#dropCallback(meta: ElementMeta, prop: string) {
+		const callbacks = meta.callbacks;
+		if (!callbacks) return;
+		const entry = callbacks.get(prop);
 		if (!entry) return;
 		this.#clearPending(entry);
-		this.#callbacks.delete(key);
-	}
-
-	#moveCallback(oldKey: string, newKey: string) {
-		if (oldKey === newKey) return;
-		const oldEntry = this.#callbacks.get(oldKey);
-		if (!oldEntry) return;
-		const args = oldEntry.lastArgs;
-		const remaining = Math.max(0, (oldEntry.dueAt ?? Date.now()) - Date.now());
-		this.#clearPending(oldEntry);
-		if (args == null) {
-			this.#callbacks.delete(oldKey);
-			return;
+		this.#callbackEntries.delete(entry);
+		callbacks.delete(prop);
+		if (callbacks.size === 0) {
+			meta.callbacks = undefined;
 		}
-		const newEntry = this.#ensureCallbackEntry(newKey);
-		if (newEntry.timer) this.#clearPending(newEntry);
-		newEntry.delayMs = oldEntry.delayMs;
-		this.#scheduleDebounced(newEntry, newKey, remaining, args);
-		this.#callbacks.delete(oldKey);
 	}
 
-	#ensureCallbackEntry(key: string): CallbackEntry {
-		let entry = this.#callbacks.get(key);
+	#ensureCallbackEntry(meta: ElementMeta, prop: string): CallbackEntry {
+		if (!meta.callbacks) {
+			meta.callbacks = new Map();
+		}
+		const callbacks = meta.callbacks;
+		let entry = callbacks.get(prop);
 		if (!entry) {
+			const fire = (args: any[]) => {
+				const key = this.#propPath(meta.path ?? "", prop);
+				this.#client.invokeCallback(this.#path, key, args);
+			};
 			entry = {
 				fn: (...args: any[]) => {
 					if (entry!.delayMs == null) {
-						this.#client.invokeCallback(this.#path, key, args);
+						fire(args);
 						return;
 					}
 					const callArgs = args.map(extractEvent);
-					this.#scheduleDebounced(entry!, key, entry!.delayMs, callArgs);
+					this.#scheduleDebounced(entry!, entry!.delayMs, callArgs, fire);
 				},
 				delayMs: null,
 				timer: null,
 				lastArgs: null,
 				dueAt: null,
 			};
-			this.#callbacks.set(key, entry);
+			callbacks.set(prop, entry);
+			this.#callbackEntries.add(entry);
 		}
 		return entry;
 	}
@@ -314,20 +316,21 @@ export class VDOMRenderer {
 		if (!isValidElement(node)) return;
 		const element = node as ReactElement<Record<string, any> | null>;
 		const meta = this.#metaMap.get(element);
-		const cbKeys = meta?.cbKeys;
 		const basePath = meta?.path ?? path;
-		if (cbKeys && cbKeys.size > 0) {
-			for (const k of cbKeys) {
-				this.#dropCallback(this.#propPath(basePath, k));
+		const callbacks = meta?.callbacks;
+		if (callbacks && callbacks.size > 0) {
+			for (const entry of callbacks.values()) {
+				this.#clearPending(entry);
+				this.#callbackEntries.delete(entry);
 			}
+			callbacks.clear();
+			meta!.callbacks = undefined;
 		}
 		const baseProps = (element.props ?? {}) as Record<string, any>;
 		for (const key of Object.keys(baseProps)) {
 			if (key === "children") continue;
 			const v = baseProps[key];
-			if (isValidElement(v)) {
-				this.#dropCallbacksInSubtree(v, this.#propPath(basePath, key));
-			}
+			this.#dropCallbacksInSubtree(v, this.#propPath(basePath, key));
 		}
 		const children = this.#ensureChildrenArray(element);
 		for (let i = 0; i < children.length; i += 1) {
@@ -336,18 +339,17 @@ export class VDOMRenderer {
 		}
 	}
 
-	#getCallback(path: string, prop: string, delayMs: CallbackDelay) {
-		const key = this.#propPath(path, prop);
-		const entry = this.#ensureCallbackEntry(key);
+	#getCallback(meta: ElementMeta, prop: string, delayMs: CallbackDelay) {
+		const entry = this.#ensureCallbackEntry(meta, prop);
 		if (entry.delayMs !== delayMs) {
 			entry.delayMs = delayMs;
 		}
 		return entry.fn;
 	}
 
-	#transformEvalProp(path: string, prop: string, value: VDOMPropValue) {
+	#transformEvalProp(path: string, meta: ElementMeta, prop: string, value: VDOMPropValue) {
 		const cbDelay = parseCallbackPlaceholder(value);
-		if (cbDelay !== undefined) return this.#getCallback(path, prop, cbDelay);
+		if (cbDelay !== undefined) return this.#getCallback(meta, prop, cbDelay);
 		if (isExprNode(value)) return this.#evalExpr(value, {});
 		if (typeof value === "object" && value !== null && "tag" in value) {
 			// Render-prop subtree; traverse as a prop path segment (non-numeric).
@@ -363,9 +365,10 @@ export class VDOMRenderer {
 	}
 
 	clearPendingCallbacks() {
-		for (const key of Array.from(this.#callbacks.keys())) {
-			this.#dropCallback(key);
+		for (const entry of Array.from(this.#callbackEntries)) {
+			this.#clearPending(entry);
 		}
+		this.#callbackEntries.clear();
 	}
 
 	renderNode(node: VDOMNode, currentPath = ""): ReactNode {
@@ -396,9 +399,9 @@ export class VDOMRenderer {
 				component = this.#evalExpr(tag, {}) as any;
 			}
 			// 2. Build props
-			let cbKeys: Set<string> | undefined;
 			const newProps: Record<string, any> = {};
 			let evalSet: Set<string> | undefined;
+			const meta: ElementMeta = { path: currentPath };
 			if (!evalKeys) {
 				// Hot path: no eval -> props are plain JSON; copy as-is.
 				for (const [propName, propValue] of Object.entries(props)) {
@@ -406,17 +409,18 @@ export class VDOMRenderer {
 				}
 			} else {
 				evalSet = new Set(evalKeys);
+				meta.eval = evalSet;
 				for (const [propName, propValue] of Object.entries(props)) {
 					if (!evalSet.has(propName)) {
 						newProps[propName] = propValue;
 						continue;
 					}
-					const cbDelay = parseCallbackPlaceholder(propValue);
-					if (cbDelay !== undefined) {
-						if (!cbKeys) cbKeys = new Set();
-						cbKeys.add(propName);
-					}
-					newProps[propName] = this.#transformEvalProp(currentPath, propName, propValue);
+					newProps[propName] = this.#transformEvalProp(
+						currentPath,
+						meta,
+						propName,
+						propValue,
+					);
 				}
 			}
 			if (node.key) newProps.key = node.key;
@@ -432,7 +436,7 @@ export class VDOMRenderer {
 			try {
 				return this.#rememberMeta(
 					createElement(component, newProps, ...renderedChildren),
-					{ eval: evalSet, cbKeys, path: currentPath },
+					meta,
 				);
 			} catch (error) {
 				console.error("[Pulse] Failed to create element:", node)
@@ -469,40 +473,41 @@ export class VDOMRenderer {
 		return next;
 	}
 
-	// Rebind callback function props within a subtree after a path-changing move.
+	// Update paths within a subtree after a move so callbacks resolve correctly.
 	#rebindCallbacksInSubtree(node: ReactNode, path: string): ReactNode {
+		if (node == null || typeof node === "boolean" || typeof node === "number" || typeof node === "string") {
+			return node;
+		}
+		if (Array.isArray(node)) {
+			for (let i = 0; i < node.length; i += 1) {
+				const childPath = path ? `${path}.${i}` : String(i);
+				this.#rebindCallbacksInSubtree(node[i], childPath);
+			}
+			return node;
+		}
 		if (!isValidElement(node)) return node;
 		const element = node as ReactElement<Record<string, any> | null>;
+		const meta = this.#metaMap.get(element);
+		if (meta) {
+			meta.path = path;
+		} else {
+			this.#metaMap.set(element, { path });
+		}
 
 		const baseProps = (element.props ?? {}) as Record<string, any>;
-		const nextProps: Record<string, any> = { ...baseProps };
-
-		const meta = this.#metaMap.get(element);
-		const cbKeys = meta?.cbKeys;
-		const prevPath = meta?.path ?? path;
-		if (cbKeys && cbKeys.size > 0) {
-			for (const k of cbKeys) {
-				const oldKey = this.#propPath(prevPath, k);
-				const newKey = this.#propPath(path, k);
-				const delay = this.#callbacks.get(oldKey)?.delayMs ?? null;
-				if (oldKey !== newKey) this.#moveCallback(oldKey, newKey);
-				nextProps[k] = this.#getCallback(path, k, delay);
-			}
-		}
 		for (const key of Object.keys(baseProps)) {
+			if (key === "children") continue;
 			const v = baseProps[key];
-			if (isValidElement(v)) {
-				nextProps[key] = this.#rebindCallbacksInSubtree(v, this.#propPath(path, key));
-			}
+			this.#rebindCallbacksInSubtree(v, this.#propPath(path, key));
 		}
 
-		const children = this.#ensureChildrenArray(element).map((child, idx) => {
-			const childPath = path ? `${path}.${idx}` : String(idx);
-			return this.#rebindCallbacksInSubtree(child, childPath);
-		});
+		const children = this.#ensureChildrenArray(element);
+		for (let i = 0; i < children.length; i += 1) {
+			const childPath = path ? `${path}.${i}` : String(i);
+			this.#rebindCallbacksInSubtree(children[i], childPath);
+		}
 
-		const nextMeta = meta ? { ...meta, path } : { path };
-		return this.#rememberMeta(cloneElement(element, nextProps, ...children), nextMeta);
+		return node;
 	}
 
 	applyUpdates(initialTree: ReactNode, updates: VDOMUpdate[]): ReactNode {
@@ -542,8 +547,8 @@ export class VDOMRenderer {
 						const nextProps: Record<string, any> = { ...currentProps };
 
 						const prevMeta = this.#metaMap.get(element);
-						const prevEval = prevMeta?.eval;
-						const prevCbKeys = prevMeta?.cbKeys;
+						const meta: ElementMeta = prevMeta ?? {};
+						const prevEval = meta.eval;
 						const prevPath = prevMeta?.path ?? path;
 						const evalPatch = update.data.eval;
 						const nextEval: Set<string> | undefined =
@@ -554,26 +559,18 @@ export class VDOMRenderer {
 									: new Set(evalPatch);
 						const evalCleared = evalPatch !== undefined && evalPatch.length === 0;
 
-						// Maintain callback-keys metadata incrementally (for path rebinding after moves).
-						// If eval is cleared, callbacks must disappear unless explicitly re-set.
-						let nextCbKeys: Set<string> | undefined;
-						if (nextEval) {
-							const cbSet = new Set<string>();
-							if (prevCbKeys) {
-								for (const k of prevCbKeys) {
-									if (nextEval.has(k)) {
-										cbSet.add(k);
-									} else {
-										this.#dropCallback(this.#propPath(prevPath, k));
-									}
+						// Drop callbacks that are no longer eval-bound.
+						if (nextEval && meta.callbacks) {
+							for (const k of Array.from(meta.callbacks.keys())) {
+								if (!nextEval.has(k)) {
+									this.#dropCallback(meta, k);
 								}
 							}
-							nextCbKeys = cbSet.size > 0 ? cbSet : undefined;
 						}
-						if (evalCleared && prevCbKeys) {
-							for (const k of prevCbKeys) {
+						if (evalCleared && meta.callbacks) {
+							for (const k of Array.from(meta.callbacks.keys())) {
 								delete nextProps[k];
-								this.#dropCallback(this.#propPath(prevPath, k));
+								this.#dropCallback(meta, k);
 							}
 						}
 
@@ -584,10 +581,9 @@ export class VDOMRenderer {
 									this.#dropCallbacksInSubtree(removedValue, this.#propPath(prevPath, key));
 								}
 								delete nextProps[key];
-								if (prevCbKeys?.has(key)) {
-									this.#dropCallback(this.#propPath(prevPath, key));
+								if (meta.callbacks?.has(key)) {
+									this.#dropCallback(meta, key);
 								}
-								nextCbKeys?.delete(key);
 							}
 						}
 						if (update.data.set) {
@@ -595,22 +591,16 @@ export class VDOMRenderer {
 								// Only interpret eval-marked keys; otherwise treat as JSON.
 								const isEval = nextEval?.has(k) === true;
 								const cbDelay = isEval ? parseCallbackPlaceholder(v) : undefined;
-								nextProps[k] = isEval ? this.#transformEvalProp(path, k, v as any) : (v as any);
-
-								// Update cbKeys based on placeholder sentinel in the payload.
-								if (cbDelay !== undefined) {
-									if (!nextCbKeys) nextCbKeys = new Set();
-									nextCbKeys.add(k);
-								} else {
-									nextCbKeys?.delete(k);
-									if (prevCbKeys?.has(k)) {
-										this.#dropCallback(this.#propPath(prevPath, k));
-									}
+								nextProps[k] = isEval
+									? this.#transformEvalProp(path, meta, k, v as any)
+									: (v as any);
+								if (cbDelay === undefined && meta.callbacks?.has(k)) {
+									this.#dropCallback(meta, k);
 								}
 							}
 						}
-
-						if (nextCbKeys && nextCbKeys.size === 0) nextCbKeys = undefined;
+						meta.eval = nextEval;
+						meta.path = path;
 
 						const removedSomething = (update.data.remove?.length ?? 0) > 0;
 						if (removedSomething) {
@@ -618,14 +608,10 @@ export class VDOMRenderer {
 							nextProps.ref = (element as any).ref;
 							return this.#rememberMeta(
 								createElement(element.type, nextProps, ...this.#ensureChildrenArray(element)),
-								{ eval: nextEval, cbKeys: nextCbKeys, path },
+								meta,
 							);
 						} else {
-							return this.#rememberMeta(cloneElement(element, nextProps), {
-								eval: nextEval,
-								cbKeys: nextCbKeys,
-								path,
-							});
+							return this.#rememberMeta(cloneElement(element, nextProps), meta);
 						}
 					}
 
@@ -637,6 +623,18 @@ export class VDOMRenderer {
 
 						const [newIndices, newContents] = update.new;
 						const [reuseIndices, reuseSources] = update.reuse;
+						const newIndexSet = new Set(newIndices);
+						const reuseIndexSet = new Set(reuseIndices);
+						const reuseSourceSet = new Set(reuseSources);
+						for (let i = 0; i < prevChildren.length; i += 1) {
+							const reused =
+								reuseSourceSet.has(i) ||
+								(i < update.N && !newIndexSet.has(i) && !reuseIndexSet.has(i));
+							if (!reused) {
+								const childPath = path ? `${path}.${i}` : String(i);
+								this.#dropCallbacksInSubtree(prevChildren[i], childPath);
+							}
+						}
 
 						let nextNew = -1,
 							nextReuse = -1,

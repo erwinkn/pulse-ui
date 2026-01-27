@@ -84,7 +84,7 @@ def DebouncedDemo():
 						state.show_debounced,
 						ps.input(
 							type="text",
-							onChange=ps.debounced(state.on_debounced, 300),
+							onChange=ps.debounced(state.on_debounced, 2000),
 							placeholder="Type quickly…",
 							className="mt-3 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2",
 						),

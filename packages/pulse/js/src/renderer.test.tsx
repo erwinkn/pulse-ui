@@ -152,6 +152,43 @@ describe("VDOMRenderer", () => {
 		expect(invokeCallback).toHaveBeenCalledWith("/test", "1.onClick", ["value"]);
 	});
 
+	it("drops pending debounced callbacks when a node is removed", async () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		let tree = renderer.renderNode({
+			tag: "div",
+			children: [
+				{
+					tag: "button",
+					props: { onClick: "$cb:40" },
+					eval: ["onClick"],
+					children: ["A"],
+				},
+				{
+					tag: "button",
+					props: { onClick: "$cb:40" },
+					eval: ["onClick"],
+					children: ["B"],
+				},
+			],
+		});
+		const root = tree as React.ReactElement;
+		const kids = childrenArray(root) as React.ReactElement[];
+		(kids[1].props as any).onClick("value");
+
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "reconciliation",
+				path: "",
+				N: 1,
+				new: [[], []],
+				reuse: [[], []],
+			},
+		]);
+
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		expect(invokeCallback).not.toHaveBeenCalled();
+	});
+
 	it("drops pending debounced callbacks when a node is replaced", async () => {
 		const { renderer, invokeCallback } = makeRenderer();
 		let tree = renderer.renderNode({

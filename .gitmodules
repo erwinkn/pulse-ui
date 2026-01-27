@@ -1,3 +1,0 @@
-[submodule "vendors/asgiproxy"]
-	path = vendors/asgiproxy
-	url = https://github.com/valohai/asgiproxy.git

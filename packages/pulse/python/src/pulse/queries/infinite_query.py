@@ -1308,6 +1308,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 		)
 
 		if self._key is None:
+			# pyright: ignore[reportImplicitStringConcatenation]
 			raise RuntimeError(
 				f"key is required for infinite query '{self.name}'. Provide a key via @infinite_query(key=...) or @{self.name}.key decorator."
 			)

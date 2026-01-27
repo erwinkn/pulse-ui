@@ -35,7 +35,7 @@ class Key(tuple[Hashable, ...]):
 			try:
 				key_hash = hash(parts)
 			except TypeError:
-				raise TypeError("QueryKey values must be hashable") from None
+				raise TypeError("QueryKey values must be hashable") from None  # pyright: ignore[reportImplicitStringConcatenation]
 			obj = super().__new__(cls, parts)
 			obj._hash = key_hash
 			return obj
@@ -46,7 +46,7 @@ class Key(tuple[Hashable, ...]):
 		return self._hash
 
 
-QueryKey: TypeAlias = tuple[Hashable, ...] | list[Hashable] | Key
+QueryKey: TypeAlias = tuple[Hashable, ...] | list[Hashable] | Key  # pyright: ignore[reportImplicitStringConcatenation]
 """List/tuple of hashable values identifying a query in the store.
 
 Used to uniquely identify queries for caching, deduplication, and invalidation.

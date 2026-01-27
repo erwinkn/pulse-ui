@@ -25,7 +25,6 @@ from pulse.env import (
 	ENV_PULSE_ENV,
 	ENV_PULSE_HOST,
 	ENV_PULSE_PORT,
-	ENV_PULSE_PROXY_MODE,
 	ENV_PULSE_REACT_SERVER_ADDRESS,
 )
 from starlette.applications import Starlette
@@ -267,7 +266,6 @@ async def _run(args: argparse.Namespace) -> int:
 	upstream_base = f"http://{upstream_host}:{args.upstream_port}"
 
 	os.environ[ENV_PULSE_REACT_SERVER_ADDRESS] = upstream_base
-	os.environ[ENV_PULSE_PROXY_MODE] = args.proxy_mode
 	os.environ[ENV_PULSE_HOST] = args.host
 	os.environ[ENV_PULSE_PORT] = str(args.port)
 	os.environ[ENV_PULSE_ENV] = args.env
@@ -365,7 +363,6 @@ def _parse_args() -> argparse.Namespace:
 	parser.add_argument("--host", default="127.0.0.1")
 	parser.add_argument("--port", type=int, default=8010)
 	parser.add_argument("--upstream-port", type=int, default=9010)
-	parser.add_argument("--proxy-mode", choices=["asgi", "fastapi"], default="asgi")
 	parser.add_argument("--env", choices=["dev", "ci", "prod"], default="prod")
 	parser.add_argument("--disable-codegen", action="store_true", default=True)
 	parser.add_argument("--requests", type=int, default=5000)

@@ -681,6 +681,28 @@ class TestReactProxyStreaming:
 			assert response.close.call_count >= 1
 
 
+class TestReactProxyCleanup:
+	@pytest.mark.asyncio
+	async def test_request_clears_tracking_sets(self):
+		proxy = ReactProxy(
+			react_server_address="http://localhost:5173",
+			server_address="http://localhost:8000",
+		)
+		response = _StubResponse(
+			status=200,
+			raw_headers=[(b"content-type", b"text/plain")],
+			read_body=b"ok",
+			content_length=2,
+		)
+		proxy._session = _make_session(response)  # pyright: ignore[reportPrivateUsage]
+
+		await _run_proxy(proxy, _make_asgi_scope("/"))
+		await asyncio.sleep(0)
+
+		assert proxy._active_responses == set()  # pyright: ignore[reportPrivateUsage]
+		assert proxy._tasks == set()  # pyright: ignore[reportPrivateUsage]
+
+
 class TestReactProxyWebSocket:
 	@pytest.mark.asyncio
 	async def test_websocket_forwards_text_and_cleans_up(self):

@@ -33,7 +33,6 @@ ENV_PULSE_APP_DIR = "PULSE_APP_DIR"
 ENV_PULSE_HOST = "PULSE_HOST"
 ENV_PULSE_PORT = "PULSE_PORT"
 ENV_PULSE_REACT_SERVER_ADDRESS = "PULSE_REACT_SERVER_ADDRESS"
-ENV_PULSE_PROXY_MODE = "PULSE_PROXY_MODE"
 ENV_PULSE_SECRET = "PULSE_SECRET"
 ENV_PULSE_DISABLE_CODEGEN = "PULSE_DISABLE_CODEGEN"
 
@@ -125,17 +124,6 @@ class EnvVars:
 	@react_server_address.setter
 	def react_server_address(self, value: str | None) -> None:
 		self._set(ENV_PULSE_REACT_SERVER_ADDRESS, value)
-
-	@property
-	def proxy_mode(self) -> Literal["fastapi", "asgi"]:
-		value = (self._get(ENV_PULSE_PROXY_MODE) or "fastapi").lower()
-		if value not in ("fastapi", "asgi"):
-			value = "fastapi"
-		return value
-
-	@proxy_mode.setter
-	def proxy_mode(self, value: Literal["fastapi", "asgi"]) -> None:
-		self._set(ENV_PULSE_PROXY_MODE, value)
 
 	# Secrets
 	@property

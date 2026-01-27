@@ -62,7 +62,7 @@ Target files:
   - always instantiate ASGI proxy
   - always register ASGI catch-all
   - dev websocket catch-all uses same proxy instance
-- Deprecate/ignore `PULSE_PROXY_MODE`.
+- Remove `PULSE_PROXY_MODE`.
 
 ## Tests to Add/Update
 - HTTP:
@@ -79,4 +79,3 @@ Target files:
 - `make all` passes
 - `uv run pulse run examples/main.py` runs
 - agent-browser smoke test succeeds against dev server
-

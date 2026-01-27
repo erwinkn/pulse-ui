@@ -272,6 +272,8 @@ def _write_tagged_line(name: str, message: str, tag_mode: TagMode) -> None:
 		"Network: use --host to expose" in clean_message
 		or "press h + enter to show help" in clean_message
 		or "➜  Local:" in clean_message
+		or "/__manifest" in clean_message
+		or "?import" in clean_message
 	):
 		return
 

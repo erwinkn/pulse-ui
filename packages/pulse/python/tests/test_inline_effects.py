@@ -4,7 +4,7 @@ from typing import cast
 import pulse as ps
 import pytest
 from pulse import HookContext, Signal
-from pulse.reactive import AsyncEffect, Batch, Effect
+from pulse.reactive import AsyncEffect, Batch, Computed, Effect
 from pulse.test_helpers import wait_for
 
 
@@ -845,6 +845,28 @@ class TestNoDoubleDispose:
 		assert dispose_count == 1, (
 			f"Effect cleanup should run exactly once, got {dispose_count}"
 		)
+
+
+class TestComputedInteraction:
+	def test_inline_effect_in_computed_still_errors(self):
+		"""Inline effects created inside computed should still raise."""
+		@ps.component
+		def Comp():
+			def compute():
+				@ps.effect
+				def my_effect():
+					pass
+
+				return 1
+
+			value = Computed(compute, name="c")
+			_ = value()
+			return None
+
+		ctx = HookContext()
+		with pytest.raises(RuntimeError, match="effect was created within a computed"):
+			with ctx:
+				Comp.fn()
 
 
 class TestIntegration:

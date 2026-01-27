@@ -8,14 +8,12 @@ from pulse.hooks.core import HOOK_CONTEXT
 from pulse.hooks.effects import inline_effect_hook
 from pulse.hooks.state import collect_component_identity
 from pulse.reactive import (
-	REACTIVE_CONTEXT,
 	AsyncEffect,
 	AsyncEffectFn,
 	Computed,
 	Effect,
 	EffectCleanup,
 	EffectFn,
-	ReactiveContext,
 	Signal,
 )
 from pulse.state import ComputedProperty, State, StateEffect
@@ -339,21 +337,7 @@ def effect(
 			identity = key
 
 		state = inline_effect_hook()
-
-		def create_effect_untracked() -> Effect | AsyncEffect:
-			# Create effect without registering in parent scope.
-			# Inline effects are tracked by InlineEffectHookState, not the render
-			# Effect's scope. This avoids double-dispose on unmount.
-			rc = REACTIVE_CONTEXT.get()
-			token = REACTIVE_CONTEXT.set(
-				ReactiveContext(rc.epoch, rc.batch, None, rc.on_effect_error)
-			)
-			try:
-				return create_effect()
-			finally:
-				REACTIVE_CONTEXT.reset(token)
-
-		return state.get_or_create(cast(Any, identity), key, create_effect_untracked)
+		return state.get_or_create(cast(Any, identity), key, create_effect)
 
 	if fn is not None:
 		return decorator(fn)

@@ -1433,6 +1433,7 @@ from pulse.serializer import deserialize as deserialize
 from pulse.serializer import serialize as serialize
 
 # State and routing
+from pulse.state import QueryParam as QueryParam
 from pulse.state import State as State
 
 # Transpiler v2

@@ -46,7 +46,7 @@ export function serialize(data: Serializable): Serialized {
 
 		if (value instanceof Date) {
 			dates.push(idx);
-			return value.getTime();
+			return value.toISOString();
 		}
 
 		if (Array.isArray(value)) {
@@ -123,7 +123,16 @@ export function deserialize<Data extends Serializable = Serializable>(
 		}
 
 		if (dates.has(idx)) {
-			const dt = new Date(value as number);
+			if (typeof value !== "string") {
+				throw new Error("Date payload must be an ISO string");
+			}
+			if (isDateLiteral(value)) {
+				const [y, m, d] = value.split("-").map(Number);
+				const dt = new Date(Date.UTC(y, m - 1, d));
+				objects.push(dt);
+				return dt;
+			}
+			const dt = new Date(value);
 			objects.push(dt);
 			return dt;
 		}
@@ -185,4 +194,8 @@ export function deserialize<Data extends Serializable = Serializable>(
 	}
 
 	return reconstruct(data);
+}
+
+function isDateLiteral(value: string): boolean {
+	return value.length === 10 && value[4] === "-" && value[7] === "-";
 }

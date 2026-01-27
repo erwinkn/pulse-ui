@@ -1,4 +1,4 @@
-"""Pulse serializer v3 implementation (Python).
+"""Pulse serializer v4 implementation (Python).
 
 The format mirrors the TypeScript implementation in ``packages/pulse/js``.
 
@@ -13,8 +13,10 @@ Serialized payload structure::
   ``refs``, ``dates``, ``sets``, ``maps``.
 - ``refs``  – indices where the payload entry is an integer pointing to a
   previously visited node's index (shared refs/cycles).
-- ``dates`` – indices that should be materialised as ``datetime`` objects; the
-  payload entry is the millisecond timestamp since the Unix epoch (UTC).
+- ``dates`` – indices that should be materialised as temporal objects; the
+  payload entry is an ISO 8601 string:
+  - ``YYYY-MM-DD`` → ``datetime.date``
+  - ``YYYY-MM-DDTHH:MM:SS.SSSZ`` → ``datetime.datetime`` (UTC)
 - ``sets``  – indices that are ``set`` instances; payload is an array of their
   items.
 - ``maps``  – indices that are ``Map`` instances; payload is an object mapping
@@ -22,8 +24,8 @@ Serialized payload structure::
 
 Nodes are assigned a single global index as they are visited (non-primitives
 only). This preserves shared references and cycles across nested structures
-containing primitives, lists/tuples, ``dict``/plain objects, ``set`` and
-``datetime`` objects.
+containing primitives, lists/tuples, ``dict``/plain objects, ``set``, ``date``
+and ``datetime`` objects.
 """
 
 from __future__ import annotations
@@ -49,7 +51,7 @@ def serialize(data: Any) -> Serialized:
 	"""Serialize a Python value to wire format.
 
 	Converts Python values to a JSON-compatible format with metadata for
-	preserving types like datetime, set, and shared references.
+		preserving types like datetime, date, set, and shared references.
 
 	Args:
 		data: Value to serialize.
@@ -64,7 +66,8 @@ def serialize(data: Any) -> Serialized:
 	Supported types:
 		- Primitives: None, bool, int, float, str
 		- Collections: list, tuple, dict, set
-		- datetime.datetime (converted to milliseconds since Unix epoch)
+		- datetime.datetime (converted to ISO 8601 UTC)
+		- datetime.date (converted to ISO 8601 date string)
 		- Dataclasses (serialized as dict of fields)
 		- Objects with __dict__ (public attributes only)
 
@@ -123,7 +126,11 @@ def serialize(data: Any) -> Serialized:
 
 		if isinstance(value, dt.datetime):
 			dates.append(idx)
-			return _datetime_to_millis(value)
+			return _datetime_to_iso(value)
+
+		if isinstance(value, dt.date):
+			dates.append(idx)
+			return value.isoformat()
 
 		if isinstance(value, dict):
 			result_dict: dict[str, PlainJSON] = {}
@@ -178,7 +185,7 @@ def deserialize(
 	"""Deserialize wire format back to Python values.
 
 	Reconstructs Python values from the serialized format, restoring
-	datetime objects, sets, and shared references.
+	date/datetime objects, sets, and shared references.
 
 	Args:
 		payload: Serialized tuple from serialize().
@@ -191,6 +198,7 @@ def deserialize(
 
 	Notes:
 		- datetime values are reconstructed as UTC-aware
+		- date values are reconstructed as ``datetime.date``
 		- set values are reconstructed as Python sets
 		- Shared references and cycles are restored
 
@@ -228,10 +236,12 @@ def deserialize(
 			return objects[target_index]
 
 		if idx in dates:
-			assert isinstance(value, (int, float)), (
-				"Date payload must be a numeric timestamp"
-			)
-			dt_value = _datetime_from_millis(value)
+			assert isinstance(value, str), "Date payload must be an ISO string"
+			if _is_date_literal(value):
+				date_value = dt.date.fromisoformat(value)
+				objects.append(date_value)
+				return date_value
+			dt_value = _datetime_from_iso(value)
 			objects.append(dt_value)
 			return dt_value
 
@@ -267,13 +277,22 @@ def deserialize(
 	return reconstruct(data)
 
 
-def _datetime_to_millis(value: dt.datetime) -> int:
+def _datetime_to_iso(value: dt.datetime) -> str:
 	if value.tzinfo is None:
-		ts = value.replace(tzinfo=dt.UTC).timestamp()
+		value = value.replace(tzinfo=dt.UTC)
 	else:
-		ts = value.astimezone(dt.UTC).timestamp()
-	return int(round(ts * 1000))
+		value = value.astimezone(dt.UTC)
+	return value.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def _datetime_from_millis(value: int | float) -> dt.datetime:
-	return dt.datetime.fromtimestamp(value / 1000.0, tz=dt.UTC)
+def _datetime_from_iso(value: str) -> dt.datetime:
+	if value.endswith("Z"):
+		value = value[:-1] + "+00:00"
+	parsed = dt.datetime.fromisoformat(value)
+	if parsed.tzinfo is None:
+		return parsed.replace(tzinfo=dt.UTC)
+	return parsed
+
+
+def _is_date_literal(value: str) -> bool:
+	return len(value) == 10 and value[4] == "-" and value[7] == "-"

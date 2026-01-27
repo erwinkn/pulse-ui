@@ -68,7 +68,7 @@ from pulse.middleware import (
 	Redirect,
 )
 from pulse.plugin import Plugin
-from pulse.proxy import ReactAsgiProxy, ReactProxy
+from pulse.proxy import ReactProxy
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
@@ -211,7 +211,7 @@ class App:
 	_render_cleanups: dict[str, TimerHandleLike]
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
-	_proxy: ReactProxy | ReactAsgiProxy | None
+	_proxy: ReactProxy | None
 	session_timeout: float
 	connection_status: ConnectionStatusConfig
 	render_loop_limit: int
@@ -676,54 +676,29 @@ class App:
 				"HEAD",
 				"OPTIONS",
 			]
-			if envvars.proxy_mode == "asgi":
-				proxy_handler = ReactAsgiProxy(
-					react_server_address=react_server_address,
-					server_address=server_address,
-				)
-				self._proxy = proxy_handler
+			proxy_handler = ReactProxy(
+				react_server_address=react_server_address,
+				server_address=server_address,
+			)
+			self._proxy = proxy_handler
 
-				# In dev mode, proxy WebSocket connections to React Router (e.g. Vite HMR)
-				# Socket.IO handles /socket.io/ at ASGI level before reaching FastAPI
-				if self.env == "dev":
+			# In dev mode, proxy WebSocket connections to React Router (e.g. Vite HMR)
+			# Socket.IO handles /socket.io/ at ASGI level before reaching FastAPI
+			if self.env == "dev":
 
-					@self.fastapi.websocket("/{path:path}")
-					async def websocket_proxy(websocket: WebSocket, path: str):  # pyright: ignore[reportUnusedFunction]
-						await proxy_handler.proxy_websocket(websocket)
+				@self.fastapi.websocket("/{path:path}")
+				async def websocket_proxy(websocket: WebSocket, path: str):  # pyright: ignore[reportUnusedFunction]
+					await proxy_handler.proxy_websocket(websocket)
 
-				self.fastapi.router.routes.append(
-					StarletteRoute(
-						"/{path:path}",
-						proxy_handler,
-						methods=proxy_methods,
-						include_in_schema=False,
-					)
-				)
-			else:
-				proxy_handler = ReactProxy(
-					react_server_address=react_server_address,
-					server_address=server_address,
-				)
-				self._proxy = proxy_handler
-
-				# In dev mode, proxy WebSocket connections to React Router (e.g. Vite HMR)
-				# Socket.IO handles /socket.io/ at ASGI level before reaching FastAPI
-				if self.env == "dev":
-
-					@self.fastapi.websocket("/{path:path}")
-					async def websocket_proxy(websocket: WebSocket, path: str):  # pyright: ignore[reportUnusedFunction]
-						await proxy_handler.proxy_websocket(websocket)
-
-				@self.fastapi.api_route(
+			# Register ASGI-level catch-all last.
+			self.fastapi.router.routes.append(
+				StarletteRoute(
 					"/{path:path}",
+					proxy_handler,
 					methods=proxy_methods,
 					include_in_schema=False,
 				)
-				async def proxy_catch_all(  # pyright: ignore[reportUnusedFunction]
-					request: Request, path: str
-				):
-					# Proxy all unmatched HTTP requests to React Router
-					return await proxy_handler(request)
+			)
 
 		@self.sio.event
 		async def connect(  # pyright: ignore[reportUnusedFunction]

@@ -62,4 +62,5 @@ markers = [
 # Skip CDK tests by default (they're slow due to CDK synthesis)
 # Run them explicitly with: pytest -m cdk
 addopts = "-m 'not cdk'"
+norecursedirs = ["vendors", "node_modules", ".git"]
 asyncio_default_fixture_loop_scope = "function"

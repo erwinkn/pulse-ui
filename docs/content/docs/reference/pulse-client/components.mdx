@@ -40,6 +40,7 @@ interface PulseProviderProps {
 ```ts
 interface PulseConfig {
   serverAddress: string;
+  apiPrefix: string;
   connectionStatus: ConnectionStatusConfig;
 }
 
@@ -55,6 +56,11 @@ The connection status configuration controls when status messages appear:
 - **initialConnectingDelay** - How long to wait before showing "Connecting..." on first load. A small delay (e.g., 500ms) prevents flash on fast connections.
 - **initialErrorDelay** - How long to wait before showing an error if initial connection fails.
 - **reconnectErrorDelay** - How long to wait before showing an error when reconnecting after disconnect.
+
+Other config fields:
+
+- **serverAddress** - Public base URL for WebSocket and client-side requests.
+- **apiPrefix** - Prefix for Pulse API endpoints (usually `/_pulse`).
 
 ### PulsePrerender
 
@@ -93,6 +99,7 @@ function App() {
       <PulseProvider
         config={{
           serverAddress: "http://localhost:8000",
+          apiPrefix: "/_pulse",
           connectionStatus: {
             initialConnectingDelay: 500,
             initialErrorDelay: 5000,

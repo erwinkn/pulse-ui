@@ -42,5 +42,7 @@
   // into a single giant file.
   "reportImportCycles": "none",
   // TYPE_CHECKING imports are intentionally unused at runtime
-  "reportUnusedImport": "none"
+  "reportUnusedImport": "none",
+  // Platform-specific ignores (Linux basedpyright has false positives)
+  "reportUnnecessaryTypeIgnoreComment": "none"
 }

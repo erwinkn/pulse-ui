@@ -364,7 +364,7 @@ def _parse_args() -> argparse.Namespace:
 	parser.add_argument("--port", type=int, default=8010)
 	parser.add_argument("--upstream-port", type=int, default=9010)
 	parser.add_argument("--env", choices=["dev", "ci", "prod"], default="prod")
-	parser.add_argument("--disable-codegen", action="store_true", default=True)
+	parser.add_argument("--disable-codegen", action="store_true", default=False)
 	parser.add_argument("--requests", type=int, default=5000)
 	parser.add_argument("--duration", type=float, default=None)
 	parser.add_argument("--concurrency", type=int, default=200)

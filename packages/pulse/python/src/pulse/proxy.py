@@ -11,9 +11,11 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator, Iterable
 from contextlib import suppress
+from dataclasses import dataclass
 from typing import Any, cast
 
 import aiohttp
+from starlette.datastructures import URL
 from starlette.types import Receive, Scope, Send
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
@@ -26,7 +28,18 @@ logger = logging.getLogger(__name__)
 _INCOMING_STREAMING_THRESHOLD = 512 * 1024
 _OUTGOING_STREAMING_THRESHOLD = 5 * 1024 * 1024
 _STREAM_CHUNK_SIZE = 512 * 1024
-_MAX_CONCURRENCY_DEFAULT = 20
+_MAX_CONCURRENCY = 100
+
+
+@dataclass
+class ProxyConfig:
+	"""Configuration for the React proxy in single-server mode."""
+
+	max_concurrency: int = _MAX_CONCURRENCY
+	incoming_streaming_threshold: int = _INCOMING_STREAMING_THRESHOLD
+	outgoing_streaming_threshold: int = _OUTGOING_STREAMING_THRESHOLD
+	stream_chunk_size: int = _STREAM_CHUNK_SIZE
+
 
 # Hop-by-hop headers should not be proxied per RFC 7230.
 _HOP_BY_HOP_HEADERS = {
@@ -70,12 +83,12 @@ def _encode_header(value: str) -> bytes:
 	return value.encode("latin-1")
 
 
-class _ReactProxyBase:
-	"""Shared proxy helpers, lifecycle, and WebSocket forwarding."""
+class ReactProxy:
+	"""ASGI-level proxy for React Router HTTP/WebSocket requests."""
 
 	react_server_address: str
 	server_address: str
-	max_concurrency: int
+	config: ProxyConfig
 	_session: aiohttp.ClientSession | None
 	_active_responses: set[aiohttp.ClientResponse]
 	_active_websockets: set[aiohttp.ClientWebSocketResponse]
@@ -87,17 +100,17 @@ class _ReactProxyBase:
 		react_server_address: str,
 		server_address: str,
 		*,
-		max_concurrency: int = _MAX_CONCURRENCY_DEFAULT,
+		config: ProxyConfig | None = None,
 	) -> None:
 		"""
 		Args:
 		    react_server_address: Internal React Router server URL (e.g., http://localhost:5173)
 		    server_address: External server URL exposed to clients (e.g., http://localhost:8000)
-		    max_concurrency: Guard against upstream overload and runaway tasks.
+		    config: Proxy configuration (uses defaults if not provided).
 		"""
 		self.react_server_address = react_server_address
 		self.server_address = server_address
-		self.max_concurrency = max_concurrency
+		self.config = config or ProxyConfig()
 		self._session = None
 		self._active_responses = set()
 		self._active_websockets = set()
@@ -121,8 +134,8 @@ class _ReactProxyBase:
 			# Keep connect timeouts; avoid total/read timeouts for long streams.
 			timeout = aiohttp.ClientTimeout(total=None, sock_connect=30)
 			connector = aiohttp.TCPConnector(
-				limit=self.max_concurrency,
-				limit_per_host=self.max_concurrency,
+				limit=self.config.max_concurrency,
+				limit_per_host=self.config.max_concurrency,
 			)
 			self._session = aiohttp.ClientSession(
 				connector=connector,
@@ -139,7 +152,7 @@ class _ReactProxyBase:
 			return False
 		if content_length is None:
 			return True
-		return content_length > _INCOMING_STREAMING_THRESHOLD
+		return content_length > self.config.incoming_streaming_threshold
 
 	def _determine_outgoing_streaming(self, response: aiohttp.ClientResponse) -> bool:
 		if response.status != 200:
@@ -148,7 +161,7 @@ class _ReactProxyBase:
 		if not content_length:
 			return True
 		try:
-			return int(content_length) > _OUTGOING_STREAMING_THRESHOLD
+			return int(content_length) > self.config.outgoing_streaming_threshold
 		except Exception:
 			return True
 
@@ -179,7 +192,7 @@ class _ReactProxyBase:
 		return "; ".join(f"{key}={value}" for key, value in existing.items())
 
 	async def proxy_websocket(self, websocket: WebSocket) -> None:
-		"""Proxy a WebSocket connection to the React Router dev server."""
+		"""Proxy a WebSocket connection to the React Router server."""
 		if self._closing.is_set():
 			await websocket.close(code=1012, reason="Proxy shutting down")
 			return
@@ -300,7 +313,7 @@ class _ReactProxyBase:
 				if exc and not isinstance(exc, asyncio.CancelledError):
 					raise exc
 
-		except aiohttp.ClientError as exc:
+		except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError) as exc:
 			logger.error("WebSocket proxy connection failed: %s", exc)
 			with suppress(asyncio.CancelledError, Exception):
 				await websocket.close(
@@ -354,12 +367,13 @@ class _ReactProxyBase:
 				await self._session.close()
 			self._session = None
 
-
-class ReactProxy(_ReactProxyBase):
-	"""ASGI-level proxy for React Router HTTP requests."""
-
 	async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-		if scope["type"] != "http":
+		scope_type = scope["type"]
+		if scope_type == "websocket":
+			websocket = WebSocket(scope, receive=receive, send=send)
+			await self.proxy_websocket(websocket)
+			return
+		if scope_type != "http":
 			return
 		if self._closing.is_set():
 			await send(
@@ -378,11 +392,14 @@ class ReactProxy(_ReactProxyBase):
 			)
 			return
 
-		path = scope.get("path", "")
-		query_string = scope.get("query_string", b"")
+		request_url = URL(scope=scope)
+		root_path = scope.get("root_path", "")
+		path = request_url.path
+		if root_path and not path.startswith(root_path):
+			path = root_path.rstrip("/") + path
 		url = self.react_server_address.rstrip("/") + path
-		if query_string:
-			url += "?" + query_string.decode("latin-1")
+		if request_url.query:
+			url += "?" + request_url.query
 
 		raw_headers = cast(list[tuple[bytes, bytes]], scope.get("headers") or [])
 		headers: list[tuple[str, str]] = []
@@ -533,6 +550,16 @@ class ReactProxy(_ReactProxyBase):
 				with suppress(asyncio.CancelledError, Exception):
 					await watch_task
 				return
+			if request_task.cancelled():
+				for task in pending:
+					task.cancel()
+				for task in pending:
+					with suppress(asyncio.CancelledError, Exception):
+						await task
+				watch_task.cancel()
+				with suppress(asyncio.CancelledError, Exception):
+					await watch_task
+				return
 			proxy_response = request_task.result()
 		except asyncio.CancelledError:
 			disconnect_task.cancel()
@@ -545,6 +572,32 @@ class ReactProxy(_ReactProxyBase):
 			with suppress(asyncio.CancelledError, Exception):
 				await watch_task
 			raise
+		except (asyncio.TimeoutError, TimeoutError) as exc:
+			logger.error("Proxy request timed out: %s", exc)
+			disconnect_task.cancel()
+			closing_task.cancel()
+			await send(
+				{
+					"type": "http.response.start",
+					"status": 504,
+					"headers": [(b"content-type", b"text/plain; charset=utf-8")],
+				}
+			)
+			await send(
+				{
+					"type": "http.response.body",
+					"body": b"Gateway Timeout: React Router server took too long to respond",
+					"more_body": False,
+				}
+			)
+			with suppress(asyncio.CancelledError, Exception):
+				await asyncio.gather(
+					disconnect_task, closing_task, return_exceptions=True
+				)
+			watch_task.cancel()
+			with suppress(asyncio.CancelledError, Exception):
+				await watch_task
+			return
 		except aiohttp.ClientError as exc:
 			logger.error("Proxy request failed: %s", exc)
 			disconnect_task.cancel()
@@ -635,7 +688,9 @@ class ReactProxy(_ReactProxyBase):
 				self._active_responses.discard(proxy_response)
 			return
 
-		aiter = proxy_response.content.iter_chunked(_STREAM_CHUNK_SIZE).__aiter__()
+		aiter = proxy_response.content.iter_chunked(
+			self.config.stream_chunk_size
+		).__aiter__()
 
 		async def _next_chunk() -> bytes:
 			return await aiter.__anext__()

@@ -9,7 +9,7 @@ import aiohttp
 import pytest
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.helpers import get_client_address, get_client_address_socketio
-from pulse.proxy import ReactProxy
+from pulse.proxy import ProxyConfig, ReactProxy
 from starlette.datastructures import URL, Headers
 from starlette.requests import Request
 from starlette.types import Message
@@ -20,12 +20,14 @@ def _make_asgi_scope(
 	query: str = "",
 	headers: dict[str, str] | None = None,
 	method: str = "GET",
+	root_path: str = "",
 ) -> dict[str, Any]:
 	return {
 		"type": "http",
 		"method": method,
 		"path": path,
 		"query_string": query.encode(),
+		"root_path": root_path,
 		"headers": [
 			(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()
 		],
@@ -221,7 +223,7 @@ class TestReactProxySessionLimits:
 		proxy = ReactProxy(
 			react_server_address="http://localhost:5173",
 			server_address="http://localhost:8000",
-			max_concurrency=7,
+			config=ProxyConfig(max_concurrency=7),
 		)
 		session = proxy.session
 		connector = session.connector
@@ -229,6 +231,30 @@ class TestReactProxySessionLimits:
 		assert connector.limit == 7
 		assert connector.limit_per_host == 7
 		await proxy.close()
+
+
+class TestReactProxyRequestURL:
+	@pytest.mark.asyncio
+	async def test_preserves_root_path(self):
+		proxy = ReactProxy(
+			react_server_address="http://localhost:5173",
+			server_address="http://localhost:8000",
+		)
+		response = _StubResponse(
+			status=200,
+			raw_headers=[(b"content-type", b"text/plain")],
+			read_body=b"ok",
+			content_length=2,
+		)
+		proxy._session = _make_session(response)  # pyright: ignore[reportPrivateUsage]
+
+		scope = _make_asgi_scope("/assets/app.js", query="x=1", root_path="/root")
+		await _run_proxy(proxy, scope)
+
+		request_args = proxy._session.request.await_args  # pyright: ignore[reportPrivateUsage]
+		assert (
+			request_args.kwargs["url"] == "http://localhost:5173/root/assets/app.js?x=1"
+		)
 
 
 class TestGetClientAddressFallback:
@@ -673,12 +699,33 @@ class TestReactProxyStreaming:
 		async def send(message: Message) -> None:
 			sent.append(message)
 
-			task = asyncio.create_task(proxy(scope, receive, send))
+		task = asyncio.create_task(proxy(scope, receive, send))
+		for _ in range(5):
+			if proxy._active_responses:  # pyright: ignore[reportPrivateUsage]
+				break
 			await asyncio.sleep(0)
-			await proxy.close()
-			disconnect_event.set()
-			await asyncio.wait_for(task, timeout=1)
-			assert response.close.call_count >= 1
+		await proxy.close()
+		disconnect_event.set()
+		await asyncio.wait_for(task, timeout=1)
+		assert response.close.call_count >= 1
+
+
+class TestReactProxyErrors:
+	@pytest.mark.asyncio
+	async def test_timeout_returns_gateway_timeout(self):
+		proxy = ReactProxy(
+			react_server_address="http://localhost:5173",
+			server_address="http://localhost:8000",
+		)
+		session = MagicMock()
+		session.request = AsyncMock(side_effect=asyncio.TimeoutError())
+		session.close = AsyncMock()
+		proxy._session = session  # pyright: ignore[reportPrivateUsage]
+
+		sent = await _run_proxy(proxy, _make_asgi_scope("/"))
+
+		assert sent[0]["status"] == 504
+		assert sent[-1]["type"] == "http.response.body"
 
 
 class TestReactProxyCleanup:
@@ -704,6 +751,33 @@ class TestReactProxyCleanup:
 
 
 class TestReactProxyWebSocket:
+	@pytest.mark.asyncio
+	async def test_call_dispatches_websocket_scope(self):
+		proxy = ReactProxy(
+			react_server_address="http://localhost:5173",
+			server_address="http://localhost:8000",
+		)
+		proxy.proxy_websocket = AsyncMock()
+		headers: list[tuple[bytes, bytes]] = []
+		scope: dict[str, Any] = {
+			"type": "websocket",
+			"path": "/socket",
+			"query_string": b"",
+			"headers": headers,
+			"scheme": "ws",
+			"server": ("localhost", 8000),
+			"client": ("127.0.0.1", 1234),
+		}
+
+		async def receive() -> Message:
+			return {"type": "websocket.disconnect"}
+
+		async def send(_: Message) -> None:
+			return None
+
+		await proxy(scope, receive, send)
+		assert proxy.proxy_websocket.await_count == 1
+
 	@pytest.mark.asyncio
 	async def test_websocket_forwards_text_and_cleans_up(self):
 		proxy = ReactProxy(

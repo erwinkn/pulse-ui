@@ -14,7 +14,7 @@ from contextlib import suppress
 from typing import Any, cast
 
 import aiohttp
-from starlette.types import Message, Receive, Scope, Send
+from starlette.types import Receive, Scope, Send
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from pulse.context import PulseContext
@@ -77,7 +77,6 @@ class _ReactProxyBase:
 	server_address: str
 	max_concurrency: int
 	_session: aiohttp.ClientSession | None
-	_semaphore: asyncio.Semaphore
 	_active_responses: set[aiohttp.ClientResponse]
 	_active_websockets: set[aiohttp.ClientWebSocketResponse]
 	_tasks: set[asyncio.Task[Any]]
@@ -100,7 +99,6 @@ class _ReactProxyBase:
 		self.server_address = server_address
 		self.max_concurrency = max_concurrency
 		self._session = None
-		self._semaphore = asyncio.Semaphore(max_concurrency)
 		self._active_responses = set()
 		self._active_websockets = set()
 		self._tasks = set()
@@ -122,7 +120,12 @@ class _ReactProxyBase:
 		if self._session is None:
 			# Keep connect timeouts; avoid total/read timeouts for long streams.
 			timeout = aiohttp.ClientTimeout(total=None, sock_connect=30)
+			connector = aiohttp.TCPConnector(
+				limit=self.max_concurrency,
+				limit_per_host=self.max_concurrency,
+			)
 			self._session = aiohttp.ClientSession(
+				connector=connector,
 				cookie_jar=aiohttp.DummyCookieJar(),
 				auto_decompress=False,
 				timeout=timeout,
@@ -226,12 +229,11 @@ class _ReactProxyBase:
 		upstream_to_client_task: asyncio.Task[Any] | None = None
 
 		try:
-			async with self._semaphore:
-				upstream_ws = await self.session.ws_connect(
-					target_url,
-					headers=headers,
-					protocols=subprotocols,
-				)
+			upstream_ws = await self.session.ws_connect(
+				target_url,
+				headers=headers,
+				protocols=subprotocols,
+			)
 			self._active_websockets.add(upstream_ws)
 
 			await websocket.accept(subprotocol=upstream_ws.protocol)
@@ -416,53 +418,71 @@ class ReactProxy(_ReactProxyBase):
 		if cookie_header:
 			headers.append(("cookie", cookie_header))
 
-		receive_queue: asyncio.Queue[Message] = asyncio.Queue()
 		disconnect_event = asyncio.Event()
+		body_complete = asyncio.Event()
 
-		async def _pump_receive() -> None:
-			while True:
+		async def _stream_body() -> AsyncGenerator[bytes, None]:
+			try:
+				while not self._closing.is_set():
+					message = await receive()
+					if message["type"] == "http.disconnect":
+						disconnect_event.set()
+						return
+					if message["type"] != "http.request":
+						continue
+					body = message.get("body", b"")
+					if body:
+						yield body
+					if not message.get("more_body", False):
+						return
+			finally:
+				body_complete.set()
+
+		async def _read_full_body() -> bytes:
+			parts: list[bytes] = []
+			try:
+				while not self._closing.is_set():
+					message = await receive()
+					if message["type"] == "http.disconnect":
+						disconnect_event.set()
+						return b""
+					if message["type"] != "http.request":
+						continue
+					body = message.get("body", b"")
+					if body:
+						parts.append(body)
+					if not message.get("more_body", False):
+						break
+				return b"".join(parts)
+			finally:
+				body_complete.set()
+
+		async def _watch_disconnect() -> None:
+			await body_complete.wait()
+			if disconnect_event.is_set() or self._closing.is_set():
+				return
+			while not self._closing.is_set():
 				message = await receive()
-				await receive_queue.put(message)
 				if message["type"] == "http.disconnect":
 					disconnect_event.set()
 					return
+				if message["type"] != "http.request":
+					continue
+				if not message.get("more_body", False):
+					continue
 
-		receive_task = asyncio.create_task(_pump_receive())
-		self._track_task(receive_task)
+		watch_task = asyncio.create_task(_watch_disconnect())
+		self._track_task(watch_task)
 
 		should_stream_incoming = self._determine_incoming_streaming(
 			scope["method"], content_length
 		)
-
-		async def _stream_body() -> AsyncGenerator[bytes, None]:
-			while not self._closing.is_set():
-				message = await receive_queue.get()
-				if message["type"] == "http.disconnect":
-					disconnect_event.set()
-					return
-				if message["type"] != "http.request":
-					continue
-				body = message.get("body", b"")
-				if body:
-					yield body
-				if not message.get("more_body", False):
-					return
-
-		async def _read_full_body() -> bytes:
-			parts: list[bytes] = []
-			while not self._closing.is_set():
-				message = await receive_queue.get()
-				if message["type"] == "http.disconnect":
-					disconnect_event.set()
-					return b""
-				if message["type"] != "http.request":
-					continue
-				body = message.get("body", b"")
-				if body:
-					parts.append(body)
-				if not message.get("more_body", False):
-					break
-			return b"".join(parts)
+		if should_stream_incoming:
+			headers = [
+				(key, value)
+				for key, value in headers
+				if key.lower() != "content-length"
+			]
 
 		data: AsyncGenerator[bytes, None] | bytes | None = None
 		if scope["method"] not in ("GET", "HEAD"):
@@ -472,23 +492,63 @@ class ReactProxy(_ReactProxyBase):
 				data = await _read_full_body()
 
 			if disconnect_event.is_set() or self._closing.is_set():
-				receive_task.cancel()
+				watch_task.cancel()
 				with suppress(asyncio.CancelledError, Exception):
-					await receive_task
+					await watch_task
 				return
+		else:
+			body_complete.set()
 
 		proxy_response: aiohttp.ClientResponse | None = None
+		request_task = asyncio.create_task(
+			self.session.request(
+				method=scope["method"],
+				url=url,
+				headers=headers,
+				data=data,
+				allow_redirects=False,
+			)
+		)
+		self._track_task(request_task)
+		disconnect_task = asyncio.create_task(disconnect_event.wait())
+		closing_task = asyncio.create_task(self._closing.wait())
+		self._track_task(disconnect_task)
+		self._track_task(closing_task)
+
 		try:
-			async with self._semaphore:
-				proxy_response = await self.session.request(
-					method=scope["method"],
-					url=url,
-					headers=headers,
-					data=data,
-					allow_redirects=False,
+			done, pending = await asyncio.wait(
+				{request_task, disconnect_task, closing_task},
+				return_when=asyncio.FIRST_COMPLETED,
+			)
+			if request_task not in done:
+				request_task.cancel()
+				with suppress(asyncio.CancelledError, Exception):
+					await request_task
+				for task in pending:
+					task.cancel()
+				for task in pending:
+					with suppress(asyncio.CancelledError, Exception):
+						await task
+				watch_task.cancel()
+				with suppress(asyncio.CancelledError, Exception):
+					await watch_task
+				return
+			proxy_response = request_task.result()
+		except asyncio.CancelledError:
+			disconnect_task.cancel()
+			closing_task.cancel()
+			with suppress(asyncio.CancelledError, Exception):
+				await asyncio.gather(
+					disconnect_task, closing_task, return_exceptions=True
 				)
+			watch_task.cancel()
+			with suppress(asyncio.CancelledError, Exception):
+				await watch_task
+			raise
 		except aiohttp.ClientError as exc:
 			logger.error("Proxy request failed: %s", exc)
+			disconnect_task.cancel()
+			closing_task.cancel()
 			await send(
 				{
 					"type": "http.response.start",
@@ -503,12 +563,28 @@ class ReactProxy(_ReactProxyBase):
 					"more_body": False,
 				}
 			)
-			receive_task.cancel()
 			with suppress(asyncio.CancelledError, Exception):
-				await receive_task
+				await asyncio.gather(
+					disconnect_task, closing_task, return_exceptions=True
+				)
+			watch_task.cancel()
+			with suppress(asyncio.CancelledError, Exception):
+				await watch_task
 			return
 
 		assert proxy_response is not None
+		if disconnect_event.is_set() or self._closing.is_set():
+			proxy_response.close()
+			disconnect_task.cancel()
+			closing_task.cancel()
+			with suppress(asyncio.CancelledError, Exception):
+				await asyncio.gather(
+					disconnect_task, closing_task, return_exceptions=True
+				)
+			watch_task.cancel()
+			with suppress(asyncio.CancelledError, Exception):
+				await watch_task
+			return
 		self._active_responses.add(proxy_response)
 
 		response_headers = self._rewrite_raw_headers(proxy_response.raw_headers)
@@ -523,9 +599,15 @@ class ReactProxy(_ReactProxyBase):
 		except Exception:
 			proxy_response.close()
 			self._active_responses.discard(proxy_response)
-			receive_task.cancel()
+			disconnect_task.cancel()
+			closing_task.cancel()
 			with suppress(asyncio.CancelledError, Exception):
-				await receive_task
+				await asyncio.gather(
+					disconnect_task, closing_task, return_exceptions=True
+				)
+			watch_task.cancel()
+			with suppress(asyncio.CancelledError, Exception):
+				await watch_task
 			return
 
 		should_stream_outgoing = self._determine_outgoing_streaming(proxy_response)
@@ -540,17 +622,18 @@ class ReactProxy(_ReactProxyBase):
 					}
 				)
 			finally:
-				receive_task.cancel()
+				disconnect_task.cancel()
+				closing_task.cancel()
 				with suppress(asyncio.CancelledError, Exception):
-					await receive_task
+					await asyncio.gather(
+						disconnect_task, closing_task, return_exceptions=True
+					)
+				watch_task.cancel()
+				with suppress(asyncio.CancelledError, Exception):
+					await watch_task
 				proxy_response.close()
 				self._active_responses.discard(proxy_response)
 			return
-
-		disconnect_task = asyncio.create_task(disconnect_event.wait())
-		closing_task = asyncio.create_task(self._closing.wait())
-		self._track_task(disconnect_task)
-		self._track_task(closing_task)
 
 		aiter = proxy_response.content.iter_chunked(_STREAM_CHUNK_SIZE).__aiter__()
 
@@ -599,9 +682,9 @@ class ReactProxy(_ReactProxyBase):
 				await disconnect_task
 			with suppress(asyncio.CancelledError, Exception):
 				await closing_task
-			receive_task.cancel()
+			watch_task.cancel()
 			with suppress(asyncio.CancelledError, Exception):
-				await receive_task
+				await watch_task
 			proxy_response.close()
 			self._active_responses.discard(proxy_response)
 

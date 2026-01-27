@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Heavy stress test for the Pulse proxy (ASGI or FastAPI mode)."""
+"""Heavy stress test for the Pulse proxy.
+
+Targets streaming/disconnect scenarios and asserts that upstream streams and
+proxy-side active sets are empty after shutdown.
+"""
 
 from __future__ import annotations
 
@@ -309,6 +313,14 @@ async def _run(args: argparse.Namespace) -> int:
 				print(f"server task error: {result}", file=sys.stderr)
 				metrics.errors += 1
 
+	proxy = app_ctx.app._proxy  # pyright: ignore[reportPrivateUsage]
+	if proxy is None:
+		print("error: proxy was not initialized", file=sys.stderr)
+		return 2
+	proxy_active_responses = len(proxy._active_responses)  # pyright: ignore[reportPrivateUsage]
+	proxy_active_websockets = len(proxy._active_websockets)  # pyright: ignore[reportPrivateUsage]
+	proxy_active_tasks = len(proxy._tasks)  # pyright: ignore[reportPrivateUsage]
+
 	elapsed = time.monotonic() - start
 	ok = metrics.ok
 	errors = metrics.errors
@@ -324,6 +336,9 @@ async def _run(args: argparse.Namespace) -> int:
 		f"in_flight_max={metrics.max_in_flight}",
 		f"upstream_active={state.active_streams}",
 		f"upstream_max={state.max_active}",
+		f"proxy_active_responses={proxy_active_responses}",
+		f"proxy_active_websockets={proxy_active_websockets}",
+		f"proxy_active_tasks={proxy_active_tasks}",
 		f"elapsed={elapsed:.2f}s",
 		f"rps={rate:.1f}",
 		sep=" ",
@@ -333,6 +348,12 @@ async def _run(args: argparse.Namespace) -> int:
 
 	if state.active_streams != 0:
 		print("error: upstream streams still active after stress run", file=sys.stderr)
+		return 2
+	if proxy_active_responses or proxy_active_websockets or proxy_active_tasks:
+		print(
+			"error: proxy still has active responses/websockets/tasks after shutdown",
+			file=sys.stderr,
+		)
 		return 2
 	if errors:
 		return 1
@@ -355,7 +376,8 @@ def _parse_args() -> argparse.Namespace:
 	parser.add_argument("--disconnect-ratio", type=float, default=0.2)
 	parser.add_argument("--chunk-count", type=int, default=50)
 	parser.add_argument("--chunk-size", type=int, default=1024)
-	parser.add_argument("--chunk-delay", type=float, default=0.0)
+	# Small default delay yields control, enabling concurrent streams.
+	parser.add_argument("--chunk-delay", type=float, default=0.001)
 	parser.add_argument("--timeout", type=float, default=10.0)
 	return parser.parse_args()
 

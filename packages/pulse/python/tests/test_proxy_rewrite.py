@@ -215,6 +215,22 @@ class TestReactProxyUrlRewrite:
 		assert proxy.rewrite_url("/foo/bar") == "/foo/bar"
 
 
+class TestReactProxySessionLimits:
+	@pytest.mark.asyncio
+	async def test_session_uses_connector_limits(self):
+		proxy = ReactProxy(
+			react_server_address="http://localhost:5173",
+			server_address="http://localhost:8000",
+			max_concurrency=7,
+		)
+		session = proxy.session
+		connector = session.connector
+		assert connector is not None
+		assert connector.limit == 7
+		assert connector.limit_per_host == 7
+		await proxy.close()
+
+
 class TestGetClientAddressFallback:
 	def _make_request(self, headers: dict[str, str]) -> Request:
 		scope = {
@@ -390,6 +406,130 @@ class TestReactProxyHeaders:
 		]
 		assert cookies == ["a=1; Path=/", "b=2; Path=/"]
 		assert response.close.call_count >= 1
+
+
+class TestReactProxyIncomingStreaming:
+	@pytest.mark.asyncio
+	async def test_streaming_body_not_read_ahead(self):
+		proxy = ReactProxy(
+			react_server_address="http://localhost:5173",
+			server_address="http://localhost:8000",
+		)
+		response = _StubResponse(
+			status=200,
+			raw_headers=[(b"content-type", b"text/plain")],
+			read_body=b"ok",
+			content_length=2,
+		)
+		session = MagicMock()
+		session.request = AsyncMock(return_value=response)
+		session.close = AsyncMock()
+		proxy._session = session  # pyright: ignore[reportPrivateUsage]
+
+		async def receive() -> Message:
+			raise AssertionError("receive called during streaming setup")
+
+		async def send(_: Message) -> None:
+			return None
+
+		scope = _make_asgi_scope(
+			"/upload",
+			method="POST",
+			headers={"content-length": str(10 * 1024 * 1024)},
+		)
+		await proxy(scope, receive, send)
+
+	@pytest.mark.asyncio
+	async def test_streaming_body_drops_content_length(self):
+		proxy = ReactProxy(
+			react_server_address="http://localhost:5173",
+			server_address="http://localhost:8000",
+		)
+		response = _StubResponse(
+			status=200,
+			raw_headers=[(b"content-type", b"text/plain")],
+			read_body=b"ok",
+			content_length=2,
+		)
+		captured_headers: list[tuple[str, str]] = []
+
+		async def _request(
+			*, headers: list[tuple[str, str]], **_: Any
+		) -> _StubResponse:
+			captured_headers.extend(headers)
+			return response
+
+		session = MagicMock()
+		session.request = AsyncMock(side_effect=_request)
+		session.close = AsyncMock()
+		proxy._session = session  # pyright: ignore[reportPrivateUsage]
+
+		async def receive() -> Message:
+			return {"type": "http.request", "body": b"", "more_body": False}
+
+		async def send(_: Message) -> None:
+			return None
+
+		scope = _make_asgi_scope(
+			"/upload",
+			method="POST",
+			headers={"content-length": str(10 * 1024 * 1024)},
+		)
+		await proxy(scope, receive, send)
+
+		assert all(key.lower() != "content-length" for key, _ in captured_headers)
+
+	@pytest.mark.asyncio
+	async def test_disconnect_cancels_upstream_request(self):
+		proxy = ReactProxy(
+			react_server_address="http://localhost:5173",
+			server_address="http://localhost:8000",
+		)
+		request_cancelled = asyncio.Event()
+		request_started = asyncio.Event()
+		wait_forever = asyncio.Event()
+
+		async def _request(*, data: Any | None = None, **_: Any) -> _StubResponse:
+			request_started.set()
+			if data is not None:
+				async for _ in data:
+					pass
+			try:
+				await wait_forever.wait()
+			except asyncio.CancelledError:
+				request_cancelled.set()
+				raise
+			raise RuntimeError("unreachable")
+
+		session = MagicMock()
+		session.request = AsyncMock(side_effect=_request)
+		session.close = AsyncMock()
+		proxy._session = session  # pyright: ignore[reportPrivateUsage]
+
+		messages: list[Message] = [
+			{"type": "http.request", "body": b"chunk", "more_body": True},
+			{"type": "http.disconnect"},
+		]
+		sent: list[Message] = []
+
+		async def receive() -> Message:
+			if messages:
+				return messages.pop(0)
+			return {"type": "http.disconnect"}
+
+		async def send(message: Message) -> None:
+			sent.append(message)
+
+		scope = _make_asgi_scope(
+			"/upload",
+			method="POST",
+			headers={"content-length": str(10 * 1024 * 1024)},
+		)
+		await proxy(scope, receive, send)
+
+		assert request_started.is_set()
+		assert request_cancelled.is_set()
+		assert sent == []
 
 
 class TestReactProxyStreaming:

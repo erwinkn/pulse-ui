@@ -1011,17 +1011,18 @@ async def test_session_close_cancels_tracked_timers():
 async def test_session_close_cancels_cleanup_timers():
 	class TimerState(ps.State):
 		_render: RenderSession | None = None
-		_fired: bool = False
+		fired: bool = False
 
 		def capture_render(self) -> None:
 			self._render = ps.PulseContext.get().render
 
+		@override
 		def on_dispose(self) -> None:
 			render = self._render
 			assert render is not None
 
 			def on_fire() -> None:
-				self._fired = True
+				self.fired = True
 
 			render.schedule_later(0.05, on_fire)
 
@@ -1046,7 +1047,7 @@ async def test_session_close_cancels_cleanup_timers():
 	session.close()
 
 	await asyncio.sleep(0.1)
-	assert state_box[0]._fired is False
+	assert state_box[0].fired is False
 
 
 def test_handle_api_result_ignores_unknown_id():

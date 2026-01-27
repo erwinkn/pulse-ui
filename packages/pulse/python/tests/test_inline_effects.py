@@ -850,6 +850,7 @@ class TestNoDoubleDispose:
 class TestComputedInteraction:
 	def test_inline_effect_in_computed_still_errors(self):
 		"""Inline effects created inside computed should still raise."""
+
 		@ps.component
 		def Comp():
 			def compute():

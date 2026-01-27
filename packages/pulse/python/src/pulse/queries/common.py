@@ -37,20 +37,20 @@ class Key(tuple[Hashable, ...]):
 			except TypeError as e:
 				raise TypeError(
 					f"Query key contains unhashable value: {e}.\n\n"
-					f"Keys must contain only hashable values (strings, numbers, tuples).\n"
-					f"Got: {key!r}\n\n"
-					f"If using a dict or list inside the key, convert it to a tuple:\n"
-					f"    key=('users', tuple(user_ids))  # instead of list"
+					+ "Keys must contain only hashable values (strings, numbers, tuples).\n"
+					+ f"Got: {key!r}\n\n"
+					+ "If using a dict or list inside the key, convert it to a tuple:\n"
+					+ "    key=('users', tuple(user_ids))  # instead of list"
 				) from None
 			obj = super().__new__(cls, parts)
 			obj._hash = key_hash
 			return obj
 		raise TypeError(
 			f"Query key must be a tuple or list, got {type(key).__name__}: {key!r}\n\n"
-			f"Examples of valid keys:\n"
-			f"    key=('users',)           # single-element tuple\n"
-			f"    key=('user', user_id)    # tuple with dynamic value\n"
-			f"    key=['posts', 'feed']    # list form also works"
+			+ "Examples of valid keys:\n"
+			+ "    key=('users',)           # single-element tuple\n"
+			+ "    key=('user', user_id)    # tuple with dynamic value\n"
+			+ "    key=['posts', 'feed']    # list form also works"
 		)
 
 	@override

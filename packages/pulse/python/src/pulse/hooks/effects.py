@@ -2,7 +2,7 @@ from collections.abc import Callable
 from typing import Any, override
 
 from pulse.hooks.core import HookMetadata, HookState, hooks
-from pulse.reactive import AsyncEffect, Effect, REACTIVE_CONTEXT
+from pulse.reactive import REACTIVE_CONTEXT, AsyncEffect, Effect
 
 
 class InlineEffectHookState(HookState):

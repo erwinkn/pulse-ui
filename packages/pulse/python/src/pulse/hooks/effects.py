@@ -44,6 +44,7 @@ class InlineEffectHookState(HookState):
 				continue
 			try:
 				scope.effects.remove(effect)
+				effect.parent = None
 			except ValueError:
 				pass
 

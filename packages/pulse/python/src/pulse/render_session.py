@@ -34,7 +34,7 @@ from pulse.scheduling import (
 	TimerRegistry,
 	create_future,
 )
-from pulse.state import State
+from pulse.state.state import State
 from pulse.transpiler.id import next_id
 from pulse.transpiler.nodes import Expr
 

@@ -13,7 +13,8 @@ from typing import (
 from pulse.helpers import call_flexible, maybe_await
 from pulse.queries.common import OnErrorFn, OnSuccessFn, bind_state
 from pulse.reactive import Signal
-from pulse.state import InitializableProperty, State
+from pulse.state.property import InitializableProperty
+from pulse.state.state import State
 
 T = TypeVar("T")
 TState = TypeVar("TState", bound=State)

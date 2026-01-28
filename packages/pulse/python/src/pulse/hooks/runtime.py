@@ -14,7 +14,7 @@ from pulse.context import PulseContext
 from pulse.hooks.core import HOOK_CONTEXT
 from pulse.reactive_extensions import ReactiveDict
 from pulse.routing import RouteContext
-from pulse.state import State
+from pulse.state.state import State
 
 
 class RedirectInterrupt(Exception):

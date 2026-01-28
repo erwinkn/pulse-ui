@@ -7,7 +7,7 @@ from pulse.hooks.setup import setup, setup_key
 from pulse.hooks.stable import stable
 from pulse.hooks.state import state
 from pulse.reactive import Signal
-from pulse.state import State
+from pulse.state.state import State
 
 
 class DummyState(State):

@@ -109,7 +109,7 @@ class TestSubscriptAccess:
 
 		fn = get_last.transpile()
 		code = emit(fn)
-		assert code == "function get_last_1(arr) {\nreturn arr.at(-1);\n}"
+		assert code == "function get_last_1(arr) {\nreturn arr[-1];\n}"
 
 	def test_slice_start(self):
 		@javascript

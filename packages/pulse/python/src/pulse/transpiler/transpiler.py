@@ -253,6 +253,10 @@ class Transpiler:
 			return Block([])
 
 		if isinstance(node, ast.AugAssign):
+			if isinstance(node.target, ast.Subscript):
+				return self._emit_augmented_subscript_assign(node)
+			if isinstance(node.target, ast.Attribute):
+				return self._emit_augmented_attribute_assign(node)
 			if not isinstance(node.target, ast.Name):
 				raise TranspileError(
 					"Only simple augmented assignments supported", node=node
@@ -277,6 +281,12 @@ class Transpiler:
 			# Tuple/list unpacking
 			if isinstance(target_node, (ast.Tuple, ast.List)):
 				return self._emit_unpacking_assign(target_node, node.value)
+
+			if isinstance(target_node, ast.Subscript):
+				return self._emit_subscript_assign(target_node, node.value)
+
+			if isinstance(target_node, ast.Attribute):
+				return self._emit_attribute_assign(target_node, node.value)
 
 			if not isinstance(target_node, ast.Name):
 				raise TranspileError(
@@ -355,6 +365,82 @@ class Transpiler:
 				stmts.append(Assign(name, sub, declare="let"))
 
 		return StmtSequence(stmts)
+
+	def _emit_subscript_assign(self, target: ast.Subscript, value: ast.expr) -> Stmt:
+		"""Emit subscript assignment: obj[key] = value"""
+		if isinstance(target.slice, ast.Tuple):
+			raise TranspileError(
+				"Multiple indices not supported in subscript", node=target.slice
+			)
+		if isinstance(target.slice, ast.Slice):
+			raise TranspileError("Slice assignment not supported", node=target.slice)
+		obj_expr = self.emit_expr(target.value)
+		target_expr = obj_expr.transpile_subscript(target.slice, self)
+		if not isinstance(target_expr, (Identifier, Member, Subscript)):
+			raise TranspileError(
+				"Only simple subscript assignments supported", node=target
+			)
+		value_expr = self.emit_expr(value)
+		return Assign(target_expr, value_expr)
+
+	def _emit_attribute_assign(self, target: ast.Attribute, value: ast.expr) -> Stmt:
+		"""Emit attribute assignment: obj.attr = value"""
+		obj_expr = self.emit_expr(target.value)
+		value_expr = self.emit_expr(value)
+		target_expr = obj_expr.transpile_getattr(target.attr, self)
+		if not isinstance(target_expr, (Identifier, Member, Subscript)):
+			raise TranspileError(
+				"Only simple attribute assignments supported", node=target
+			)
+		return Assign(target_expr, value_expr)
+
+	def _emit_augmented_subscript_assign(self, node: ast.AugAssign) -> Stmt:
+		"""Emit augmented subscript assignment: arr[i] += x"""
+		target = node.target
+		assert isinstance(target, ast.Subscript)
+
+		if isinstance(target.slice, ast.Tuple):
+			raise TranspileError(
+				"Multiple indices not supported in subscript", node=target.slice
+			)
+		if isinstance(target.slice, ast.Slice):
+			raise TranspileError("Slice assignment not supported", node=target.slice)
+
+		obj_expr = self.emit_expr(target.value)
+		op_type = type(node.op)
+		if op_type not in ALLOWED_BINOPS:
+			raise TranspileError(
+				f"Unsupported augmented assignment operator: {op_type.__name__}",
+				node=node,
+			)
+		target_expr = obj_expr.transpile_subscript(target.slice, self)
+		if not isinstance(target_expr, (Identifier, Member, Subscript)):
+			raise TranspileError(
+				"Only simple subscript assignments supported", node=target
+			)
+		value_expr = self.emit_expr(node.value)
+		return Assign(target_expr, value_expr, op=ALLOWED_BINOPS[op_type])
+
+	def _emit_augmented_attribute_assign(self, node: ast.AugAssign) -> Stmt:
+		"""Emit augmented attribute assignment: obj.attr += x"""
+		target = node.target
+		assert isinstance(target, ast.Attribute)
+
+		obj_expr = self.emit_expr(target.value)
+		op_type = type(node.op)
+		if op_type not in ALLOWED_BINOPS:
+			raise TranspileError(
+				f"Unsupported augmented assignment operator: {op_type.__name__}",
+				node=node,
+			)
+
+		target_expr = obj_expr.transpile_getattr(target.attr, self)
+		if not isinstance(target_expr, (Identifier, Member, Subscript)):
+			raise TranspileError(
+				"Only simple attribute assignments supported", node=target
+			)
+		value_expr = self.emit_expr(node.value)
+		return Assign(target_expr, value_expr, op=ALLOWED_BINOPS[op_type])
 
 	def _emit_for_loop(self, node: ast.For) -> Stmt:
 		"""Emit a for loop."""
@@ -771,11 +857,6 @@ class Transpiler:
 		# Slice handling
 		if isinstance(node.slice, ast.Slice):
 			return self._emit_slice(value, node.slice)
-
-		# Negative index: use .at()
-		if isinstance(node.slice, ast.UnaryOp) and isinstance(node.slice.op, ast.USub):
-			idx_expr = self.emit_expr(node.slice.operand)
-			return Call(Member(value, "at"), [Unary("-", idx_expr)])
 
 		# Delegate to Expr.transpile_subscript (default returns Subscript)
 		return value.transpile_subscript(node.slice, self)

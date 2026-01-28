@@ -132,6 +132,42 @@ State updates between `await` calls are automatically batched, so the UI only re
 | `onFocus` / `onBlur` | Element gains/loses focus | Form validation |
 | `onMouseEnter` / `onMouseLeave` | Mouse enters/leaves | Hover effects |
 
+## Debouncing
+
+Every keystroke fires an `onChange`. For a search box, that's a lot of server calls. Debouncing waits until the user pauses, then sends just the final value.
+
+Wrap your handler with `ps.debounced()`:
+
+```python
+class SearchState(ps.State):
+    query: str = ""
+    calls: int = 0
+
+    def update(self, event):
+        self.calls += 1
+        self.query = event["target"]["value"]
+
+@ps.component
+def SearchBox():
+    with ps.init():
+        state = SearchState()
+
+    return ps.div(
+        ps.input(
+            placeholder="Search...",
+            onChange=ps.debounced(state.update, 300),
+        ),
+        ps.p(f"Server calls: {state.calls}"),
+    )
+```
+
+Type quickly in the input—the handler only fires after 300ms of silence.
+
+How it works:
+- The debounce runs in the browser, not on the server
+- The event is snapshotted at call time—`event["target"]["value"]` is safe after the delay
+- Changing the delay resets the timer for future calls (pending calls still fire)
+
 ## See also
 
 - [Tutorial: Events](/docs/tutorial/03-events)

@@ -65,6 +65,250 @@ describe("VDOMRenderer", () => {
 		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["value"]);
 	});
 
+	it("debounces callbacks when placeholder includes delay", async () => {
+		const { renderer, invokeCallback } = makeRenderer();
+
+		const tree = renderer.renderNode({
+			tag: "button",
+			props: { onClick: "$cb:30" },
+			eval: ["onClick"],
+		});
+		const button = tree as React.ReactElement;
+		(button.props as any).onClick("a");
+		(button.props as any).onClick("b");
+
+		expect(invokeCallback).not.toHaveBeenCalled();
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(invokeCallback).not.toHaveBeenCalled();
+		await new Promise((resolve) => setTimeout(resolve, 40));
+		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["b"]);
+	});
+
+	it("keeps a pending debounced call when the delay changes", async () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		let tree = renderer.renderNode({
+			tag: "button",
+			props: { onClick: "$cb:40" },
+			eval: ["onClick"],
+		});
+
+		const button = tree as React.ReactElement;
+		(button.props as any).onClick("a");
+
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "update_props",
+				path: "",
+				data: { eval: ["onClick"], set: { onClick: "$cb:5" } },
+			},
+		]);
+
+		expect(invokeCallback).not.toHaveBeenCalled();
+		await new Promise((resolve) => setTimeout(resolve, 25));
+		expect(invokeCallback).not.toHaveBeenCalled();
+		await new Promise((resolve) => setTimeout(resolve, 40));
+		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["a"]);
+	});
+
+	it("keeps a pending debounced call when a node moves", async () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		let tree = renderer.renderNode({
+			tag: "div",
+			children: [
+				{
+					tag: "button",
+					props: { onClick: "$cb:40" },
+					eval: ["onClick"],
+					children: ["A"],
+				},
+				{
+					tag: "button",
+					props: { onClick: "$cb:40" },
+					eval: ["onClick"],
+					children: ["B"],
+				},
+			],
+		});
+		const root = tree as React.ReactElement;
+		const kids = childrenArray(root) as React.ReactElement[];
+		(kids[0].props as any).onClick("value");
+
+		expect(invokeCallback).not.toHaveBeenCalled();
+
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "reconciliation",
+				path: "",
+				N: 2,
+				new: [[], []],
+				reuse: [
+					[0, 1],
+					[1, 0],
+				],
+			},
+		]);
+
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		expect(invokeCallback).toHaveBeenCalledWith("/test", "1.onClick", ["value"]);
+	});
+
+	it("drops pending debounced callbacks when a node is removed", async () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		let tree = renderer.renderNode({
+			tag: "div",
+			children: [
+				{
+					tag: "button",
+					props: { onClick: "$cb:40" },
+					eval: ["onClick"],
+					children: ["A"],
+				},
+				{
+					tag: "button",
+					props: { onClick: "$cb:40" },
+					eval: ["onClick"],
+					children: ["B"],
+				},
+			],
+		});
+		const root = tree as React.ReactElement;
+		const kids = childrenArray(root) as React.ReactElement[];
+		(kids[1].props as any).onClick("value");
+
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "reconciliation",
+				path: "",
+				N: 1,
+				new: [[], []],
+				reuse: [[], []],
+			},
+		]);
+
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		expect(invokeCallback).not.toHaveBeenCalled();
+	});
+
+	it("drops pending debounced callbacks when a node is replaced", async () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		let tree = renderer.renderNode({
+			tag: "button",
+			props: { onClick: "$cb:50" },
+			eval: ["onClick"],
+		});
+		const button = tree as React.ReactElement;
+		(button.props as any).onClick("value");
+
+		expect(invokeCallback).not.toHaveBeenCalled();
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "replace",
+				path: "",
+				data: { tag: "div", children: ["done"] },
+			},
+		]);
+		const root = tree as React.ReactElement;
+		expect(root.type).toBe("div");
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		expect(invokeCallback).not.toHaveBeenCalled();
+	});
+
+	it("drops pending debounced callbacks when eval is cleared", async () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		let tree = renderer.renderNode({
+			tag: "button",
+			props: { onClick: "$cb:50" },
+			eval: ["onClick"],
+		});
+		const button = tree as React.ReactElement;
+		(button.props as any).onClick("value");
+
+		expect(invokeCallback).not.toHaveBeenCalled();
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "update_props",
+				path: "",
+				data: { eval: [] },
+			},
+		]);
+		const root = tree as React.ReactElement;
+		expect(root.type).toBe("button");
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		expect(invokeCallback).not.toHaveBeenCalled();
+	});
+
+	it("drops pending debounced callbacks when a render-prop subtree is replaced", async () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		let tree = renderer.renderNode({
+			tag: "div",
+			props: {
+				render: {
+					tag: "button",
+					props: { onClick: "$cb:50" },
+					eval: ["onClick"],
+					children: ["A"],
+				},
+			},
+			eval: ["render"],
+		});
+		const root = tree as React.ReactElement;
+		const renderProp = (root.props as any).render as React.ReactElement;
+		(renderProp.props as any).onClick("value");
+
+		expect(invokeCallback).not.toHaveBeenCalled();
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "update_props",
+				path: "",
+				data: { eval: ["render"], set: { render: { tag: "span", children: ["B"] } } },
+			},
+		]);
+		const nextRoot = tree as React.ReactElement;
+		expect((nextRoot.props as any).render.type).toBe("span");
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		expect(invokeCallback).not.toHaveBeenCalled();
+	});
+
+	it("clears pending debounced calls after switching to immediate", async () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		let tree = renderer.renderNode({
+			tag: "button",
+			props: { onClick: "$cb:50" },
+			eval: ["onClick"],
+		});
+		const button = tree as React.ReactElement;
+		(button.props as any).onClick("value");
+
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "update_props",
+				path: "",
+				data: { eval: ["onClick"], set: { onClick: "$cb" } },
+			},
+		]);
+
+		expect(invokeCallback).not.toHaveBeenCalled();
+		renderer.clearPendingCallbacks();
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		expect(invokeCallback).not.toHaveBeenCalled();
+	});
+
+	it("clears pending debounced callbacks on renderer teardown", async () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		const tree = renderer.renderNode({
+			tag: "button",
+			props: { onClick: "$cb:50" },
+			eval: ["onClick"],
+		});
+		const button = tree as React.ReactElement;
+		(button.props as any).onClick("value");
+
+		expect(invokeCallback).not.toHaveBeenCalled();
+		renderer.clearPendingCallbacks();
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		expect(invokeCallback).not.toHaveBeenCalled();
+	});
+
 	it("keeps previous eval when update_props.eval is absent", () => {
 		const { renderer } = makeRenderer();
 		let tree = renderer.renderNode({

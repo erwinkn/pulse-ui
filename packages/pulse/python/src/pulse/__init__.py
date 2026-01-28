@@ -60,6 +60,14 @@ from pulse.context import PulseContext as PulseContext
 from pulse.cookies import Cookie as Cookie
 from pulse.cookies import SetCookie as SetCookie
 
+# Debounce
+from pulse.debounce import (
+	Debounced as Debounced,
+)
+from pulse.debounce import (
+	debounced as debounced,
+)
+
 # Decorators
 from pulse.decorators import computed as computed
 from pulse.decorators import effect as effect

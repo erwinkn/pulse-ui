@@ -1593,7 +1593,7 @@ class Assign(Stmt):
 		if not isinstance(target, (str, Identifier, Member, Subscript)):
 			raise TypeError(
 				"Assign target must be str, Identifier, Member, or Subscript; "
-				f"got {type(target).__name__}: {target!r}"
+				+ f"got {type(target).__name__}: {target!r}"
 			)
 
 	def __post_init__(self) -> None:

@@ -3,6 +3,7 @@ import logging
 from collections.abc import Callable, Mapping
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
+from types import CodeType, FrameType
 from typing import Any, Generic, Literal, TypeVar, override
 
 from pulse.helpers import Disposable, call_flexible
@@ -27,6 +28,41 @@ class HookRenameCollisionError(HookError):
 
 
 MISSING: Any = object()
+
+HookIdentity = tuple[tuple[CodeType, int], ...]
+
+
+def callsite_identity(*, skip: int = 0, frame: FrameType | None = None) -> HookIdentity:
+	if skip < 0:
+		raise ValueError("callsite_identity() skip must be non-negative")
+	if frame is None:
+		frame = inspect.currentframe()
+		if frame is not None:
+			frame = frame.f_back
+	if frame is None:
+		return tuple()
+	while skip > 0 and frame is not None:
+		frame = frame.f_back
+		skip -= 1
+	if frame is None:
+		return tuple()
+
+	# Local import to avoid import cycles with pulse.component -> pulse.hooks.init -> pulse.hooks.core.
+	from pulse.component import is_component_code
+
+	identity: list[tuple[CodeType, int]] = []
+	cursor: FrameType | None = frame
+	while cursor is not None:
+		offset = cursor.f_lasti
+		if offset < 0:
+			offset = cursor.f_lineno
+		identity.append((cursor.f_code, offset))
+		if is_component_code(cursor.f_code):
+			return tuple(identity)
+		cursor = cursor.f_back
+	if not identity:
+		return tuple()
+	return tuple(identity[:1])
 
 
 @dataclass(slots=True)
@@ -125,17 +161,20 @@ class Hook(Generic[T]):
 		name: Unique name identifying this hook.
 		factory: Function that creates new HookState instances.
 		metadata: Optional metadata about the hook.
+		identity: Keying mode for hook calls ("key" or "callsite").
 	"""
 
 	name: str
 	factory: HookFactory[T]
 	metadata: HookMetadata
+	identity: Literal["key", "callsite"]
 
-	def __call__(self, key: str | None = None) -> T:
+	def __call__(self, key: str | HookIdentity | None = None) -> T:
 		"""Get or create hook state for the current component.
 
 		Args:
-			key: Optional key for multiple instances of the same hook.
+			key: Optional key for multiple instances of the same hook. Can be a string
+				or an explicit callsite identity.
 
 		Returns:
 			The hook state instance.
@@ -145,7 +184,29 @@ class Hook(Generic[T]):
 		"""
 		ctx = HookContext.require(self.name)
 		namespace = ctx.namespace_for(self)
-		state = namespace.ensure(ctx, key)
+		resolved_key: object | None = None
+		if key is None:
+			if self.identity == "callsite":
+				hook_key = ("callsite", callsite_identity(skip=1))
+			else:
+				hook_key = ("default", DEFAULT_HOOK_KEY)
+		elif isinstance(key, str):
+			hook_key = ("key", key)
+			resolved_key = key
+		else:
+			is_identity = isinstance(key, tuple) and all(
+				isinstance(entry, tuple)
+				and len(entry) == 2
+				and isinstance(entry[0], CodeType)
+				and isinstance(entry[1], int)
+				for entry in key
+			)
+			if is_identity:
+				hook_key = ("callsite", key)
+			else:
+				hook_key = ("key", key)
+			resolved_key = key
+		state = namespace.ensure(ctx, hook_key, resolved_key)
 		return state
 
 
@@ -157,12 +218,12 @@ class HookInit(Generic[T]):
 	containing context about the initialization.
 
 	Attributes:
-		key: Optional key if the hook was called with a specific key.
+		key: Optional key or identity if the hook was called with a specific key.
 		render_cycle: The current render cycle number.
 		definition: Reference to the Hook definition being initialized.
 	"""
 
-	key: str | None
+	key: object | None
 	render_cycle: int
 	definition: Hook[T]
 
@@ -176,11 +237,7 @@ class HookNamespace(Generic[T]):
 
 	def __init__(self, hook: Hook[T]) -> None:
 		self.hook = hook
-		self.states: dict[object, T] = {}
-
-	@staticmethod
-	def _normalize_key(key: str | None) -> object:
-		return key if key is not None else DEFAULT_HOOK_KEY
+		self.states: dict[tuple[str, object], T] = {}
 
 	def on_render_start(self, render_cycle: int):
 		for state in self.states.values():
@@ -190,13 +247,18 @@ class HookNamespace(Generic[T]):
 		for state in self.states.values():
 			state.on_render_end(render_cycle)
 
-	def ensure(self, ctx: "HookContext", key: str | None) -> T:
-		normalized = self._normalize_key(key)
-		state = self.states.get(normalized)
+	def ensure(
+		self, ctx: "HookContext", key: tuple[str, object], init_key: object | None
+	) -> T:
+		state = self.states.get(key)
 		if state is None:
 			created = call_flexible(
 				self.hook.factory,
-				HookInit(definition=self.hook, render_cycle=ctx.render_cycle, key=key),
+				HookInit(
+					definition=self.hook,
+					render_cycle=ctx.render_cycle,
+					key=init_key,
+				),
 			)
 			if inspect.isawaitable(created):
 				raise HookError(
@@ -208,7 +270,7 @@ class HookNamespace(Generic[T]):
 					f"Hook factory '{self.hook.name}' must return a HookState instance"
 				)
 			state = created
-			self.states[normalized] = state
+			self.states[key] = state
 			state.on_render_start(ctx.render_cycle)
 		return state
 
@@ -299,9 +361,12 @@ class HookRegistry:
 		name: str,
 		factory: HookFactory[T] = _default_factory,
 		metadata: HookMetadata | None = None,
+		identity: Literal["key", "callsite"] = "key",
 	) -> Hook[T]:
 		if not isinstance(name, str) or not name:
 			raise ValueError("Hook name must be a non-empty string")
+		if identity not in ("key", "callsite"):
+			raise ValueError("Hook identity must be 'key' or 'callsite'")
 		hook_metadata = metadata or HookMetadata()
 		if self._locked:
 			raise HookError("Hook registry is locked")
@@ -311,6 +376,7 @@ class HookRegistry:
 			name=name,
 			factory=factory,
 			metadata=hook_metadata,
+			identity=identity,
 		)
 		self.hooks[name] = hook
 
@@ -376,6 +442,7 @@ class HooksAPI:
 		factory: HookFactory[T] = _default_factory,
 		*,
 		metadata: HookMetadata | None = None,
+		identity: Literal["key", "callsite"] = "key",
 	) -> "Hook[T]":
 		"""Register a new hook.
 
@@ -384,6 +451,7 @@ class HooksAPI:
 			factory: Function that creates HookState instances. Can be a
 				zero-argument callable or accept a HookInit object.
 			metadata: Optional metadata describing the hook.
+			identity: Keying mode for hook calls ("key" or "callsite").
 
 		Returns:
 			Hook[T]: The registered hook, callable during component render.
@@ -412,7 +480,7 @@ class HooksAPI:
 		    return _timer_hook()
 		```
 		"""
-		return HOOK_REGISTRY.create(name, factory, metadata)
+		return HOOK_REGISTRY.create(name, factory, metadata, identity)
 
 	def rename(self, current: str, new: str) -> None:
 		HOOK_REGISTRY.rename(current, new)
@@ -428,6 +496,11 @@ class HooksAPI:
 
 	def lock(self) -> None:
 		HOOK_REGISTRY.lock()
+
+	def callsite_identity(
+		self, *, skip: int = 0, frame: FrameType | None = None
+	) -> HookIdentity:
+		return callsite_identity(skip=skip, frame=frame)
 
 
 hooks = HooksAPI()
@@ -447,6 +520,8 @@ __all__ = [
 	"HookAlreadyRegisteredError",
 	"HOOK_CONTEXT",
 	"HookRegistry",
+	"HookIdentity",
+	"callsite_identity",
 	"hooks",
 	"MISSING",
 ]

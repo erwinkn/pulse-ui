@@ -258,24 +258,46 @@ def my_component():
 
 ## route
 
-Get the current route context.
+Get the current route info.
 
 ```python
-def route() -> RouteContext
+def route() -> RouteInfo
 ```
 
 ### Returns
 
-`RouteContext` with access to route parameters, path, and query.
+`RouteInfo` with access to route parameters, path, and query.
 
 ### Example
 
 ```python
 def user_page():
     r = ps.route()
-    user_id = r.params.get("user_id")  # From /users/:user_id
-    page = r.query.get("page", "1")    # From ?page=2
+    user_id = r["pathParams"].get("user_id")  # From /users/:user_id
+    page = r["queryParams"].get("page", "1")  # From ?page=2
     return m.Text(f"User {user_id}, Page {page}")
+```
+
+---
+
+## pulse_route
+
+Get the current route definition.
+
+```python
+def pulse_route() -> Route | Layout
+```
+
+### Returns
+
+`Route` or `Layout` for the active route.
+
+### Example
+
+```python
+def show_route():
+    route = ps.pulse_route()
+    return m.Text(f"Route: {route.path}")
 ```
 
 ---
@@ -347,7 +369,7 @@ def not_found() -> NoReturn
 ```python
 def user_page():
     r = ps.route()
-    user = get_user(r.params["id"])
+    user = get_user(r["pathParams"]["id"])
     if not user:
         ps.not_found()  # Shows 404 page
 

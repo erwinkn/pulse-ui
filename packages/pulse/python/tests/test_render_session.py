@@ -529,7 +529,7 @@ async def test_route_info_updated_on_reconnect():
 	route_info1: RouteInfo = {
 		"pathname": "/a",
 		"hash": "",
-		"query": "?foo=bar",
+		"query": "foo=bar",
 		"queryParams": {"foo": "bar"},
 		"pathParams": {},
 		"catchall": [],
@@ -539,7 +539,7 @@ async def test_route_info_updated_on_reconnect():
 		session.attach("/a", route_info1)
 
 	mount = session.route_mounts["/a"]
-	assert mount.route.query == "?foo=bar"
+	assert mount.route.query == "foo=bar"
 
 	# Disconnect
 	session.disconnect()
@@ -550,7 +550,7 @@ async def test_route_info_updated_on_reconnect():
 	route_info2: RouteInfo = {
 		"pathname": "/a",
 		"hash": "",
-		"query": "?baz=qux",
+		"query": "baz=qux",
 		"queryParams": {"baz": "qux"},
 		"pathParams": {},
 		"catchall": [],
@@ -559,7 +559,7 @@ async def test_route_info_updated_on_reconnect():
 		session.attach("/a", route_info2)
 
 	# Route info should be updated
-	assert mount.route.query == "?baz=qux"
+	assert mount.route.query == "baz=qux"
 
 	session.close()
 
@@ -1248,7 +1248,7 @@ async def test_prerender_keeps_mounts_for_unrendered_paths():
 	assert mount_b.state == "active"
 
 	nav_info = make_route_info("/a")
-	nav_info["query"] = "?page=2"
+	nav_info["query"] = "page=2"
 	nav_info["queryParams"] = {"page": "2"}
 
 	with ps.PulseContext.update(render=session):
@@ -1258,7 +1258,7 @@ async def test_prerender_keeps_mounts_for_unrendered_paths():
 	assert session.route_mounts["/a"] is mount_a
 	assert mount_a.effect is effect_a
 	assert mount_a.state == "active"
-	assert mount_a.route.query == "?page=2"
+	assert mount_a.route.query == "page=2"
 	assert session.route_mounts["/b"] is mount_b
 	assert mount_b.effect is effect_b
 
@@ -1390,7 +1390,7 @@ async def test_update_route_updates_route_context():
 	initial_info: RouteInfo = {
 		"pathname": "/a",
 		"hash": "",
-		"query": "?x=1",
+		"query": "x=1",
 		"queryParams": {"x": "1"},
 		"pathParams": {},
 		"catchall": [],
@@ -1400,21 +1400,21 @@ async def test_update_route_updates_route_context():
 		session.attach("/a", initial_info)
 
 	mount = session.route_mounts["/a"]
-	assert mount.route.query == "?x=1"
+	assert mount.route.query == "x=1"
 
 	# Update route
 	updated_info: RouteInfo = {
 		"pathname": "/a",
-		"hash": "#section",
-		"query": "?y=2",
+		"hash": "section",
+		"query": "y=2",
 		"queryParams": {"y": "2"},
 		"pathParams": {},
 		"catchall": [],
 	}
 	session.update_route("/a", updated_info)
 
-	assert mount.route.query == "?y=2"
-	assert mount.route.hash == "#section"
+	assert mount.route.query == "y=2"
+	assert mount.route.hash == "section"
 
 	session.close()
 

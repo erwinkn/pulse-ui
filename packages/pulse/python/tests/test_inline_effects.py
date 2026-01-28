@@ -424,7 +424,8 @@ class TestContextDetection:
 		assert isinstance(module_effect, Effect)
 
 	def test_state_class_effect_unchanged(self):
-		from pulse.state import State, StateEffect
+		from pulse.state.property import StateEffect
+		from pulse.state.state import State
 
 		class MyState(State):
 			@ps.effect

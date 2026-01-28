@@ -13,7 +13,7 @@ from typing import (
 	override,
 )
 
-from pulse.state import State
+from pulse.state.state import State
 
 T = TypeVar("T")
 TState = TypeVar("TState", bound="State")

@@ -159,7 +159,7 @@ Access parameters with `ps.route()`:
 @ps.component
 def user_profile():
     route = ps.route()
-    user_id = route.pathParams.get("user_id")
+    user_id = route["pathParams"].get("user_id")
 
     return ps.h1(f"User {user_id}")
 ```
@@ -182,13 +182,13 @@ ps.Route("/files/*", file_browser)
 # Matches /files/docs/report.pdf
 ```
 
-Access the captured path with `route.catchall`:
+Access the captured path with `route["catchall"]`:
 
 ```python
 @ps.component
 def file_browser():
     route = ps.route()
-    file_path = route.catchall  # "docs/report.pdf"
+    file_path = route["catchall"]  # "docs/report.pdf"
     return ps.p(f"Viewing: {file_path}")
 ```
 
@@ -202,18 +202,18 @@ def debug_route():
     route = ps.route()
 
     return ps.ul(
-        ps.li(f"pathname: {route.pathname}"),      # /users/123?tab=posts#section
-        ps.li(f"pathParams: {route.pathParams}"),  # {"user_id": "123"}
-        ps.li(f"query: {route.query}"),            # "tab=posts"
-        ps.li(f"queryParams: {route.queryParams}"),# {"tab": "posts"}
-        ps.li(f"hash: {route.hash}"),              # "section"
-        ps.li(f"catchall: {route.catchall}"),      # For wildcard routes
+        ps.li(f"pathname: {route['pathname']}"),      # /users/123?tab=posts#section
+        ps.li(f"pathParams: {route['pathParams']}"),  # {"user_id": "123"}
+        ps.li(f"query: {route['query']}"),            # "tab=posts"
+        ps.li(f"queryParams: {route['queryParams']}"),# {"tab": "posts"}
+        ps.li(f"hash: {route['hash']}"),              # "section"
+        ps.li(f"catchall: {route['catchall']}"),      # For wildcard routes
     )
 ```
 
 ## Query parameters
 
-Access query string parameters through `route.queryParams`:
+Access query string parameters through `route["queryParams"]`:
 
 ```python
 # URL: /search?q=pulse&page=2
@@ -221,8 +221,8 @@ Access query string parameters through `route.queryParams`:
 @ps.component
 def search_page():
     route = ps.route()
-    query = route.queryParams.get("q", "")
-    page = int(route.queryParams.get("page", "1"))
+    query = route["queryParams"].get("q", "")
+    page = int(route["queryParams"].get("page", "1"))
 
     return ps.div(
         ps.p(f"Searching for: {query}"),

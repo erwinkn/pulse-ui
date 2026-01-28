@@ -310,7 +310,7 @@ VALIDATION_INITIAL_VALUES = {
 
 @ps.component
 def ValidationModesPage():
-	raw = ps.route().pathParams.get("mode", "submit")
+	raw = ps.route()["pathParams"].get("mode", "submit")
 	mode_str = str(raw or "submit")
 	if mode_str not in ("submit", "blur", "change"):
 		mode_str = "submit"

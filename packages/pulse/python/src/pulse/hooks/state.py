@@ -5,7 +5,7 @@ from typing import Any, TypeVar, override
 
 from pulse.component import is_component_code
 from pulse.hooks.core import HookMetadata, HookState, hooks
-from pulse.state import State
+from pulse.state.state import State
 
 S = TypeVar("S", bound=State)
 

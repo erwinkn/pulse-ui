@@ -39,7 +39,8 @@ from pulse.queries.query import RETRY_DELAY_DEFAULT, QueryConfig
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.reactive_extensions import ReactiveList, unwrap
 from pulse.scheduling import TimerHandleLike, create_task, later
-from pulse.state import InitializableProperty, State
+from pulse.state.property import InitializableProperty
+from pulse.state.state import State
 
 T = TypeVar("T")
 TParam = TypeVar("TParam")

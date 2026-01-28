@@ -72,23 +72,35 @@ def connection_info():
 
 ### `ps.route()`
 
-Get current route context with path params, query params, and URL info.
+Get current route info with path params, query params, and URL info.
 
 ```python
 def user_page():
     r = ps.route()
-    user_id = r.pathParams.get("id")     # From /users/:id
-    page = r.queryParams.get("page", "1") # From ?page=2
+    user_id = r["pathParams"].get("id")     # From /users/:id
+    page = r["queryParams"].get("page", "1") # From ?page=2
     return m.Text(f"User {user_id}, Page {page}")
 ```
 
-**Returns:** `RouteContext` with properties:
+**Returns:** `RouteInfo` with keys:
 - `pathname` - Current URL path (e.g., "/users/123")
 - `hash` - URL hash fragment (without #)
 - `query` - Raw query string (without ?)
 - `queryParams` - Parsed query parameters as dict
 - `pathParams` - Dynamic path parameters (e.g., `{"id": "123"}`)
 - `catchall` - Catch-all segments as list
+
+### `ps.pulse_route()`
+
+Get the current route definition.
+
+```python
+def route_def():
+    route = ps.pulse_route()
+    return m.Text(f"Route: {route.path}")
+```
+
+**Returns:** `Route` or `Layout` for the active route.
 
 ## Address Functions
 

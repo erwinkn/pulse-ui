@@ -228,7 +228,8 @@ See `references/reactive.md` for Effect options (interval, lazy, on_error) and `
 #### Runtime hooks
 
 ```python
-ps.route()          # RouteContext: .pathname, .params, .query, .queryParams
+ps.route()          # RouteInfo: ["pathname"], ["pathParams"], ["query"], ["queryParams"]
+ps.pulse_route()    # Route | Layout definition
 ps.session()        # ReactiveDict of session data
 ps.session_id()     # str session ID
 ps.websocket_id()   # str WebSocket connection ID (one session can have multiple)
@@ -335,7 +336,7 @@ def AppLayout():
 @ps.component
 def UserDetail():
     route = ps.route()
-    user_id = route.params["id"]
+    user_id = route["pathParams"]["id"]
     return ps.div(f"User: {user_id}")
 ```
 
@@ -601,7 +602,7 @@ def DataTable():
 5. **Mutate state directly** in methods (`self.field = value`)
 6. **Use `@ps.query`** for data fetching with caching
 7. **Use `ps.Link`** for internal navigation, not `ps.a`
-8. **Access route params** via `ps.route().params`
+8. **Access route params** via `ps.route()["pathParams"]`
 9. **Clean up** in `on_dispose()` method or effect return
 10. **Run `make all`** before committing
 

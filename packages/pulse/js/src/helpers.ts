@@ -12,11 +12,17 @@ export interface RouteInfo {
 export function extractServerRouteInfo({ params, request }: LoaderFunctionArgs) {
 	const { "*": catchall = "", ...pathParams } = params;
 	const parsedUrl = new URL(request.url);
+	const query = parsedUrl.search.startsWith("?")
+		? parsedUrl.search.slice(1)
+		: parsedUrl.search;
+	const hash = parsedUrl.hash.startsWith("#")
+		? parsedUrl.hash.slice(1)
+		: parsedUrl.hash;
 
 	return {
-		hash: parsedUrl.hash,
+		hash,
 		pathname: parsedUrl.pathname,
-		query: parsedUrl.search,
+		query,
 		queryParams: Object.fromEntries(parsedUrl.searchParams.entries()),
 		pathParams,
 		catchall: catchall.length > 1 ? catchall.split("/") : [],

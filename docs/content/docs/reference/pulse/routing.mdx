@@ -142,7 +142,7 @@ class RouteInfo(TypedDict):
 
 ### RouteContext
 
-Runtime context for the current route, accessible via `ps.route()`.
+Runtime context for the current route (internal). `ps.route()` returns `RouteInfo`.
 
 #### Attributes
 
@@ -247,20 +247,37 @@ def handle_submit():
 
 ### route
 
-Get current route context (available via `ps.route()`).
+Get current route info (available via `ps.route()`).
 
 ```python
-def route() -> RouteContext
+def route() -> RouteInfo
 ```
 
-**Returns:** Current `RouteContext`.
+**Returns:** Current `RouteInfo`.
 
 ```python
 @ps.component
 def UserProfile():
-    ctx = ps.route()
-    user_id = ctx.pathParams.get("id")
+    info = ps.route()
+    user_id = info["pathParams"].get("id")
     return ps.div(f"User: {user_id}")
+```
+
+### pulse_route
+
+Get the current route definition (available via `ps.pulse_route()`).
+
+```python
+def pulse_route() -> Route | Layout
+```
+
+**Returns:** Current `Route` or `Layout`.
+
+```python
+@ps.component
+def RouteMeta():
+    definition = ps.pulse_route()
+    return ps.div(f"Route: {definition.path}")
 ```
 
 ## Path Syntax

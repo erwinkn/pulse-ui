@@ -16,7 +16,8 @@ from pulse.reactive import (
 	EffectFn,
 	Signal,
 )
-from pulse.state import ComputedProperty, State, StateEffect
+from pulse.state.property import ComputedProperty, StateEffect
+from pulse.state.state import State
 
 T = TypeVar("T")
 TState = TypeVar("TState", bound=State)

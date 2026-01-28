@@ -34,7 +34,7 @@ AZURE_TENANT_ID = require_env("AZURE_TENANT_ID")
 @ps.component
 def LoginPage():
 	r = ps.route()
-	next_path = r.queryParams.get("next") or "/"
+	next_path = r["queryParams"].get("next") or "/"
 	return ps.div(
 		ps.h2("Sign in", className="text-2xl font-bold mb-4"),
 		ps.p("You will be redirected to Microsoft to sign in."),
@@ -53,7 +53,7 @@ def SecretPage():
 	user = auth()
 	if not user:
 		r = ps.route()
-		ps.redirect(f"/login?next={r.pathname}")
+		ps.redirect(f"/login?next={r['pathname']}")
 
 	name = user.get("name") or user.get("email")
 
@@ -83,7 +83,7 @@ def SecretSettingsPage():
 	user = auth()
 	if not user:
 		r = ps.route()
-		ps.redirect(f"/login?next={r.pathname}")
+		ps.redirect(f"/login?next={r['pathname']}")
 
 	name = user.get("name") or user.get("email")
 

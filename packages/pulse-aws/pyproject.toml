@@ -4,7 +4,7 @@ version = "0.1.9"
 description = "Add your description here"
 readme = "README.md"
 authors = [{ name = "Erwin Kuhn", email = "erwin.kuhn@protonmail.com" }]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "aws-cdk-lib>=2.160.0,<3.0",
     "constructs>=10.0.0,<11.0.0",

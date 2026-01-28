@@ -37,7 +37,8 @@ from pulse.queries.common import (
 from pulse.queries.effect import AsyncQueryEffect
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.scheduling import TimerHandleLike, create_task, is_pytest, later
-from pulse.state import InitializableProperty, State
+from pulse.state.property import InitializableProperty
+from pulse.state.state import State
 
 if TYPE_CHECKING:
 	from pulse.queries.protocol import QueryResult

@@ -150,7 +150,7 @@ Often you need routes that include variable parts, like `/users/123` or `/posts/
 def user_profile():
     # Get route information including parameters
     route = ps.route()
-    user_id = route.params.get("id")
+    user_id = route["pathParams"].get("id")
 
     return ps.div(
         ps.h1(f"User Profile: {user_id}", className="text-2xl"),
@@ -177,9 +177,9 @@ def current_page():
     route = ps.route()
 
     return ps.div(
-        ps.p(f"Current path: {route.path}"),
-        ps.p(f"Query params: {route.query}"),
-        ps.p(f"Route params: {route.params}"),
+        ps.p(f"Current path: {route['pathname']}"),
+        ps.p(f"Query params: {route['queryParams']}"),
+        ps.p(f"Route params: {route['pathParams']}"),
     )
 ```
 

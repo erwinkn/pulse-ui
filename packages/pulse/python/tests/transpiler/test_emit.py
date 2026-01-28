@@ -273,6 +273,16 @@ class TestUnaryEmit:
 		outer = Unary("!", inner)
 		assert emit(outer) == "!!x"
 
+	def test_double_negative(self):
+		inner = Unary("-", Identifier("x"))
+		outer = Unary("-", inner)
+		assert emit(outer) == "-(-x)"
+
+	def test_double_positive(self):
+		inner = Unary("+", Identifier("x"))
+		outer = Unary("+", inner)
+		assert emit(outer) == "+(+x)"
+
 	def test_typeof(self):
 		assert emit(Unary("typeof", Identifier("x"))) == "typeof x"
 

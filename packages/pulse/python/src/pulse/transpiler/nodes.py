@@ -1150,6 +1150,15 @@ class Unary(Expr):
 			out.append(" ")
 		else:
 			out.append(self.op)
+		if (
+			self.op in {"+", "-"}
+			and isinstance(self.operand, Unary)
+			and self.operand.op == self.op
+		):
+			out.append("(")
+			self.operand.emit(out)
+			out.append(")")
+			return
 		_emit_paren(self.operand, self.op, "unary", out)
 
 	@override

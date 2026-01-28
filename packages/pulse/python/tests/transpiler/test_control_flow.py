@@ -317,6 +317,17 @@ class TestSubscriptAssignment:
 			== "function f_1(arr, val) {\narr[arr.length - 1] = val;\nreturn arr;\n}"
 		)
 
+	def test_negative_index_assignment_expression(self):
+		@javascript
+		def f(arr: list[int], idx: int, val: int) -> list[int]:
+			arr[-idx] = val
+			return arr
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(arr, idx, val) {\nconst $tmp0 = -idx;\narr[$tmp0 < 0 ? arr.length + $tmp0 : $tmp0] = val;\nreturn arr;\n}"
+		)
+
 	def test_negative_index_assignment_with_attribute_base(self):
 		@javascript
 		def f(obj: Any, val: int) -> Any:
@@ -353,6 +364,17 @@ class TestSubscriptAssignment:
 		assert (
 			emit(f.transpile())
 			== "function f_1(arr, idx) {\narr[idx] += 1;\nreturn arr;\n}"
+		)
+
+	def test_augmented_negative_index_expression(self):
+		@javascript
+		def f(arr: list[int], idx: int) -> list[int]:
+			arr[-idx] += 10
+			return arr
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(arr, idx) {\nconst $tmp0 = -idx;\narr[$tmp0 < 0 ? arr.length + $tmp0 : $tmp0] += 10;\nreturn arr;\n}"
 		)
 
 	def test_augmented_negative_index(self):

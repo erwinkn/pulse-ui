@@ -157,7 +157,7 @@ CallbackPlaceholder: TypeAlias = Literal["$cb"]
 
 The callback invocation target is derived from the element path + prop name.
 Because the prop name is known from `VDOMElement.eval`, the placeholder can be a
-single sentinel string.
+single sentinel string. Debounced callbacks use "$cb:<delay_ms>" in the wire format.
 """
 
 

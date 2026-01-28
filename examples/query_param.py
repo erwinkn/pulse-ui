@@ -9,12 +9,10 @@ from datetime import date, datetime, timezone
 
 import pulse as ps
 
-PAGE_PARAM = "p"
-
 
 class QueryState(ps.State):
 	q: ps.QueryParam[str] = ""
-	page: ps.QueryParam[int, PAGE_PARAM] = 1
+	page: ps.QueryParam[int] = 1
 	tags: ps.QueryParam[list[str]] = []
 	since: ps.QueryParam[date | None] = None
 	updated: ps.QueryParam[datetime | None] = None

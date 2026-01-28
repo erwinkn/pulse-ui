@@ -4,7 +4,7 @@ version = "0.546.1"
 description = "Lucide icons for the Pulse framework"
 readme = "README.md"
 authors = [{ name = "Erwin Kuhn", email = "erwin.kuhn@protonmail.com" }]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = ["pulse-framework"]
 
 

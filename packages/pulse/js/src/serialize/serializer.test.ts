@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { deserialize, serialize } from "./serializer";
+import { deserialize, serialize, type Serialized } from "./serializer";
 
-describe("v3 serialization", () => {
+describe("v4 serialization", () => {
 	it("serializes primitives as direct entries and round trips", () => {
 		const data = [1, "a", true, null, undefined];
 		const ser = serialize(data);
@@ -139,6 +139,16 @@ describe("v3 serialization", () => {
 		expect(parsed.when.getTime()).toBe(d.getTime());
 		// shared reference must be preserved at same indices
 		expect(parsed.when).toBe(parsed.same);
+	});
+	it("decodes date literals as UTC midnight dates", () => {
+		const ser: Serialized = [[[], [0], [], []], "2024-01-02"];
+		const parsed = deserialize(ser) as Date;
+		expect(parsed).toBeInstanceOf(Date);
+		expect(parsed.toISOString()).toBe("2024-01-02T00:00:00.000Z");
+	});
+	it("throws on invalid date literals", () => {
+		const ser: Serialized = [[[], [0], [], []], "2024-02-30"];
+		expect(() => deserialize(ser)).toThrow("Invalid date literal: 2024-02-30");
 	});
 
 	it("throws on unsupported values (function/symbol)", () => {

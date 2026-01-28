@@ -283,3 +283,94 @@ class TestExceptionHandling:
 		fn = rethrow.transpile()
 		code = emit(fn)
 		assert code == "function rethrow_1(e) {\nthrow e;\n}"
+
+
+# =============================================================================
+# Subscript and Attribute Assignment
+# =============================================================================
+
+
+class TestSubscriptAssignment:
+	"""Test subscript and attribute assignment transpilation."""
+
+	def test_array_index_assignment(self):
+		@javascript
+		def f(arr: list[int], val: int) -> list[int]:
+			arr[0] = val
+			return arr
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(arr, val) {\narr[0] = val;\nreturn arr;\n}"
+		)
+
+	def test_negative_index_assignment(self):
+		@javascript
+		def f(arr: list[int], val: int) -> list[int]:
+			arr[-1] = val
+			return arr
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(arr, val) {\narr[arr.length - 1] = val;\nreturn arr;\n}"
+		)
+
+	def test_dict_key_assignment(self):
+		@javascript
+		def f(d: dict[str, int]) -> dict[str, int]:
+			d["key"] = 42
+			return d
+
+		assert emit(f.transpile()) == 'function f_1(d) {\nd["key"] = 42;\nreturn d;\n}'
+
+	def test_dynamic_key_assignment(self):
+		@javascript
+		def f(d: dict[str, int], k: str, v: int) -> dict[str, int]:
+			d[k] = v
+			return d
+
+		assert emit(f.transpile()) == "function f_1(d, k, v) {\nd[k] = v;\nreturn d;\n}"
+
+	def test_augmented_subscript_assignment(self):
+		@javascript
+		def f(arr: list[int], idx: int) -> list[int]:
+			arr[idx] += 1
+			return arr
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(arr, idx) {\narr[idx] += 1;\nreturn arr;\n}"
+		)
+
+	def test_augmented_negative_index(self):
+		@javascript
+		def f(arr: list[int]) -> list[int]:
+			arr[-1] += 10
+			return arr
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(arr) {\narr[arr.length - 1] += 10;\nreturn arr;\n}"
+		)
+
+	def test_attribute_assignment(self):
+		@javascript
+		def f(ref: Any, val: int) -> Any:
+			ref.current = val
+			return ref
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(ref, val) {\nref.current = val;\nreturn ref;\n}"
+		)
+
+	def test_augmented_attribute_assignment(self):
+		@javascript
+		def f(obj: Any) -> Any:
+			obj.count += 1
+			return obj
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(obj) {\nobj.count += 1;\nreturn obj;\n}"
+		)

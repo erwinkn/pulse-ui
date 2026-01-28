@@ -1574,7 +1574,7 @@ class Assign(Stmt):
 	op: None for =, or "+", "-", etc. for augmented assignment
 	"""
 
-	target: str
+	target: str | Expr
 	value: Expr
 	declare: Lit["let", "const"] | None = None
 	op: str | None = None  # For augmented: +=, -=, etc.
@@ -1584,7 +1584,10 @@ class Assign(Stmt):
 		if self.declare:
 			out.append(self.declare)
 			out.append(" ")
-		out.append(self.target)
+		if isinstance(self.target, str):
+			out.append(self.target)
+		else:
+			_emit_primary(self.target, out)
 		if self.op:
 			out.append(" ")
 			out.append(self.op)

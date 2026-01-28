@@ -253,6 +253,10 @@ class Transpiler:
 			return Block([])
 
 		if isinstance(node, ast.AugAssign):
+			if isinstance(node.target, ast.Subscript):
+				return self._emit_augmented_subscript_assign(node)
+			if isinstance(node.target, ast.Attribute):
+				return self._emit_augmented_attribute_assign(node)
 			if not isinstance(node.target, ast.Name):
 				raise TranspileError(
 					"Only simple augmented assignments supported", node=node
@@ -277,6 +281,12 @@ class Transpiler:
 			# Tuple/list unpacking
 			if isinstance(target_node, (ast.Tuple, ast.List)):
 				return self._emit_unpacking_assign(target_node, node.value)
+
+			if isinstance(target_node, ast.Subscript):
+				return self._emit_subscript_assign(target_node, node.value)
+
+			if isinstance(target_node, ast.Attribute):
+				return self._emit_attribute_assign(target_node, node.value)
 
 			if not isinstance(target_node, ast.Name):
 				raise TranspileError(
@@ -355,6 +365,73 @@ class Transpiler:
 				stmts.append(Assign(name, sub, declare="let"))
 
 		return StmtSequence(stmts)
+
+	def _emit_subscript_assign(self, target: ast.Subscript, value: ast.expr) -> Stmt:
+		"""Emit subscript assignment: obj[key] = value"""
+		obj_expr = self.emit_expr(target.value)
+		value_expr = self.emit_expr(value)
+
+		# Negative index: arr[-1] = x -> arr[arr.length - 1] = x
+		if isinstance(target.slice, ast.UnaryOp) and isinstance(
+			target.slice.op, ast.USub
+		):
+			idx = self.emit_expr(target.slice.operand)
+			key_expr = Binary(Member(obj_expr, "length"), "-", idx)
+		else:
+			key_expr = self.emit_expr(target.slice)
+
+		return Assign(Subscript(obj_expr, key_expr), value_expr)
+
+	def _emit_attribute_assign(self, target: ast.Attribute, value: ast.expr) -> Stmt:
+		"""Emit attribute assignment: obj.attr = value"""
+		obj_expr = self.emit_expr(target.value)
+		value_expr = self.emit_expr(value)
+		return Assign(Member(obj_expr, target.attr), value_expr)
+
+	def _emit_augmented_subscript_assign(self, node: ast.AugAssign) -> Stmt:
+		"""Emit augmented subscript assignment: arr[i] += x"""
+		target = node.target
+		assert isinstance(target, ast.Subscript)
+
+		obj_expr = self.emit_expr(target.value)
+		op_type = type(node.op)
+		if op_type not in ALLOWED_BINOPS:
+			raise TranspileError(
+				f"Unsupported augmented assignment operator: {op_type.__name__}",
+				node=node,
+			)
+
+		# Negative index handling
+		if isinstance(target.slice, ast.UnaryOp) and isinstance(
+			target.slice.op, ast.USub
+		):
+			idx = self.emit_expr(target.slice.operand)
+			key_expr = Binary(Member(obj_expr, "length"), "-", idx)
+		else:
+			key_expr = self.emit_expr(target.slice)
+
+		value_expr = self.emit_expr(node.value)
+		return Assign(
+			Subscript(obj_expr, key_expr), value_expr, op=ALLOWED_BINOPS[op_type]
+		)
+
+	def _emit_augmented_attribute_assign(self, node: ast.AugAssign) -> Stmt:
+		"""Emit augmented attribute assignment: obj.attr += x"""
+		target = node.target
+		assert isinstance(target, ast.Attribute)
+
+		obj_expr = self.emit_expr(target.value)
+		op_type = type(node.op)
+		if op_type not in ALLOWED_BINOPS:
+			raise TranspileError(
+				f"Unsupported augmented assignment operator: {op_type.__name__}",
+				node=node,
+			)
+
+		value_expr = self.emit_expr(node.value)
+		return Assign(
+			Member(obj_expr, target.attr), value_expr, op=ALLOWED_BINOPS[op_type]
+		)
 
 	def _emit_for_loop(self, node: ast.For) -> Stmt:
 		"""Emit a for loop."""

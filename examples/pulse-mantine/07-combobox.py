@@ -74,6 +74,7 @@ class ComboboxShowcase(ps.State):
 	split_value: str | None
 	split_search: str
 	inline_value: str
+	inline_store: ComboboxStore
 	events: list[str]
 	selected_index: int
 	dropdown_opened: bool
@@ -93,6 +94,7 @@ class ComboboxShowcase(ps.State):
 		self.split_value = None
 		self.split_search = ""
 		self.inline_value = "First"
+		self.inline_store = ComboboxStore()
 		self.events = []
 		self.selected_index = -1
 		self.dropdown_opened = False
@@ -537,7 +539,7 @@ def Demo():
 		Paper(withBorder=True, p="lg", radius="md")[
 			Stack(gap="md")[
 				Text("Inline options (no dropdown)", fw=600),
-				Combobox(onOptionSubmit=state.choose_inline)[
+				Combobox(store=state.inline_store, onOptionSubmit=state.choose_inline)[
 					ComboboxEventsTarget()[
 						TextInput(
 							label="Inline combobox",

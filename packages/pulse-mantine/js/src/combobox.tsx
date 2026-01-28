@@ -10,7 +10,7 @@ type ComboboxScrollBehavior = ScrollBehavior | "instant";
 
 export interface PulseComboboxProps
 	extends Omit<ComponentPropsWithoutRef<typeof MantineCombobox>, "store"> {
-	channelId?: string;
+	channelId: string;
 	defaultOpened?: boolean;
 	opened?: boolean;
 	onOpenedChange?: (opened: boolean) => void;
@@ -32,42 +32,39 @@ export function Combobox({
 	...rest
 }: PulseComboboxProps) {
 	// biome-ignore lint/correctness/useHookAtTopLevel: channelId is not expected to change
-	const channel = channelId ? usePulseChannel(channelId) : undefined;
+	const channel = usePulseChannel(channelId);
 
 	const combobox = useCombobox({
 		defaultOpened,
 		opened,
 		onOpenedChange: (nextOpened) => {
 			onOpenedChange?.(nextOpened);
-			channel?.emit("openedChange", { opened: nextOpened });
+			channel.emit("openedChange", { opened: nextOpened });
 		},
 		onDropdownOpen: (eventSource) => {
 			onDropdownOpen?.(eventSource);
-			channel?.emit("dropdownOpen", { eventSource });
+			channel.emit("dropdownOpen", { eventSource });
 		},
 		onDropdownClose: (eventSource) => {
 			onDropdownClose?.(eventSource);
-			channel?.emit("dropdownClose", { eventSource });
+			channel.emit("dropdownClose", { eventSource });
 		},
 		loop,
 		scrollBehavior
 	});
 
 	useEffect(() => {
-		if (!channel) return;
-
 		const cleanups = [
-			channel.on("openDropdown", (payload?: { eventSource?: DropdownEventSource }) => {
-				combobox.openDropdown(payload?.eventSource);
+			channel.on("openDropdown", (payload: { eventSource: DropdownEventSource }) => {
+				combobox.openDropdown(payload.eventSource);
 			}),
-			channel.on("closeDropdown", (payload?: { eventSource?: DropdownEventSource }) => {
-				combobox.closeDropdown(payload?.eventSource);
+			channel.on("closeDropdown", (payload: { eventSource: DropdownEventSource }) => {
+				combobox.closeDropdown(payload.eventSource);
 			}),
-			channel.on("toggleDropdown", (payload?: { eventSource?: DropdownEventSource }) => {
-				combobox.toggleDropdown(payload?.eventSource);
+			channel.on("toggleDropdown", (payload: { eventSource: DropdownEventSource }) => {
+				combobox.toggleDropdown(payload.eventSource);
 			}),
-			channel.on("selectOption", (payload?: { index?: number }) => {
-				if (!payload || typeof payload.index !== "number") return;
+			channel.on("selectOption", (payload: { index: number }) => {
 				combobox.selectOption(payload.index);
 			}),
 			channel.on("selectActiveOption", () => combobox.selectActiveOption()),
@@ -82,8 +79,8 @@ export function Combobox({
 			}),
 			channel.on(
 				"updateSelectedOptionIndex",
-				(payload?: { target?: SelectedOptionTarget }) => {
-					combobox.updateSelectedOptionIndex(payload?.target);
+				(payload: { target: SelectedOptionTarget }) => {
+					combobox.updateSelectedOptionIndex(payload.target);
 				},
 			),
 			channel.on("focusSearchInput", () => {
@@ -92,8 +89,7 @@ export function Combobox({
 			channel.on("focusTarget", () => {
 				combobox.focusTarget();
 			}),
-			channel.on("setListId", (payload?: { listId?: string }) => {
-				if (!payload || typeof payload.listId !== "string") return;
+			channel.on("setListId", (payload: { listId: string }) => {
 				combobox.setListId(payload.listId);
 			}),
 			channel.on("getDropdownOpened", () => combobox.dropdownOpened),

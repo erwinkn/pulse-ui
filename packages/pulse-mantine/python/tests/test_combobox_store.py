@@ -6,7 +6,7 @@ import pulse as ps
 import pytest
 from pulse.messages import ClientChannelResponseMessage
 from pulse.user_session import UserSession
-from pulse_mantine.core.combobox.combobox import ComboboxStore
+from pulse_mantine.core.combobox.combobox import Combobox, ComboboxStore
 
 
 class DummyRender:
@@ -152,3 +152,8 @@ async def test_combobox_store_callbacks():
 	assert opened == [True]
 	assert opened_sources == ["mouse"]
 	assert closed_sources == ["keyboard"]
+
+
+def test_combobox_requires_store():
+	with pytest.raises(TypeError):
+		Combobox()

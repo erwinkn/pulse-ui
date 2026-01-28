@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 import pulse as ps
 from pulse.helpers import call_flexible, maybe_await
@@ -16,7 +16,7 @@ _Combobox = ps.Import("Combobox", "@mantine/core")
 def ComboboxInternal(
 	*children: ps.Node,
 	key: str | None = None,
-	channelId: str | None = None,
+	channelId: str,
 	**props: Any,
 ): ...
 
@@ -55,17 +55,20 @@ class ComboboxStore(ps.State):
 		self._channel.on("dropdownOpen", self._handle_dropdown_open)
 		self._channel.on("dropdownClose", self._handle_dropdown_close)
 
-	def open_dropdown(self, event_source: DropdownEventSource | None = None) -> None:
-		payload = {"eventSource": event_source} if event_source is not None else None
-		self._channel.emit("openDropdown", payload)
+	def open_dropdown(self, event_source: DropdownEventSource = "unknown") -> None:
+		if event_source not in ("keyboard", "mouse", "unknown"):
+			raise ValueError("event_source must be 'keyboard', 'mouse', or 'unknown'")
+		self._channel.emit("openDropdown", {"eventSource": event_source})
 
-	def close_dropdown(self, event_source: DropdownEventSource | None = None) -> None:
-		payload = {"eventSource": event_source} if event_source is not None else None
-		self._channel.emit("closeDropdown", payload)
+	def close_dropdown(self, event_source: DropdownEventSource = "unknown") -> None:
+		if event_source not in ("keyboard", "mouse", "unknown"):
+			raise ValueError("event_source must be 'keyboard', 'mouse', or 'unknown'")
+		self._channel.emit("closeDropdown", {"eventSource": event_source})
 
-	def toggle_dropdown(self, event_source: DropdownEventSource | None = None) -> None:
-		payload = {"eventSource": event_source} if event_source is not None else None
-		self._channel.emit("toggleDropdown", payload)
+	def toggle_dropdown(self, event_source: DropdownEventSource = "unknown") -> None:
+		if event_source not in ("keyboard", "mouse", "unknown"):
+			raise ValueError("event_source must be 'keyboard', 'mouse', or 'unknown'")
+		self._channel.emit("toggleDropdown", {"eventSource": event_source})
 
 	def select_option(self, index: int) -> None:
 		if not isinstance(index, int):
@@ -91,12 +94,11 @@ class ComboboxStore(ps.State):
 		self._channel.emit("clickSelectedOption")
 
 	def update_selected_option_index(
-		self, target: SelectedOptionTarget | None = None
+		self, target: SelectedOptionTarget = "active"
 	) -> None:
-		if target is not None and target not in ("active", "selected"):
+		if target not in ("active", "selected"):
 			raise ValueError("target must be 'active' or 'selected'")
-		payload = {"target": target} if target is not None else None
-		self._channel.emit("updateSelectedOptionIndex", payload)
+		self._channel.emit("updateSelectedOptionIndex", {"target": target})
 
 	def focus_search_input(self) -> None:
 		self._channel.emit("focusSearchInput")
@@ -134,53 +136,42 @@ class ComboboxStore(ps.State):
 			**merged,
 		)
 
-	async def _handle_opened_change(self, payload: Any) -> None:
-		if not isinstance(payload, dict):
-			return
-		opened = payload.get("opened")
+	async def _handle_opened_change(self, payload: dict[str, Any]) -> None:
+		opened = payload["opened"]
 		if not isinstance(opened, bool):
-			return
+			raise TypeError("opened must be bool")
 		listener = self._on_opened_change
 		if listener is None:
 			return
 		create_task(maybe_await(call_flexible(listener, opened)))
 
-	async def _handle_dropdown_open(self, payload: Any) -> None:
-		source = _event_source_from_payload(payload)
-		if source is None:
-			return
+	async def _handle_dropdown_open(self, payload: dict[str, Any]) -> None:
+		source = payload["eventSource"]
+		if source not in ("keyboard", "mouse", "unknown"):
+			raise ValueError("eventSource must be 'keyboard', 'mouse', or 'unknown'")
 		listener = self._on_dropdown_open
 		if listener is None:
 			return
 		create_task(maybe_await(call_flexible(listener, source)))
 
-	async def _handle_dropdown_close(self, payload: Any) -> None:
-		source = _event_source_from_payload(payload)
-		if source is None:
-			return
+	async def _handle_dropdown_close(self, payload: dict[str, Any]) -> None:
+		source = payload["eventSource"]
+		if source not in ("keyboard", "mouse", "unknown"):
+			raise ValueError("eventSource must be 'keyboard', 'mouse', or 'unknown'")
 		listener = self._on_dropdown_close
 		if listener is None:
 			return
 		create_task(maybe_await(call_flexible(listener, source)))
 
 
-def _event_source_from_payload(payload: Any) -> DropdownEventSource | None:
-	if not isinstance(payload, dict):
-		return None
-	source = payload.get("eventSource")
-	if isinstance(source, str) and source in {"keyboard", "mouse", "unknown"}:
-		return cast(DropdownEventSource, source)
-	return None
-
-
 def _ComboboxWrapper(
 	*children: ps.Node,
 	key: str | None = None,
-	store: ComboboxStore | None = None,
+	store: ComboboxStore | None,
 	**props: Any,
 ):
 	if store is None:
-		return ComboboxInternal(*children, key=key, channelId=None, **props)
+		raise TypeError("store is required")
 	return store.render(*children, key=key, **props)
 
 

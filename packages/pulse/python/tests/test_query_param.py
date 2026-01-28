@@ -86,7 +86,7 @@ class TestQueryParam:
 
 	def test_query_param_string_annotation_with_unresolved_type(self):
 		class QState(ps.State):
-			bad: "MissingType[int]" = ""
+			bad: "MissingType[int]" = ""  # pyright: ignore[reportInvalidTypeArguments,reportAssignmentType]
 			q: "ps.QueryParam[str]" = ""
 
 		app, session, route_ctx = make_context(

@@ -2,6 +2,7 @@
 Query parameter bindings for State properties.
 """
 
+import sys
 import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -35,7 +36,10 @@ if TYPE_CHECKING:
 
 
 if TYPE_CHECKING:
-	QueryParam: TypeAlias = T
+	if sys.version_info >= (3, 12):
+		type QueryParam[T] = T
+	else:
+		QueryParam: TypeAlias = T
 else:
 
 	class QueryParam(Generic[T]):

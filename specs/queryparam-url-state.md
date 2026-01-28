@@ -75,7 +75,7 @@ Unsupported types -> error at class creation (StateMeta) or state init.
   - `\` -> `\\`
   - `,` -> `\,`
 - Join items with literal `,`.
-- Empty list => remove param.
+- Empty list => remove param if it equals default; otherwise encode as empty string.
 
 ### List Parsing
 - Split on commas **not escaped** by `\` after URL decoding.

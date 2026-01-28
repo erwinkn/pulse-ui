@@ -99,10 +99,6 @@ def _instantiate_state(arg: State | Callable[[], State]) -> State:
 	return instance
 
 
-def _state_factory():
-	return StateHookState()
-
-
 def _frame_offset(frame: FrameType) -> int:
 	offset = frame.f_lasti
 	if offset < 0:
@@ -123,9 +119,9 @@ def collect_component_identity(
 	return tuple(identity[:1])
 
 
-_state_hook = hooks.create(
+state_hook = hooks.create(
 	"pulse:core.state",
-	_state_factory,
+	factory=StateHookState,
 	metadata=HookMetadata(
 		owner="pulse.core",
 		description="Internal storage for pulse.state hook",
@@ -185,7 +181,7 @@ def state(
 	else:
 		identity = resolved_key
 
-	hook_state = _state_hook()
+	hook_state = state_hook()
 	return hook_state.get_or_create_state(identity, resolved_key, resolved_arg)  # pyright: ignore[reportReturnType]
 
 

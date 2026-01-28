@@ -10,7 +10,7 @@ P = ParamSpec("P")
 T = TypeVar("T")
 
 
-class SetupHookState(HookState):
+class SetupState(HookState):
 	"""Internal hook state for the setup hook.
 
 	Manages the initialization, argument tracking, and lifecycle of
@@ -140,13 +140,9 @@ class SetupHookState(HookState):
 		return key
 
 
-def _setup_factory():
-	return SetupHookState()
-
-
-_setup_hook = hooks.create(
+setup_state = hooks.create(
 	"pulse:core.setup",
-	_setup_factory,
+	factory=SetupState,
 	metadata=HookMetadata(
 		owner="pulse.core",
 		description="Internal storage for pulse.setup hook",
@@ -195,7 +191,7 @@ def setup(init_func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
 		- Use ``ps.setup()`` directly when AST rewriting is problematic
 		- Arguments must be consistent across renders (same count and names)
 	"""
-	state = _setup_hook()
+	state = setup_state()
 	state.ensure_not_called()
 
 	key = state.consume_pending_key()
@@ -245,10 +241,10 @@ def setup_key(key: str) -> None:
 	"""
 	if not isinstance(key, str):
 		raise TypeError("setup_key() requires a string key")
-	state = _setup_hook()
+	state = setup_state()
 	if state.called_this_render:
 		raise RuntimeError("setup_key() must be called before setup() in a render")
 	state.set_pending_key(key)
 
 
-__all__ = ["setup", "setup_key", "SetupHookState"]
+__all__ = ["setup", "setup_key", "SetupState"]

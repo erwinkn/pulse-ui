@@ -5,7 +5,7 @@ from pulse.hooks.core import HookMetadata, HookState, hooks
 from pulse.reactive import REACTIVE_CONTEXT, AsyncEffect, Effect
 
 
-class InlineEffectHookState(HookState):
+class EffectState(HookState):
 	"""Stores inline effects keyed by function identity or explicit key."""
 
 	__slots__ = ("effects", "_seen_this_render")  # pyright: ignore[reportUnannotatedClassAttribute]
@@ -86,9 +86,9 @@ class InlineEffectHookState(HookState):
 		self._seen_this_render.clear()
 
 
-inline_effect_hook = hooks.create(
+effect_state = hooks.create(
 	"pulse:core.inline_effects",
-	lambda: InlineEffectHookState(),
+	factory=EffectState,
 	metadata=HookMetadata(
 		owner="pulse.core",
 		description="Storage for inline @ps.effect decorators in components",
@@ -97,6 +97,6 @@ inline_effect_hook = hooks.create(
 
 
 __all__ = [
-	"InlineEffectHookState",
-	"inline_effect_hook",
+	"EffectState",
+	"effect_state",
 ]

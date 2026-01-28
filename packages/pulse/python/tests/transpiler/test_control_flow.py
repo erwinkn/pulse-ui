@@ -8,7 +8,9 @@ from collections.abc import Iterable
 from typing import Any
 
 import pytest
+from pulse.js import Array
 from pulse.transpiler import (
+	TranspileError,
 	clear_function_cache,
 	clear_import_registry,
 	emit,
@@ -315,6 +317,17 @@ class TestSubscriptAssignment:
 			== "function f_1(arr, val) {\narr[arr.length - 1] = val;\nreturn arr;\n}"
 		)
 
+	def test_negative_index_assignment_with_attribute_base(self):
+		@javascript
+		def f(obj: Any, val: int) -> Any:
+			obj.arr[-1] = val
+			return obj
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(obj, val) {\nconst $tmp0 = obj.arr;\n$tmp0[$tmp0.length - 1] = val;\nreturn obj;\n}"
+		)
+
 	def test_dict_key_assignment(self):
 		@javascript
 		def f(d: dict[str, int]) -> dict[str, int]:
@@ -353,6 +366,17 @@ class TestSubscriptAssignment:
 			== "function f_1(arr) {\narr[arr.length - 1] += 10;\nreturn arr;\n}"
 		)
 
+	def test_augmented_negative_index_with_attribute_base(self):
+		@javascript
+		def f(obj: Any) -> Any:
+			obj.arr[-1] += 1
+			return obj
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(obj) {\nconst $tmp0 = obj.arr;\n$tmp0[$tmp0.length - 1] += 1;\nreturn obj;\n}"
+		)
+
 	def test_attribute_assignment(self):
 		@javascript
 		def f(ref: Any, val: int) -> Any:
@@ -362,6 +386,17 @@ class TestSubscriptAssignment:
 		assert (
 			emit(f.transpile())
 			== "function f_1(ref, val) {\nref.current = val;\nreturn ref;\n}"
+		)
+
+	def test_attribute_assignment_keyword_escape(self):
+		@javascript
+		def f(val: Any) -> Any:
+			Array.from_ = val
+			return Array
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(val) {\nArray.from = val;\nreturn Array;\n}"
 		)
 
 	def test_augmented_attribute_assignment(self):
@@ -374,3 +409,12 @@ class TestSubscriptAssignment:
 			emit(f.transpile())
 			== "function f_1(obj) {\nobj.count += 1;\nreturn obj;\n}"
 		)
+
+	def test_tuple_subscript_assignment_error(self):
+		@javascript
+		def f(arr: list[list[int]]) -> list[list[int]]:
+			arr[0, 1] = 3
+			return arr
+
+		with pytest.raises(TranspileError, match="Multiple indices"):
+			f.transpile()

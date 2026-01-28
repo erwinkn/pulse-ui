@@ -368,6 +368,10 @@ class Transpiler:
 
 	def _emit_subscript_assign(self, target: ast.Subscript, value: ast.expr) -> Stmt:
 		"""Emit subscript assignment: obj[key] = value"""
+		if isinstance(target.slice, ast.Tuple):
+			raise TranspileError(
+				"Multiple indices not supported in subscript", node=target.slice
+			)
 		obj_expr = self.emit_expr(target.value)
 		value_expr = self.emit_expr(value)
 
@@ -376,22 +380,42 @@ class Transpiler:
 			target.slice.op, ast.USub
 		):
 			idx = self.emit_expr(target.slice.operand)
-			key_expr = Binary(Member(obj_expr, "length"), "-", idx)
-		else:
-			key_expr = self.emit_expr(target.slice)
+			if isinstance(target.value, ast.Name):
+				key_expr = Binary(Member(obj_expr, "length"), "-", idx)
+				return Assign(Subscript(obj_expr, key_expr), value_expr)
+			tmp_name = self._fresh_temp()
+			tmp_expr = Identifier(tmp_name)
+			key_expr = Binary(Member(tmp_expr, "length"), "-", idx)
+			return StmtSequence(
+				[
+					Assign(tmp_name, obj_expr, declare="const"),
+					Assign(Subscript(tmp_expr, key_expr), value_expr),
+				]
+			)
 
+		key_expr = self.emit_expr(target.slice)
 		return Assign(Subscript(obj_expr, key_expr), value_expr)
 
 	def _emit_attribute_assign(self, target: ast.Attribute, value: ast.expr) -> Stmt:
 		"""Emit attribute assignment: obj.attr = value"""
 		obj_expr = self.emit_expr(target.value)
 		value_expr = self.emit_expr(value)
-		return Assign(Member(obj_expr, target.attr), value_expr)
+		target_expr = obj_expr.transpile_getattr(target.attr, self)
+		if not isinstance(target_expr, Member):
+			raise TranspileError(
+				"Only simple attribute assignments supported", node=target
+			)
+		return Assign(target_expr, value_expr)
 
 	def _emit_augmented_subscript_assign(self, node: ast.AugAssign) -> Stmt:
 		"""Emit augmented subscript assignment: arr[i] += x"""
 		target = node.target
 		assert isinstance(target, ast.Subscript)
+
+		if isinstance(target.slice, ast.Tuple):
+			raise TranspileError(
+				"Multiple indices not supported in subscript", node=target.slice
+			)
 
 		obj_expr = self.emit_expr(target.value)
 		op_type = type(node.op)
@@ -406,10 +430,30 @@ class Transpiler:
 			target.slice.op, ast.USub
 		):
 			idx = self.emit_expr(target.slice.operand)
-			key_expr = Binary(Member(obj_expr, "length"), "-", idx)
-		else:
-			key_expr = self.emit_expr(target.slice)
+			if isinstance(target.value, ast.Name):
+				key_expr = Binary(Member(obj_expr, "length"), "-", idx)
+				value_expr = self.emit_expr(node.value)
+				return Assign(
+					Subscript(obj_expr, key_expr),
+					value_expr,
+					op=ALLOWED_BINOPS[op_type],
+				)
+			tmp_name = self._fresh_temp()
+			tmp_expr = Identifier(tmp_name)
+			key_expr = Binary(Member(tmp_expr, "length"), "-", idx)
+			value_expr = self.emit_expr(node.value)
+			return StmtSequence(
+				[
+					Assign(tmp_name, obj_expr, declare="const"),
+					Assign(
+						Subscript(tmp_expr, key_expr),
+						value_expr,
+						op=ALLOWED_BINOPS[op_type],
+					),
+				]
+			)
 
+		key_expr = self.emit_expr(target.slice)
 		value_expr = self.emit_expr(node.value)
 		return Assign(
 			Subscript(obj_expr, key_expr), value_expr, op=ALLOWED_BINOPS[op_type]
@@ -428,10 +472,13 @@ class Transpiler:
 				node=node,
 			)
 
+		target_expr = obj_expr.transpile_getattr(target.attr, self)
+		if not isinstance(target_expr, Member):
+			raise TranspileError(
+				"Only simple attribute assignments supported", node=target
+			)
 		value_expr = self.emit_expr(node.value)
-		return Assign(
-			Member(obj_expr, target.attr), value_expr, op=ALLOWED_BINOPS[op_type]
-		)
+		return Assign(target_expr, value_expr, op=ALLOWED_BINOPS[op_type])
 
 	def _emit_for_loop(self, node: ast.For) -> Stmt:
 		"""Emit a for loop."""

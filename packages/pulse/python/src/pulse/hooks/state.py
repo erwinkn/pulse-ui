@@ -1,9 +1,6 @@
-import inspect
 from collections.abc import Callable
-from types import CodeType, FrameType
 from typing import Any, TypeVar, override
 
-from pulse.component import is_component_code
 from pulse.hooks.core import HookMetadata, HookState, hooks
 from pulse.state import State
 
@@ -103,26 +100,6 @@ def _state_factory():
 	return StateHookState()
 
 
-def _frame_offset(frame: FrameType) -> int:
-	offset = frame.f_lasti
-	if offset < 0:
-		offset = frame.f_lineno
-	return offset
-
-
-def collect_component_identity(
-	frame: FrameType,
-) -> tuple[tuple[CodeType, int], ...]:
-	identity: list[tuple[CodeType, int]] = []
-	cursor: FrameType | None = frame
-	while cursor is not None:
-		identity.append((cursor.f_code, _frame_offset(cursor)))
-		if is_component_code(cursor.f_code):
-			return tuple(identity)
-		cursor = cursor.f_back
-	return tuple(identity[:1])
-
-
 _state_hook = hooks.create(
 	"pulse:core.state",
 	_state_factory,
@@ -177,11 +154,7 @@ def state(
 
 	identity: Any
 	if resolved_key is None:
-		frame = inspect.currentframe()
-		assert frame is not None
-		caller = frame.f_back
-		assert caller is not None
-		identity = collect_component_identity(caller)
+		identity = hooks.callsite_identity(skip=1)
 	else:
 		identity = resolved_key
 

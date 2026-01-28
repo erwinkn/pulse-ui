@@ -2,7 +2,7 @@ from typing import override
 
 import pulse as ps
 import pytest
-from pulse.hooks.core import HookContext
+from pulse.hooks.core import HookContext, HookRegistry, HookState
 from pulse.hooks.setup import setup, setup_key
 from pulse.hooks.stable import stable
 from pulse.hooks.state import state
@@ -80,6 +80,79 @@ def test_setup_key_must_precede_setup():
 		setup(lambda: object())
 		with pytest.raises(RuntimeError):
 			setup_key("late")
+
+
+def test_hook_callsite_identity_reuses_state():
+	registry = HookRegistry()
+	hook = registry.create(
+		"test:callsite_identity",
+		lambda: HookState(),
+		identity="callsite",
+	)
+	ctx = HookContext()
+
+	@ps.component
+	def Comp():
+		first = hook()
+		second = hook()
+		return first, second
+
+	with ctx:
+		first_a, second_a = Comp.fn()
+
+	with ctx:
+		first_b, second_b = Comp.fn()
+
+	assert first_a is first_b
+	assert second_a is second_b
+	assert first_a is not second_a
+
+
+def test_hook_callsite_identity_key_overrides():
+	registry = HookRegistry()
+	hook = registry.create(
+		"test:callsite_identity_key_override",
+		lambda: HookState(),
+		identity="callsite",
+	)
+	ctx = HookContext()
+
+	@ps.component
+	def Comp():
+		first = hook("same")
+		second = hook("same")
+		return first, second
+
+	with ctx:
+		first, second = Comp.fn()
+
+	assert first is second
+
+
+def test_hook_explicit_callsite_identity_key():
+	registry = HookRegistry()
+	hook = registry.create(
+		"test:explicit_callsite_identity",
+		lambda: HookState(),
+		identity="key",
+	)
+	ctx = HookContext()
+
+	@ps.component
+	def Comp():
+		first = hook(ps.hooks.callsite_identity())
+		second = hook(ps.hooks.callsite_identity())
+		return first, second
+
+	with ctx:
+		first_a, second_a = Comp.fn()
+
+	with ctx:
+		first_b, second_b = Comp.fn()
+
+	assert first_a is first_b
+	assert second_a is second_b
+	assert first_a is not second_a
 
 
 def test_state_reuses_instances_with_same_key():

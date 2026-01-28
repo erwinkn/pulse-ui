@@ -4,9 +4,8 @@ import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any, ParamSpec, Protocol, TypeVar, cast, overload
 
-from pulse.hooks.core import HOOK_CONTEXT
+from pulse.hooks.core import HOOK_CONTEXT, hooks
 from pulse.hooks.effects import inline_effect_hook
-from pulse.hooks.state import collect_component_identity
 from pulse.reactive import (
 	AsyncEffect,
 	AsyncEffectFn,
@@ -332,7 +331,7 @@ def effect(
 			caller = caller.f_back
 			assert caller is not None
 		if key is None:
-			identity = collect_component_identity(caller)
+			identity = hooks.callsite_identity(frame=caller)
 		else:
 			identity = key
 

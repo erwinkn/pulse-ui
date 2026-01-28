@@ -211,7 +211,7 @@ class TestFormatSpecs:
 		code = emit(fn)
 		assert (
 			code
-			== "function format_pi_1() {\nlet pi = 3.14159;\nreturn `${pi.toFixed(2)}`;\n}"
+			== "function format_pi_1() {\nlet pi;\npi = 3.14159;\nreturn `${pi.toFixed(2)}`;\n}"
 		)
 
 	def test_left_align(self):

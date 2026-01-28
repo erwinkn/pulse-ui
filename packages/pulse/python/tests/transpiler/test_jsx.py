@@ -498,6 +498,40 @@ class TestJsxFunction:
 			== 'function Toggle_1({visible = true}) {\nreturn <div>{visible ? "content" : "hidden"}</div>;\n}'
 		)
 
+	def test_jsx_function_with_default_lambda(self):
+		"""Default lambda in JSX props is emitted."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+
+		div = TagExpr("div")
+
+		@javascript(jsx=True)
+		def WithCallback(cb: Any = lambda x: x) -> Any:
+			return div(cb(1))
+
+		fn = WithCallback.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function WithCallback_1({cb = x => x}) {\nreturn <div>{cb(1)}</div>;\n}"
+		)
+
+	def test_jsx_function_with_default_comprehension(self):
+		"""Default comprehension in JSX props is emitted."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+
+		div = TagExpr("div")
+
+		@javascript(jsx=True)
+		def WithItems(items: list[int] = tuple([x * 2 for x in [1, 2, 3]])) -> Any:
+			return div(items[0])
+
+		fn = WithItems.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function WithItems_1({items = Array.from([1, 2, 3].map(x => x * 2))}) {\nreturn <div>{items[0]}</div>;\n}"
+		)
+
 	def test_jsx_function_with_children_and_defaults(self):
 		"""JsxFunction with *children and default kwargs works as React component."""
 		from pulse.transpiler.modules.pulse.tags import TagExpr

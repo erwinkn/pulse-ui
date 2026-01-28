@@ -1517,7 +1517,7 @@ class If(Stmt):
 
 @dataclass(slots=True)
 class ForOf(Stmt):
-	"""JS for-of loop: for (const x of iter) { ... }
+	"""JS for-of loop: for (x of iter) { ... }
 
 	target can be a single name or array pattern for destructuring: [a, b]
 	"""
@@ -1528,7 +1528,7 @@ class ForOf(Stmt):
 
 	@override
 	def emit(self, out: list[str]) -> None:
-		out.append("for (const ")
+		out.append("for (")
 		out.append(self.target)
 		out.append(" of ")
 		self.iter.emit(out)
@@ -1616,6 +1616,21 @@ class Assign(Stmt):
 		else:
 			out.append(" = ")
 		self.value.emit(out)
+		out.append(";")
+
+
+@dataclass(slots=True)
+class LetDecl(Stmt):
+	"""JS let declaration: let a, b;"""
+
+	names: Sequence[str]
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		if not self.names:
+			return
+		out.append("let ")
+		out.append(", ".join(self.names))
 		out.append(";")
 
 

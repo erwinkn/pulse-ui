@@ -352,6 +352,7 @@ _EXPORTS: dict[str, str] = {
 	"NotificationRootCSSVariables": "pulse_mantine.core.feedback.notifications",
 	"NotificationStyles": "pulse_mantine.core.feedback.notifications",
 	"NotificationStylesNames": "pulse_mantine.core.feedback.notifications",
+	"Notifications": "pulse_mantine.core.feedback.notifications",
 	"NotificationsApi": "pulse_mantine.core.feedback.notifications",
 	"NotificationsAttributes": "pulse_mantine.core.feedback.notifications",
 	"NotificationsClassNames": "pulse_mantine.core.feedback.notifications",

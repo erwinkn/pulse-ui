@@ -372,17 +372,23 @@ class Transpiler:
 			raise TranspileError(
 				"Multiple indices not supported in subscript", node=target.slice
 			)
+		if isinstance(target.slice, ast.Slice):
+			raise TranspileError("Slice assignment not supported", node=target.slice)
 		obj_expr = self.emit_expr(target.value)
+		target_expr = obj_expr.transpile_subscript(target.slice, self)
+		if not isinstance(target_expr, (Identifier, Member, Subscript)):
+			raise TranspileError(
+				"Only simple subscript assignments supported", node=target
+			)
 		value_expr = self.emit_expr(value)
-		key_expr = self.emit_expr(target.slice)
-		return Assign(Subscript(obj_expr, key_expr), value_expr)
+		return Assign(target_expr, value_expr)
 
 	def _emit_attribute_assign(self, target: ast.Attribute, value: ast.expr) -> Stmt:
 		"""Emit attribute assignment: obj.attr = value"""
 		obj_expr = self.emit_expr(target.value)
 		value_expr = self.emit_expr(value)
 		target_expr = obj_expr.transpile_getattr(target.attr, self)
-		if not isinstance(target_expr, Member):
+		if not isinstance(target_expr, (Identifier, Member, Subscript)):
 			raise TranspileError(
 				"Only simple attribute assignments supported", node=target
 			)
@@ -397,6 +403,8 @@ class Transpiler:
 			raise TranspileError(
 				"Multiple indices not supported in subscript", node=target.slice
 			)
+		if isinstance(target.slice, ast.Slice):
+			raise TranspileError("Slice assignment not supported", node=target.slice)
 
 		obj_expr = self.emit_expr(target.value)
 		op_type = type(node.op)
@@ -405,11 +413,13 @@ class Transpiler:
 				f"Unsupported augmented assignment operator: {op_type.__name__}",
 				node=node,
 			)
-		key_expr = self.emit_expr(target.slice)
+		target_expr = obj_expr.transpile_subscript(target.slice, self)
+		if not isinstance(target_expr, (Identifier, Member, Subscript)):
+			raise TranspileError(
+				"Only simple subscript assignments supported", node=target
+			)
 		value_expr = self.emit_expr(node.value)
-		return Assign(
-			Subscript(obj_expr, key_expr), value_expr, op=ALLOWED_BINOPS[op_type]
-		)
+		return Assign(target_expr, value_expr, op=ALLOWED_BINOPS[op_type])
 
 	def _emit_augmented_attribute_assign(self, node: ast.AugAssign) -> Stmt:
 		"""Emit augmented attribute assignment: obj.attr += x"""
@@ -425,7 +435,7 @@ class Transpiler:
 			)
 
 		target_expr = obj_expr.transpile_getattr(target.attr, self)
-		if not isinstance(target_expr, Member):
+		if not isinstance(target_expr, (Identifier, Member, Subscript)):
 			raise TranspileError(
 				"Only simple attribute assignments supported", node=target
 			)

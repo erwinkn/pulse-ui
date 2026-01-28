@@ -17,6 +17,7 @@ from pulse.transpiler.nodes import (
 	UNDEFINED,
 	Array,
 	Arrow,
+	Assign,
 	Binary,
 	Call,
 	Element,
@@ -517,6 +518,14 @@ class TestArrowEmit:
 			["a", "b"], [Return(Binary(Identifier("a"), "+", Identifier("b")))]
 		)
 		assert emit(arrow) == "(a, b) => { return a + b; }"
+
+
+class TestAssignEmit:
+	"""Test Assign node emission."""
+
+	def test_invalid_target_raises(self):
+		with pytest.raises(TypeError, match="Assign target must be"):
+			Assign(Literal(1), Literal(2))
 
 	def test_if_statement_in_arrow(self):
 		from pulse.transpiler.nodes import If, Return

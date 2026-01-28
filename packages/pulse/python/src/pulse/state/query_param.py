@@ -498,7 +498,10 @@ class QueryParamSync(Disposable):
 			path += "?" + query
 		hash_frag = self._hash_untracked()
 		if hash_frag:
-			path += hash_frag
+			if hash_frag.startswith("#"):
+				path += hash_frag
+			else:
+				path += "#" + hash_frag
 		self.render.send(
 			{
 				"type": "navigate_to",

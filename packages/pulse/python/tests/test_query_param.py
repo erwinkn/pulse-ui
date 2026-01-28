@@ -11,12 +11,16 @@ from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteContext, RouteInfo, RouteTree
 
 
+class MissingType:
+	pass
+
+
 def make_route_info(
-	pathname: str, *, query_params: dict[str, str] | None = None
+	pathname: str, *, query_params: dict[str, str] | None = None, hash: str = ""
 ) -> RouteInfo:
 	return {
 		"pathname": pathname,
-		"hash": "",
+		"hash": hash,
 		"query": "",
 		"queryParams": query_params or {},
 		"pathParams": {},
@@ -76,6 +80,19 @@ class TestQueryParam:
 			route_ctx.update(make_route_info("/", query_params={"q": "world"}))
 			flush_effects()
 			assert state.q == "world"
+
+	def test_query_param_string_annotation_with_unresolved_type(self):
+		class QState(ps.State):
+			bad: "MissingType[int]" = ""
+			q: "ps.QueryParam[str]" = ""
+
+		app, session, route_ctx = make_context(
+			make_route_info("/", query_params={"q": "hello"})
+		)
+		session.connect(lambda _msg: None)
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			state = QState()
+			assert state.q == "hello"
 
 	def test_list_parsing_and_serialization(self):
 		class TagState(ps.State):
@@ -145,6 +162,28 @@ class TestQueryParam:
 		query = parse_qs(parsed.query)
 		assert "q" not in query
 		assert query["other"] == ["1"]
+
+	def test_hash_preserved_in_url(self):
+		class QState(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		app, session, route_ctx = make_context(
+			make_route_info("/", query_params={}, hash="section1")
+		)
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
+
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			state = QState()
+			messages.clear()
+			state.q = "next"
+			flush_effects()
+
+		assert len(messages) == 1
+		msg = messages[0]
+		assert msg["type"] == "navigate_to"
+		parsed = urlparse(str(msg["path"]))
+		assert parsed.fragment == "section1"
 
 	def test_datetime_naive_warns(self):
 		class TimeState(ps.State):

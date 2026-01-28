@@ -9,6 +9,7 @@ import sys
 from abc import ABC, ABCMeta
 from collections.abc import Iterator
 from enum import IntEnum
+from types import SimpleNamespace
 from typing import Any, get_type_hints, override
 
 from pulse.helpers import Disposable
@@ -65,18 +66,30 @@ class StateMeta(ABCMeta):
 			globalns = module.__dict__ if module else {}
 			if "QueryParam" not in globalns:
 				globalns["QueryParam"] = QueryParam
+			localns = dict(cls.__dict__)
 			try:
 				hints = get_type_hints(
 					cls,
 					globalns=globalns,
-					localns=dict(cls.__dict__),
+					localns=localns,
 				)
-			except Exception as exc:
-				raise TypeError(
-					f"Failed to resolve type annotations for {cls.__name__}: {exc}"
-				) from exc
-			for key, value in declared_annotations.items():
-				resolved_annotations[key] = hints.get(key, value)
+			except Exception:
+				hints = None
+			if hints is not None:
+				for key, value in declared_annotations.items():
+					resolved_annotations[key] = hints.get(key, value)
+			else:
+				for key, value in declared_annotations.items():
+					try:
+						holder = SimpleNamespace(__annotations__={key: value})
+						resolved = get_type_hints(
+							holder,
+							globalns=globalns,
+							localns=localns,
+						).get(key, value)
+					except Exception:
+						resolved = value
+					resolved_annotations[key] = resolved
 
 		# 1) Turn annotated fields into StateProperty descriptors
 		for attr_name, annotation in resolved_annotations.items():

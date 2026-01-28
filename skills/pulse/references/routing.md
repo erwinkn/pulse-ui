@@ -106,17 +106,17 @@ Get current route information inside components:
 ```python
 @ps.component
 def UserProfile():
-    ctx = ps.route()
+    info = ps.route()
 
     # Properties
-    ctx.pathname      # "/users/123" - current URL path
-    ctx.hash          # "section1" - URL hash (without #)
-    ctx.query         # "page=2&sort=name" - raw query string (without ?)
-    ctx.queryParams   # {"page": "2", "sort": "name"} - parsed query params
-    ctx.pathParams    # {"id": "123"} - dynamic path parameters
-    ctx.catchall      # ["a", "b"] - catch-all segments as list
+    info["pathname"]      # "/users/123" - current URL path
+    info["hash"]          # "section1" - URL hash (without #)
+    info["query"]         # "page=2&sort=name" - raw query string (without ?)
+    info["queryParams"]   # {"page": "2", "sort": "name"} - parsed query params
+    info["pathParams"]    # {"id": "123"} - dynamic path parameters
+    info["catchall"]      # ["a", "b"] - catch-all segments as list
 
-    return ps.div(f"User ID: {ctx.pathParams.get('id')}")
+    return ps.div(f"User ID: {info['pathParams'].get('id')}")
 ```
 
 ### Example: Dynamic Route Info
@@ -126,13 +126,24 @@ def UserProfile():
 def dynamic_route():
     route = ps.route()
     return ps.ul(
-        ps.li(f"Pathname: {route.pathname}"),
-        ps.li(f"Hash: {route.hash}"),
-        ps.li(f"Query: {route.query}"),
-        ps.li(f"Query Params: {route.queryParams}"),
-        ps.li(f"Path Params: {route.pathParams}"),
-        ps.li(f"Catchall: {route.catchall}"),
+        ps.li(f"Pathname: {route['pathname']}"),
+        ps.li(f"Hash: {route['hash']}"),
+        ps.li(f"Query: {route['query']}"),
+        ps.li(f"Query Params: {route['queryParams']}"),
+        ps.li(f"Path Params: {route['pathParams']}"),
+        ps.li(f"Catchall: {route['catchall']}"),
     )
+```
+
+### `ps.pulse_route()`
+
+Get the current route definition inside components:
+
+```python
+@ps.component
+def route_meta():
+    definition = ps.pulse_route()
+    return ps.div(f"Route: {definition.path}")
 ```
 
 ## Navigation APIs

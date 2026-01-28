@@ -43,7 +43,7 @@ def ProtectedPage():
     # Redirect unauthenticated users
     if not user:
         route = ps.route()
-        ps.redirect(f"/login?next={route.pathname}")
+        ps.redirect(f"/login?next={route['pathname']}")
         return None
 
     return ps.div()[
@@ -63,7 +63,7 @@ import pulse as ps
 @ps.component
 def LoginPage():
     route = ps.route()
-    next_path = route.queryParams.get("next") or "/"
+    next_path = route["queryParams"].get("next") or "/"
 
     return ps.div()[
         ps.h2("Sign in"),
@@ -93,7 +93,7 @@ def Home():
 @ps.component
 def Login():
     route = ps.route()
-    next_path = route.queryParams.get("next") or "/"
+    next_path = route["queryParams"].get("next") or "/"
     return ps.a(
         "Sign in with Microsoft",
         href=f"{ps.server_address()}/auth/login?next={next_path}",

@@ -1236,6 +1236,9 @@ from pulse.hooks.runtime import (
 	not_found as not_found,
 )
 from pulse.hooks.runtime import (
+	pulse_route as pulse_route,
+)
+from pulse.hooks.runtime import (
 	redirect as redirect,
 )
 from pulse.hooks.runtime import (

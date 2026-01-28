@@ -157,8 +157,8 @@ def QueryParamDemo():
 				className="rounded border border-slate-800 bg-slate-900 p-3 text-xs"
 			)[
 				ps.div("Route info", className="text-slate-400"),
-				ps.div(f"query: {route.query}"),
-				ps.div(f"queryParams: {route.queryParams}"),
+				ps.div(f"query: {route['query']}"),
+				ps.div(f"queryParams: {route['queryParams']}"),
 			],
 		],
 	]

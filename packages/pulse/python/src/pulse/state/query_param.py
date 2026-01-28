@@ -22,13 +22,15 @@ from urllib.parse import urlencode
 
 from pulse.context import PulseContext
 from pulse.helpers import Disposable, values_equal
-from pulse.reactive import Effect, Scope, Signal
+from pulse.reactive import Effect, Scope, Signal, Untrack
 from pulse.reactive_extensions import reactive, unwrap
 from pulse.state.property import InitializableProperty, StateProperty
 
 T = TypeVar("T")
 
 if TYPE_CHECKING:
+	from pulse.render_session import RenderSession
+	from pulse.routing import RouteContext
 	from pulse.state.state import State
 
 
@@ -225,8 +227,6 @@ def _parse_query_param_value(
 	param: str,
 ) -> Any:
 	if raw is None:
-		if codec.optional:
-			return None
 		return default
 	if raw == "" and codec.optional:
 		return None
@@ -293,7 +293,9 @@ def _serialize_query_param_value(
 		assert codec.item is not None
 		items = cast(list[Any], value)
 		if len(items) == 0:
-			return None
+			if values_equal(value, default):
+				return None
+			return ""
 		parts: list[str] = []
 		for item in items:
 			if item is None:
@@ -353,8 +355,9 @@ class QueryParamProperty(StateProperty, InitializableProperty):
 			raise RuntimeError(
 				"QueryParam properties require a route render context. Create the state inside a component render."
 			)
-		sync = _get_query_param_sync(ctx.render, ctx.route)
-		sync.register(state, name, self)
+		sync = ctx.route.query_param_sync
+		registration = sync.register(state, name, self)
+		setattr(state, f"_query_param_reg_{name}", registration)
 
 
 @dataclass
@@ -374,14 +377,27 @@ class QueryParamBinding:
 		return self.prop.codec
 
 
+class QueryParamRegistration(Disposable):
+	_sync: "QueryParamSync"
+	_param: str
+
+	def __init__(self, sync: "QueryParamSync", param: str) -> None:
+		self._sync = sync
+		self._param = param
+
+	@override
+	def dispose(self) -> None:
+		self._sync.unregister(self._param)
+
+
 class QueryParamSync(Disposable):
-	route: Any
-	render: Any
+	route: "RouteContext"
+	render: "RenderSession"
 	_bindings: dict[str, QueryParamBinding]
 	_route_effect: Effect | None
 	_state_effect: Effect | None
 
-	def __init__(self, render: Any, route: Any) -> None:
+	def __init__(self, render: "RenderSession", route: "RouteContext") -> None:
 		self.render = render
 		self.route = route
 		self._bindings = {}
@@ -390,7 +406,7 @@ class QueryParamSync(Disposable):
 
 	def register(
 		self, state: "State", attr_name: str, prop: QueryParamProperty
-	) -> None:
+	) -> QueryParamRegistration:
 		param = prop.param_name
 		if not param:
 			raise RuntimeError("QueryParam param name was not resolved")
@@ -406,6 +422,19 @@ class QueryParamSync(Disposable):
 		self._ensure_effects()
 		self._apply_route_to_binding(binding)
 		self._prime_effects()
+		return QueryParamRegistration(self, param)
+
+	def unregister(self, param: str) -> None:
+		binding = self._bindings.pop(param, None)
+		if binding is None:
+			return
+		if not self._bindings:
+			if self._route_effect:
+				self._route_effect.dispose()
+				self._route_effect = None
+			if self._state_effect:
+				self._state_effect.dispose()
+				self._state_effect = None
 
 	def _ensure_effects(self) -> None:
 		if self._route_effect is None or self._state_effect is None:
@@ -429,27 +458,6 @@ class QueryParamSync(Disposable):
 		if self._state_effect:
 			self._state_effect.run()
 
-	def _query_params_untracked(self) -> dict[str, str]:
-		try:
-			query_params = dict.__getitem__(self.route.info, "queryParams")
-		except KeyError:
-			return {}
-		if isinstance(query_params, dict):
-			return dict(cast(dict[str, str], query_params))
-		return dict(cast(Mapping[str, str], query_params))
-
-	def _hash_untracked(self) -> str:
-		try:
-			return dict.__getitem__(self.route.info, "hash")
-		except KeyError:
-			return ""
-
-	def _pathname_untracked(self) -> str:
-		try:
-			return dict.__getitem__(self.route.info, "pathname")
-		except KeyError:
-			return "/"
-
 	def _apply_route_to_binding(self, binding: QueryParamBinding) -> None:
 		query_params = self.route.queryParams
 		raw = query_params.get(binding.param)
@@ -471,7 +479,13 @@ class QueryParamSync(Disposable):
 			self._apply_route_to_binding(binding)
 
 	def _sync_to_route(self) -> None:
-		query_params = self._query_params_untracked()
+		with Untrack():
+			info = self.route.info
+			raw_params = info["queryParams"]
+			current_params = dict(cast(Mapping[str, str], raw_params))
+			pathname = info["pathname"]
+			hash_frag = info["hash"]
+		query_params = dict(current_params)
 		for binding in self._bindings.values():
 			signal = binding.signal()
 			value = signal.read()
@@ -489,14 +503,12 @@ class QueryParamSync(Disposable):
 			else:
 				query_params[binding.param] = serialized
 
-		current_params = self._query_params_untracked()
 		if query_params == current_params:
 			return
-		path = self._pathname_untracked()
+		path = pathname
 		query = urlencode(query_params)
 		if query:
 			path += "?" + query
-		hash_frag = self._hash_untracked()
 		if hash_frag:
 			if hash_frag.startswith("#"):
 				path += hash_frag
@@ -520,12 +532,3 @@ class QueryParamSync(Disposable):
 			self._state_effect.dispose()
 			self._state_effect = None
 		self._bindings.clear()
-
-
-def _get_query_param_sync(render: Any, route: Any) -> QueryParamSync:
-	try:
-		sync = route._query_param_sync
-	except AttributeError:
-		sync = QueryParamSync(render, route)
-		route._query_param_sync = sync
-	return sync

@@ -35,7 +35,7 @@ def make_context(route_info: RouteInfo):
 	route = Route("/", ps.component(render))
 	routes = RouteTree([route])
 	session = RenderSession("test", routes)
-	route_ctx = RouteContext(route_info, route)
+	route_ctx = RouteContext(route_info, route, session)
 	app = ps.App(routes=[route])
 	return app, session, route_ctx
 
@@ -73,13 +73,16 @@ class TestQueryParam:
 		app, session, route_ctx = make_context(
 			make_route_info("/", query_params={"q": "hello"})
 		)
-		session.connect(lambda _msg: None)
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			state = QState()
 			assert state.q == "hello"
+			messages.clear()
 			route_ctx.update(make_route_info("/", query_params={"q": "world"}))
 			flush_effects()
 			assert state.q == "world"
+		assert messages == []
 
 	def test_query_param_string_annotation_with_unresolved_type(self):
 		class QState(ps.State):
@@ -162,6 +165,37 @@ class TestQueryParam:
 		query = parse_qs(parsed.query)
 		assert "q" not in query
 		assert query["other"] == ["1"]
+
+	def test_optional_missing_uses_default(self):
+		class QState(ps.State):
+			q: ps.QueryParam[str | None] = "hello"
+
+		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+		session.connect(lambda _msg: None)
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			state = QState()
+			assert state.q == "hello"
+
+	def test_empty_list_serializes_when_not_default(self):
+		class TagState(ps.State):
+			tags: ps.QueryParam[list[str]] = ["alpha"]
+
+		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
+
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			state = TagState()
+			messages.clear()
+			state.tags = []
+			flush_effects()
+
+		assert len(messages) == 1
+		msg = messages[0]
+		assert msg["type"] == "navigate_to"
+		parsed = urlparse(str(msg["path"]))
+		query = parse_qs(parsed.query, keep_blank_values=True)
+		assert query["tags"] == [""]
 
 	def test_hash_preserved_in_url(self):
 		class QState(ps.State):

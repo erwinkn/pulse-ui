@@ -13,7 +13,7 @@ from typing import (
 from pulse.context import PulseContext
 from pulse.hooks.core import HOOK_CONTEXT
 from pulse.reactive_extensions import ReactiveDict
-from pulse.routing import RouteContext
+from pulse.routing import Layout, Route, RouteInfo
 from pulse.state.state import State
 
 
@@ -47,11 +47,11 @@ class NotFoundInterrupt(Exception):
 	pass
 
 
-def route() -> RouteContext:
-	"""Get the current route context.
+def route() -> RouteInfo:
+	"""Get the current route info.
 
 	Returns:
-		RouteContext: Object with access to route parameters, path, and query.
+		RouteInfo: Mapping with access to route parameters, path, and query.
 
 	Raises:
 		RuntimeError: If called outside of a component render context.
@@ -61,8 +61,8 @@ def route() -> RouteContext:
 	```python
 	def user_page():
 	    r = ps.route()
-	    user_id = r.params.get("user_id")  # From /users/:user_id
-	    page = r.query.get("page", "1")    # From ?page=2
+	    user_id = r["pathParams"].get("user_id")  # From /users/:user_id
+	    page = r["queryParams"].get("page", "1")  # From ?page=2
 	    return m.Text(f"User {user_id}, Page {page}")
 	```
 	"""
@@ -71,7 +71,24 @@ def route() -> RouteContext:
 		raise RuntimeError(
 			"`pulse.route` can only be called within a component during rendering."
 		)
-	return ctx.route
+	return ctx.route.info
+
+
+def pulse_route() -> Route | Layout:
+	"""Get the current route definition.
+
+	Returns:
+		Route | Layout: The active route or layout definition.
+
+	Raises:
+		RuntimeError: If called outside of a component render context.
+	"""
+	ctx = PulseContext.get()
+	if not ctx or not ctx.route:
+		raise RuntimeError(
+			"`pulse.pulse_route` can only be called within a component during rendering."
+		)
+	return ctx.route.pulse_route
 
 
 def session() -> ReactiveDict[str, Any]:

@@ -355,7 +355,7 @@ def counter():
 				onClick=lambda: ps.navigate("/counter/details"),
 				className="link",
 			)
-			if route_info.pathname == "/counter"
+			if route_info["pathname"] == "/counter"
 			else ps.Link("Hide Nested Route", to="/counter", className="link"),
 			className="text-center",
 		),
@@ -480,12 +480,12 @@ def dynamic_route():
 	return ps.div(
 		ps.h2("Dynamic Route Info", className="text-xl font-bold mb-2"),
 		ps.ul(
-			ps.li(f"Pathname: {route.pathname}"),
-			ps.li(f"Hash: {route.hash}"),
-			ps.li(f"Query: {route.query}"),
-			ps.li(f"Query Params: {route.queryParams}"),
-			ps.li(f"Path Params: {route.pathParams}"),
-			ps.li(f"Catchall: {route.catchall}"),
+			ps.li(f"Pathname: {route['pathname']}"),
+			ps.li(f"Hash: {route['hash']}"),
+			ps.li(f"Query: {route['query']}"),
+			ps.li(f"Query Params: {route['queryParams']}"),
+			ps.li(f"Path Params: {route['pathParams']}"),
+			ps.li(f"Catchall: {route['catchall']}"),
 			className="list-disc ml-6",
 		),
 		className="bg-yellow-50 p-4 rounded-lg",

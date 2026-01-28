@@ -368,7 +368,8 @@ export class VDOMRenderer {
 		for (const entry of Array.from(this.#callbackEntries)) {
 			this.#clearPending(entry);
 		}
-		this.#callbackEntries.clear();
+		// Keep entries so StrictMode cleanup (no real unmount) can still cancel
+		// future debounced calls on the reused renderer instance.
 	}
 
 	renderNode(node: VDOMNode, currentPath = ""): ReactNode {

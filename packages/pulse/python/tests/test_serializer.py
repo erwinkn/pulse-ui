@@ -103,6 +103,16 @@ def test_dates_and_shared_references_v3():
 	assert parsed["when"] is parsed["same"]
 
 
+def test_date_roundtrip_v4():
+	day = dt.date(2024, 1, 2)
+	data = {"day": day}
+	payload = serialize(data)
+	parsed = deserialize(payload)
+
+	assert isinstance(parsed["day"], dt.date)
+	assert parsed["day"] == day
+
+
 def test_unsupported_values_raise_v3():
 	with pytest.raises(TypeError):
 		serialize({"x": lambda: None})

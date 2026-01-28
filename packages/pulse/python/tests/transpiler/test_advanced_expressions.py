@@ -124,6 +124,15 @@ class TestLambda:
 		code = emit(fn)
 		assert code == "function get_const_1() {\nreturn () => 42;\n}"
 
+	def test_lambda_in_subscript_target(self):
+		@javascript
+		def set_item(arr):
+			arr[lambda x: x] = 1
+
+		fn = set_item.transpile()
+		code = emit(fn)
+		assert code == "function set_item_1(arr) {\narr[x => x] = 1;\n}"
+
 
 # =============================================================================
 # List Comprehensions
@@ -190,6 +199,17 @@ class TestComprehensions:
 		assert (
 			code
 			== "function double_values_1(pairs) {\nreturn new Map(pairs.map(([k, v]) => [k, v * 2]));\n}"
+		)
+
+	def test_list_comp_in_subscript_target(self):
+		@javascript
+		def set_item(obj, items: Iterable[int]):
+			obj[[x for x in items]] = 1
+
+		fn = set_item.transpile()
+		code = emit(fn)
+		assert (
+			code == "function set_item_1(obj, items) {\nobj[items.map(x => x)] = 1;\n}"
 		)
 
 

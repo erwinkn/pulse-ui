@@ -146,6 +146,13 @@ class ScopeAnalyzer(ast.NodeVisitor):
 				if isinstance(elt, ast.Name):
 					self._add_local(elt.id)
 
+	def _visit_target_expr(self, target: ast.expr) -> None:
+		if isinstance(target, (ast.Tuple, ast.List)):
+			for elt in target.elts:
+				self._visit_target_expr(elt)
+			return
+		self.visit(target)
+
 	def _analyze_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
 		scope = self._new_scope(
 			node,
@@ -225,12 +232,14 @@ class ScopeAnalyzer(ast.NodeVisitor):
 		for target in node.targets:
 			if isinstance(target, (ast.Name, ast.Tuple, ast.List)):
 				self._add_targets(target)
+			self._visit_target_expr(target)
 		self.visit(node.value)
 
 	@override
 	def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
 		if isinstance(node.target, (ast.Name, ast.Tuple, ast.List)):
 			self._add_targets(node.target)
+		self._visit_target_expr(node.target)
 		if node.value is not None:
 			self.visit(node.value)
 
@@ -238,12 +247,14 @@ class ScopeAnalyzer(ast.NodeVisitor):
 	def visit_AugAssign(self, node: ast.AugAssign) -> None:
 		if isinstance(node.target, (ast.Name, ast.Tuple, ast.List)):
 			self._add_targets(node.target)
+		self._visit_target_expr(node.target)
 		self.visit(node.value)
 
 	@override
 	def visit_For(self, node: ast.For) -> None:
 		if isinstance(node.target, (ast.Name, ast.Tuple, ast.List)):
 			self._add_targets(node.target)
+		self._visit_target_expr(node.target)
 		self.visit(node.iter)
 		for stmt in node.body:
 			self.visit(stmt)
@@ -266,6 +277,8 @@ class ScopeAnalyzer(ast.NodeVisitor):
 				item.optional_vars, (ast.Name, ast.Tuple, ast.List)
 			):
 				self._add_targets(item.optional_vars)
+			if item.optional_vars is not None:
+				self._visit_target_expr(item.optional_vars)
 			self.visit(item.context_expr)
 		for stmt in node.body:
 			self.visit(stmt)

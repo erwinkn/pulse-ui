@@ -23,7 +23,7 @@ from urllib.parse import urlencode
 from pulse.context import PulseContext
 from pulse.helpers import Disposable, values_equal
 from pulse.reactive import Effect, Scope, Signal
-from pulse.reactive_extensions import reactive
+from pulse.reactive_extensions import reactive, unwrap
 from pulse.state.property import InitializableProperty, StateProperty
 
 T = TypeVar("T")
@@ -315,6 +315,10 @@ def extract_query_param(annotation: Any) -> tuple[Any, bool]:
 	origin = get_origin(annotation)
 	if origin is QueryParam:
 		args = get_args(annotation)
+		if len(args) != 1:
+			raise TypeError(
+				"QueryParam expects a single type argument (e.g. QueryParam[str])."
+			)
 		return args[0], True
 	return annotation, False
 
@@ -323,6 +327,7 @@ class QueryParamProperty(StateProperty, InitializableProperty):
 	value_type: Any
 	param_name: str
 	codec: QueryParamCodec
+	default_value: Any
 
 	def __init__(
 		self,
@@ -330,6 +335,7 @@ class QueryParamProperty(StateProperty, InitializableProperty):
 		default: Any,
 		value_type: Any,
 	):
+		self.default_value = unwrap(default, untrack=True)
 		super().__init__(name, default)
 		self.value_type = value_type
 		self.param_name = name
@@ -362,7 +368,7 @@ class QueryParamBinding:
 		return self.prop.get_signal(self.state)
 
 	def default(self) -> Any:
-		return self.prop.default
+		return self.prop.default_value
 
 	def codec(self) -> QueryParamCodec:
 		return self.prop.codec
@@ -469,10 +475,13 @@ class QueryParamSync(Disposable):
 		for binding in self._bindings.values():
 			signal = binding.signal()
 			value = signal.read()
+			codec = binding.codec()
+			if codec.kind == "list" and value is not None:
+				value = unwrap(value)
 			serialized = _serialize_query_param_value(
 				value,
 				default=binding.default(),
-				codec=binding.codec(),
+				codec=codec,
 				param=binding.param,
 			)
 			if serialized is None:

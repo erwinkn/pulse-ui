@@ -101,6 +101,51 @@ class TestQueryParam:
 		query = parse_qs(parsed.query)
 		assert query["tags"] == ["x\\,y,z\\\\w"]
 
+	def test_list_in_place_mutation_updates_url(self):
+		class TagState(ps.State):
+			tags: ps.QueryParam[list[str]] = []
+
+		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
+
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			state = TagState()
+			messages.clear()
+			state.tags.append("alpha")
+			flush_effects()
+
+		assert len(messages) == 1
+		msg = messages[0]
+		assert msg["type"] == "navigate_to"
+		parsed = urlparse(str(msg["path"]))
+		query = parse_qs(parsed.query)
+		assert query["tags"] == ["alpha"]
+
+	def test_default_removal(self):
+		class QState(ps.State):
+			q: ps.QueryParam[str] = "hello"
+
+		app, session, route_ctx = make_context(
+			make_route_info("/", query_params={"q": "world", "other": "1"})
+		)
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
+
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			state = QState()
+			messages.clear()
+			state.q = "hello"
+			flush_effects()
+
+		assert len(messages) == 1
+		msg = messages[0]
+		assert msg["type"] == "navigate_to"
+		parsed = urlparse(str(msg["path"]))
+		query = parse_qs(parsed.query)
+		assert "q" not in query
+		assert query["other"] == ["1"]
+
 	def test_datetime_naive_warns(self):
 		class TimeState(ps.State):
 			ts: ps.QueryParam[datetime] = datetime(2024, 1, 1, tzinfo=timezone.utc)

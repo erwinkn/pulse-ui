@@ -9,7 +9,7 @@ import sys
 from abc import ABC, ABCMeta
 from collections.abc import Iterator
 from enum import IntEnum
-from typing import Any, override
+from typing import Any, get_type_hints, override
 
 from pulse.helpers import Disposable
 from pulse.reactive import Computed, Effect, Scope, Signal
@@ -57,38 +57,50 @@ class StateMeta(ABCMeta):
 		namespace: dict[str, Any],
 		**kwargs: Any,
 	):
-		annotations = namespace.get("__annotations__", {})
-		if annotations:
-			module = namespace.get("__module__")
-			globalns = sys.modules[module].__dict__ if module in sys.modules else {}
+		declared_annotations = dict(namespace.get("__annotations__", {}))
+		cls = super().__new__(mcs, name, bases, namespace)
+		resolved_annotations: dict[str, Any] = {}
+		if declared_annotations:
+			module = sys.modules.get(cls.__module__)
+			globalns = module.__dict__ if module else {}
 			if "QueryParam" not in globalns:
 				globalns["QueryParam"] = QueryParam
-			for key, value in list(annotations.items()):
-				if isinstance(value, str) and "QueryParam" in value:
-					try:
-						annotations[key] = eval(value, globalns, namespace)
-					except Exception:
-						pass
+			try:
+				hints = get_type_hints(
+					cls,
+					globalns=globalns,
+					localns=dict(cls.__dict__),
+				)
+			except Exception as exc:
+				raise TypeError(
+					f"Failed to resolve type annotations for {cls.__name__}: {exc}"
+				) from exc
+			for key, value in declared_annotations.items():
+				resolved_annotations[key] = hints.get(key, value)
 
 		# 1) Turn annotated fields into StateProperty descriptors
-		for attr_name, annotation in annotations.items():
+		for attr_name, annotation in resolved_annotations.items():
 			# Do not wrap private/dunder attributes as reactive
 			if attr_name.startswith("_"):
 				continue
-			default_value = namespace.get(attr_name)
+			default_value = cls.__dict__.get(attr_name)
 			value_type, is_query_param = extract_query_param(annotation)
 			if is_query_param:
-				annotations[attr_name] = value_type
-				namespace[attr_name] = QueryParamProperty(
+				cls.__annotations__[attr_name] = value_type
+				prop = QueryParamProperty(
 					attr_name,
 					default_value,
 					value_type,
 				)
+				setattr(cls, attr_name, prop)
+				prop.__set_name__(cls, attr_name)
 			else:
-				namespace[attr_name] = StateProperty(attr_name, default_value)
+				prop = StateProperty(attr_name, default_value)
+				setattr(cls, attr_name, prop)
+				prop.__set_name__(cls, attr_name)
 
 		# 2) Turn non-annotated plain values into StateProperty descriptors
-		for attr_name, value in list(namespace.items()):
+		for attr_name, value in list(cls.__dict__.items()):
 			# Do not wrap private/dunder attributes as reactive
 			if attr_name.startswith("_"):
 				continue
@@ -104,9 +116,11 @@ class StateMeta(ABCMeta):
 			):
 				continue
 			# Convert plain class var into a StateProperty
-			namespace[attr_name] = StateProperty(attr_name, value)
+			prop = StateProperty(attr_name, value)
+			setattr(cls, attr_name, prop)
+			prop.__set_name__(cls, attr_name)
 
-		return super().__new__(mcs, name, bases, namespace)
+		return cls
 
 	@override
 	def __call__(cls, *args: Any, **kwargs: Any):

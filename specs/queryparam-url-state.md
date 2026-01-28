@@ -4,12 +4,12 @@
 Enable state attributes to sync bidirectionally with URL query params by annotating state fields with `ps.QueryParam[...]`.
 
 ## API
-Use `ps.QueryParam[T]` or `ps.QueryParam[T, "param_name"]` in `ps.State` annotations.
+Use `ps.QueryParam[T]` in `ps.State` annotations.
 
 ```python
 class Filters(ps.State):
     q: ps.QueryParam[str] = ""
-    page: ps.QueryParam[int, "p"] = 1
+    page: ps.QueryParam[int] = 1
     debug: ps.QueryParam[bool] = False
     org: ps.QueryParam[str | None] = None
     tags: ps.QueryParam[list[str]] = []

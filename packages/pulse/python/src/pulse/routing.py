@@ -1,11 +1,15 @@
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TypedDict, cast, override
+from typing import TYPE_CHECKING, TypedDict, cast, override
 
 from pulse.component import Component
 from pulse.env import env
 from pulse.reactive_extensions import ReactiveDict
+
+if TYPE_CHECKING:
+	from pulse.render_session import RenderSession
+	from pulse.state.query_param import QueryParamSync
 
 # angle brackets cannot appear in a regular URL path, this ensures no name conflicts
 LAYOUT_INDICATOR = "<layout>"
@@ -516,7 +520,8 @@ class RouteContext:
 	"""Runtime context for the current route.
 
 	Provides reactive access to the current route's URL components and
-	parameters. Accessible via `ps.route()` in components.
+	parameters. Available via `ps.route()` (route info) and `ps.pulse_route()`
+	(route definition) in components.
 
 	Attributes:
 		info: Current route info (reactive, auto-updates on navigation).
@@ -534,18 +539,27 @@ class RouteContext:
 		```python
 		@ps.component
 		def UserProfile():
-			ctx = ps.route()
-			user_id = ctx.pathParams.get("id")
+			info = ps.route()
+			user_id = info["pathParams"].get("id")
 			return ps.div(f"User: {user_id}")
 		```
 	"""
 
 	info: RouteInfo
 	pulse_route: Route | Layout
+	query_param_sync: "QueryParamSync"
 
-	def __init__(self, info: RouteInfo, pulse_route: Route | Layout):
+	def __init__(
+		self,
+		info: RouteInfo,
+		pulse_route: Route | Layout,
+		render: "RenderSession",
+	):
 		self.info = cast(RouteInfo, cast(object, ReactiveDict(info)))
 		self.pulse_route = pulse_route
+		from pulse.state.query_param import QueryParamSync
+
+		self.query_param_sync = QueryParamSync(render, self)
 
 	def update(self, info: RouteInfo) -> None:
 		"""Update the route info with new values.

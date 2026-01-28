@@ -1236,6 +1236,9 @@ from pulse.hooks.runtime import (
 	not_found as not_found,
 )
 from pulse.hooks.runtime import (
+	pulse_route as pulse_route,
+)
+from pulse.hooks.runtime import (
 	redirect as redirect,
 )
 from pulse.hooks.runtime import (
@@ -1433,7 +1436,8 @@ from pulse.serializer import deserialize as deserialize
 from pulse.serializer import serialize as serialize
 
 # State and routing
-from pulse.state import State as State
+from pulse.state.query_param import QueryParam as QueryParam
+from pulse.state.state import State as State
 
 # Transpiler v2
 from pulse.transpiler.function import JsFunction as JsFunction

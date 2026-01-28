@@ -185,6 +185,18 @@ def expressions(x, y):
     return result
 ```
 
+### Subscript access
+
+```python
+@ps.javascript
+def last(arr):
+    return arr[-1]
+
+# -> return arr[-1];
+```
+
+Negative indices are not rewritten. Use `.at(-1)` or `arr[arr.length - 1]` for array-last behavior.
+
 ### List and Dict Comprehensions
 
 ```python

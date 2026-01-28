@@ -54,10 +54,18 @@ from pulse_mantine.core.combobox.combobox import ComboboxHeader as ComboboxHeade
 from pulse_mantine.core.combobox.combobox import (
 	ComboboxHiddenInput as ComboboxHiddenInput,
 )
+from pulse_mantine.core.combobox.combobox import ComboboxInternal as ComboboxInternal
 from pulse_mantine.core.combobox.combobox import ComboboxOption as ComboboxOption
 from pulse_mantine.core.combobox.combobox import ComboboxOptions as ComboboxOptions
 from pulse_mantine.core.combobox.combobox import ComboboxSearch as ComboboxSearch
+from pulse_mantine.core.combobox.combobox import ComboboxStore as ComboboxStore
 from pulse_mantine.core.combobox.combobox import ComboboxTarget as ComboboxTarget
+from pulse_mantine.core.combobox.combobox import (
+	DropdownEventSource as DropdownEventSource,
+)
+from pulse_mantine.core.combobox.combobox import (
+	SelectedOptionTarget as SelectedOptionTarget,
+)
 from pulse_mantine.core.combobox.multi_select import MultiSelect as MultiSelect
 from pulse_mantine.core.combobox.pill import Pill as Pill
 from pulse_mantine.core.combobox.pill import PillGroup as PillGroup
@@ -123,7 +131,6 @@ from pulse_mantine.core.feedback.notifications import (
 from pulse_mantine.core.feedback.notifications import (
 	NotificationRootCSSVariables as NotificationRootCSSVariables,
 )
-from pulse_mantine.core.feedback.notifications import Notifications as Notifications
 from pulse_mantine.core.feedback.notifications import (
 	NotificationsApi as NotificationsApi,
 )

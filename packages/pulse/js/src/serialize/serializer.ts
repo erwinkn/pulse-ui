@@ -126,11 +126,15 @@ export function deserialize<Data extends Serializable = Serializable>(
 			if (typeof value !== "string") {
 				throw new Error("Date payload must be an ISO string");
 			}
-			if (isDateLiteral(value)) {
-				const [y, m, d] = value.split("-").map(Number);
+			const literal = parseDateLiteral(value);
+			if (literal) {
+				const [y, m, d] = literal;
 				const dt = new Date(Date.UTC(y, m - 1, d));
 				objects.push(dt);
 				return dt;
+			}
+			if (isDateLiteral(value)) {
+				throw new Error(`Invalid date literal: ${value}`);
 			}
 			const dt = new Date(value);
 			objects.push(dt);
@@ -196,6 +200,33 @@ export function deserialize<Data extends Serializable = Serializable>(
 	return reconstruct(data);
 }
 
+const DATE_LITERAL_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 function isDateLiteral(value: string): boolean {
-	return value.length === 10 && value[4] === "-" && value[7] === "-";
+	return DATE_LITERAL_RE.test(value);
+}
+
+function parseDateLiteral(value: string): [number, number, number] | null {
+	if (!isDateLiteral(value)) {
+		return null;
+	}
+	const [yStr, mStr, dStr] = value.split("-");
+	const y = Number(yStr);
+	const m = Number(mStr);
+	const d = Number(dStr);
+	if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) {
+		return null;
+	}
+	if (m < 1 || m > 12 || d < 1 || d > 31) {
+		return null;
+	}
+	const dt = new Date(Date.UTC(y, m - 1, d));
+	if (
+		dt.getUTCFullYear() !== y ||
+		dt.getUTCMonth() !== m - 1 ||
+		dt.getUTCDate() !== d
+	) {
+		return null;
+	}
+	return [y, m, d];
 }

@@ -146,6 +146,10 @@ describe("v4 serialization", () => {
 		expect(parsed).toBeInstanceOf(Date);
 		expect(parsed.toISOString()).toBe("2024-01-02T00:00:00.000Z");
 	});
+	it("throws on invalid date literals", () => {
+		const ser: Serialized = [[[], [0], [], []], "2024-02-30"];
+		expect(() => deserialize(ser)).toThrow("Invalid date literal: 2024-02-30");
+	});
 
 	it("throws on unsupported values (function/symbol)", () => {
 		expect(() => serialize({ x: () => {} } as any)).toThrow();

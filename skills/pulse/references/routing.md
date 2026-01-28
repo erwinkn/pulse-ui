@@ -193,7 +193,7 @@ Trigger 404 during render:
 @ps.component
 def user_page():
     ctx = ps.route()
-    user = db.get_user(ctx.pathParams["id"])
+    user = db.get_user(ctx["pathParams"]["id"])
     if not user:
         ps.not_found()  # Shows 404 page
 
@@ -239,8 +239,8 @@ ps.Link(to="/about", className="btn")[
 @ps.component
 def search_page():
     ctx = ps.route()
-    query = ctx.queryParams.get("q", "")
-    page = int(ctx.queryParams.get("page", "1"))
+    query = ctx["queryParams"].get("q", "")
+    page = int(ctx["queryParams"].get("page", "1"))
     return ps.div(f"Searching for: {query}, page {page}")
 ```
 
@@ -282,14 +282,14 @@ ps.Route("/products/:id/:variant?", render=product_page)
 @ps.component
 def user_page():
     ctx = ps.route()
-    user_id = ctx.pathParams.get("id")
+    user_id = ctx["pathParams"].get("id")
     return ps.div(f"User: {user_id}")
 
 @ps.component
 def post_page():
     ctx = ps.route()
-    user_id = ctx.pathParams["user_id"]
-    post_id = ctx.pathParams["post_id"]
+    user_id = ctx["pathParams"]["user_id"]
+    post_id = ctx["pathParams"]["post_id"]
     return ps.div(f"Post {post_id} by user {user_id}")
 ```
 
@@ -305,7 +305,7 @@ ps.Route("/docs/*", render=docs_page)
 @ps.component
 def docs_page():
     ctx = ps.route()
-    segments = ctx.catchall  # ["guides", "getting-started"] for /docs/guides/getting-started
+    segments = ctx["catchall"]  # ["guides", "getting-started"] for /docs/guides/getting-started
     return ps.div(f"Doc path: {'/'.join(segments)}")
 ```
 
@@ -348,7 +348,7 @@ def counter():
 
     return ps.div(
         ps.h1("Counter"),
-        route_info.pathname == "/counter"
+        route_info["pathname"] == "/counter"
         and ps.button("Show Details", onClick=lambda: ps.navigate("/counter/details"))
         or ps.Link("Hide Details", to="/counter"),
         ps.Outlet(),  # details renders here when path matches
@@ -385,8 +385,8 @@ def users_list():
 @ps.component
 def user_detail():
     ctx = ps.route()
-    user_id = ctx.pathParams["id"]
-    tab = ctx.pathParams.get("tab", "profile")
+    user_id = ctx["pathParams"]["id"]
+    tab = ctx["pathParams"].get("tab", "profile")
     return ps.div(f"User {user_id} - {tab}")
 
 app = ps.App(
@@ -428,7 +428,7 @@ def protected_page():
     user = ps.session().get("user")
     if not user:
         ctx = ps.route()
-        ps.redirect(f"/login?next={ctx.pathname}")
+        ps.redirect(f"/login?next={ctx['pathname']}")
 
     return ps.div(f"Welcome, {user['name']}")
 ```

@@ -67,7 +67,7 @@ def DebouncedDemo():
 					],
 				],
 				ps.div(className="rounded-xl border border-slate-800 bg-slate-900 p-5")[
-					ps.h2("Debounced (300ms)", className="text-lg font-semibold"),
+					ps.h2("Debounced (2000ms)", className="text-lg font-semibold"),
 					ps.p(
 						"Server callback runs after you stop typing.",
 						className="text-xs text-slate-400",
@@ -78,7 +78,7 @@ def DebouncedDemo():
 						className="mt-3 inline-flex items-center rounded border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200",
 					),
 					ps.div(className="mt-3 text-xs text-slate-400")[
-						"Hide the input before 300ms: pending calls are dropped on unmount.",
+						"Hide the input before 2000ms: pending calls are dropped on unmount.",
 					],
 					ps.If(
 						state.show_debounced,

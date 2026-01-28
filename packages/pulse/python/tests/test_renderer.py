@@ -347,6 +347,18 @@ def test_render_tree_debounced_callbacks():
 	assert set(tree.callbacks.keys()) == {"0.onClick"}
 
 
+def test_debounced_to_immediate_updates_placeholder():
+	def on_click() -> None:
+		pass
+
+	tree = RenderTree(div(button(onClick=ps.debounced(on_click, 250))["Click"]))
+	tree.render()
+
+	ops = tree.rerender(div(button(onClick=on_click)["Click"]))
+	update_props = [op for op in ops if op["type"] == "update_props"]
+	assert any(op["data"].get("set", {}).get("onClick") == "$cb" for op in update_props)
+
+
 def test_callback_removal_clears_callbacks():
 	def on_click() -> None:
 		pass

@@ -428,7 +428,7 @@ class Renderer:
 					normalized = current.copy()
 				normalized[key] = value
 				register_callback(self.callbacks, prop_path, value)
-				if not callable(old_value):
+				if not callable(old_value) or isinstance(old_value, Debounced):
 					updated[key] = CALLBACK_PLACEHOLDER
 				continue
 

@@ -589,6 +589,10 @@ export class VDOMRenderer {
 						}
 						if (update.data.set) {
 							for (const [k, v] of Object.entries(update.data.set)) {
+								const prevValue = currentProps[k];
+								if (prevValue !== undefined) {
+									this.#dropCallbacksInSubtree(prevValue, this.#propPath(prevPath, k));
+								}
 								// Only interpret eval-marked keys; otherwise treat as JSON.
 								const isEval = nextEval?.has(k) === true;
 								const cbDelay = isEval ? parseCallbackPlaceholder(v) : undefined;

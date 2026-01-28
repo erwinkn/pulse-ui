@@ -237,6 +237,38 @@ describe("VDOMRenderer", () => {
 		expect(invokeCallback).not.toHaveBeenCalled();
 	});
 
+	it("drops pending debounced callbacks when a render-prop subtree is replaced", async () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		let tree = renderer.renderNode({
+			tag: "div",
+			props: {
+				render: {
+					tag: "button",
+					props: { onClick: "$cb:50" },
+					eval: ["onClick"],
+					children: ["A"],
+				},
+			},
+			eval: ["render"],
+		});
+		const root = tree as React.ReactElement;
+		const renderProp = (root.props as any).render as React.ReactElement;
+		(renderProp.props as any).onClick("value");
+
+		expect(invokeCallback).not.toHaveBeenCalled();
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "update_props",
+				path: "",
+				data: { eval: ["render"], set: { render: { tag: "span", children: ["B"] } } },
+			},
+		]);
+		const nextRoot = tree as React.ReactElement;
+		expect((nextRoot.props as any).render.type).toBe("span");
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		expect(invokeCallback).not.toHaveBeenCalled();
+	});
+
 	it("clears pending debounced calls after switching to immediate", async () => {
 		const { renderer, invokeCallback } = makeRenderer();
 		let tree = renderer.renderNode({

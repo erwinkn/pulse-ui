@@ -8,6 +8,13 @@ type SelectedOptionTarget = "active" | "selected";
 
 type ComboboxScrollBehavior = ScrollBehavior | "instant";
 
+type OptionalEventSourcePayload =
+	| { eventSource?: DropdownEventSource }
+	| null
+	| undefined;
+
+type OptionalTargetPayload = { target?: SelectedOptionTarget } | null | undefined;
+
 export interface PulseComboboxProps
 	extends Omit<ComponentPropsWithoutRef<typeof MantineCombobox>, "store"> {
 	channelId: string;
@@ -53,20 +60,20 @@ export function Combobox({
 		scrollBehavior
 	});
 
-	useEffect(() => {
-		const cleanups = [
-			channel.on("openDropdown", (payload: { eventSource: DropdownEventSource }) => {
-				combobox.openDropdown(payload.eventSource);
-			}),
-			channel.on("closeDropdown", (payload: { eventSource: DropdownEventSource }) => {
-				combobox.closeDropdown(payload.eventSource);
-			}),
-			channel.on("toggleDropdown", (payload: { eventSource: DropdownEventSource }) => {
-				combobox.toggleDropdown(payload.eventSource);
-			}),
-			channel.on("selectOption", (payload: { index: number }) => {
-				combobox.selectOption(payload.index);
-			}),
+		useEffect(() => {
+			const cleanups = [
+				channel.on("openDropdown", (payload: OptionalEventSourcePayload) => {
+					combobox.openDropdown(payload?.eventSource);
+				}),
+				channel.on("closeDropdown", (payload: OptionalEventSourcePayload) => {
+					combobox.closeDropdown(payload?.eventSource);
+				}),
+				channel.on("toggleDropdown", (payload: OptionalEventSourcePayload) => {
+					combobox.toggleDropdown(payload?.eventSource);
+				}),
+				channel.on("selectOption", (payload: { index: number }) => {
+					combobox.selectOption(payload.index);
+				}),
 			channel.on("selectActiveOption", () => combobox.selectActiveOption()),
 			channel.on("selectFirstOption", () => combobox.selectFirstOption()),
 			channel.on("selectNextOption", () => combobox.selectNextOption()),
@@ -77,12 +84,12 @@ export function Combobox({
 			channel.on("clickSelectedOption", () => {
 				combobox.clickSelectedOption();
 			}),
-			channel.on(
-				"updateSelectedOptionIndex",
-				(payload: { target: SelectedOptionTarget }) => {
-					combobox.updateSelectedOptionIndex(payload.target);
-				},
-			),
+				channel.on(
+					"updateSelectedOptionIndex",
+					(payload: OptionalTargetPayload) => {
+						combobox.updateSelectedOptionIndex(payload?.target);
+					},
+				),
 			channel.on("focusSearchInput", () => {
 				combobox.focusSearchInput();
 			}),

@@ -55,20 +55,35 @@ class ComboboxStore(ps.State):
 		self._channel.on("dropdownOpen", self._handle_dropdown_open)
 		self._channel.on("dropdownClose", self._handle_dropdown_close)
 
-	def open_dropdown(self, event_source: DropdownEventSource = "unknown") -> None:
-		if event_source not in ("keyboard", "mouse", "unknown"):
+	def open_dropdown(self, event_source: DropdownEventSource | None = None) -> None:
+		if event_source is not None and event_source not in (
+			"keyboard",
+			"mouse",
+			"unknown",
+		):
 			raise ValueError("event_source must be 'keyboard', 'mouse', or 'unknown'")
-		self._channel.emit("openDropdown", {"eventSource": event_source})
+		payload = None if event_source is None else {"eventSource": event_source}
+		self._channel.emit("openDropdown", payload)
 
-	def close_dropdown(self, event_source: DropdownEventSource = "unknown") -> None:
-		if event_source not in ("keyboard", "mouse", "unknown"):
+	def close_dropdown(self, event_source: DropdownEventSource | None = None) -> None:
+		if event_source is not None and event_source not in (
+			"keyboard",
+			"mouse",
+			"unknown",
+		):
 			raise ValueError("event_source must be 'keyboard', 'mouse', or 'unknown'")
-		self._channel.emit("closeDropdown", {"eventSource": event_source})
+		payload = None if event_source is None else {"eventSource": event_source}
+		self._channel.emit("closeDropdown", payload)
 
-	def toggle_dropdown(self, event_source: DropdownEventSource = "unknown") -> None:
-		if event_source not in ("keyboard", "mouse", "unknown"):
+	def toggle_dropdown(self, event_source: DropdownEventSource | None = None) -> None:
+		if event_source is not None and event_source not in (
+			"keyboard",
+			"mouse",
+			"unknown",
+		):
 			raise ValueError("event_source must be 'keyboard', 'mouse', or 'unknown'")
-		self._channel.emit("toggleDropdown", {"eventSource": event_source})
+		payload = None if event_source is None else {"eventSource": event_source}
+		self._channel.emit("toggleDropdown", payload)
 
 	def select_option(self, index: int) -> None:
 		if not isinstance(index, int):
@@ -94,11 +109,12 @@ class ComboboxStore(ps.State):
 		self._channel.emit("clickSelectedOption")
 
 	def update_selected_option_index(
-		self, target: SelectedOptionTarget = "active"
+		self, target: SelectedOptionTarget | None = None
 	) -> None:
-		if target not in ("active", "selected"):
+		if target is not None and target not in ("active", "selected"):
 			raise ValueError("target must be 'active' or 'selected'")
-		self._channel.emit("updateSelectedOptionIndex", {"target": target})
+		payload = None if target is None else {"target": target}
+		self._channel.emit("updateSelectedOptionIndex", payload)
 
 	def focus_search_input(self) -> None:
 		self._channel.emit("focusSearchInput")

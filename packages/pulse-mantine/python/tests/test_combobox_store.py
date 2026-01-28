@@ -58,6 +58,29 @@ async def test_combobox_store_emits_actions():
 
 
 @pytest.mark.asyncio
+async def test_combobox_store_optional_payloads():
+	app, render, session, real_render = build_context()
+
+	with ps.PulseContext(
+		app=app,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		render=real_render,
+	):
+		store = ComboboxStore()
+		store.open_dropdown()
+		store.update_selected_option_index()
+
+	assert len(render.sent) == 2
+	open_msg = render.sent[0]
+	assert open_msg["event"] == "openDropdown"
+	assert open_msg["payload"] is None
+
+	update_msg = render.sent[1]
+	assert update_msg["event"] == "updateSelectedOptionIndex"
+	assert update_msg["payload"] is None
+
+
+@pytest.mark.asyncio
 async def test_combobox_store_request_roundtrip():
 	app, render, session, real_render = build_context()
 

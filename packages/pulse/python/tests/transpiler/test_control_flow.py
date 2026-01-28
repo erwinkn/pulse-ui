@@ -171,6 +171,23 @@ class TestMultiStatement:
 			== "function outer_1(x) {\nconst inner = function(y) {\nreturn x + y;\n};\nreturn inner(10);\n}"
 		)
 
+	def test_nested_function_recursive_reference(self):
+		@javascript
+		def outer(n: int) -> int:
+			def inner(x: int) -> int:
+				if x <= 0:
+					return 0
+				return inner(x - 1)
+
+			return inner(n)
+
+		fn = outer.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function outer_1(n) {\nconst inner = function(x) {\nif (x <= 0) {\nreturn 0;\n}\nreturn inner(x - 1);\n};\nreturn inner(n);\n}"
+		)
+
 	def test_tuple_unpacking_assignment(self):
 		@javascript
 		def unpack(t: tuple[int, int]) -> int:

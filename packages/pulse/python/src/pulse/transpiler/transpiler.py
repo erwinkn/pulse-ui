@@ -478,6 +478,8 @@ class Transpiler:
 
 		# Save current locals and extend with params
 		saved_locals = set(self.locals)
+		# Allow recursive references to the function within its own body.
+		self.locals.add(name)
 		self.locals.update(params)
 
 		# Skip docstrings and emit body

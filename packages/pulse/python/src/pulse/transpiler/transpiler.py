@@ -374,63 +374,6 @@ class Transpiler:
 			)
 		obj_expr = self.emit_expr(target.value)
 		value_expr = self.emit_expr(value)
-
-		# Negative index: arr[-1] = x -> arr[arr.length - 1] = x
-		if isinstance(target.slice, ast.UnaryOp) and isinstance(
-			target.slice.op, ast.USub
-		):
-			operand = target.slice.operand
-			if (
-				isinstance(operand, ast.Constant)
-				and isinstance(operand.value, (int, float))
-				and operand.value != 0
-			):
-				idx = self.emit_expr(operand)
-				if isinstance(target.value, ast.Name):
-					key_expr = Binary(Member(obj_expr, "length"), "-", idx)
-					return Assign(Subscript(obj_expr, key_expr), value_expr)
-				tmp_name = self._fresh_temp()
-				tmp_expr = Identifier(tmp_name)
-				key_expr = Binary(Member(tmp_expr, "length"), "-", idx)
-				return StmtSequence(
-					[
-						Assign(tmp_name, obj_expr, declare="const"),
-						Assign(Subscript(tmp_expr, key_expr), value_expr),
-					]
-				)
-
-			idx_expr = self.emit_expr(target.slice)
-			if isinstance(target.value, ast.Name):
-				idx_name = self._fresh_temp()
-				idx_ident = Identifier(idx_name)
-				key_expr = Ternary(
-					Binary(idx_ident, "<", Literal(0)),
-					Binary(Member(obj_expr, "length"), "+", idx_ident),
-					idx_ident,
-				)
-				return StmtSequence(
-					[
-						Assign(idx_name, idx_expr, declare="const"),
-						Assign(Subscript(obj_expr, key_expr), value_expr),
-					]
-				)
-			tmp_name = self._fresh_temp()
-			tmp_expr = Identifier(tmp_name)
-			idx_name = self._fresh_temp()
-			idx_ident = Identifier(idx_name)
-			key_expr = Ternary(
-				Binary(idx_ident, "<", Literal(0)),
-				Binary(Member(tmp_expr, "length"), "+", idx_ident),
-				idx_ident,
-			)
-			return StmtSequence(
-				[
-					Assign(tmp_name, obj_expr, declare="const"),
-					Assign(idx_name, idx_expr, declare="const"),
-					Assign(Subscript(tmp_expr, key_expr), value_expr),
-				]
-			)
-
 		key_expr = self.emit_expr(target.slice)
 		return Assign(Subscript(obj_expr, key_expr), value_expr)
 
@@ -462,82 +405,6 @@ class Transpiler:
 				f"Unsupported augmented assignment operator: {op_type.__name__}",
 				node=node,
 			)
-
-		# Negative index handling
-		if isinstance(target.slice, ast.UnaryOp) and isinstance(
-			target.slice.op, ast.USub
-		):
-			operand = target.slice.operand
-			if (
-				isinstance(operand, ast.Constant)
-				and isinstance(operand.value, (int, float))
-				and operand.value != 0
-			):
-				idx = self.emit_expr(operand)
-				if isinstance(target.value, ast.Name):
-					key_expr = Binary(Member(obj_expr, "length"), "-", idx)
-					value_expr = self.emit_expr(node.value)
-					return Assign(
-						Subscript(obj_expr, key_expr),
-						value_expr,
-						op=ALLOWED_BINOPS[op_type],
-					)
-				tmp_name = self._fresh_temp()
-				tmp_expr = Identifier(tmp_name)
-				key_expr = Binary(Member(tmp_expr, "length"), "-", idx)
-				value_expr = self.emit_expr(node.value)
-				return StmtSequence(
-					[
-						Assign(tmp_name, obj_expr, declare="const"),
-						Assign(
-							Subscript(tmp_expr, key_expr),
-							value_expr,
-							op=ALLOWED_BINOPS[op_type],
-						),
-					]
-				)
-
-			idx_expr = self.emit_expr(target.slice)
-			value_expr = self.emit_expr(node.value)
-			if isinstance(target.value, ast.Name):
-				idx_name = self._fresh_temp()
-				idx_ident = Identifier(idx_name)
-				key_expr = Ternary(
-					Binary(idx_ident, "<", Literal(0)),
-					Binary(Member(obj_expr, "length"), "+", idx_ident),
-					idx_ident,
-				)
-				return StmtSequence(
-					[
-						Assign(idx_name, idx_expr, declare="const"),
-						Assign(
-							Subscript(obj_expr, key_expr),
-							value_expr,
-							op=ALLOWED_BINOPS[op_type],
-						),
-					]
-				)
-			tmp_name = self._fresh_temp()
-			tmp_expr = Identifier(tmp_name)
-			idx_name = self._fresh_temp()
-			idx_ident = Identifier(idx_name)
-			key_expr = Ternary(
-				Binary(idx_ident, "<", Literal(0)),
-				Binary(Member(tmp_expr, "length"), "+", idx_ident),
-				idx_ident,
-			)
-			return StmtSequence(
-				[
-					Assign(tmp_name, obj_expr, declare="const"),
-					Assign(idx_name, idx_expr, declare="const"),
-					Assign(
-						Subscript(tmp_expr, key_expr),
-						value_expr,
-						op=ALLOWED_BINOPS[op_type],
-					),
-				]
-			)
-
 		key_expr = self.emit_expr(target.slice)
 		value_expr = self.emit_expr(node.value)
 		return Assign(
@@ -980,11 +847,6 @@ class Transpiler:
 		# Slice handling
 		if isinstance(node.slice, ast.Slice):
 			return self._emit_slice(value, node.slice)
-
-		# Negative index: use .at()
-		if isinstance(node.slice, ast.UnaryOp) and isinstance(node.slice.op, ast.USub):
-			idx_expr = self.emit_expr(node.slice.operand)
-			return Call(Member(value, "at"), [Unary("-", idx_expr)])
 
 		# Delegate to Expr.transpile_subscript (default returns Subscript)
 		return value.transpile_subscript(node.slice, self)

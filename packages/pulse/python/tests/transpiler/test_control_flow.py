@@ -314,7 +314,7 @@ class TestSubscriptAssignment:
 
 		assert (
 			emit(f.transpile())
-			== "function f_1(arr, val) {\narr[arr.length - 1] = val;\nreturn arr;\n}"
+			== "function f_1(arr, val) {\narr[-1] = val;\nreturn arr;\n}"
 		)
 
 	def test_negative_index_assignment_expression(self):
@@ -325,7 +325,7 @@ class TestSubscriptAssignment:
 
 		assert (
 			emit(f.transpile())
-			== "function f_1(arr, idx, val) {\nconst $tmp0 = -idx;\narr[$tmp0 < 0 ? arr.length + $tmp0 : $tmp0] = val;\nreturn arr;\n}"
+			== "function f_1(arr, idx, val) {\narr[-idx] = val;\nreturn arr;\n}"
 		)
 
 	def test_negative_index_assignment_with_attribute_base(self):
@@ -336,7 +336,7 @@ class TestSubscriptAssignment:
 
 		assert (
 			emit(f.transpile())
-			== "function f_1(obj, val) {\nconst $tmp0 = obj.arr;\n$tmp0[$tmp0.length - 1] = val;\nreturn obj;\n}"
+			== "function f_1(obj, val) {\nobj.arr[-1] = val;\nreturn obj;\n}"
 		)
 
 	def test_dict_key_assignment(self):
@@ -374,7 +374,7 @@ class TestSubscriptAssignment:
 
 		assert (
 			emit(f.transpile())
-			== "function f_1(arr, idx) {\nconst $tmp0 = -idx;\narr[$tmp0 < 0 ? arr.length + $tmp0 : $tmp0] += 10;\nreturn arr;\n}"
+			== "function f_1(arr, idx) {\narr[-idx] += 10;\nreturn arr;\n}"
 		)
 
 	def test_augmented_negative_index(self):
@@ -384,8 +384,7 @@ class TestSubscriptAssignment:
 			return arr
 
 		assert (
-			emit(f.transpile())
-			== "function f_1(arr) {\narr[arr.length - 1] += 10;\nreturn arr;\n}"
+			emit(f.transpile()) == "function f_1(arr) {\narr[-1] += 10;\nreturn arr;\n}"
 		)
 
 	def test_augmented_negative_index_with_attribute_base(self):
@@ -396,7 +395,7 @@ class TestSubscriptAssignment:
 
 		assert (
 			emit(f.transpile())
-			== "function f_1(obj) {\nconst $tmp0 = obj.arr;\n$tmp0[$tmp0.length - 1] += 1;\nreturn obj;\n}"
+			== "function f_1(obj) {\nobj.arr[-1] += 1;\nreturn obj;\n}"
 		)
 
 	def test_attribute_assignment(self):

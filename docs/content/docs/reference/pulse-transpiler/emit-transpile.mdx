@@ -112,13 +112,29 @@ Expressions:
 - Boolean: `and`, `or`, `not`
 - Ternary: `x if cond else y`
 - Attribute access: `obj.attr`
-- Subscript: `obj[key]`, `obj[start:end]`
+- Subscript: `obj[key]`, `obj[start:end]` (negative indices pass through)
 - Function calls: `fn(args, **kwargs)`
 - Comprehensions: `[x for x in ...]`, `{k: v for ...}`, `{x for ...}`
 - Lambda: `lambda x: x + 1`
 - f-strings: `f"hello {name}"`
 - Spread: `*args`
 - Await: `await expr`
+
+**Subscript semantics:**
+
+```python
+from typing import Any
+
+import pulse as ps
+
+@ps.javascript
+def last(arr: list[Any]) -> Any:
+    return arr[-1]
+
+# -> return arr[-1];
+```
+
+Negative indices are not rewritten. Use `.at(-1)` or `arr[arr.length - 1]` if you want array-last behavior.
 
 ---
 

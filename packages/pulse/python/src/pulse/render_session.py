@@ -36,7 +36,7 @@ from pulse.scheduling import (
 )
 from pulse.state import State
 from pulse.transpiler.id import next_id
-from pulse.transpiler.nodes import Expr
+from pulse.transpiler.nodes import Expr, Node
 
 if TYPE_CHECKING:
 	from pulse.channel import ChannelsManager
@@ -261,6 +261,8 @@ class RenderSession:
 	_global_queue: list[ServerMessage]
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
+	_updates_paused: bool
+	_pending_rerenders: set[str]
 
 	def __init__(
 		self,
@@ -297,6 +299,8 @@ class RenderSession:
 		self.detach_queue_timeout = detach_queue_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
 		self.render_loop_limit = render_loop_limit
+		self._updates_paused = False
+		self._pending_rerenders = set()
 
 	@property
 	def server_address(self) -> str:
@@ -417,6 +421,7 @@ class RenderSession:
 			route = self.routes.find(path)
 			info = route_info or route.default_route_info()
 			mount = self.route_mounts.get(path)
+			root: Node | None = None
 
 			if mount is None:
 				mount = RouteMount(self, path, route, info)
@@ -424,6 +429,8 @@ class RenderSession:
 				mount.ensure_effect(lazy=True, flush=False)
 			else:
 				mount.update_route(info)
+				mount.route.pulse_route = route
+				root = route.render()
 				if mount.effect is None:
 					mount.ensure_effect(lazy=True, flush=False)
 
@@ -431,7 +438,7 @@ class RenderSession:
 				mount.start_pending(self.prerender_queue_timeout)
 			assert mount.effect is not None
 			with mount.effect.capture_deps(update_deps=True):
-				message = self.render(mount, path)
+				message = self.render(mount, path, root=root)
 
 			results[path] = message
 			if message["type"] == "navigate_to":
@@ -544,10 +551,15 @@ class RenderSession:
 				)
 
 	def render(
-		self, mount: RouteMount, path: str, *, session: Any | None = None
+		self,
+		mount: RouteMount,
+		path: str,
+		*,
+		root: Node | None = None,
+		session: Any | None = None,
 	) -> ServerInitMessage | ServerNavigateToMessage:
 		def _render() -> ServerInitMessage:
-			vdom = mount.tree.render()
+			vdom = mount.tree.render(root)
 			mount.initialized = True
 			return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
 
@@ -559,6 +571,10 @@ class RenderSession:
 	def rerender(
 		self, mount: RouteMount, path: str, *, session: Any | None = None
 	) -> ServerUpdateMessage | ServerNavigateToMessage | None:
+		if self._updates_paused:
+			self._pending_rerenders.add(path)
+			return None
+
 		def _rerender() -> ServerUpdateMessage | None:
 			if not mount.initialized:
 				raise RuntimeError(f"rerender called before init for {path!r}")
@@ -619,6 +635,35 @@ class RenderSession:
 	def flush(self):
 		with PulseContext.update(render=self):
 			flush_effects()
+
+	def pause_updates(self) -> None:
+		if self._updates_paused:
+			return
+		self._updates_paused = True
+		self._pending_rerenders = set()
+		for mount in self.route_mounts.values():
+			if mount.effect:
+				mount.effect.pause()
+
+	def resume_updates(self) -> None:
+		if not self._updates_paused:
+			return
+		self._updates_paused = False
+		for mount in self.route_mounts.values():
+			if mount.effect:
+				mount.effect.resume()
+		pending = list(self._pending_rerenders)
+		self._pending_rerenders.clear()
+		for path in pending:
+			mount = self.route_mounts.get(path)
+			if mount is None:
+				continue
+			try:
+				message = self.rerender(mount, path)
+				if message is not None:
+					self.send(message)
+			except Exception as exc:
+				self.report_error(path, "render", exc, {"hot_reload": True})
 
 	def create_task(
 		self,

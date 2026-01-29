@@ -44,6 +44,7 @@ from pulse.helpers import (
 	get_client_address_socketio,
 )
 from pulse.hooks.core import hooks
+from pulse.hot_reload import build_hot_reload_manager
 from pulse.messages import (
 	ClientChannelMessage,
 	ClientChannelRequestMessage,
@@ -211,6 +212,8 @@ class App:
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
 	_proxy: ReactProxy | None
+	_hot_reload: Any | None
+	_hot_reload_in_progress: bool
 	session_timeout: float
 	connection_status: ConnectionStatusConfig
 	render_loop_limit: int
@@ -289,6 +292,8 @@ class App:
 		self._tasks = TaskRegistry(name="app")
 		self._timers = TimerRegistry(tasks=self._tasks, name="app")
 		self._proxy = None
+		self._hot_reload = None
+		self._hot_reload_in_progress = False
 		self.session_timeout = session_timeout
 		self.prerender_queue_timeout = prerender_queue_timeout
 		self.detach_queue_timeout = detach_queue_timeout
@@ -332,6 +337,8 @@ class App:
 		# Call plugin on_startup hooks before serving
 		for plugin in self.plugins:
 			plugin.on_startup(self)
+		if self._hot_reload is not None:
+			self._hot_reload.start()
 
 		if self.mode == "single-server":
 			react_server_address = envvars.react_server_address
@@ -478,15 +485,11 @@ class App:
 			self.cookie.secure = compute_cookie_secure(self.env, self.server_address)
 
 		# Add CORS middleware (configurable/overridable)
-		if self.cors is not None:
-			self.fastapi.add_middleware(CORSMiddleware, **self.cors)
-		else:
-			# Use deployment-specific CORS settings
-			cors_config = cors_options(self.mode, self.server_address)
-			self.fastapi.add_middleware(
-				CORSMiddleware,
-				**cors_config,
-			)
+		cors_config = self.cors or cors_options(self.mode, self.server_address)
+		self.fastapi.add_middleware(
+			CORSMiddleware,
+			**cors_config,
+		)
 
 		# Mount PulseContext for all FastAPI routes (no route info). Other API
 		# routes / middleware should be added at the module-level, which means
@@ -495,6 +498,7 @@ class App:
 		async def session_middleware(  # pyright: ignore[reportUnusedFunction]
 			request: Request, call_next: Callable[[Request], Awaitable[Response]]
 		):
+			self._ensure_hot_reload_started()
 			# Skip session handling for CORS preflight requests
 			if request.method == "OPTIONS":
 				return await call_next(request)
@@ -551,6 +555,8 @@ class App:
 			client_addr: str | None = get_client_address(request)
 			# Reuse render session from header (set by middleware) or create new one
 			render = PulseContext.get().render
+			if render is None and self.env == "dev" and self._hot_reload is not None:
+				render = self._find_render_for_paths(session, paths)
 			if render is not None:
 				render_id = render.id
 			else:
@@ -693,6 +699,7 @@ class App:
 		async def connect(  # pyright: ignore[reportUnusedFunction]
 			sid: str, environ: dict[str, Any], auth: dict[str, str] | None
 		):
+			self._ensure_hot_reload_started()
 			# Expect renderId during websocket auth and require a valid user session
 			rid = auth.get("render_id") if auth else None
 			# Parse cookies from environ and ensure a session exists
@@ -794,6 +801,17 @@ class App:
 				render.report_error(path, "server", e)
 
 		self.status = AppStatus.initialized
+		if self._hot_reload is None:
+			manager = build_hot_reload_manager(self)
+			if manager is not None:
+				self._hot_reload = manager
+
+	def _ensure_hot_reload_started(self) -> None:
+		manager = self._hot_reload
+		if manager is None:
+			return
+		if manager.task is None:
+			manager.start()
 
 	def _cancel_render_cleanup(self, rid: str):
 		"""Cancel any pending cleanup task for a render session."""
@@ -833,12 +851,16 @@ class App:
 	async def _handle_pulse_message(
 		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
 	) -> None:
+		self._ensure_hot_reload_started()
+
 		async def _next() -> Ok[None]:
 			if msg["type"] == "attach":
 				render.attach(msg["path"], msg["routeInfo"])
 			elif msg["type"] == "update":
 				render.update_route(msg["path"], msg["routeInfo"])
 			elif msg["type"] == "callback":
+				if self._hot_reload_in_progress:
+					return Ok()
 				render.execute_callback(msg["path"], msg["callback"], msg["args"])
 			elif msg["type"] == "detach":
 				render.detach(msg["path"])
@@ -992,6 +1014,12 @@ class App:
 		Returns None if render_id is None, render doesn't exist, or doesn't belong to session.
 		"""
 		if not render_id:
+			if self.env == "dev" and self._hot_reload is not None:
+				render_ids = self._user_to_render.get(session.sid, [])
+				if len(render_ids) == 1:
+					existing = self.render_sessions.get(render_ids[0])
+					if existing is not None:
+						return existing
 			return None
 		render = self.render_sessions.get(render_id)
 		if render is None:
@@ -1000,6 +1028,24 @@ class App:
 		if owner != session.sid:
 			return None
 		return render
+
+	def _find_render_for_paths(
+		self, session: UserSession, paths: list[str]
+	) -> RenderSession | None:
+		render_ids = self._user_to_render.get(session.sid, [])
+		if not render_ids:
+			return None
+		for rid in reversed(render_ids):
+			render = self.render_sessions.get(rid)
+			if render is None:
+				continue
+			if all(path in render.route_mounts for path in paths):
+				return render
+		for rid in reversed(render_ids):
+			render = self.render_sessions.get(rid)
+			if render is not None:
+				return render
+		return None
 
 	def create_render(
 		self, rid: str, session: UserSession, *, client_address: str | None = None
@@ -1072,6 +1118,12 @@ class App:
 				await self._proxy.close()
 			except Exception:
 				logger.exception("Error during ReactProxy.close()")
+		if self._hot_reload is not None:
+			try:
+				self._hot_reload.stop()
+			except Exception:
+				logger.exception("Error during HotReloadManager.stop()")
+			self._hot_reload = None
 
 		# Update status
 		self.status = AppStatus.stopped

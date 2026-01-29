@@ -6,14 +6,14 @@ class Todos(ps.State):
 	draft: str
 
 	def __init__(self):
-		self.items = []
+		self.items = ["existing"]
 		self.draft = ""
 
 	def update(self, value: str):
 		self.draft = value
 
 	def add(self):
-		text = self.draft.strip()
+		text = self.draft.strip() + "h o"
 		if text:
 			self.items.append(text)
 			self.draft = ""
@@ -60,7 +60,7 @@ def TodoApp():
 						ps.button(
 							"Done",
 							onClick=lambda: state.remove(idx),
-							className="rounded border border-emerald-500 px-2 py-1 text-xs text-emerald-300",
+							className="rounded border border-green-500 px-2 py-1 text-xs text-emerald-300",
 						),
 					],
 				),

@@ -9,10 +9,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from inspect import Parameter, signature
 from types import CodeType
-from typing import Any, Generic, ParamSpec, TypeVar, overload, override
+from typing import Any, Generic, ParamSpec, TypeVar, cast, overload, override
 
 from pulse.code_analysis import is_stub_function
 from pulse.hooks.init import rewrite_init_blocks
+from pulse.hot_reload.deps import compute_component_deps, get_unknown_deps
+from pulse.hot_reload.signatures import compute_component_signature_data
 from pulse.transpiler.nodes import (
 	Children,
 	Node,
@@ -27,6 +29,8 @@ P = ParamSpec("P")
 _T = TypeVar("_T")
 
 _COMPONENT_CODES: set[CodeType] = set()
+COMPONENT_BY_ID: dict[str, "Component[Any]"] = {}
+COMPONENT_ID_BY_CODE: dict[CodeType, str] = {}
 
 
 def is_component_code(code: CodeType) -> bool:
@@ -59,6 +63,11 @@ class Component(Generic[P]):
 	_fn: Callable[P, Any] | None
 	name: str
 	_takes_children: bool | None
+	component_id: str
+	signature_hash: str | None
+	signature: list[Any] | None
+	deps: set[str]
+	unknown_deps: bool
 
 	def __init__(self, fn: Callable[P, Any], name: str | None = None) -> None:
 		"""Initialize a Component.
@@ -69,6 +78,10 @@ class Component(Generic[P]):
 		"""
 		self._raw_fn = fn
 		self.name = name or _infer_component_name(fn)
+		self.component_id = _component_id(fn)
+		self.signature, self.signature_hash = compute_component_signature_data(fn)
+		self.deps = compute_component_deps(fn)
+		self.unknown_deps = get_unknown_deps(fn)
 		# Only lazy-init for stubs (avoid heavy work for JS module bindings)
 		# Real components need immediate rewrite for early error detection
 		if is_stub_function(fn):
@@ -78,6 +91,32 @@ class Component(Generic[P]):
 			self._fn = rewrite_init_blocks(fn)
 			self._takes_children = _takes_children(fn)
 			_COMPONENT_CODES.add(self._fn.__code__)
+			COMPONENT_ID_BY_CODE[self._fn.__code__] = self.component_id
+		COMPONENT_BY_ID[self.component_id] = cast("Component[Any]", self)
+
+	def refresh(self, fn: Callable[..., Any], name: str | None = None) -> None:
+		"""Update component in place (used by hot reload)."""
+		self._raw_fn = fn
+		self.name = name or _infer_component_name(fn)
+		self.signature, self.signature_hash = compute_component_signature_data(fn)
+		self.deps = compute_component_deps(fn)
+		self.unknown_deps = get_unknown_deps(fn)
+
+		old_code = self._fn.__code__ if self._fn is not None else None
+		new_code: CodeType | None = None
+		if is_stub_function(fn):
+			self._fn = None
+			self._takes_children = None
+		else:
+			self._fn = rewrite_init_blocks(fn)
+			self._takes_children = _takes_children(fn)
+			new_code = self._fn.__code__
+			_COMPONENT_CODES.add(new_code)
+			COMPONENT_ID_BY_CODE[new_code] = self.component_id
+
+		if old_code is not None and old_code is not new_code:
+			_COMPONENT_CODES.discard(old_code)
+			COMPONENT_ID_BY_CODE.pop(old_code, None)
 
 	@property
 	def fn(self) -> Callable[P, Any]:
@@ -86,7 +125,12 @@ class Component(Generic[P]):
 			self._fn = rewrite_init_blocks(self._raw_fn)
 			self._takes_children = _takes_children(self._raw_fn)
 			_COMPONENT_CODES.add(self._fn.__code__)
+			COMPONENT_ID_BY_CODE[self._fn.__code__] = self.component_id
 		return self._fn
+
+	@property
+	def raw_fn(self) -> Callable[P, Any]:
+		return self._raw_fn
 
 	def __call__(self, *args: P.args, **kwargs: P.kwargs) -> PulseNode:
 		"""Invoke the component to create a PulseNode.
@@ -116,7 +160,16 @@ class Component(Generic[P]):
 			)
 			args = tuple(flattened)  # pyright: ignore[reportAssignmentType]
 
-		return PulseNode(fn=self.fn, args=args, kwargs=kwargs, key=key, name=self.name)
+		return PulseNode(
+			fn=self.fn,
+			args=args,
+			kwargs=kwargs,
+			key=key,
+			name=self.name,
+			component_id=self.component_id,
+			signature_hash=self.signature_hash,
+			signature=self.signature,
+		)
 
 	@override
 	def __repr__(self) -> str:
@@ -189,6 +242,12 @@ def component(
 	"""
 
 	def decorator(fn: Callable[P, Any]) -> Component[P]:
+		component_id = _component_id(fn)
+		existing = COMPONENT_BY_ID.get(component_id)
+		if existing is not None:
+			updated = cast("Component[P]", existing)
+			updated.refresh(fn, name)
+			return updated
 		return Component(fn, name)
 
 	if fn is not None:
@@ -225,6 +284,12 @@ def _callable_qualname(fn: Callable[..., Any]) -> str:
 	return f"{mod}.{qname}"
 
 
+def _component_id(fn: Callable[..., Any]) -> str:
+	mod = getattr(fn, "__module__", "<unknown>")
+	qname = getattr(fn, "__qualname__", getattr(fn, "__name__", "<callable>"))
+	return f"{mod}:{qname}"
+
+
 __all__ = [
 	"Node",
 	"Children",
@@ -234,4 +299,6 @@ __all__ = [
 	"VDOMNode",
 	"component",
 	"is_component_code",
+	"COMPONENT_BY_ID",
+	"COMPONENT_ID_BY_CODE",
 ]

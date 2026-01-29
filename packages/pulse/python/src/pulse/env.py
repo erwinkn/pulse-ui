@@ -35,6 +35,10 @@ ENV_PULSE_PORT = "PULSE_PORT"
 ENV_PULSE_REACT_SERVER_ADDRESS = "PULSE_REACT_SERVER_ADDRESS"
 ENV_PULSE_SECRET = "PULSE_SECRET"
 ENV_PULSE_DISABLE_CODEGEN = "PULSE_DISABLE_CODEGEN"
+ENV_PULSE_HOT_RELOAD = "PULSE_HOT_RELOAD"
+ENV_PULSE_HOT_RELOAD_DIRS = "PULSE_HOT_RELOAD_DIRS"
+ENV_PULSE_HOT_RELOAD_EXCLUDES = "PULSE_HOT_RELOAD_EXCLUDES"
+ENV_PULSE_HOT_RELOAD_TRIGGER = "PULSE_HOT_RELOAD_TRIGGER"
 
 
 class EnvVars:
@@ -142,6 +146,53 @@ class EnvVars:
 	@codegen_disabled.setter
 	def codegen_disabled(self, value: bool) -> None:
 		self._set(ENV_PULSE_DISABLE_CODEGEN, "1" if value else None)
+
+	@property
+	def pulse_hot_reload(self) -> bool:
+		value = self._get(ENV_PULSE_HOT_RELOAD)
+		if value is None:
+			return self.pulse_env == "dev"
+		return value not in ("0", "false", "False")
+
+	@pulse_hot_reload.setter
+	def pulse_hot_reload(self, value: bool) -> None:
+		self._set(ENV_PULSE_HOT_RELOAD, "1" if value else "0")
+
+	@property
+	def pulse_hot_reload_dirs(self) -> list[str]:
+		raw = self._get(ENV_PULSE_HOT_RELOAD_DIRS)
+		if not raw:
+			return []
+		return [p for p in raw.split(os.pathsep) if p]
+
+	@pulse_hot_reload_dirs.setter
+	def pulse_hot_reload_dirs(self, value: list[str]) -> None:
+		if not value:
+			self._set(ENV_PULSE_HOT_RELOAD_DIRS, None)
+			return
+		self._set(ENV_PULSE_HOT_RELOAD_DIRS, os.pathsep.join(value))
+
+	@property
+	def pulse_hot_reload_excludes(self) -> list[str]:
+		raw = self._get(ENV_PULSE_HOT_RELOAD_EXCLUDES)
+		if not raw:
+			return []
+		return [p for p in raw.split(os.pathsep) if p]
+
+	@pulse_hot_reload_excludes.setter
+	def pulse_hot_reload_excludes(self, value: list[str]) -> None:
+		if not value:
+			self._set(ENV_PULSE_HOT_RELOAD_EXCLUDES, None)
+			return
+		self._set(ENV_PULSE_HOT_RELOAD_EXCLUDES, os.pathsep.join(value))
+
+	@property
+	def pulse_hot_reload_trigger(self) -> str | None:
+		return self._get(ENV_PULSE_HOT_RELOAD_TRIGGER)
+
+	@pulse_hot_reload_trigger.setter
+	def pulse_hot_reload_trigger(self, value: str | None) -> None:
+		self._set(ENV_PULSE_HOT_RELOAD_TRIGGER, value)
 
 
 # Singleton

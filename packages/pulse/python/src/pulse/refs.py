@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import re
 import uuid
 from collections.abc import Callable
 from typing import Any, Generic, TypeVar, cast, override
@@ -13,6 +14,89 @@ from pulse.hooks.state import collect_component_identity
 from pulse.scheduling import create_future
 
 T = TypeVar("T")
+
+_ATTR_ALIASES: dict[str, str] = {
+	"className": "class",
+	"htmlFor": "for",
+	"tabIndex": "tabindex",
+}
+
+_ATTR_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_:\-\.]*$")
+
+_GETTABLE_PROPS: set[str] = {
+	"value",
+	"checked",
+	"disabled",
+	"readOnly",
+	"selectedIndex",
+	"selectionStart",
+	"selectionEnd",
+	"selectionDirection",
+	"scrollTop",
+	"scrollLeft",
+	"scrollHeight",
+	"scrollWidth",
+	"clientWidth",
+	"clientHeight",
+	"offsetWidth",
+	"offsetHeight",
+	"innerText",
+	"textContent",
+	"className",
+	"id",
+	"name",
+	"type",
+	"tabIndex",
+}
+
+_SETTABLE_PROPS: set[str] = {
+	"value",
+	"checked",
+	"disabled",
+	"readOnly",
+	"selectedIndex",
+	"selectionStart",
+	"selectionEnd",
+	"selectionDirection",
+	"scrollTop",
+	"scrollLeft",
+	"className",
+	"id",
+	"name",
+	"type",
+	"tabIndex",
+}
+
+
+def _normalize_attr_name(name: str) -> str:
+	return _ATTR_ALIASES.get(name, name)
+
+
+def _validate_attr_name(name: str) -> str:
+	if not isinstance(name, str):
+		raise TypeError("ref attribute name must be a string")
+	trimmed = name.strip()
+	if not trimmed:
+		raise ValueError("ref attribute name must be non-empty")
+	normalized = _normalize_attr_name(trimmed)
+	if not _ATTR_NAME_PATTERN.match(normalized):
+		raise ValueError(f"Invalid attribute name: {normalized}")
+	if normalized.lower().startswith("on"):
+		raise ValueError("ref attribute name cannot start with 'on'")
+	return normalized
+
+
+def _validate_prop_name(name: str, *, settable: bool) -> str:
+	if not isinstance(name, str):
+		raise TypeError("ref property name must be a string")
+	trimmed = name.strip()
+	if not trimmed:
+		raise ValueError("ref property name must be non-empty")
+	if trimmed not in _GETTABLE_PROPS:
+		raise ValueError(f"Unsupported ref property: {trimmed}")
+	if settable and trimmed not in _SETTABLE_PROPS:
+		raise ValueError(f"Ref property is read-only: {trimmed}")
+	return trimmed
 
 
 class RefNotMounted(RuntimeError):
@@ -98,14 +182,25 @@ class RefHandle(Disposable, Generic[T]):
 			if fut in self._mount_waiters:
 				self._mount_waiters.remove(fut)
 
-	def focus(self) -> None:
-		self._emit("focus")
+	def focus(self, *, prevent_scroll: bool | None = None) -> None:
+		payload = None
+		if prevent_scroll is not None:
+			if not isinstance(prevent_scroll, bool):
+				raise TypeError("focus() prevent_scroll must be a bool")
+			payload = {"preventScroll": prevent_scroll}
+		self._emit("focus", payload)
 
 	def blur(self) -> None:
 		self._emit("blur")
 
 	def click(self) -> None:
 		self._emit("click")
+
+	def submit(self) -> None:
+		self._emit("submit")
+
+	def reset(self) -> None:
+		self._emit("reset")
 
 	def scroll_into_view(
 		self,
@@ -124,6 +219,54 @@ class RefHandle(Disposable, Generic[T]):
 			if v is not None
 		}
 		self._emit("scrollIntoView", payload if payload else None)
+
+	def scroll_to(
+		self,
+		*,
+		top: float | int | None = None,
+		left: float | int | None = None,
+		behavior: str | None = None,
+	) -> None:
+		if top is not None and not isinstance(top, (int, float)):
+			raise TypeError("scroll_to() top must be a number")
+		if left is not None and not isinstance(left, (int, float)):
+			raise TypeError("scroll_to() left must be a number")
+		if behavior is not None and not isinstance(behavior, str):
+			raise TypeError("scroll_to() behavior must be a string")
+		payload = {
+			k: v
+			for k, v in {
+				"top": top,
+				"left": left,
+				"behavior": behavior,
+			}.items()
+			if v is not None
+		}
+		self._emit("scrollTo", payload if payload else None)
+
+	def scroll_by(
+		self,
+		*,
+		top: float | int | None = None,
+		left: float | int | None = None,
+		behavior: str | None = None,
+	) -> None:
+		if top is not None and not isinstance(top, (int, float)):
+			raise TypeError("scroll_by() top must be a number")
+		if left is not None and not isinstance(left, (int, float)):
+			raise TypeError("scroll_by() left must be a number")
+		if behavior is not None and not isinstance(behavior, str):
+			raise TypeError("scroll_by() behavior must be a string")
+		payload = {
+			k: v
+			for k, v in {
+				"top": top,
+				"left": left,
+				"behavior": behavior,
+			}.items()
+			if v is not None
+		}
+		self._emit("scrollBy", payload if payload else None)
 
 	async def measure(self, *, timeout: float | None = None) -> dict[str, Any] | None:
 		result = await self._request("measure", timeout=timeout)
@@ -157,6 +300,68 @@ class RefHandle(Disposable, Generic[T]):
 
 	def select(self) -> None:
 		self._emit("select")
+
+	def set_selection_range(
+		self, start: int, end: int, *, direction: str | None = None
+	) -> None:
+		if not isinstance(start, int) or not isinstance(end, int):
+			raise TypeError("set_selection_range() requires integer start/end")
+		if direction is not None and not isinstance(direction, str):
+			raise TypeError("set_selection_range() direction must be a string")
+		payload: dict[str, Any] = {"start": start, "end": end}
+		if direction is not None:
+			payload["direction"] = direction
+		self._emit("setSelectionRange", payload)
+
+	async def get_attr(self, name: str, *, timeout: float | None = None) -> str | None:
+		normalized = _validate_attr_name(name)
+		result = await self._request("getAttr", {"name": normalized}, timeout=timeout)
+		if result is None:
+			return None
+		if isinstance(result, str):
+			return result
+		raise TypeError("get_attr() expected string result")
+
+	async def set_attr(
+		self, name: str, value: Any, *, timeout: float | None = None
+	) -> str | None:
+		normalized = _validate_attr_name(name)
+		result = await self._request(
+			"setAttr", {"name": normalized, "value": value}, timeout=timeout
+		)
+		if result is None:
+			return None
+		if isinstance(result, str):
+			return result
+		raise TypeError("set_attr() expected string result")
+
+	async def remove_attr(self, name: str, *, timeout: float | None = None) -> None:
+		normalized = _validate_attr_name(name)
+		await self._request("removeAttr", {"name": normalized}, timeout=timeout)
+
+	async def get_prop(self, name: str, *, timeout: float | None = None) -> Any:
+		prop = _validate_prop_name(name, settable=False)
+		return await self._request("getProp", {"name": prop}, timeout=timeout)
+
+	async def set_prop(
+		self, name: str, value: Any, *, timeout: float | None = None
+	) -> Any:
+		prop = _validate_prop_name(name, settable=True)
+		return await self._request(
+			"setProp", {"name": prop, "value": value}, timeout=timeout
+		)
+
+	async def set_style(
+		self, styles: dict[str, Any], *, timeout: float | None = None
+	) -> None:
+		if not isinstance(styles, dict):
+			raise TypeError("set_style() requires a dict")
+		for key, value in styles.items():
+			if not isinstance(key, str) or not key:
+				raise ValueError("set_style() keys must be non-empty strings")
+			if value is not None and not isinstance(value, (str, int, float)):
+				raise TypeError("set_style() values must be string, number, or None")
+		await self._request("setStyle", {"styles": styles}, timeout=timeout)
 
 	def _emit(self, op: str, payload: Any = None) -> None:
 		self._ensure_mounted()
@@ -279,13 +484,9 @@ class RefHookState(HookState):
 		self.instances.clear()
 
 
-def _ref_factory():
-	return RefHookState()
-
-
-_ref_hook = hooks.create(
+ref_hook_state = hooks.create(
 	"pulse:core.ref",
-	_ref_factory,
+	factory=RefHookState,
 	metadata=HookMetadata(
 		owner="pulse.core",
 		description="Internal storage for pulse.ref handles",
@@ -314,7 +515,7 @@ def ref(*, key: str | None = None) -> RefHandle[Any]:
 	else:
 		identity = key
 
-	hook_state = _ref_hook()
+	hook_state = ref_hook_state()
 	return hook_state.get_or_create(identity, key)
 
 

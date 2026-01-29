@@ -306,7 +306,7 @@ class Effect(Disposable):
 		self.paused = False
 
 		if immediate and lazy:
-			raise ValueError("An effect cannot be boht immediate and lazy")
+			raise ValueError("An effect cannot be both immediate and lazy")
 
 		# Register explicit dependencies immediately upon initialization
 		if deps is not None:
@@ -512,9 +512,7 @@ class Effect(Disposable):
 				self._cleanup_before_run()
 			except Exception as e:
 				self.handle_error(e)
-		self._execute()
 
-	def _execute(self) -> None:
 		execution_epoch = epoch()
 		# Capture last_change for explicit deps before running
 		captured_last_changes: dict[Signal[Any] | Computed[Any], int] | None = None

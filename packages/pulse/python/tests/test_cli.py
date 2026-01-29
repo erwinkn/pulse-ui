@@ -12,6 +12,7 @@ from pulse.cli.dependencies import (
 from pulse.cli.helpers import load_app_from_target, parse_app_target
 from pulse.cli.models import CommandSpec
 from pulse.cli.packages import (
+	VersionConflict,
 	is_alias_source,
 	is_relative_source,
 	is_url_or_absolute,
@@ -289,7 +290,6 @@ def test_resolve_versions_prefers_exact_and_longer_constraints():
 
 def test_resolve_versions_conflict_on_different_exact_versions():
 	constraints: dict[str, list[str | None]] = {"react": ["18.2.0", "18.1.0"]}
-	from pulse.cli.packages import VersionConflict
 
 	with pytest.raises(VersionConflict):
 		resolve_versions(constraints)

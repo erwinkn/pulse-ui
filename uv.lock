@@ -1322,7 +1322,7 @@ requires-dist = [
 
 [[package]]
 name = "pulse-framework"
-version = "0.1.73"
+version = "0.1.74"
 source = { editable = "packages/pulse/python" }
 dependencies = [
     { name = "aiohttp" },
@@ -1384,7 +1384,7 @@ requires-dist = [{ name = "pulse-framework", editable = "packages/pulse/python" 
 
 [[package]]
 name = "pulse-mantine"
-version = "0.1.29"
+version = "0.1.30"
 source = { editable = "packages/pulse-mantine/python" }
 dependencies = [
     { name = "pulse-framework" },

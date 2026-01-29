@@ -1057,6 +1057,34 @@ def test_ref_prop_serializes_with_eval():
 	assert "ref" in vdom.get("eval", [])
 
 
+def test_ref_handles_share_session_channel():
+	handle_a: RefHandle[Any] | None = None
+	handle_b: RefHandle[Any] | None = None
+
+	@component
+	def WithRefA() -> ps.Element:
+		nonlocal handle_a
+		handle_a = ps.ref()
+		return div(ref=handle_a)
+
+	@component
+	def WithRefB() -> ps.Element:
+		nonlocal handle_b
+		handle_b = ps.ref()
+		return span(ref=handle_b)
+
+	app = ps.App()
+	render = ps.RenderSession("render-ref-shared-channel", app.routes)
+	session: Any = SimpleNamespace(sid="session-ref-shared-channel")
+	with ps.PulseContext(app=app, session=session, render=render):
+		tree = RenderTree(div(WithRefA(), WithRefB()))
+		tree.render()
+
+	assert handle_a is not None
+	assert handle_b is not None
+	assert handle_a.channel_id == handle_b.channel_id
+
+
 def test_ref_hook_handlers_register():
 	events: list[str] = []
 	handle: RefHandle[Any] | None = None

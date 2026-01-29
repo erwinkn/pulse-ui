@@ -6,6 +6,7 @@ from asyncio import iscoroutine
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 
+from pulse.channel import Channel
 from pulse.context import PulseContext
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import (
@@ -257,6 +258,7 @@ class RenderSession:
 	_send_message: Callable[[ServerMessage], Any] | None
 	_pending_api: dict[str, asyncio.Future[dict[str, Any]]]
 	_pending_js_results: dict[str, asyncio.Future[Any]]
+	_ref_channel: Channel | None
 	_global_states: dict[str, State]
 	_global_queue: list[ServerMessage]
 	_tasks: TaskRegistry
@@ -291,6 +293,7 @@ class RenderSession:
 		self.forms = FormRegistry(self)
 		self._pending_api = {}
 		self._pending_js_results = {}
+		self._ref_channel = None
 		self._tasks = TaskRegistry(name=f"render:{id}")
 		self._timers = TimerRegistry(tasks=self._tasks, name=f"render:{id}")
 		self.prerender_queue_timeout = prerender_queue_timeout
@@ -597,6 +600,7 @@ class RenderSession:
 			if not fut.done():
 				fut.cancel()
 		self._pending_js_results.clear()
+		self._ref_channel = None
 		self._global_queue = []
 		self._send_message = None
 		self.connected = False
@@ -615,6 +619,12 @@ class RenderSession:
 			inst = factory()
 			self._global_states[key] = inst
 		return inst
+
+	def get_ref_channel(self) -> Channel:
+		if self._ref_channel is not None and not self._ref_channel.closed:
+			return self._ref_channel
+		self._ref_channel = self.channels.create(bind_route=False)
+		return self._ref_channel
 
 	def flush(self):
 		with PulseContext.update(render=self):

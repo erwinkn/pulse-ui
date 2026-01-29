@@ -192,3 +192,13 @@ async def test_ref_set_style_payload() -> None:
 			None,
 		),
 	]
+
+
+@pytest.mark.asyncio
+async def test_ref_set_style_rejects_bool() -> None:
+	handle, _ = make_handle()
+
+	with pytest.raises(
+		TypeError, match="set_style\\(\\) values must be string, number, or None"
+	):
+		await handle.set_style({"display": True})

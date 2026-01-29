@@ -29,6 +29,7 @@ function isCallbackPlaceholder(v: unknown): v is "$cb" {
 type ElementMeta = {
 	eval?: Set<string>;
 	cbKeys?: Set<string>;
+	ref?: any;
 };
 
 export class VDOMRenderer {
@@ -298,9 +299,11 @@ export class VDOMRenderer {
 			}
 
 			try {
+				const hasRef = Object.prototype.hasOwnProperty.call(newProps, "ref");
+				const refValue = hasRef ? newProps.ref : undefined;
 				return this.#rememberMeta(
 					createElement(component, newProps, ...renderedChildren),
-					{ eval: evalSet, cbKeys },
+					{ eval: evalSet, cbKeys, ref: refValue },
 				);
 			} catch (error) {
 				console.error("[Pulse] Failed to create element:", node)
@@ -405,6 +408,10 @@ export class VDOMRenderer {
 						const prevMeta = this.#metaMap.get(element);
 						const prevEval = prevMeta?.eval;
 						const prevCbKeys = prevMeta?.cbKeys;
+						const prevRef = prevMeta?.ref;
+						const propsHasRef = Object.prototype.hasOwnProperty.call(currentProps, "ref");
+						const propsRef = propsHasRef ? currentProps.ref : undefined;
+						const existingRef = prevRef ?? propsRef;
 						const evalPatch = update.data.eval;
 						const nextEval: Set<string> | undefined =
 							evalPatch === undefined
@@ -430,8 +437,9 @@ export class VDOMRenderer {
 							for (const k of prevCbKeys) delete nextProps[k];
 						}
 
-						if (update.data.remove && update.data.remove.length > 0) {
-							for (const key of update.data.remove) {
+						const removedKeys = update.data.remove ?? [];
+						if (removedKeys.length > 0) {
+							for (const key of removedKeys) {
 								delete nextProps[key];
 								nextCbKeys?.delete(key);
 							}
@@ -452,18 +460,24 @@ export class VDOMRenderer {
 
 						if (nextCbKeys && nextCbKeys.size === 0) nextCbKeys = undefined;
 
-						const removedSomething = (update.data.remove?.length ?? 0) > 0;
+						const removedSomething = removedKeys.length > 0;
+						const refRemoved = removedKeys.includes("ref");
+						const hasNextRef = Object.prototype.hasOwnProperty.call(nextProps, "ref");
+						const nextRef = hasNextRef ? nextProps.ref : refRemoved ? undefined : existingRef;
 						if (removedSomething) {
 							nextProps.key = (element as any).key;
-							nextProps.ref = (element as any).ref;
+							if (!refRemoved && !hasNextRef && existingRef !== undefined) {
+								nextProps.ref = existingRef;
+							}
 							return this.#rememberMeta(
 								createElement(element.type, nextProps, ...this.#ensureChildrenArray(element)),
-								{ eval: nextEval, cbKeys: nextCbKeys },
+								{ eval: nextEval, cbKeys: nextCbKeys, ref: nextRef },
 							);
 						} else {
 							return this.#rememberMeta(cloneElement(element, nextProps), {
 								eval: nextEval,
 								cbKeys: nextCbKeys,
+								ref: nextRef,
 							});
 						}
 					}

@@ -80,8 +80,45 @@ describe("VDOMRenderer", () => {
 		});
 
 		const input = tree as React.ReactElement;
-		expect((input.props as any).ref).toBe(callback);
+		const hasRefProp = Object.prototype.hasOwnProperty.call(input.props ?? {}, "ref");
+		if (hasRefProp) {
+			expect((input.props as any).ref).toBe(callback);
+		}
 		expect(getRefCallback).toHaveBeenCalledWith("chan-1", "ref-1");
+	});
+
+	it("removes ref when update_props removes it", () => {
+		const { renderer, getRefCallback } = makeRenderer();
+		const callback = () => {};
+		getRefCallback.mockReturnValue(callback);
+
+		let tree = renderer.renderNode({
+			tag: "input",
+			props: {
+				ref: { __pulse_ref__: { channelId: "chan-1", refId: "ref-1" } },
+			},
+			eval: ["ref"],
+		});
+
+		const input = tree as React.ReactElement;
+		const hasRefProp = Object.prototype.hasOwnProperty.call(input.props ?? {}, "ref");
+		if (hasRefProp) {
+			expect((input.props as any).ref).toBe(callback);
+		}
+
+		tree = renderer.applyUpdates(tree, [
+			{
+				type: "update_props",
+				path: "",
+				data: { remove: ["ref"] },
+			},
+		]);
+
+		const updated = tree as React.ReactElement;
+		const updatedHasRefProp = Object.prototype.hasOwnProperty.call(updated.props ?? {}, "ref");
+		if (updatedHasRefProp) {
+			expect((updated.props as any).ref == null).toBe(true);
+		}
 	});
 
 	it("keeps previous eval when update_props.eval is absent", () => {

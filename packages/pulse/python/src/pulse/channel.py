@@ -81,7 +81,9 @@ class ChannelsManager:
 		self.pending_requests = {}
 
 	# ------------------------------------------------------------------
-	def create(self, identifier: str | None = None) -> "Channel":
+	def create(
+		self, identifier: str | None = None, *, bind_route: bool = True
+	) -> "Channel":
 		ctx = PulseContext.get()
 		render = ctx.render
 		session = ctx.session
@@ -93,7 +95,7 @@ class ChannelsManager:
 			raise ValueError(f"Channel id '{channel_id}' is already in use")
 
 		route_path: str | None = None
-		if ctx.route is not None:
+		if bind_route and ctx.route is not None:
 			# unique_path() returns absolute path, use as-is for keys
 			route_path = ctx.route.pulse_route.unique_path()
 

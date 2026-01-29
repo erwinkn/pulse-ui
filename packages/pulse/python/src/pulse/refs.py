@@ -7,7 +7,8 @@ import uuid
 from collections.abc import Callable
 from typing import Any, Generic, Literal, TypeVar, cast, overload, override
 
-from pulse.channel import Channel, channel
+from pulse.channel import Channel
+from pulse.context import PulseContext
 from pulse.helpers import Disposable
 from pulse.hooks.core import HookMetadata, HookState, hooks
 from pulse.hooks.state import collect_component_identity
@@ -662,6 +663,8 @@ class RefHandle(Disposable, Generic[T]):
 		for key, value in styles.items():
 			if not isinstance(key, str) or not key:
 				raise ValueError("set_style() keys must be non-empty strings")
+			if isinstance(value, bool):
+				raise TypeError("set_style() values must be string, number, or None")
 			if value is not None and not isinstance(value, (str, int, float)):
 				raise TypeError("set_style() values must be string, number, or None")
 		await self._request("setStyle", {"styles": styles}, timeout=timeout)
@@ -796,7 +799,10 @@ class RefHookState(HookState):
 			return existing, False
 
 		if self._channel is None or self._channel.closed:
-			self._channel = channel()
+			ctx = PulseContext.get()
+			if ctx.render is None:
+				raise RuntimeError("ref() requires an active render session")
+			self._channel = ctx.render.get_ref_channel()
 		handle = RefHandle(self._channel, owns_channel=False)
 		self.instances[full_identity] = handle
 		return handle, True
@@ -808,8 +814,6 @@ class RefHookState(HookState):
 				handle.dispose()
 			except Exception:
 				pass
-		if self._channel is not None and not self._channel.closed:
-			self._channel.close()
 		self._channel = None
 		self.instances.clear()
 

@@ -161,7 +161,18 @@ single sentinel string.
 """
 
 
-VDOMPropValue: TypeAlias = "JsonValue | VDOMExpr | VDOMElement | CallbackPlaceholder"
+class PulseRefPayload(TypedDict):
+	channelId: str
+	refId: str
+
+
+class PulseRefSpec(TypedDict):
+	__pulse_ref__: PulseRefPayload
+
+
+VDOMPropValue: TypeAlias = (
+	"JsonValue | VDOMExpr | VDOMElement | CallbackPlaceholder | PulseRefSpec"
+)
 """Allowed prop value types.
 
 Hot path:

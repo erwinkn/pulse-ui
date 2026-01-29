@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast, override
 
 import pulse as ps
@@ -7,6 +8,7 @@ import pytest
 from pulse.component import component
 from pulse.dom.tags import button, div, li, span, ul
 from pulse.hooks.core import HookContext
+from pulse.refs import RefHandle
 from pulse.renderer import RenderTree
 from pulse.transpiler.nodes import Element, PulseNode
 from pulse.transpiler.vdom import VDOMElement, VDOMExpr
@@ -1026,3 +1028,47 @@ def test_keyed_head_tail_placeholders_deep_reconcile_props_change():
 		and op["data"].get("set", {}).get("className") == "two"
 		for op in ops
 	)
+
+
+def test_ref_prop_serializes_with_eval():
+	handle: RefHandle[Any] | None = None
+
+	@component
+	def WithRef() -> ps.Element:
+		nonlocal handle
+		handle = ps.ref()
+		return div(ref=handle)
+
+	app = ps.App()
+	render = ps.RenderSession("render-ref", app.routes)
+	session: Any = SimpleNamespace(sid="session-ref")
+	with ps.PulseContext(app=app, session=session, render=render):
+		tree = RenderTree(WithRef())
+		vdom = tree.render()
+	assert handle is not None
+	assert isinstance(vdom, dict)
+	props = vdom.get("props", {})
+	ref_spec = props.get("ref")
+	assert isinstance(ref_spec, dict)
+	assert ref_spec.get("__pulse_ref__") == {
+		"channelId": handle.channel_id,
+		"refId": handle.id,
+	}
+	assert "ref" in vdom.get("eval", [])
+
+
+def test_ref_prop_rejects_non_ref_key():
+	@component
+	def BadRef() -> ps.Element:
+		handle = ps.ref()
+		return div(dataRef=handle)  # pyright: ignore[reportCallIssue]
+
+	app = ps.App()
+	render = ps.RenderSession("render-ref-2", app.routes)
+	session: Any = SimpleNamespace(sid="session-ref-2")
+	with ps.PulseContext(app=app, session=session, render=render):
+		tree = RenderTree(BadRef())
+		with pytest.raises(
+			TypeError, match="RefHandle can only be used as the 'ref' prop"
+		):
+			tree.render()

@@ -16,6 +16,7 @@ import type {
 	VDOMNode,
 	VDOMPropValue,
 	VDOMUpdate,
+	PulseRefSpec,
 } from "./vdom";
 import { isElementNode, isExprNode, MOUNT_POINT_PREFIX as REF_PREFIX } from "./vdom";
 
@@ -23,6 +24,10 @@ type Env = Record<string, unknown>;
 
 function isCallbackPlaceholder(v: unknown): v is "$cb" {
 	return v === "$cb";
+}
+
+function isPulseRefSpec(v: unknown): v is PulseRefSpec {
+	return typeof v === "object" && v !== null && "__pulse_ref__" in (v as any);
 }
 
 type ElementMeta = {
@@ -218,6 +223,10 @@ export class VDOMRenderer {
 
 	#transformEvalProp(path: string, prop: string, value: VDOMPropValue) {
 		if (isCallbackPlaceholder(value)) return this.#getCallback(path, prop);
+		if (isPulseRefSpec(value)) {
+			const payload = value.__pulse_ref__;
+			return this.#client.getRefCallback(payload.channelId, payload.refId);
+		}
 		if (isExprNode(value)) return this.#evalExpr(value, {});
 		if (typeof value === "object" && value !== null && "tag" in value) {
 			// Render-prop subtree; traverse as a prop path segment (non-numeric).

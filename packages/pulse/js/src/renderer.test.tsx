@@ -11,9 +11,10 @@ function childrenArray(el: React.ReactElement): React.ReactNode[] {
 describe("VDOMRenderer", () => {
 	function makeRenderer(registry: Record<string, unknown> = {}) {
 		const invokeCallback = vi.fn();
-		const client: any = { invokeCallback };
+		const getRefCallback = vi.fn(() => () => {});
+		const client: any = { invokeCallback, getRefCallback };
 		const renderer = new VDOMRenderer(client, "/test", registry);
-		return { renderer, invokeCallback };
+		return { renderer, invokeCallback, getRefCallback };
 	}
 
 	it("replaces the root element", () => {
@@ -63,6 +64,24 @@ describe("VDOMRenderer", () => {
 		expect(typeof (button.props as any).onClick).toBe("function");
 		(button.props as any).onClick("value");
 		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["value"]);
+	});
+
+	it("hydrates ref specs into callbacks", () => {
+		const { renderer, getRefCallback } = makeRenderer();
+		const callback = () => {};
+		getRefCallback.mockReturnValue(callback);
+
+		const tree = renderer.renderNode({
+			tag: "input",
+			props: {
+				ref: { __pulse_ref__: { channelId: "chan-1", refId: "ref-1" } },
+			},
+			eval: ["ref"],
+		});
+
+		const input = tree as React.ReactElement;
+		expect((input.props as any).ref).toBe(callback);
+		expect(getRefCallback).toHaveBeenCalledWith("chan-1", "ref-1");
 	});
 
 	it("keeps previous eval when update_props.eval is absent", () => {

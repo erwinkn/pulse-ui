@@ -8,6 +8,7 @@ from typing import Any, NamedTuple, TypeAlias, cast
 
 from pulse.helpers import values_equal
 from pulse.hooks.core import HookContext
+from pulse.refs import RefHandle
 from pulse.transpiler import Import
 from pulse.transpiler.function import Constant, JsFunction, JsxFunction
 from pulse.transpiler.nodes import (
@@ -33,7 +34,7 @@ from pulse.transpiler.vdom import (
 	VDOMPropValue,
 )
 
-PropValue: TypeAlias = Node | Callable[..., Any]
+PropValue: TypeAlias = Node | Callable[..., Any] | RefHandle[Any]
 
 FRAGMENT_TAG = ""
 MOUNT_PREFIX = "$$"
@@ -404,6 +405,26 @@ class Renderer:
 					updated[key] = value.render()
 				continue
 
+			if isinstance(value, RefHandle):
+				if key != "ref":
+					raise TypeError("RefHandle can only be used as the 'ref' prop")
+				eval_keys.add(key)
+				if isinstance(old_value, (Element, PulseNode)):
+					unmount_element(old_value)
+				if normalized is None:
+					normalized = current.copy()
+				normalized[key] = value
+				if not (
+					isinstance(old_value, RefHandle) and values_equal(old_value, value)
+				):
+					updated[key] = {
+						"__pulse_ref__": {
+							"channelId": value.channel_id,
+							"refId": value.id,
+						}
+					}
+				continue
+
 			if callable(value):
 				eval_keys.add(key)
 				if isinstance(old_value, (Element, PulseNode)):
@@ -482,6 +503,8 @@ def prop_requires_eval(value: PropValue) -> bool:
 	if isinstance(value, (Element, PulseNode)):
 		return True
 	if isinstance(value, Expr):
+		return True
+	if isinstance(value, RefHandle):
 		return True
 	return callable(value)
 

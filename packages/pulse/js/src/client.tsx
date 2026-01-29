@@ -17,6 +17,183 @@ import { extractEvent } from "./serialize/events";
 import { deserialize, serialize } from "./serialize/serializer";
 import type { VDOMUpdate } from "./vdom";
 
+type RefPayload = {
+	refId?: string;
+	op?: string;
+	payload?: any;
+};
+
+function isRefPayload(value: unknown): value is RefPayload {
+	return typeof value === "object" && value !== null && "refId" in (value as any);
+}
+
+type RefOpResult = any;
+
+class RefController {
+	#client: PulseSocketIOClient;
+	#channelId: string;
+	#refId: string;
+	#bridge: ChannelBridge;
+	#cleanup: Array<() => void> = [];
+	#node: any = null;
+	#callback: (node: any) => void;
+
+	constructor(client: PulseSocketIOClient, channelId: string, refId: string) {
+		this.#client = client;
+		this.#channelId = channelId;
+		this.#refId = refId;
+		const entry = this.#client._ensureChannelEntry(channelId);
+		this.#bridge = entry.bridge;
+
+		this.#cleanup.push(
+			this.#bridge.on("ref:call", (payload) => {
+				if (!this.#matches(payload)) return;
+				this.#handleCall(payload);
+			}),
+			this.#bridge.on("ref:request", (payload) => {
+				if (!this.#matches(payload)) return undefined;
+				return this.#handleRequest(payload);
+			}),
+		);
+
+		this.#callback = (node: any) => {
+			this.#setNode(node ?? null);
+		};
+	}
+
+	get callback() {
+		return this.#callback;
+	}
+
+	get channelId() {
+		return this.#channelId;
+	}
+
+	dispose() {
+		for (const fn of this.#cleanup) fn();
+		this.#cleanup = [];
+		this.#node = null;
+	}
+
+	#matches(payload: unknown): payload is RefPayload {
+		if (!isRefPayload(payload)) return false;
+		const refId = payload.refId;
+		return refId == null || String(refId) === this.#refId;
+	}
+
+	#setNode(node: any) {
+		if (this.#node === node) return;
+		this.#node = node;
+		if (node) {
+			this.#bridge.emit("ref:mounted", { refId: this.#refId });
+		} else {
+			this.#bridge.emit("ref:unmounted", { refId: this.#refId });
+		}
+	}
+
+	#handleCall(payload: RefPayload) {
+		const op = payload.op;
+		if (!op) return;
+		try {
+			this.#perform(op, payload.payload, false);
+		} catch (err) {
+			console.error("[Pulse] Ref call failed:", err);
+		}
+	}
+
+	#handleRequest(payload: RefPayload): RefOpResult {
+		const op = payload.op;
+		if (!op) {
+			throw new Error("ref request missing op");
+		}
+		return this.#perform(op, payload.payload, true);
+	}
+
+	#perform(op: string, payload: any, needsResult: boolean): RefOpResult {
+		const node = this.#node as any;
+		if (!node) {
+			const msg = "ref is not mounted";
+			if (needsResult) throw new Error(msg);
+			console.warn(`[Pulse] ${msg}`);
+			return null;
+		}
+
+		switch (op) {
+			case "focus":
+				if (typeof node.focus === "function") node.focus();
+				return null;
+			case "blur":
+				if (typeof node.blur === "function") node.blur();
+				return null;
+			case "click":
+				if (typeof node.click === "function") node.click();
+				return null;
+			case "select":
+				if (typeof node.select === "function") node.select();
+				else throw new Error("select() not supported on this element");
+				return null;
+			case "scrollIntoView": {
+				if (typeof node.scrollIntoView !== "function") {
+					throw new Error("scrollIntoView() not supported on this element");
+				}
+				const options = payload ?? undefined;
+				node.scrollIntoView(options);
+				return null;
+			}
+			case "measure": {
+				if (typeof node.getBoundingClientRect !== "function") {
+					throw new Error("measure() not supported on this element");
+				}
+				const rect = node.getBoundingClientRect();
+				return {
+					x: rect.x,
+					y: rect.y,
+					width: rect.width,
+					height: rect.height,
+					top: rect.top,
+					right: rect.right,
+					bottom: rect.bottom,
+					left: rect.left,
+				};
+			}
+			case "getValue": {
+				if ("value" in node) return (node as any).value;
+				if ("textContent" in node) return (node as any).textContent;
+				return null;
+			}
+			case "setValue": {
+				const value = payload?.value;
+				if ("value" in node) {
+					(node as any).value = value;
+					return (node as any).value;
+				}
+				if ("textContent" in node) {
+					(node as any).textContent = value == null ? "" : String(value);
+					return (node as any).textContent;
+				}
+				return null;
+			}
+			case "getText": {
+				if ("textContent" in node) return (node as any).textContent;
+				return null;
+			}
+			case "setText": {
+				const text = payload?.text;
+				if (typeof text !== "string") {
+					throw new Error("setText() requires a string payload");
+				}
+				if ("textContent" in node) {
+					(node as any).textContent = text;
+					return (node as any).textContent;
+				}
+				return null;
+			}
+			default:
+				throw new Error(`Unsupported ref op: ${op}`);
+		}
+	}
+}
+
 export interface SocketIODirectives {
 	headers?: Record<string, string>;
 	auth?: Record<string, string>;
@@ -55,6 +232,7 @@ export class PulseSocketIOClient {
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
 	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
+	#refControllers: Map<string, RefController> = new Map();
 	#url: string;
 	#frameworkNavigate: NavigateFunction;
 	#directives: Directives;
@@ -265,6 +443,10 @@ export class PulseSocketIOClient {
 			bridge.dispose(new PulseChannelResetError("Client disconnected"));
 		}
 		this.#channels.clear();
+		for (const controller of this.#refControllers.values()) {
+			controller.dispose();
+		}
+		this.#refControllers.clear();
 		this.#currentStatus = "ok";
 		this.#hasConnectedOnce = false;
 	}
@@ -477,11 +659,39 @@ export class PulseSocketIOClient {
 		if (closed && entry.refCount === 0) {
 			this.#channels.delete(message.channel);
 		}
+		if (message.event === "__close__" || closed) {
+			this.#disposeRefControllersForChannel(message.channel);
+		}
 	}
 
 	#handleTransportDisconnect(): void {
 		for (const entry of this.#channels.values()) {
 			entry.bridge.handleDisconnect(new PulseChannelResetError("Connection lost"));
 		}
+	}
+
+	public getRefCallback(channelId: string, refId: string): (node: any) => void {
+		const key = `${channelId}:${refId}`;
+		let controller = this.#refControllers.get(key);
+		if (!controller) {
+			controller = new RefController(this, channelId, refId);
+			this.#refControllers.set(key, controller);
+		}
+		return controller.callback;
+	}
+
+	#disposeRefControllersForChannel(channelId: string): void {
+		for (const [key, controller] of this.#refControllers.entries()) {
+			if (controller.channelId !== channelId) continue;
+			controller.dispose();
+			this.#refControllers.delete(key);
+		}
+	}
+
+	_ensureChannelEntry(id: string): {
+		bridge: ChannelBridge;
+		refCount: number;
+	} {
+		return this.#ensureChannelEntry(id);
 	}
 }

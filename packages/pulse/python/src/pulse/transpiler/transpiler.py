@@ -103,19 +103,25 @@ class ScopeAnalyzer(ast.NodeVisitor):
 
 	_scopes: dict[ast.AST, Scope]
 	_stack: list[Scope]
+	_global_scope: Scope
 
 	def __init__(self) -> None:
 		self._scopes = {}
 		self._stack = []
+		self._global_scope = Scope(locals=set(), params=set(), parent=None)
 
 	def analyze(
 		self, node: ast.FunctionDef | ast.AsyncFunctionDef
 	) -> dict[ast.AST, Scope]:
-		scope = self._new_scope(node, _collect_param_names(node.args), parent=None)
-		self._stack.append(scope)
+		self._stack.append(self._global_scope)
 		self._visit_defaults(node.args)
+		scope = self._new_scope(
+			node, _collect_param_names(node.args), parent=self._global_scope
+		)
+		self._stack.append(scope)
 		for stmt in node.body:
 			self.visit(stmt)
+		self._stack.pop()
 		self._stack.pop()
 		return self._scopes
 
@@ -154,16 +160,20 @@ class ScopeAnalyzer(ast.NodeVisitor):
 		self.visit(target)
 
 	def _analyze_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+		self._visit_defaults(node.args)
 		scope = self._new_scope(
 			node,
 			_collect_param_names(node.args),
 			parent=self._current_scope(),
 		)
 		self._stack.append(scope)
-		self._visit_defaults(node.args)
 		for stmt in node.body:
 			self.visit(stmt)
 		self._stack.pop()
+
+	@property
+	def global_scope(self) -> Scope:
+		return self._global_scope
 
 	def _visit_defaults(self, args: ast.arguments) -> None:
 		for default in args.defaults:
@@ -312,6 +322,7 @@ class Transpiler:
 	_temp_counter: int
 	_scope_map: dict[ast.AST, Scope]
 	_scope_stack: list[Scope]
+	_global_scope: Scope
 
 	def __init__(
 		self,
@@ -328,7 +339,9 @@ class Transpiler:
 		self.deps = deps
 		self.jsx = jsx
 		self._temp_counter = 0
-		self._scope_map = ScopeAnalyzer().analyze(fndef)
+		analyzer = ScopeAnalyzer()
+		self._scope_map = analyzer.analyze(fndef)
+		self._global_scope = analyzer.global_scope
 		self._scope_stack = [self._scope_map[fndef]]
 		self.init_temp_counter()
 
@@ -447,7 +460,7 @@ class Transpiler:
 			if default_idx >= 0:
 				# Has a default value
 				default_node = args.defaults[default_idx]
-				default_expr = self.emit_expr(default_node)
+				default_expr = self._emit_default_expr(default_node)
 				default_out.clear()
 				default_expr.emit(default_out)
 				destructure_parts.append(f"{param_name} = {''.join(default_out)}")
@@ -465,7 +478,7 @@ class Transpiler:
 			default_node = args.kw_defaults[i]
 			if default_node is not None:
 				# Has a default value
-				default_expr = self.emit_expr(default_node)
+				default_expr = self._emit_default_expr(default_node)
 				default_out.clear()
 				default_expr.emit(default_out)
 				destructure_parts.append(f"{param_name} = {''.join(default_out)}")
@@ -478,6 +491,14 @@ class Transpiler:
 			destructure_parts.append(f"...{args.kwarg.arg}")
 
 		return "{" + ", ".join(destructure_parts) + "}"
+
+	def _emit_default_expr(self, node: ast.expr) -> Expr:
+		"""Emit defaults in defining-scope context."""
+		self._scope_stack.append(self._global_scope)
+		try:
+			return self.emit_expr(node)
+		finally:
+			self._scope_stack.pop()
 
 	# --- Statements ----------------------------------------------------------
 

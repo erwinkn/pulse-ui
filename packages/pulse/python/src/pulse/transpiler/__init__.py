@@ -106,6 +106,11 @@ from pulse.transpiler.nodes import While as While
 # Emit
 from pulse.transpiler.nodes import emit as emit
 
+# Parse helpers
+from pulse.transpiler.parse import ParsedSource as ParsedSource
+from pulse.transpiler.parse import get_ast as get_ast
+from pulse.transpiler.parse import get_source as get_source
+
 # Transpiler
 from pulse.transpiler.transpiler import Transpiler as Transpiler
 from pulse.transpiler.transpiler import transpile as transpile

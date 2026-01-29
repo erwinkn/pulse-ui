@@ -65,7 +65,7 @@ class TestMultiStatement:
 		code = emit(fn)
 		assert (
 			code
-			== "function swap_1(x, y) {\nlet temp = x;\nx = y;\ny = temp;\nreturn [x, y];\n}"
+			== "function swap_1(x, y) {\nlet temp;\ntemp = x;\nx = y;\ny = temp;\nreturn [x, y];\n}"
 		)
 
 	def test_while_loop(self):
@@ -94,7 +94,21 @@ class TestMultiStatement:
 		code = emit(fn)
 		assert (
 			code
-			== "function sum_items_1(items) {\nlet total = 0;\nfor (const x of items) {\ntotal = total + x;\n}\nreturn total;\n}"
+			== "function sum_items_1(items) {\nlet total, x;\ntotal = 0;\nfor (x of items) {\ntotal = total + x;\n}\nreturn total;\n}"
+		)
+
+	def test_for_target_reassign(self):
+		@javascript
+		def last_item(items: Iterable[int]) -> int:
+			for x in items:
+				x = x + 1
+			return x
+
+		fn = last_item.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function last_item_1(items) {\nlet x;\nfor (x of items) {\nx = x + 1;\n}\nreturn x;\n}"
 		)
 
 	def test_for_of_with_tuple_unpacking(self):
@@ -109,7 +123,7 @@ class TestMultiStatement:
 		code = emit(fn)
 		assert (
 			code
-			== "function sum_pairs_1(pairs) {\nlet total = 0;\nfor (const [a, b] of pairs) {\ntotal = total + a + b;\n}\nreturn total;\n}"
+			== "function sum_pairs_1(pairs) {\nlet a, b, total;\ntotal = 0;\nfor ([a, b] of pairs) {\ntotal = total + a + b;\n}\nreturn total;\n}"
 		)
 
 	def test_break_statement(self):
@@ -126,7 +140,7 @@ class TestMultiStatement:
 		code = emit(fn)
 		assert (
 			code
-			== "function find_first_1(items, target) {\nlet result = null;\nfor (const x of items) {\nif (x === target) {\nresult = x;\nbreak;\n}\n}\nreturn result;\n}"
+			== "function find_first_1(items, target) {\nlet result, x;\nresult = null;\nfor (x of items) {\nif (x === target) {\nresult = x;\nbreak;\n}\n}\nreturn result;\n}"
 		)
 
 	def test_continue_statement(self):
@@ -143,7 +157,7 @@ class TestMultiStatement:
 		code = emit(fn)
 		assert (
 			code
-			== "function count_positive_1(items) {\nlet count = 0;\nfor (const x of items) {\nif (x <= 0) {\ncontinue;\n}\ncount = count + 1;\n}\nreturn count;\n}"
+			== "function count_positive_1(items) {\nlet count, x;\ncount = 0;\nfor (x of items) {\nif (x <= 0) {\ncontinue;\n}\ncount = count + 1;\n}\nreturn count;\n}"
 		)
 
 	def test_augmented_assignment(self):
@@ -168,7 +182,54 @@ class TestMultiStatement:
 		code = emit(fn)
 		assert (
 			code
-			== "function outer_1(x) {\nconst inner = function(y) {\nreturn x + y;\n};\nreturn inner(10);\n}"
+			== "function outer_1(x) {\nlet inner;\ninner = function(y) {\nreturn x + y;\n};\nreturn inner(10);\n}"
+		)
+
+	def test_nested_function_recursive_reference(self):
+		@javascript
+		def outer(n: int) -> int:
+			def inner(x: int) -> int:
+				if x <= 0:
+					return 0
+				return inner(x - 1)
+
+			return inner(n)
+
+		fn = outer.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function outer_1(n) {\nlet inner;\ninner = function(x) {\nif (x <= 0) {\nreturn 0;\n}\nreturn inner(x - 1);\n};\nreturn inner(n);\n}"
+		)
+
+	def test_nested_function_rebinds_own_name(self):
+		@javascript
+		def outer() -> int:
+			def inner() -> int:
+				inner = 1
+				return inner
+
+			return inner()
+
+		fn = outer.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function outer_1() {\nlet inner;\ninner = function() {\nlet inner;\ninner = 1;\nreturn inner;\n};\nreturn inner();\n}"
+		)
+
+	def test_use_before_assign_is_local(self):
+		@javascript
+		def read_before_assign() -> int:
+			y = x  # noqa: F821
+			x = 1  # noqa: F841
+			return y
+
+		fn = read_before_assign.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function read_before_assign_1() {\nlet x, y;\ny = x;\nx = 1;\nreturn y;\n}"
 		)
 
 	def test_tuple_unpacking_assignment(self):
@@ -181,7 +242,7 @@ class TestMultiStatement:
 		code = emit(fn)
 		assert (
 			code
-			== "function unpack_1(t) {\nconst $tmp0 = t;\nlet a = $tmp0[0];\nlet b = $tmp0[1];\nreturn a + b;\n}"
+			== "function unpack_1(t) {\nlet a, b;\nconst $tmp0 = t;\na = $tmp0[0];\nb = $tmp0[1];\nreturn a + b;\n}"
 		)
 
 
@@ -225,7 +286,7 @@ class TestExceptionHandling:
 		code = emit(fn)
 		assert (
 			code
-			== "function safe_divide_1(a, b) {\ntry {\nreturn Math.floor(a / b);\n} catch (e) {\nconsole.log(e);\nreturn 0;\n}\n}"
+			== "function safe_divide_1(a, b) {\nlet e;\ntry {\nreturn Math.floor(a / b);\n} catch (e) {\nconsole.log(e);\nreturn 0;\n}\n}"
 		)
 
 	def test_try_finally(self):

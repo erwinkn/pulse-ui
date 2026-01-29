@@ -51,5 +51,5 @@ class TestAsyncFunctions:
 		code = emit(fn)
 		assert (
 			code
-			== "async function process_1(x) {\nlet result = x * 2;\nreturn result;\n}"
+			== "async function process_1(x) {\nlet result;\nresult = x * 2;\nreturn result;\n}"
 		)

@@ -334,11 +334,19 @@ JavaScript builtin bindings for use in `@javascript` functions.
 ```python
 from pulse.js import (
     # Namespace objects (function-only modules)
-    Math, JSON, console, window, document, navigator,
+    Math, JSON, console, window, document, navigator, crypto, Intl,
 
     # Classes (constructors + static methods)
-    Array, Date, Error, Map, Object, Promise, RegExp, Set, String,
-    WeakMap, WeakSet, Number,
+    AbortController, AbortSignal,
+    Array, ArrayBuffer, BigInt64Array, BigUint64Array, Blob, CustomEvent, DataView, Date,
+    DOMParser, Error, File, FileReader, FormData, Headers, Int16Array, Int32Array, Int8Array,
+    IntersectionObserver, Map, MutationObserver, Number, Object, PerformanceObserver, Promise,
+    RegExp, Request, ResizeObserver, Response, Set, String, TextDecoder, TextEncoder,
+    Uint16Array, Uint32Array, Uint8Array, Uint8ClampedArray, URL, URLSearchParams,
+    WeakMap, WeakSet, XMLSerializer,
+
+    # Functions
+    fetch,
 
     # Statement functions
     throw,

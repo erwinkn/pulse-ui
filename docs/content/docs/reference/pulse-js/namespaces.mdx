@@ -8,7 +8,7 @@ description: "JavaScript namespace objects for transpiled Python code"
 JavaScript namespace objects that provide static functions and properties. These don't use `new` - they're just containers for related functions.
 
 ```python
-from pulse.js import Math, JSON, console, window, document, navigator
+from pulse.js import Math, JSON, console, window, document, navigator, crypto, Intl
 ```
 
 Or import as modules for aliased access:
@@ -17,6 +17,8 @@ Or import as modules for aliased access:
 import pulse.js.math as Math
 import pulse.js.json as JSON
 import pulse.js.console as console
+import pulse.js.crypto as crypto
+import pulse.js.intl as Intl
 ```
 
 ---
@@ -440,6 +442,63 @@ def highlight_links():
         link.style.backgroundColor = "yellow"
     console.log(f"Highlighted {links.length} links")
 ```
+
+---
+
+## Intl
+
+Locale-sensitive formatting and collation.
+
+```python
+from pulse.js import Intl, obj
+
+@ps.javascript
+def format_price(value: float):
+    fmt = Intl.NumberFormat("en-US", obj(style="currency", currency="USD"))
+    return fmt.format(value)
+```
+
+### Common constructors
+
+| Constructor | Description |
+|-------------|-------------|
+| `Intl.NumberFormat` | Number formatting |
+| `Intl.DateTimeFormat` | Date/time formatting |
+| `Intl.ListFormat` | List formatting |
+| `Intl.RelativeTimeFormat` | Relative time |
+| `Intl.Collator` | String collation |
+| `Intl.PluralRules` | Plural rules |
+| `Intl.DisplayNames` | Localized names |
+| `Intl.Segmenter` | Text segmentation |
+
+---
+
+## crypto
+
+Web Crypto helpers and random values.
+
+```python
+from pulse.js import crypto, Uint8Array
+
+@ps.javascript
+def random_bytes():
+    buf = Uint8Array(16)
+    crypto.getRandomValues(buf)
+    return crypto.randomUUID()
+```
+
+### Properties
+
+| Property | Description |
+|----------|-------------|
+| `subtle` | SubtleCrypto API |
+
+### Methods
+
+| Function | Description |
+|----------|-------------|
+| `getRandomValues(typedArray)` | Fill typed array |
+| `randomUUID()` | v4 UUID |
 
 ---
 

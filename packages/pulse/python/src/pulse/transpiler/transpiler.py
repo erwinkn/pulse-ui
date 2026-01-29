@@ -10,8 +10,9 @@ from __future__ import annotations
 import ast
 import re
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, override
 
 from pulse.transpiler.builtins import BUILTINS, emit_method
 from pulse.transpiler.errors import TranspileError
@@ -30,6 +31,7 @@ from pulse.transpiler.nodes import (
 	Function,
 	Identifier,
 	If,
+	LetDecl,
 	Literal,
 	Member,
 	New,
@@ -78,6 +80,228 @@ ALLOWED_CMPOPS: dict[type[ast.cmpop], str] = {
 }
 
 
+def _collect_param_names(args: ast.arguments) -> list[str]:
+	"""Collect argument names (regular, vararg, kwonly, kwarg)."""
+	names: list[str] = [arg.arg for arg in args.args]
+	if args.vararg:
+		names.append(args.vararg.arg)
+	names.extend(arg.arg for arg in args.kwonlyargs)
+	if args.kwarg:
+		names.append(args.kwarg.arg)
+	return names
+
+
+@dataclass(slots=True)
+class Scope:
+	locals: set[str]
+	params: set[str]
+	parent: "Scope | None" = None
+
+
+class ScopeAnalyzer(ast.NodeVisitor):
+	"""Collect locals per scope (function/lambda/comprehension)."""
+
+	_scopes: dict[ast.AST, Scope]
+	_stack: list[Scope]
+	_global_scope: Scope
+
+	def __init__(self) -> None:
+		self._scopes = {}
+		self._stack = []
+		self._global_scope = Scope(locals=set(), params=set(), parent=None)
+
+	def analyze(
+		self, node: ast.FunctionDef | ast.AsyncFunctionDef
+	) -> dict[ast.AST, Scope]:
+		self._stack.append(self._global_scope)
+		self._visit_defaults(node.args)
+		scope = self._new_scope(
+			node, _collect_param_names(node.args), parent=self._global_scope
+		)
+		self._stack.append(scope)
+		for stmt in node.body:
+			self.visit(stmt)
+		self._stack.pop()
+		self._stack.pop()
+		return self._scopes
+
+	def _new_scope(
+		self,
+		node: ast.AST,
+		params: list[str],
+		*,
+		parent: Scope | None,
+	) -> Scope:
+		param_set = set(params)
+		scope = Scope(locals=set(param_set), params=param_set, parent=parent)
+		self._scopes[node] = scope
+		return scope
+
+	def _current_scope(self) -> Scope:
+		return self._stack[-1]
+
+	def _add_local(self, name: str) -> None:
+		self._current_scope().locals.add(name)
+
+	def _add_targets(self, target: ast.expr) -> None:
+		if isinstance(target, ast.Name):
+			self._add_local(target.id)
+			return
+		if isinstance(target, (ast.Tuple, ast.List)):
+			for elt in target.elts:
+				if isinstance(elt, ast.Name):
+					self._add_local(elt.id)
+
+	def _visit_target_expr(self, target: ast.expr) -> None:
+		if isinstance(target, (ast.Tuple, ast.List)):
+			for elt in target.elts:
+				self._visit_target_expr(elt)
+			return
+		self.visit(target)
+
+	def _analyze_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+		self._visit_defaults(node.args)
+		scope = self._new_scope(
+			node,
+			_collect_param_names(node.args),
+			parent=self._current_scope(),
+		)
+		self._stack.append(scope)
+		for stmt in node.body:
+			self.visit(stmt)
+		self._stack.pop()
+
+	@property
+	def global_scope(self) -> Scope:
+		return self._global_scope
+
+	def _visit_defaults(self, args: ast.arguments) -> None:
+		for default in args.defaults:
+			self.visit(default)
+		for default in args.kw_defaults:
+			if default is not None:
+				self.visit(default)
+
+	@override
+	def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+		self._add_local(node.name)
+		self._analyze_function(node)
+
+	@override
+	def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+		self._add_local(node.name)
+		self._analyze_function(node)
+
+	@override
+	def visit_Lambda(self, node: ast.Lambda) -> None:
+		scope = self._new_scope(
+			node,
+			_collect_param_names(node.args),
+			parent=self._current_scope(),
+		)
+		self._stack.append(scope)
+		self.visit(node.body)
+		self._stack.pop()
+
+	def _visit_comprehension(
+		self,
+		node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp,
+		*,
+		elt: ast.expr,
+		key: ast.expr | None = None,
+	) -> None:
+		scope = self._new_scope(node, [], parent=self._current_scope())
+		self._stack.append(scope)
+		if key is not None:
+			self.visit(key)
+		self.visit(elt)
+		for gen in node.generators:
+			self.visit(gen.iter)
+			for if_node in gen.ifs:
+				self.visit(if_node)
+		self._stack.pop()
+
+	@override
+	def visit_ListComp(self, node: ast.ListComp) -> None:
+		self._visit_comprehension(node, elt=node.elt)
+
+	@override
+	def visit_SetComp(self, node: ast.SetComp) -> None:
+		self._visit_comprehension(node, elt=node.elt)
+
+	@override
+	def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+		self._visit_comprehension(node, elt=node.elt)
+
+	@override
+	def visit_DictComp(self, node: ast.DictComp) -> None:
+		self._visit_comprehension(node, elt=node.value, key=node.key)
+
+	@override
+	def visit_Assign(self, node: ast.Assign) -> None:
+		for target in node.targets:
+			if isinstance(target, (ast.Name, ast.Tuple, ast.List)):
+				self._add_targets(target)
+			self._visit_target_expr(target)
+		self.visit(node.value)
+
+	@override
+	def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+		if isinstance(node.target, (ast.Name, ast.Tuple, ast.List)):
+			self._add_targets(node.target)
+		self._visit_target_expr(node.target)
+		if node.value is not None:
+			self.visit(node.value)
+
+	@override
+	def visit_AugAssign(self, node: ast.AugAssign) -> None:
+		if isinstance(node.target, (ast.Name, ast.Tuple, ast.List)):
+			self._add_targets(node.target)
+		self._visit_target_expr(node.target)
+		self.visit(node.value)
+
+	@override
+	def visit_For(self, node: ast.For) -> None:
+		if isinstance(node.target, (ast.Name, ast.Tuple, ast.List)):
+			self._add_targets(node.target)
+		self._visit_target_expr(node.target)
+		self.visit(node.iter)
+		for stmt in node.body:
+			self.visit(stmt)
+		for stmt in node.orelse:
+			self.visit(stmt)
+
+	@override
+	def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+		if node.name:
+			self._add_local(node.name)
+		if node.type is not None:
+			self.visit(node.type)
+		for stmt in node.body:
+			self.visit(stmt)
+
+	@override
+	def visit_With(self, node: ast.With) -> None:
+		for item in node.items:
+			if item.optional_vars and isinstance(
+				item.optional_vars, (ast.Name, ast.Tuple, ast.List)
+			):
+				self._add_targets(item.optional_vars)
+			if item.optional_vars is not None:
+				self._visit_target_expr(item.optional_vars)
+			self.visit(item.context_expr)
+		for stmt in node.body:
+			self.visit(stmt)
+
+	@override
+	def visit_Global(self, node: ast.Global) -> None:
+		raise TranspileError("global is not supported", node=node)
+
+	@override
+	def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
+		raise TranspileError("nonlocal is not supported", node=node)
+
+
 class Transpiler:
 	"""Transpile Python AST to v2 Expr/Stmt AST nodes.
 
@@ -93,10 +317,12 @@ class Transpiler:
 	fndef: ast.FunctionDef | ast.AsyncFunctionDef
 	args: list[str]
 	deps: Mapping[str, Expr]
-	locals: set[str]
 	jsx: bool
 	source_file: Path | None
 	_temp_counter: int
+	_scope_map: dict[ast.AST, Scope]
+	_scope_stack: list[Scope]
+	_global_scope: Scope
 
 	def __init__(
 		self,
@@ -109,22 +335,21 @@ class Transpiler:
 		self.fndef = fndef
 		self.source_file = source_file
 		# Collect all argument names (regular, vararg, kwonly, kwarg)
-		args: list[str] = [arg.arg for arg in fndef.args.args]
-		if fndef.args.vararg:
-			args.append(fndef.args.vararg.arg)
-		args.extend(arg.arg for arg in fndef.args.kwonlyargs)
-		if fndef.args.kwarg:
-			args.append(fndef.args.kwarg.arg)
-		self.args = args
+		self.args = _collect_param_names(fndef.args)
 		self.deps = deps
 		self.jsx = jsx
-		self.locals = set(self.args)
 		self._temp_counter = 0
+		analyzer = ScopeAnalyzer()
+		self._scope_map = analyzer.analyze(fndef)
+		self._global_scope = analyzer.global_scope
+		self._scope_stack = [self._scope_map[fndef]]
 		self.init_temp_counter()
 
 	def init_temp_counter(self) -> None:
 		"""Initialize temp counter to avoid collisions with args or globals."""
-		all_names = set(self.args) | set(self.deps.keys())
+		all_names = set(self.deps.keys())
+		for scope in self._scope_map.values():
+			all_names.update(scope.locals)
 		counter = 0
 		while f"$tmp{counter}" in all_names:
 			counter += 1
@@ -135,6 +360,38 @@ class Transpiler:
 		name = f"$tmp{self._temp_counter}"
 		self._temp_counter += 1
 		return name
+
+	def _current_scope(self) -> Scope:
+		return self._scope_stack[-1]
+
+	def _push_scope(self, node: ast.AST) -> None:
+		self._scope_stack.append(self._scope_map[node])
+
+	def _pop_scope(self) -> None:
+		self._scope_stack.pop()
+
+	def _is_local_here(self, name: str) -> bool:
+		return name in self._current_scope().locals
+
+	def _is_local(self, name: str) -> bool:
+		scope: Scope | None = self._current_scope()
+		while scope is not None:
+			if name in scope.locals:
+				return True
+			scope = scope.parent
+		return False
+
+	def _require_local(
+		self, name: str, *, node: ast.expr | ast.stmt | ast.excepthandler
+	) -> None:
+		if not self._is_local_here(name):
+			raise TranspileError(f"Assignment to unknown local: {name}", node=node)
+
+	def _function_prelude(self, scope: Scope) -> list[Stmt]:
+		names = sorted(scope.locals - scope.params)
+		if not names:
+			return []
+		return [LetDecl(names)]
 
 	# --- Entrypoint ---------------------------------------------------------
 
@@ -176,7 +433,8 @@ class Transpiler:
 					return Arrow(self.args, expr)
 
 		# General case: Function (for JSX or multi-statement)
-		stmts = [self.emit_stmt(s) for s in body]
+		prelude = self._function_prelude(self._current_scope())
+		stmts = prelude + [self.emit_stmt(s) for s in body]
 		is_async = isinstance(self.fndef, ast.AsyncFunctionDef)
 		args = [self._jsx_args()] if self.jsx else self.args
 		return Function(args, stmts, is_async=is_async)
@@ -202,7 +460,7 @@ class Transpiler:
 			if default_idx >= 0:
 				# Has a default value
 				default_node = args.defaults[default_idx]
-				default_expr = self.emit_expr(default_node)
+				default_expr = self._emit_default_expr(default_node)
 				default_out.clear()
 				default_expr.emit(default_out)
 				destructure_parts.append(f"{param_name} = {''.join(default_out)}")
@@ -220,7 +478,7 @@ class Transpiler:
 			default_node = args.kw_defaults[i]
 			if default_node is not None:
 				# Has a default value
-				default_expr = self.emit_expr(default_node)
+				default_expr = self._emit_default_expr(default_node)
 				default_out.clear()
 				default_expr.emit(default_out)
 				destructure_parts.append(f"{param_name} = {''.join(default_out)}")
@@ -233,6 +491,14 @@ class Transpiler:
 			destructure_parts.append(f"...{args.kwarg.arg}")
 
 		return "{" + ", ".join(destructure_parts) + "}"
+
+	def _emit_default_expr(self, node: ast.expr) -> Expr:
+		"""Emit defaults in defining-scope context."""
+		self._scope_stack.append(self._global_scope)
+		try:
+			return self.emit_expr(node)
+		finally:
+			self._scope_stack.pop()
 
 	# --- Statements ----------------------------------------------------------
 
@@ -262,6 +528,7 @@ class Transpiler:
 					"Only simple augmented assignments supported", node=node
 				)
 			target = node.target.id
+			self._require_local(target, node=node)
 			op_type = type(node.op)
 			if op_type not in ALLOWED_BINOPS:
 				raise TranspileError(
@@ -296,22 +563,16 @@ class Transpiler:
 			target = target_node.id
 			value_expr = self.emit_expr(node.value)
 
-			if target in self.locals:
-				return Assign(target, value_expr)
-			else:
-				self.locals.add(target)
-				return Assign(target, value_expr, declare="let")
+			self._require_local(target, node=node)
+			return Assign(target, value_expr)
 
 		if isinstance(node, ast.AnnAssign):
 			if not isinstance(node.target, ast.Name):
 				raise TranspileError("Only simple annotated assignments supported")
 			target = node.target.id
 			value = Literal(None) if node.value is None else self.emit_expr(node.value)
-			if target in self.locals:
-				return Assign(target, value)
-			else:
-				self.locals.add(target)
-				return Assign(target, value, declare="let")
+			self._require_local(target, node=node)
+			return Assign(target, value)
 
 		if isinstance(node, ast.If):
 			cond = self.emit_expr(node.test)
@@ -358,11 +619,8 @@ class Transpiler:
 			assert isinstance(e, ast.Name)
 			name = e.id
 			sub = Subscript(Identifier(tmp_name), Literal(idx))
-			if name in self.locals:
-				stmts.append(Assign(name, sub))
-			else:
-				self.locals.add(name)
-				stmts.append(Assign(name, sub, declare="let"))
+			self._require_local(name, node=target)
+			stmts.append(Assign(name, sub))
 
 		return StmtSequence(stmts)
 
@@ -453,7 +711,7 @@ class Transpiler:
 						"Only simple name targets supported in for-loop unpacking"
 					)
 				names.append(e.id)
-				self.locals.add(e.id)
+				self._require_local(e.id, node=node)
 			iter_expr = self.emit_expr(node.iter)
 			body = [self.emit_stmt(s) for s in node.body]
 			# Use array pattern for destructuring
@@ -464,7 +722,7 @@ class Transpiler:
 			raise TranspileError("Only simple name targets supported in for-loops")
 
 		target = node.target.id
-		self.locals.add(target)
+		self._require_local(target, node=node)
 		iter_expr = self.emit_expr(node.iter)
 		body = [self.emit_stmt(s) for s in node.body]
 		return ForOf(target, iter_expr, body)
@@ -474,31 +732,29 @@ class Transpiler:
 	) -> Stmt:
 		"""Emit a nested function definition."""
 		name = node.name
-		params = [arg.arg for arg in node.args.args]
+		params = _collect_param_names(node.args)
+		self._require_local(name, node=node)
 
-		# Save current locals and extend with params
-		saved_locals = set(self.locals)
-		self.locals.update(params)
+		self._push_scope(node)
+		try:
+			# Skip docstrings and emit body
+			body_stmts = node.body
+			if (
+				body_stmts
+				and isinstance(body_stmts[0], ast.Expr)
+				and isinstance(body_stmts[0].value, ast.Constant)
+				and isinstance(body_stmts[0].value.value, str)
+			):
+				body_stmts = body_stmts[1:]
 
-		# Skip docstrings and emit body
-		body_stmts = node.body
-		if (
-			body_stmts
-			and isinstance(body_stmts[0], ast.Expr)
-			and isinstance(body_stmts[0].value, ast.Constant)
-			and isinstance(body_stmts[0].value.value, str)
-		):
-			body_stmts = body_stmts[1:]
-
-		stmts: list[Stmt] = [self.emit_stmt(s) for s in body_stmts]
-
-		# Restore outer locals and add function name
-		self.locals = saved_locals
-		self.locals.add(name)
+			prelude = self._function_prelude(self._current_scope())
+			stmts: list[Stmt] = prelude + [self.emit_stmt(s) for s in body_stmts]
+		finally:
+			self._pop_scope()
 
 		is_async = isinstance(node, ast.AsyncFunctionDef)
 		fn = Function(params, stmts, is_async=is_async)
-		return Assign(name, fn, declare="const")
+		return Assign(name, fn)
 
 	def _emit_try(self, node: ast.Try) -> Stmt:
 		"""Emit a try/except/finally statement."""
@@ -517,7 +773,6 @@ class Transpiler:
 			handler = node.handlers[0]
 			if handler.name:
 				catch_param = handler.name
-				self.locals.add(catch_param)
 			catch_body = [self.emit_stmt(s) for s in handler.body]
 
 		# Handle finally
@@ -594,23 +849,21 @@ class Transpiler:
 
 		if isinstance(node, ast.ListComp):
 			return self._emit_comprehension_chain(
-				node.generators, lambda: self.emit_expr(node.elt)
+				node, lambda: self.emit_expr(node.elt)
 			)
 
 		if isinstance(node, ast.GeneratorExp):
 			return self._emit_comprehension_chain(
-				node.generators, lambda: self.emit_expr(node.elt)
+				node, lambda: self.emit_expr(node.elt)
 			)
 
 		if isinstance(node, ast.SetComp):
-			arr = self._emit_comprehension_chain(
-				node.generators, lambda: self.emit_expr(node.elt)
-			)
+			arr = self._emit_comprehension_chain(node, lambda: self.emit_expr(node.elt))
 			return New(Identifier("Set"), [arr])
 
 		if isinstance(node, ast.DictComp):
 			pairs = self._emit_comprehension_chain(
-				node.generators,
+				node,
 				lambda: Array([self.emit_expr(node.key), self.emit_expr(node.value)]),
 			)
 			return New(Identifier("Map"), [pairs])
@@ -648,13 +901,13 @@ class Transpiler:
 		"""Emit a name reference."""
 		name = node.id
 
-		# Check deps first
+		# Local variable (current or enclosing scope)
+		if self._is_local(name):
+			return Identifier(name)
+
+		# Check deps
 		if name in self.deps:
 			return self.deps[name]
-
-		# Local variable
-		if name in self.locals:
-			return Identifier(name)
 
 		# Check builtins
 		if name in BUILTINS:
@@ -1093,28 +1346,25 @@ class Transpiler:
 
 	def _emit_lambda(self, node: ast.Lambda) -> Expr:
 		"""Emit a lambda expression as an arrow function."""
-		params = [arg.arg for arg in node.args.args]
+		params = _collect_param_names(node.args)
 
-		# Add params to locals temporarily
-		saved_locals = set(self.locals)
-		self.locals.update(params)
-
-		body = self.emit_expr(node.body)
-
-		self.locals = saved_locals
+		self._push_scope(node)
+		try:
+			body = self.emit_expr(node.body)
+		finally:
+			self._pop_scope()
 
 		return Arrow(params, body)
 
 	def _emit_comprehension_chain(
 		self,
-		generators: list[ast.comprehension],
+		node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp,
 		build_last: Callable[[], Expr],
 	) -> Expr:
 		"""Build a flatMap/map chain for comprehensions."""
+		generators = node.generators
 		if len(generators) == 0:
 			raise TranspileError("Empty comprehension")
-
-		saved_locals = set(self.locals)
 
 		def build_chain(gen_index: int) -> Expr:
 			gen = generators[gen_index]
@@ -1139,7 +1389,7 @@ class Transpiler:
 				)
 
 			for nm in names:
-				self.locals.add(nm)
+				self._current_scope().locals.add(nm)
 
 			base = iter_expr
 
@@ -1159,10 +1409,11 @@ class Transpiler:
 			inner = build_chain(gen_index + 1)
 			return Call(Member(base, "flatMap"), [Arrow(params, inner)])
 
+		self._push_scope(node)
 		try:
 			return build_chain(0)
 		finally:
-			self.locals = saved_locals
+			self._pop_scope()
 
 
 def transpile(

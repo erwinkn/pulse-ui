@@ -7,8 +7,8 @@ and JsFunction which wraps transpiled functions with their dependencies.
 from __future__ import annotations
 
 import ast
+import dis
 import inspect
-import textwrap
 import types as pytypes
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -25,7 +25,6 @@ from typing import (
 	override,
 )
 
-from pulse.helpers import getsourcecode
 from pulse.transpiler.errors import TranspileError
 from pulse.transpiler.id import next_id, reset_id_counter
 from pulse.transpiler.imports import Import
@@ -38,6 +37,7 @@ from pulse.transpiler.nodes import (
 	Return,
 	to_js_identifier,
 )
+from pulse.transpiler.parse import clear_parse_cache, get_ast, get_source
 from pulse.transpiler.transpiler import Transpiler
 from pulse.transpiler.vdom import VDOMExpr
 
@@ -63,6 +63,7 @@ def clear_function_cache() -> None:
 
 	FUNCTION_CACHE.clear()
 	CONSTANT_REGISTRY.clear()
+	clear_parse_cache()
 	clear_import_registry()
 	clear_asset_registry()
 	reset_id_counter()
@@ -137,33 +138,17 @@ def _transpile_function_body(
 	deps: dict[str, Expr],
 	*,
 	jsx: bool = False,
-) -> tuple[Function | Arrow, str]:
+) -> Function | Arrow:
 	"""Shared transpilation logic for JsFunction and JsxFunction.
 
-	Returns the transpiled Function/Arrow node and the source code.
+	Returns the transpiled Function/Arrow node.
 	"""
 	# Get and parse source
-	src = getsourcecode(fn)
-	src = textwrap.dedent(src)
-	try:
-		source_start_line = inspect.getsourcelines(fn)[1]
-	except (OSError, TypeError):
-		source_start_line = None
-	module = ast.parse(src)
-
-	# Find the function definition
-	fndefs = [
-		n for n in module.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-	]
-	if not fndefs:
-		raise TranspileError("No function definition found in source")
-	fndef = fndefs[-1]
-
-	# Get filename for error messages and source file resolution
-	try:
-		filename = inspect.getfile(fn)
-	except (TypeError, OSError):
-		filename = None
+	parsed = get_source(fn)
+	src = parsed.source
+	fndef = get_ast(fn)
+	filename = parsed.filename
+	source_start_line = parsed.source_start_line
 
 	# Transpile with source context for errors
 	try:
@@ -181,7 +166,7 @@ def _transpile_function_body(
 			) from None
 		raise
 
-	return result, src
+	return result
 
 
 @dataclass(slots=True, init=False)
@@ -238,7 +223,7 @@ class JsFunction(Expr, Generic[*Args, R]):
 		if self._transpiled is not None:
 			return self._transpiled
 
-		result, _ = _transpile_function_body(self.fn, self.deps)
+		result = _transpile_function_body(self.fn, self.deps)
 
 		# Convert Arrow to Function if needed, and set the name
 		if isinstance(result, Function):
@@ -326,7 +311,7 @@ class JsxFunction(Expr, Generic[P, R]):
 		if self._transpiled is not None:
 			return self._transpiled
 
-		result, _ = _transpile_function_body(self.fn, self.deps, jsx=True)
+		result = _transpile_function_body(self.fn, self.deps, jsx=True)
 
 		# JSX transpilation always returns Function (never Arrow)
 		assert isinstance(result, Function), (
@@ -376,7 +361,6 @@ def analyze_code_object(
 	    - effective_globals: dict mapping names to their values (includes closure vars)
 	    - all_names: set of all names referenced in the code (including nested functions)
 	"""
-	import dis
 
 	code = fn.__code__
 
@@ -443,14 +427,54 @@ def analyze_deps(fn: Callable[..., Any]) -> dict[str, Expr]:
 	"""
 	# Analyze code object and resolve globals + closure vars
 	effective_globals, all_names = analyze_code_object(fn)
+	code_names = set(all_names)
+	default_names: set[str] = set()
+	default_name_values: dict[str, Any] = {}
+
+	# Include names referenced only in default expressions (not in bytecode)
+	try:
+		args = get_ast(fn).args
+		pos_defaults = list(args.defaults)
+		py_defaults = fn.__defaults__ or ()
+		num_args = len(args.args)
+		num_defaults = len(pos_defaults)
+		for i, _arg in enumerate(args.args):
+			default_idx = i - (num_args - num_defaults)
+			if default_idx < 0 or default_idx >= len(pos_defaults):
+				continue
+			default_node = pos_defaults[default_idx]
+			if isinstance(default_node, ast.Name) and default_idx < len(py_defaults):
+				default_name_values[default_node.id] = py_defaults[default_idx]
+			for node in ast.walk(default_node):
+				if isinstance(node, ast.Name):
+					default_names.add(node.id)
+
+		py_kwdefaults = fn.__kwdefaults__ or {}
+		for i, kwarg in enumerate(args.kwonlyargs):
+			default_node = args.kw_defaults[i]
+			if default_node is None:
+				continue
+			if isinstance(default_node, ast.Name) and kwarg.arg in py_kwdefaults:
+				default_name_values[default_node.id] = py_kwdefaults[kwarg.arg]
+			for node in ast.walk(default_node):
+				if isinstance(node, ast.Name):
+					default_names.add(node.id)
+	except (OSError, TypeError, SyntaxError, TranspileError):
+		pass
+
+	all_names.update(default_names)
+	default_only_names = default_names - code_names
 
 	# Build dependencies dictionary - all values are Expr
 	deps: dict[str, Expr] = {}
 
+	missing = object()
 	for name in all_names:
-		value = effective_globals.get(name)
-
-		if value is None:
+		if name in default_only_names and name in default_name_values:
+			value = default_name_values[name]
+		else:
+			value = effective_globals.get(name, missing)
+		if value is missing:
 			# Not in globals - could be a builtin or unresolved
 			# For now, skip - builtins will be handled by the transpiler
 			# TODO: Add builtin support

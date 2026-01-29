@@ -332,7 +332,7 @@ class TestSet:
 		code = emit(fn)
 		assert (
 			code
-			== "function set_ops_1() {\nlet s = new Set([1, 2, 3]);\ns.add(4);\ns.delete(1);\nreturn s.has(2);\n}"
+			== "function set_ops_1() {\nlet s;\ns = new Set([1, 2, 3]);\ns.add(4);\ns.delete(1);\nreturn s.has(2);\n}"
 		)
 
 
@@ -371,7 +371,7 @@ class TestMap:
 		code = emit(fn)
 		assert (
 			code
-			== 'function map_ops_1() {\nlet m = new Map([["a", 1], ["b", 2]]);\nm.set("c", 3);\nreturn m.get("a");\n}'
+			== 'function map_ops_1() {\nlet m;\nm = new Map([["a", 1], ["b", 2]]);\nm.set("c", 3);\nreturn m.get("a");\n}'
 		)
 
 
@@ -409,7 +409,7 @@ class TestDate:
 		code = emit(fn)
 		assert (
 			code
-			== "function date_ops_1() {\nlet d = new Date();\nreturn [d.getTime(), d.getFullYear()];\n}"
+			== "function date_ops_1() {\nlet d;\nd = new Date();\nreturn [d.getTime(), d.getFullYear()];\n}"
 		)
 
 
@@ -453,7 +453,7 @@ class TestPromise:
 		code = emit(fn)
 		assert (
 			code
-			== "function promise_chain_1() {\nlet p = Promise.resolve(1);\nreturn p.then(x => x + 1);\n}"
+			== "function promise_chain_1() {\nlet p;\np = Promise.resolve(1);\nreturn p.then(x => x + 1);\n}"
 		)
 
 
@@ -515,7 +515,7 @@ class TestRegExp:
 		code = emit(fn)
 		assert (
 			code
-			== "function regexp_ops_1(pattern, text) {\nlet re = new RegExp(pattern);\nreturn [re.test(text), re.exec(text)];\n}"
+			== "function regexp_ops_1(pattern, text) {\nlet re;\nre = new RegExp(pattern);\nreturn [re.test(text), re.exec(text)];\n}"
 		)
 
 
@@ -589,7 +589,7 @@ class TestWeakMap:
 		code = emit(fn)
 		assert (
 			code
-			== "function weakmap_ops_1(key, value) {\nlet wm = new WeakMap();\nwm.set(key, value);\nreturn [wm.get(key), wm.has(key)];\n}"
+			== "function weakmap_ops_1(key, value) {\nlet wm;\nwm = new WeakMap();\nwm.set(key, value);\nreturn [wm.get(key), wm.has(key)];\n}"
 		)
 
 
@@ -619,7 +619,7 @@ class TestWeakSet:
 		code = emit(fn)
 		assert (
 			code
-			== "function weakset_ops_1(value) {\nlet ws = new WeakSet();\nws.add(value);\nreturn [ws.has(value), ws.delete(value)];\n}"
+			== "function weakset_ops_1(value) {\nlet ws;\nws = new WeakSet();\nws.add(value);\nreturn [ws.has(value), ws.delete(value)];\n}"
 		)
 
 

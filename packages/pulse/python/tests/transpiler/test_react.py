@@ -95,9 +95,10 @@ class TestUseState:
 		assert code == (
 			'import { useState as useState_1 } from "react";\n\n'
 			"function counter_2() {\n"
+			"let count, set_count;\n"
 			"const $tmp0 = useState_1(0);\n"
-			"let count = $tmp0[0];\n"
-			"let set_count = $tmp0[1];\n"
+			"count = $tmp0[0];\n"
+			"set_count = $tmp0[1];\n"
 			"return count;\n"
 			"}"
 		)
@@ -115,9 +116,10 @@ class TestUseState:
 		assert code == (
 			'import { useState as useState_1 } from "react";\n\n'
 			"function toggle_2() {\n"
+			"let set_visible, visible;\n"
 			"const $tmp0 = useState_1(true);\n"
-			"let visible = $tmp0[0];\n"
-			"let set_visible = $tmp0[1];\n"
+			"visible = $tmp0[0];\n"
+			"set_visible = $tmp0[1];\n"
 			"set_visible(!visible);\n"
 			"return visible;\n"
 			"}"
@@ -136,9 +138,10 @@ class TestUseState:
 		assert code == (
 			'import { useState as useState_1 } from "react";\n\n'
 			"function form_state_2() {\n"
+			"let set_state, state;\n"
 			'const $tmp0 = useState_1({"name": "", "email": ""});\n'
-			"let state = $tmp0[0];\n"
-			"let set_state = $tmp0[1];\n"
+			"state = $tmp0[0];\n"
+			"set_state = $tmp0[1];\n"
 			"return state;\n"
 			"}"
 		)
@@ -488,7 +491,8 @@ class TestUseRef:
 		assert code == (
 			'import { useRef as useRef_1 } from "react";\n\n'
 			"function input_ref_2() {\n"
-			"let ref = useRef_1(null);\n"
+			"let ref;\n"
+			"ref = useRef_1(null);\n"
 			"return ref;\n"
 			"}"
 		)
@@ -505,7 +509,8 @@ class TestUseRef:
 		assert code == (
 			'import { useRef as useRef_1 } from "react";\n\n'
 			"function counter_ref_2() {\n"
-			"let ref = useRef_1(0);\n"
+			"let ref;\n"
+			"ref = useRef_1(0);\n"
 			"return ref.current;\n"
 			"}"
 		)
@@ -524,8 +529,9 @@ class TestUseRef:
 		assert code == (
 			'import { useRef as useRef_1 } from "react";\n\n'
 			"function multiple_refs_2() {\n"
-			"let input_ref = useRef_1(null);\n"
-			"let count_ref = useRef_1(0);\n"
+			"let count_ref, input_ref;\n"
+			"input_ref = useRef_1(null);\n"
+			"count_ref = useRef_1(0);\n"
 			"return [input_ref.current, count_ref.current];\n"
 			"}"
 		)
@@ -549,7 +555,8 @@ class TestUseCallback:
 		assert code == (
 			'import { useCallback as useCallback_1 } from "react";\n\n'
 			"function click_handler_2() {\n"
-			'let handle_click = useCallback_1(() => console.log("clicked"), []);\n'
+			"let handle_click;\n"
+			'handle_click = useCallback_1(() => console.log("clicked"), []);\n'
 			"return handle_click;\n"
 			"}"
 		)
@@ -566,7 +573,8 @@ class TestUseCallback:
 		assert code == (
 			'import { useCallback as useCallback_1 } from "react";\n\n'
 			"function handler_with_deps_2(id) {\n"
-			"let handle = useCallback_1(() => console.log(id), [id]);\n"
+			"let handle;\n"
+			"handle = useCallback_1(() => console.log(id), [id]);\n"
 			"return handle;\n"
 			"}"
 		)
@@ -590,7 +598,8 @@ class TestUseMemo:
 		assert code == (
 			'import { useMemo as useMemo_1 } from "react";\n\n'
 			"function expensive_value_2(a, b) {\n"
-			"let result = useMemo_1(() => a * b, [a, b]);\n"
+			"let result;\n"
+			"result = useMemo_1(() => a * b, [a, b]);\n"
 			"return result;\n"
 			"}"
 		)
@@ -609,7 +618,8 @@ class TestUseMemo:
 		assert code == (
 			'import { useMemo as useMemo_1 } from "react";\n\n'
 			"function filtered_list_2(items, threshold) {\n"
-			"let filtered = useMemo_1(() => items.filter(x => x > threshold).map(x => x), [items, threshold]);\n"
+			"let filtered;\n"
+			"filtered = useMemo_1(() => items.filter(x => x > threshold).map(x => x), [items, threshold]);\n"
 			"return filtered;\n"
 			"}"
 		)
@@ -638,15 +648,16 @@ class TestUseReducer:
 		assert code == (
 			'import { useReducer as useReducer_1 } from "react";\n\n'
 			"function counter_reducer_2() {\n"
-			"const reducer = function(state, action) {\n"
+			"let dispatch, reducer, state;\n"
+			"reducer = function(state, action) {\n"
 			'if (action === "inc") {\n'
 			"return state + 1;\n"
 			"}\n"
 			"return state;\n"
 			"};\n"
 			"const $tmp0 = useReducer_1(reducer, 0);\n"
-			"let state = $tmp0[0];\n"
-			"let dispatch = $tmp0[1];\n"
+			"state = $tmp0[0];\n"
+			"dispatch = $tmp0[1];\n"
 			"return state;\n"
 			"}"
 		)
@@ -673,7 +684,8 @@ class TestUseContext:
 			'import { ThemeContext as ThemeContext_2 } from "@app/theme";\n'
 			'import { useContext as useContext_1 } from "react";\n\n'
 			"function themed_component_3() {\n"
-			"let theme = useContext_1(ThemeContext_2);\n"
+			"let theme;\n"
+			"theme = useContext_1(ThemeContext_2);\n"
 			"return theme;\n"
 			"}"
 		)
@@ -719,7 +731,8 @@ class TestUseId:
 		assert code == (
 			'import { useId as useId_1 } from "react";\n\n'
 			"function labeled_input_2() {\n"
-			"let input_id = useId_1();\n"
+			"let input_id;\n"
+			"input_id = useId_1();\n"
 			"return input_id;\n"
 			"}"
 		)
@@ -743,9 +756,10 @@ class TestUseTransition:
 		assert code == (
 			'import { useTransition as useTransition_1 } from "react";\n\n'
 			"function transition_example_2() {\n"
+			"let is_pending, start_transition;\n"
 			"const $tmp0 = useTransition_1();\n"
-			"let is_pending = $tmp0[0];\n"
-			"let start_transition = $tmp0[1];\n"
+			"is_pending = $tmp0[0];\n"
+			"start_transition = $tmp0[1];\n"
 			"return is_pending;\n"
 			"}"
 		)
@@ -769,7 +783,8 @@ class TestUseDeferredValue:
 		assert code == (
 			'import { useDeferredValue as useDeferredValue_1 } from "react";\n\n'
 			"function deferred_search_2(query) {\n"
-			"let deferred_query = useDeferredValue_1(query);\n"
+			"let deferred_query;\n"
+			"deferred_query = useDeferredValue_1(query);\n"
 			"return deferred_query;\n"
 			"}"
 		)
@@ -793,7 +808,8 @@ class TestMemoForwardRef:
 		assert code == (
 			'import { memo as memo_1 } from "react";\n\n'
 			"function memoized_component_2() {\n"
-			"let Component = memo_1(props => props);\n"
+			"let Component;\n"
+			"Component = memo_1(props => props);\n"
 			"return Component;\n"
 			"}"
 		)
@@ -848,7 +864,8 @@ class TestCreateContext:
 		assert code == (
 			'import { createContext as createContext_1 } from "react";\n\n'
 			"function create_user_context_2() {\n"
-			'let ctx = createContext_1({"name": "", "role": "guest"});\n'
+			"let ctx;\n"
+			'ctx = createContext_1({"name": "", "role": "guest"});\n'
 			"return ctx;\n"
 			"}"
 		)
@@ -883,12 +900,13 @@ class TestMultipleHooks:
 			"import { useCallback as useCallback_4, useEffect as useEffect_3, "
 			'useMemo as useMemo_2, useState as useState_1 } from "react";\n\n'
 			"function counter_component_5() {\n"
+			"let count, doubled, increment, set_count;\n"
 			"const $tmp0 = useState_1(0);\n"
-			"let count = $tmp0[0];\n"
-			"let set_count = $tmp0[1];\n"
-			"let doubled = useMemo_2(() => count * 2, [count]);\n"
+			"count = $tmp0[0];\n"
+			"set_count = $tmp0[1];\n"
+			"doubled = useMemo_2(() => count * 2, [count]);\n"
 			"useEffect_3(() => console.log(`Count: ${count}`), [count]);\n"
-			"let increment = useCallback_4(() => set_count(count + 1), [count]);\n"
+			"increment = useCallback_4(() => set_count(count + 1), [count]);\n"
 			'return {"count": count, "doubled": doubled, "increment": increment};\n'
 			"}"
 		)
@@ -913,13 +931,14 @@ class TestMultipleHooks:
 		assert code == (
 			'import { useCallback as useCallback_2, useState as useState_1 } from "react";\n\n'
 			"function form_component_3() {\n"
+			"let email, handle_submit, name, set_email, set_name;\n"
 			'const $tmp0 = useState_1("");\n'
-			"let name = $tmp0[0];\n"
-			"let set_name = $tmp0[1];\n"
+			"name = $tmp0[0];\n"
+			"set_name = $tmp0[1];\n"
 			'const $tmp1 = useState_1("");\n'
-			"let email = $tmp1[0];\n"
-			"let set_email = $tmp1[1];\n"
-			"let handle_submit = useCallback_2(() => console.log(`Name: ${name}, Email: ${email}`), [name, email]);\n"
+			"email = $tmp1[0];\n"
+			"set_email = $tmp1[1];\n"
+			"handle_submit = useCallback_2(() => console.log(`Name: ${name}, Email: ${email}`), [name, email]);\n"
 			'return {"name": name, "email": email, "onSubmit": handle_submit};\n'
 			"}"
 		)
@@ -947,9 +966,10 @@ class TestPulseJsReactModule:
 		assert code == (
 			'import { useState as useState_1 } from "react";\n\n'
 			"function use_namespace_2() {\n"
+			"let count, set_count;\n"
 			"const $tmp0 = useState_1(0);\n"
-			"let count = $tmp0[0];\n"
-			"let set_count = $tmp0[1];\n"
+			"count = $tmp0[0];\n"
+			"set_count = $tmp0[1];\n"
 			"return count;\n"
 			"}"
 		)
@@ -971,9 +991,10 @@ class TestPulseJsReactModule:
 		assert code == (
 			'import { useEffect as useEffect_2, useState as useState_1 } from "react";\n\n'
 			"function component_with_hooks_3() {\n"
+			"let count, set_count;\n"
 			"const $tmp0 = useState_1(0);\n"
-			"let count = $tmp0[0];\n"
-			"let set_count = $tmp0[1];\n"
+			"count = $tmp0[0];\n"
+			"set_count = $tmp0[1];\n"
 			"useEffect_2(() => console.log(count), [count]);\n"
 			"return count;\n"
 			"}"
@@ -1001,9 +1022,10 @@ class TestPulseJsImportReact:
 		assert code == (
 			'import { useState as useState_2 } from "react";\n\n'
 			"function use_react_namespace_1() {\n"
+			"let count, set_count;\n"
 			"const $tmp0 = useState_2(0);\n"
-			"let count = $tmp0[0];\n"
-			"let set_count = $tmp0[1];\n"
+			"count = $tmp0[0];\n"
+			"set_count = $tmp0[1];\n"
 			"return count;\n"
 			"}"
 		)
@@ -1106,7 +1128,8 @@ class TestLazy:
 		code = emit(fn)
 		assert code == (
 			"function create_lazy_via_react_3() {\n"
-			"let LazyComp = lazy_4(__Chart_2);\n"
+			"let LazyComp;\n"
+			"LazyComp = lazy_4(__Chart_2);\n"
 			"return LazyComp;\n"
 			"}"
 		)

@@ -301,9 +301,37 @@ def with_class():
 Access JavaScript globals via `pulse.js`:
 
 ```python
-from pulse.js import Math, console, window, document, JSON
+from pulse.js import Math, console, window, document, JSON, Intl, crypto
 from pulse.js.date import Date
-from pulse.js import Promise, Set, Map, Array, Object, Error
+from pulse.js import (
+    AbortController,
+    Array,
+    ArrayBuffer,
+    Blob,
+    CustomEvent,
+    DOMParser,
+    Error,
+    File,
+    FileReader,
+    FormData,
+    Headers,
+    IntersectionObserver,
+    Map,
+    MutationObserver,
+    Object,
+    PerformanceObserver,
+    Promise,
+    Request,
+    ResizeObserver,
+    Response,
+    Set,
+    TextDecoder,
+    TextEncoder,
+    URL,
+    URLSearchParams,
+    Uint8Array,
+    XMLSerializer,
+)
 
 @ps.javascript
 def using_builtins():

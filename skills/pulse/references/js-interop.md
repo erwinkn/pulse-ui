@@ -174,7 +174,37 @@ def InteractiveWidget():
 Access JS globals via `pulse.js`:
 
 ```python
-from pulse.js import Math, console, window, document, JSON
+from pulse.js import (
+    AbortController,
+    ArrayBuffer,
+    Blob,
+    CustomEvent,
+    DOMParser,
+    Error,
+    File,
+    FileReader,
+    FormData,
+    Headers,
+    Intl,
+    IntersectionObserver,
+    JSON,
+    Math,
+    MutationObserver,
+    Promise,
+    Request,
+    ResizeObserver,
+    Response,
+    TextDecoder,
+    TextEncoder,
+    URL,
+    URLSearchParams,
+    Uint8Array,
+    XMLSerializer,
+    console,
+    crypto,
+    document,
+    window,
+)
 from pulse.js.date import Date
 
 @ps.javascript

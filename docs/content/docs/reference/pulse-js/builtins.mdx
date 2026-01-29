@@ -8,7 +8,53 @@ description: "JavaScript built-in classes for transpiled Python code"
 JavaScript built-in classes wrapped for use in `@ps.javascript` decorated functions. These classes transpile to their JavaScript equivalents with `new` constructors and static methods.
 
 ```python
-from pulse.js import Array, Set, Map, Date, Promise, Error, Number, Object, RegExp, String, WeakMap, WeakSet
+from pulse.js import (
+    AbortController,
+    AbortSignal,
+    Array,
+    ArrayBuffer,
+    BigInt64Array,
+    BigUint64Array,
+    Blob,
+    CustomEvent,
+    DataView,
+    Date,
+    DOMParser,
+    Error,
+    File,
+    FileReader,
+    Float32Array,
+    Float64Array,
+    FormData,
+    Headers,
+    Int16Array,
+    Int32Array,
+    Int8Array,
+    IntersectionObserver,
+    Map,
+    MutationObserver,
+    Number,
+    Object,
+    PerformanceObserver,
+    Promise,
+    RegExp,
+    Request,
+    ResizeObserver,
+    Response,
+    Set,
+    String,
+    TextDecoder,
+    TextEncoder,
+    Uint16Array,
+    Uint32Array,
+    Uint8Array,
+    Uint8ClampedArray,
+    URL,
+    URLSearchParams,
+    WeakMap,
+    WeakSet,
+    XMLSerializer,
+)
 ```
 
 ---
@@ -423,6 +469,506 @@ async def fetch_data():
     data = await response.json()
     return data
 ```
+
+---
+
+## URL
+
+URL parser and serializer.
+
+```python
+from pulse.js import URL
+
+@ps.javascript
+def example():
+    url = URL("https://example.com?foo=1#section")
+    return url.href, url.searchParams.toString()
+```
+
+### Properties
+
+| Property | Description |
+|----------|-------------|
+| `href` | Full URL string |
+| `origin` | Scheme + host + port |
+| `protocol` | Scheme (e.g. "https:") |
+| `username` | Username |
+| `password` | Password |
+| `host` | Host + port |
+| `hostname` | Host without port |
+| `port` | Port |
+| `pathname` | Path |
+| `search` | Query string with leading `?` |
+| `hash` | Fragment with leading `#` |
+| `searchParams` | URLSearchParams instance |
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `toString()` | Serialize to string (same as `href`) |
+| `toJSON()` | JSON serialization |
+
+---
+
+## URLSearchParams
+
+Query string utility.
+
+```python
+from pulse.js import URLSearchParams
+
+@ps.javascript
+def example():
+    params = URLSearchParams("foo=1&bar=2")
+    params.append("bar", "3")
+    return params.toString()
+```
+
+### Properties
+
+| Property | Description |
+|----------|-------------|
+| `size` | Total number of params |
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `append(name, value)` | Add a parameter |
+| `delete(name, value=None)` | Remove parameter(s) |
+| `get(name)` | First value |
+| `getAll(name)` | All values |
+| `has(name, value=None)` | Check for param |
+| `set(name, value)` | Set and replace |
+| `sort()` | Sort by key |
+| `toString()` | Serialize |
+| `entries()` | Iterator of pairs |
+| `keys()` | Iterator of keys |
+| `values()` | Iterator of values |
+
+---
+
+## AbortController
+
+Abort async operations via signals.
+
+```python
+from pulse.js import AbortController
+
+@ps.javascript
+def example():
+    controller = AbortController()
+    controller.abort()
+    return controller.signal.aborted
+```
+
+### Properties
+
+| Property | Description |
+|----------|-------------|
+| `signal` | AbortSignal instance |
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `abort()` | Trigger abort |
+
+### AbortSignal
+
+| Property/Method | Description |
+|----------------|-------------|
+| `aborted` | True if aborted |
+| `onabort` | Event handler |
+| `throwIfAborted()` | Throw if aborted |
+
+---
+
+## Fetch API
+
+Headers, Request, Response, and `fetch()`.
+
+```python
+from pulse.js import Headers, Request, fetch, obj
+
+@ps.javascript
+def example():
+    headers = Headers()
+    headers.set("Content-Type", "application/json")
+    req = Request("/api", obj(method="POST", headers=headers, body="{}"))
+    return fetch(req)
+```
+
+### Headers methods
+
+| Method | Description |
+|--------|-------------|
+| `append(name, value)` | Add header value |
+| `delete(name)` | Remove header |
+| `get(name)` | Get first value |
+| `has(name)` | Check header |
+| `set(name, value)` | Set header |
+| `forEach(cb, thisArg=None)` | Iterate |
+
+### Request properties
+
+| Property | Description |
+|----------|-------------|
+| `url` | Request URL |
+| `method` | HTTP method |
+| `headers` | Headers |
+| `body` | Request body |
+
+### Response properties/methods
+
+| Property/Method | Description |
+|----------------|-------------|
+| `ok` | Status 2xx |
+| `status` | Status code |
+| `headers` | Headers |
+| `body` | Body stream |
+| `json()` | Parse JSON |
+| `text()` | Read text |
+| `blob()` | Read Blob |
+| `formData()` | Read FormData |
+| `arrayBuffer()` | Read ArrayBuffer |
+
+---
+
+## FormData
+
+Form-like key/value collection for multipart requests.
+
+```python
+from pulse.js import FormData
+
+@ps.javascript
+def example():
+    data = FormData()
+    data.append("name", "Ada")
+    return data.get("name")
+```
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `append(name, value, filename=None)` | Append value |
+| `set(name, value, filename=None)` | Set value |
+| `delete(name)` | Remove key |
+| `get(name)` | First value |
+| `getAll(name)` | All values |
+| `has(name)` | Check key |
+| `entries()` | Iterator of pairs |
+| `keys()` | Iterator of keys |
+| `values()` | Iterator of values |
+| `forEach(cb, thisArg=None)` | Iterate |
+
+---
+
+## Blob
+
+Binary data container.
+
+```python
+from pulse.js import Blob, obj
+
+@ps.javascript
+def example():
+    blob = Blob(["hello"], obj(type="text/plain"))
+    return blob.size
+```
+
+### Properties
+
+| Property | Description |
+|----------|-------------|
+| `size` | Size in bytes |
+| `type` | MIME type |
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `arrayBuffer()` | Read as ArrayBuffer |
+| `bytes()` | Read as Uint8Array |
+| `slice(start=None, end=None, contentType=None)` | Slice |
+| `stream()` | ReadableStream |
+| `text()` | Read as text |
+
+---
+
+## File
+
+Blob with name/metadata.
+
+```python
+from pulse.js import File, obj
+
+@ps.javascript
+def example():
+    f = File(["hello"], "note.txt", obj(type="text/plain"))
+    return f.name
+```
+
+### Properties
+
+| Property | Description |
+|----------|-------------|
+| `name` | File name |
+| `lastModified` | Last modified timestamp |
+| `webkitRelativePath` | Relative path (if any) |
+
+---
+
+## FileReader
+
+Reads File/Blob contents.
+
+```python
+from pulse.js import FileReader
+
+@ps.javascript
+def example(blob):
+    reader = FileReader()
+    reader.readAsText(blob)
+    return reader.result
+```
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `readAsText(blob, encoding=None)` | Read as text |
+| `readAsArrayBuffer(blob)` | Read as ArrayBuffer |
+
+---
+
+## TextEncoder / TextDecoder
+
+UTF-8 encode/decode helpers.
+
+```python
+from pulse.js import TextEncoder, TextDecoder
+
+@ps.javascript
+def example(text: str):
+    enc = TextEncoder()
+    data = enc.encode(text)
+    dec = TextDecoder("utf-8")
+    return dec.decode(data)
+```
+
+### TextEncoder
+
+| Property/Method | Description |
+|----------------|-------------|
+| `encoding` | Always "utf-8" |
+| `encode(string="")` | Encode to Uint8Array |
+| `encodeInto(string, destination)` | Encode into buffer |
+
+### TextDecoder
+
+| Property/Method | Description |
+|----------------|-------------|
+| `encoding` | Decoder encoding |
+| `fatal` | Fatal mode |
+| `ignoreBOM` | Ignore BOM |
+| `decode(input=None, options=None)` | Decode bytes |
+
+---
+
+## ArrayBuffer / Typed Arrays
+
+Binary buffers and views.
+
+```python
+from pulse.js import ArrayBuffer, Uint8Array
+
+@ps.javascript
+def example():
+    buf = ArrayBuffer(8)
+    view = Uint8Array(buf)
+    return buf.byteLength, view.byteLength
+```
+
+### ArrayBuffer
+
+| Property/Method | Description |
+|----------------|-------------|
+| `byteLength` | Size in bytes |
+| `slice(begin=0, end=None)` | Copy range |
+| `isView(value)` | Check view |
+
+### DataView
+
+| Property | Description |
+|----------|-------------|
+| `buffer` | Backing buffer |
+| `byteLength` | View length |
+| `byteOffset` | View offset |
+
+### Typed array classes
+
+`Int8Array`, `Uint8Array`, `Uint8ClampedArray`, `Int16Array`, `Uint16Array`,
+`Int32Array`, `Uint32Array`, `Float32Array`, `Float64Array`, `BigInt64Array`,
+`BigUint64Array`.
+
+---
+
+## IntersectionObserver
+
+Observe element visibility changes.
+
+```python
+from pulse.js import IntersectionObserver, obj
+
+@ps.javascript
+def example(target):
+    observer = IntersectionObserver(lambda entries, obs: None, obj(threshold=0.5))
+    observer.observe(target)
+```
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `observe(target)` | Start observing |
+| `unobserve(target)` | Stop observing target |
+| `disconnect()` | Stop all observations |
+| `takeRecords()` | Pending entries |
+
+---
+
+## ResizeObserver
+
+Observe element size changes.
+
+```python
+from pulse.js import ResizeObserver, obj
+
+@ps.javascript
+def example(target):
+    observer = ResizeObserver(lambda entries, obs: None)
+    observer.observe(target, obj(box="border-box"))
+```
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `observe(target, options=None)` | Start observing |
+| `unobserve(target)` | Stop observing target |
+| `disconnect()` | Stop all observations |
+
+---
+
+## PerformanceObserver
+
+Observe performance entry events.
+
+```python
+from pulse.js import PerformanceObserver, obj
+
+@ps.javascript
+def example():
+    observer = PerformanceObserver(lambda list_, obs: None)
+    observer.observe(obj(entryTypes=["mark", "measure"]))
+```
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `observe(options)` | Start observing |
+| `disconnect()` | Stop observing |
+| `takeRecords()` | Pending entries |
+
+---
+
+## DOMParser / XMLSerializer
+
+Parse and serialize DOM.
+
+```python
+from pulse.js import DOMParser, XMLSerializer
+
+@ps.javascript
+def example(source: str):
+    parser = DOMParser()
+    doc = parser.parseFromString(source, "text/html")
+    serializer = XMLSerializer()
+    return serializer.serializeToString(doc)
+```
+
+### DOMParser
+
+| Method | Description |
+|--------|-------------|
+| `parseFromString(string, mimeType)` | Parse DOM |
+
+### XMLSerializer
+
+| Method | Description |
+|--------|-------------|
+| `serializeToString(root)` | Serialize DOM |
+
+---
+
+## CustomEvent
+
+Custom event with `detail`.
+
+```python
+from pulse.js import CustomEvent, obj
+
+@ps.javascript
+def example():
+    event = CustomEvent("ping", obj(detail=obj(ok=True)))
+    return event.detail
+```
+
+### Properties
+
+| Property | Description |
+|----------|-------------|
+| `detail` | Custom payload |
+
+---
+
+## MutationObserver
+
+Observe DOM changes in the browser.
+
+```python
+from pulse.js import MutationObserver, obj
+
+@ps.javascript
+def example(target):
+    observer = MutationObserver(lambda records, obs: None)
+    observer.observe(target, obj(childList=True, subtree=True))
+```
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `observe(target, options)` | Start observing DOM mutations |
+| `disconnect()` | Stop observing |
+| `takeRecords()` | Return pending mutation records |
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `childList` | Watch for child node additions/removals |
+| `attributes` | Watch for attribute changes |
+| `characterData` | Watch for text changes |
+| `subtree` | Include all descendants |
+| `attributeOldValue` | Record previous attribute value |
+| `characterDataOldValue` | Record previous text value |
+| `attributeFilter` | List of attribute names to watch |
 
 ---
 

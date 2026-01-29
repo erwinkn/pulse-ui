@@ -5,7 +5,7 @@ import inspect
 import re
 import uuid
 from collections.abc import Callable
-from typing import Any, Generic, TypeVar, cast, override
+from typing import Any, Generic, Literal, TypeVar, cast, overload, override
 
 from pulse.channel import Channel, channel
 from pulse.helpers import Disposable
@@ -14,6 +14,7 @@ from pulse.hooks.state import collect_component_identity
 from pulse.scheduling import create_future
 
 T = TypeVar("T")
+Number = int | float
 
 _ATTR_ALIASES: dict[str, str] = {
 	"className": "class",
@@ -117,6 +118,9 @@ class RefHandle(Disposable, Generic[T]):
 		"_mount_waiters",
 		"_mount_handlers",
 		"_unmount_handlers",
+		"_owns_channel",
+		"_remove_mount",
+		"_remove_unmount",
 	)
 
 	_channel: Channel
@@ -125,16 +129,26 @@ class RefHandle(Disposable, Generic[T]):
 	_mount_waiters: list[asyncio.Future[None]]
 	_mount_handlers: list[Callable[[], Any]]
 	_unmount_handlers: list[Callable[[], Any]]
+	_owns_channel: bool
+	_remove_mount: Callable[[], None] | None
+	_remove_unmount: Callable[[], None] | None
 
-	def __init__(self, channel: Channel, *, ref_id: str | None = None) -> None:
+	def __init__(
+		self,
+		channel: Channel,
+		*,
+		ref_id: str | None = None,
+		owns_channel: bool = True,
+	) -> None:
 		self._channel = channel
 		self.id = ref_id or uuid.uuid4().hex
 		self._mounted = False
 		self._mount_waiters = []
 		self._mount_handlers = []
 		self._unmount_handlers = []
-		self._channel.on("ref:mounted", self._on_mounted)
-		self._channel.on("ref:unmounted", self._on_unmounted)
+		self._owns_channel = owns_channel
+		self._remove_mount = self._channel.on("ref:mounted", self._on_mounted)
+		self._remove_unmount = self._channel.on("ref:unmounted", self._on_unmounted)
 
 	@property
 	def channel_id(self) -> str:
@@ -313,6 +327,39 @@ class RefHandle(Disposable, Generic[T]):
 			payload["direction"] = direction
 		self._emit("setSelectionRange", payload)
 
+	@overload
+	async def get_attr(
+		self,
+		name: Literal[
+			"className",
+			"class",
+			"id",
+			"name",
+			"type",
+			"title",
+			"placeholder",
+			"role",
+			"href",
+			"src",
+			"alt",
+			"htmlFor",
+			"for",
+			"tabIndex",
+			"tabindex",
+			"aria-label",
+			"aria-hidden",
+			"data-test",
+			"value",
+		],
+		*,
+		timeout: float | None = None,
+	) -> str | None: ...
+
+	@overload
+	async def get_attr(
+		self, name: str, *, timeout: float | None = None
+	) -> str | None: ...
+
 	async def get_attr(self, name: str, *, timeout: float | None = None) -> str | None:
 		normalized = _validate_attr_name(name)
 		result = await self._request("getAttr", {"name": normalized}, timeout=timeout)
@@ -321,6 +368,44 @@ class RefHandle(Disposable, Generic[T]):
 		if isinstance(result, str):
 			return result
 		raise TypeError("get_attr() expected string result")
+
+	@overload
+	async def set_attr(
+		self,
+		name: Literal[
+			"className",
+			"class",
+			"id",
+			"name",
+			"type",
+			"title",
+			"placeholder",
+			"role",
+			"href",
+			"src",
+			"alt",
+			"htmlFor",
+			"for",
+			"tabIndex",
+			"tabindex",
+			"aria-label",
+			"aria-hidden",
+			"data-test",
+			"value",
+		],
+		value: str | int | float | bool | None,
+		*,
+		timeout: float | None = None,
+	) -> str | None: ...
+
+	@overload
+	async def set_attr(
+		self,
+		name: str,
+		value: Any,
+		*,
+		timeout: float | None = None,
+	) -> str | None: ...
 
 	async def set_attr(
 		self, name: str, value: Any, *, timeout: float | None = None
@@ -339,9 +424,227 @@ class RefHandle(Disposable, Generic[T]):
 		normalized = _validate_attr_name(name)
 		await self._request("removeAttr", {"name": normalized}, timeout=timeout)
 
+	@overload
+	async def get_prop(
+		self, name: Literal["value"], *, timeout: float | None = None
+	) -> str: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["checked"], *, timeout: float | None = None
+	) -> bool: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["disabled"], *, timeout: float | None = None
+	) -> bool: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["readOnly"], *, timeout: float | None = None
+	) -> bool: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["selectedIndex"], *, timeout: float | None = None
+	) -> Number: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["selectionStart"], *, timeout: float | None = None
+	) -> Number | None: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["selectionEnd"], *, timeout: float | None = None
+	) -> Number | None: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["selectionDirection"], *, timeout: float | None = None
+	) -> str | None: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["scrollTop"], *, timeout: float | None = None
+	) -> Number: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["scrollLeft"], *, timeout: float | None = None
+	) -> Number: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["scrollHeight"], *, timeout: float | None = None
+	) -> Number: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["scrollWidth"], *, timeout: float | None = None
+	) -> Number: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["clientWidth"], *, timeout: float | None = None
+	) -> Number: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["clientHeight"], *, timeout: float | None = None
+	) -> Number: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["offsetWidth"], *, timeout: float | None = None
+	) -> Number: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["offsetHeight"], *, timeout: float | None = None
+	) -> Number: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["innerText"], *, timeout: float | None = None
+	) -> str: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["textContent"], *, timeout: float | None = None
+	) -> str | None: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["className"], *, timeout: float | None = None
+	) -> str: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["id"], *, timeout: float | None = None
+	) -> str: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["name"], *, timeout: float | None = None
+	) -> str: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["type"], *, timeout: float | None = None
+	) -> str: ...
+
+	@overload
+	async def get_prop(
+		self, name: Literal["tabIndex"], *, timeout: float | None = None
+	) -> Number: ...
+
+	@overload
+	async def get_prop(self, name: str, *, timeout: float | None = None) -> Any: ...
+
 	async def get_prop(self, name: str, *, timeout: float | None = None) -> Any:
 		prop = _validate_prop_name(name, settable=False)
 		return await self._request("getProp", {"name": prop}, timeout=timeout)
+
+	@overload
+	async def set_prop(
+		self, name: Literal["value"], value: str, *, timeout: float | None = None
+	) -> str: ...
+
+	@overload
+	async def set_prop(
+		self, name: Literal["checked"], value: bool, *, timeout: float | None = None
+	) -> bool: ...
+
+	@overload
+	async def set_prop(
+		self, name: Literal["disabled"], value: bool, *, timeout: float | None = None
+	) -> bool: ...
+
+	@overload
+	async def set_prop(
+		self, name: Literal["readOnly"], value: bool, *, timeout: float | None = None
+	) -> bool: ...
+
+	@overload
+	async def set_prop(
+		self,
+		name: Literal["selectedIndex"],
+		value: Number,
+		*,
+		timeout: float | None = None,
+	) -> Number: ...
+
+	@overload
+	async def set_prop(
+		self,
+		name: Literal["selectionStart"],
+		value: Number | None,
+		*,
+		timeout: float | None = None,
+	) -> Number | None: ...
+
+	@overload
+	async def set_prop(
+		self,
+		name: Literal["selectionEnd"],
+		value: Number | None,
+		*,
+		timeout: float | None = None,
+	) -> Number | None: ...
+
+	@overload
+	async def set_prop(
+		self,
+		name: Literal["selectionDirection"],
+		value: str | None,
+		*,
+		timeout: float | None = None,
+	) -> str | None: ...
+
+	@overload
+	async def set_prop(
+		self, name: Literal["scrollTop"], value: Number, *, timeout: float | None = None
+	) -> Number: ...
+
+	@overload
+	async def set_prop(
+		self,
+		name: Literal["scrollLeft"],
+		value: Number,
+		*,
+		timeout: float | None = None,
+	) -> Number: ...
+
+	@overload
+	async def set_prop(
+		self, name: Literal["className"], value: str, *, timeout: float | None = None
+	) -> str: ...
+
+	@overload
+	async def set_prop(
+		self, name: Literal["id"], value: str, *, timeout: float | None = None
+	) -> str: ...
+
+	@overload
+	async def set_prop(
+		self, name: Literal["name"], value: str, *, timeout: float | None = None
+	) -> str: ...
+
+	@overload
+	async def set_prop(
+		self, name: Literal["type"], value: str, *, timeout: float | None = None
+	) -> str: ...
+
+	@overload
+	async def set_prop(
+		self, name: Literal["tabIndex"], value: Number, *, timeout: float | None = None
+	) -> Number: ...
+
+	@overload
+	async def set_prop(
+		self, name: str, value: Any, *, timeout: float | None = None
+	) -> Any: ...
 
 	async def set_prop(
 		self, name: str, value: Any, *, timeout: float | None = None
@@ -420,13 +723,20 @@ class RefHandle(Disposable, Generic[T]):
 	@override
 	def dispose(self) -> None:
 		self._mounted = False
+		if self._remove_mount is not None:
+			self._remove_mount()
+			self._remove_mount = None
+		if self._remove_unmount is not None:
+			self._remove_unmount()
+			self._remove_unmount = None
 		for fut in list(self._mount_waiters):
 			if not fut.done():
 				fut.set_exception(RefNotMounted("Ref disposed"))
 		self._mount_waiters.clear()
 		self._mount_handlers.clear()
 		self._unmount_handlers.clear()
-		self._channel.close()
+		if self._owns_channel:
+			self._channel.close()
 
 	@override
 	def __repr__(self) -> str:
@@ -434,14 +744,20 @@ class RefHandle(Disposable, Generic[T]):
 
 
 class RefHookState(HookState):
-	__slots__ = ("instances", "called_keys")  # pyright: ignore[reportUnannotatedClassAttribute]
+	__slots__: tuple[str, ...] = (
+		"instances",
+		"called_keys",
+		"_channel",
+	)
 	instances: dict[tuple[str, Any], RefHandle[Any]]
 	called_keys: set[tuple[str, Any]]
+	_channel: Channel | None
 
 	def __init__(self) -> None:
 		super().__init__()
 		self.instances = {}
 		self.called_keys = set()
+		self._channel = None
 
 	def _make_key(self, identity: Any, key: str | None) -> tuple[str, Any]:
 		if key is None:
@@ -453,7 +769,9 @@ class RefHookState(HookState):
 		super().on_render_start(render_cycle)
 		self.called_keys.clear()
 
-	def get_or_create(self, identity: Any, key: str | None) -> RefHandle[Any]:
+	def get_or_create(
+		self, identity: Any, key: str | None
+	) -> tuple[RefHandle[Any], bool]:
 		full_identity = self._make_key(identity, key)
 		if full_identity in self.called_keys:
 			if key is None:
@@ -468,11 +786,20 @@ class RefHookState(HookState):
 
 		existing = self.instances.get(full_identity)
 		if existing is not None:
-			return existing
+			if existing.__disposed__:
+				key_label = f"key='{key}'" if key is not None else "callsite"
+				raise RuntimeError(
+					"`pulse.ref` found a disposed cached RefHandle for "
+					+ key_label
+					+ ". Do not dispose handles returned by `pulse.ref`."
+				)
+			return existing, False
 
-		handle = RefHandle(channel())
+		if self._channel is None or self._channel.closed:
+			self._channel = channel()
+		handle = RefHandle(self._channel, owns_channel=False)
 		self.instances[full_identity] = handle
-		return handle
+		return handle, True
 
 	@override
 	def dispose(self) -> None:
@@ -481,6 +808,9 @@ class RefHookState(HookState):
 				handle.dispose()
 			except Exception:
 				pass
+		if self._channel is not None and not self._channel.closed:
+			self._channel.close()
+		self._channel = None
 		self.instances.clear()
 
 
@@ -494,16 +824,27 @@ ref_hook_state = hooks.create(
 )
 
 
-def ref(*, key: str | None = None) -> RefHandle[Any]:
+def ref(
+	*,
+	key: str | None = None,
+	on_mount: Callable[[], Any] | None = None,
+	on_unmount: Callable[[], Any] | None = None,
+) -> RefHandle[Any]:
 	"""Create or retrieve a stable ref handle for a component.
 
 	Args:
 		key: Optional key to disambiguate multiple refs created at the same callsite.
+		on_mount: Optional handler called when the ref mounts.
+		on_unmount: Optional handler called when the ref unmounts.
 	"""
 	if key is not None and not isinstance(key, str):
 		raise TypeError("ref() key must be a string")
 	if key == "":
 		raise ValueError("ref() requires a non-empty string key")
+	if on_mount is not None and not callable(on_mount):
+		raise TypeError("ref() on_mount must be callable")
+	if on_unmount is not None and not callable(on_unmount):
+		raise TypeError("ref() on_unmount must be callable")
 
 	identity: Any
 	if key is None:
@@ -516,7 +857,13 @@ def ref(*, key: str | None = None) -> RefHandle[Any]:
 		identity = key
 
 	hook_state = ref_hook_state()
-	return hook_state.get_or_create(identity, key)
+	handle, created = hook_state.get_or_create(identity, key)
+	if created:
+		if on_mount is not None:
+			handle.on_mount(on_mount)
+		if on_unmount is not None:
+			handle.on_unmount(on_unmount)
+	return handle
 
 
 __all__ = ["RefHandle", "RefNotMounted", "RefTimeout", "ref"]

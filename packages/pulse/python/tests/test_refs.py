@@ -48,10 +48,11 @@ def make_handle(
 
 @pytest.mark.asyncio
 async def test_ref_attr_ops_payloads() -> None:
-	handle, channel = make_handle(["alpha", "beta", None])
+	handle, channel = make_handle(["alpha", "beta", "2", None])
 
 	assert await handle.get_attr("data-test") == "alpha"
 	assert await handle.set_attr("className", "btn") == "beta"
+	assert await handle.set_attr("tabIndex", 2) == "2"
 	await handle.remove_attr("data-test")
 
 	assert channel.requested == [
@@ -71,6 +72,15 @@ async def test_ref_attr_ops_payloads() -> None:
 		),
 		(
 			"ref:request",
+			{
+				"refId": "ref-1",
+				"op": "setAttr",
+				"payload": {"name": "tabindex", "value": 2},
+			},
+			None,
+		),
+		(
+			"ref:request",
 			{"refId": "ref-1", "op": "removeAttr", "payload": {"name": "data-test"}},
 			None,
 		),
@@ -79,15 +89,21 @@ async def test_ref_attr_ops_payloads() -> None:
 
 @pytest.mark.asyncio
 async def test_ref_prop_ops_payloads() -> None:
-	handle, channel = make_handle(["value", "next"])
+	handle, channel = make_handle(["value", True, "next"])
 
 	assert await handle.get_prop("value") == "value"
+	assert await handle.get_prop("checked") is True
 	assert await handle.set_prop("value", "next") == "next"
 
 	assert channel.requested == [
 		(
 			"ref:request",
 			{"refId": "ref-1", "op": "getProp", "payload": {"name": "value"}},
+			None,
+		),
+		(
+			"ref:request",
+			{"refId": "ref-1", "op": "getProp", "payload": {"name": "checked"}},
 			None,
 		),
 		(

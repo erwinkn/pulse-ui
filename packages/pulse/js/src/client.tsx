@@ -1,6 +1,7 @@
 import type { NavigateFunction } from "react-router";
 import { io, type Socket } from "socket.io-client";
 import { ChannelBridge, PulseChannelResetError } from "./channel";
+import { RefRegistry } from "./ref";
 import type { RouteInfo } from "./helpers";
 import type {
 	ClientApiResultMessage,
@@ -17,447 +18,6 @@ import { extractEvent } from "./serialize/events";
 import { deserialize, serialize } from "./serialize/serializer";
 import type { VDOMUpdate } from "./vdom";
 
-type RefPayload = {
-	refId?: string;
-	op?: string;
-	payload?: any;
-};
-
-const ATTR_ALIASES: Record<string, string> = {
-	className: "class",
-	htmlFor: "for",
-	tabIndex: "tabindex",
-};
-
-const ATTR_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_:\-\.]*$/;
-
-const GETTABLE_PROPS = new Set([
-	"value",
-	"checked",
-	"disabled",
-	"readOnly",
-	"selectedIndex",
-	"selectionStart",
-	"selectionEnd",
-	"selectionDirection",
-	"scrollTop",
-	"scrollLeft",
-	"scrollHeight",
-	"scrollWidth",
-	"clientWidth",
-	"clientHeight",
-	"offsetWidth",
-	"offsetHeight",
-	"innerText",
-	"textContent",
-	"className",
-	"id",
-	"name",
-	"type",
-	"tabIndex",
-]);
-
-const SETTABLE_PROPS = new Set([
-	"value",
-	"checked",
-	"disabled",
-	"readOnly",
-	"selectedIndex",
-	"selectionStart",
-	"selectionEnd",
-	"selectionDirection",
-	"scrollTop",
-	"scrollLeft",
-	"className",
-	"id",
-	"name",
-	"type",
-	"tabIndex",
-]);
-
-function isRefPayload(value: unknown): value is RefPayload {
-	return typeof value === "object" && value !== null && "refId" in (value as any);
-}
-
-function normalizeAttrName(name: string): string {
-	return ATTR_ALIASES[name] ?? name;
-}
-
-function ensureAttrName(value: unknown): string {
-	if (typeof value !== "string") {
-		throw new Error("ref attribute name must be a string");
-	}
-	const trimmed = value.trim();
-	if (!trimmed) {
-		throw new Error("ref attribute name must be non-empty");
-	}
-	const normalized = normalizeAttrName(trimmed);
-	if (!ATTR_NAME_PATTERN.test(normalized)) {
-		throw new Error(`invalid attribute name: ${normalized}`);
-	}
-	if (normalized.toLowerCase().startsWith("on")) {
-		throw new Error("ref attribute name cannot start with 'on'");
-	}
-	return normalized;
-}
-
-function ensurePropName(value: unknown, settable: boolean): string {
-	if (typeof value !== "string") {
-		throw new Error("ref property name must be a string");
-	}
-	const trimmed = value.trim();
-	if (!trimmed) {
-		throw new Error("ref property name must be non-empty");
-	}
-	if (!GETTABLE_PROPS.has(trimmed)) {
-		throw new Error(`unsupported ref property: ${trimmed}`);
-	}
-	if (settable && !SETTABLE_PROPS.has(trimmed)) {
-		throw new Error(`ref property is read-only: ${trimmed}`);
-	}
-	return trimmed;
-}
-
-function ensureElement(node: any): Element {
-	if (!node || typeof node.getAttribute !== "function") {
-		throw new Error("ref is not bound to a DOM element");
-	}
-	return node as Element;
-}
-
-function ensureHTMLElement(node: any): HTMLElement {
-	if (!node || typeof (node as HTMLElement).style === "undefined") {
-		throw new Error("ref is not bound to an HTML element");
-	}
-	return node as HTMLElement;
-}
-
-function parseScrollOptions(payload: any): ScrollToOptions | undefined {
-	if (!payload || typeof payload !== "object") return undefined;
-	const options: ScrollToOptions = {};
-	if (typeof payload.top === "number") options.top = payload.top;
-	if (typeof payload.left === "number") options.left = payload.left;
-	if (typeof payload.behavior === "string") {
-		options.behavior = payload.behavior as ScrollBehavior;
-	}
-	return Object.keys(options).length > 0 ? options : undefined;
-}
-
-function parseScrollIntoViewOptions(
-	payload: any,
-): ScrollIntoViewOptions | undefined {
-	if (!payload || typeof payload !== "object") return undefined;
-	const options: ScrollIntoViewOptions = {};
-	if (typeof payload.behavior === "string") {
-		options.behavior = payload.behavior as ScrollBehavior;
-	}
-	if (typeof payload.block === "string") {
-		options.block = payload.block as ScrollLogicalPosition;
-	}
-	if (typeof payload.inline === "string") {
-		options.inline = payload.inline as ScrollLogicalPosition;
-	}
-	return Object.keys(options).length > 0 ? options : undefined;
-}
-
-function normalizeStyleValue(value: unknown): string | null {
-	if (value == null) return null;
-	if (typeof value === "string") return value;
-	if (typeof value === "number") return String(value);
-	throw new Error("style values must be strings or numbers");
-}
-
-type RefOpResult = any;
-
-class RefController {
-	#client: PulseSocketIOClient;
-	#channelId: string;
-	#refId: string;
-	#bridge: ChannelBridge;
-	#cleanup: Array<() => void> = [];
-	#node: any = null;
-	#callback: (node: any) => void;
-
-	constructor(client: PulseSocketIOClient, channelId: string, refId: string) {
-		this.#client = client;
-		this.#channelId = channelId;
-		this.#refId = refId;
-		const entry = this.#client._ensureChannelEntry(channelId);
-		this.#bridge = entry.bridge;
-
-		this.#cleanup.push(
-			this.#bridge.on("ref:call", (payload) => {
-				if (!this.#matches(payload)) return;
-				this.#handleCall(payload);
-			}),
-			this.#bridge.on("ref:request", (payload) => {
-				if (!this.#matches(payload)) return undefined;
-				return this.#handleRequest(payload);
-			}),
-		);
-
-		this.#callback = (node: any) => {
-			this.#setNode(node ?? null);
-		};
-	}
-
-	get callback() {
-		return this.#callback;
-	}
-
-	get channelId() {
-		return this.#channelId;
-	}
-
-	dispose() {
-		for (const fn of this.#cleanup) fn();
-		this.#cleanup = [];
-		this.#node = null;
-	}
-
-	#matches(payload: unknown): payload is RefPayload {
-		if (!isRefPayload(payload)) return false;
-		const refId = payload.refId;
-		return refId == null || String(refId) === this.#refId;
-	}
-
-	#setNode(node: any) {
-		if (this.#node === node) return;
-		this.#node = node;
-		if (node) {
-			this.#bridge.emit("ref:mounted", { refId: this.#refId });
-		} else {
-			this.#bridge.emit("ref:unmounted", { refId: this.#refId });
-		}
-	}
-
-	#handleCall(payload: RefPayload) {
-		const op = payload.op;
-		if (!op) return;
-		try {
-			this.#perform(op, payload.payload, false);
-		} catch (err) {
-			console.error("[Pulse] Ref call failed:", err);
-		}
-	}
-
-	#handleRequest(payload: RefPayload): RefOpResult {
-		const op = payload.op;
-		if (!op) {
-			throw new Error("ref request missing op");
-		}
-		return this.#perform(op, payload.payload, true);
-	}
-
-	#perform(op: string, payload: any, needsResult: boolean): RefOpResult {
-		const node = this.#node as any;
-		if (!node) {
-			const msg = "ref is not mounted";
-			if (needsResult) throw new Error(msg);
-			console.warn(`[Pulse] ${msg}`);
-			return null;
-		}
-
-		switch (op) {
-			case "focus":
-				if (typeof node.focus === "function") {
-					if (
-						payload &&
-						typeof payload === "object" &&
-						"preventScroll" in payload
-					) {
-						const preventScroll = Boolean((payload as any).preventScroll);
-						try {
-							node.focus({ preventScroll });
-						} catch {
-							node.focus();
-						}
-					} else {
-						node.focus();
-					}
-				}
-				return null;
-			case "blur":
-				if (typeof node.blur === "function") node.blur();
-				return null;
-			case "click":
-				if (typeof node.click === "function") node.click();
-				return null;
-			case "select":
-				if (typeof node.select === "function") node.select();
-				else throw new Error("select() not supported on this element");
-				return null;
-			case "scrollIntoView": {
-				if (typeof node.scrollIntoView !== "function") {
-					throw new Error("scrollIntoView() not supported on this element");
-				}
-				const options = parseScrollIntoViewOptions(payload) ?? undefined;
-				node.scrollIntoView(options);
-				return null;
-			}
-			case "scrollTo": {
-				if (typeof node.scrollTo !== "function") {
-					throw new Error("scrollTo() not supported on this element");
-				}
-				const options = parseScrollOptions(payload);
-				node.scrollTo(options ?? undefined);
-				return null;
-			}
-			case "scrollBy": {
-				if (typeof node.scrollBy !== "function") {
-					throw new Error("scrollBy() not supported on this element");
-				}
-				const options = parseScrollOptions(payload);
-				node.scrollBy(options ?? undefined);
-				return null;
-			}
-			case "submit": {
-				if (typeof node.submit !== "function") {
-					throw new Error("submit() not supported on this element");
-				}
-				node.submit();
-				return null;
-			}
-			case "reset": {
-				if (typeof node.reset !== "function") {
-					throw new Error("reset() not supported on this element");
-				}
-				node.reset();
-				return null;
-			}
-			case "setSelectionRange": {
-				if (typeof node.setSelectionRange !== "function") {
-					throw new Error("setSelectionRange() not supported on this element");
-				}
-				if (!payload || typeof payload !== "object") {
-					throw new Error("setSelectionRange() requires payload");
-				}
-				const start = (payload as any).start;
-				const end = (payload as any).end;
-				const direction = (payload as any).direction;
-				if (typeof start !== "number" || typeof end !== "number") {
-					throw new Error("setSelectionRange() requires numeric start/end");
-				}
-				node.setSelectionRange(start, end, direction ?? undefined);
-				return null;
-			}
-			case "measure": {
-				if (typeof node.getBoundingClientRect !== "function") {
-					throw new Error("measure() not supported on this element");
-				}
-				const rect = node.getBoundingClientRect();
-				return {
-					x: rect.x,
-					y: rect.y,
-					width: rect.width,
-					height: rect.height,
-					top: rect.top,
-					right: rect.right,
-					bottom: rect.bottom,
-					left: rect.left,
-				};
-			}
-			case "getValue": {
-				if ("value" in node) return (node as any).value;
-				if ("textContent" in node) return (node as any).textContent;
-				return null;
-			}
-			case "setValue": {
-				const value = payload?.value;
-				if ("value" in node) {
-					(node as any).value = value;
-					return (node as any).value;
-				}
-				if ("textContent" in node) {
-					(node as any).textContent = value == null ? "" : String(value);
-					return (node as any).textContent;
-				}
-				return null;
-			}
-			case "getText": {
-				if ("textContent" in node) return (node as any).textContent;
-				return null;
-			}
-			case "setText": {
-				const text = payload?.text;
-				if (typeof text !== "string") {
-					throw new Error("setText() requires a string payload");
-				}
-				if ("textContent" in node) {
-					(node as any).textContent = text;
-					return (node as any).textContent;
-				}
-				return null;
-			}
-			case "getAttr": {
-				const name = ensureAttrName(payload?.name);
-				const el = ensureElement(node);
-				return el.getAttribute(name);
-			}
-			case "setAttr": {
-				const name = ensureAttrName(payload?.name);
-				const el = ensureElement(node);
-				const value = payload?.value;
-				if (value == null) {
-					el.removeAttribute(name);
-				} else {
-					el.setAttribute(name, String(value));
-				}
-				return el.getAttribute(name);
-			}
-			case "removeAttr": {
-				const name = ensureAttrName(payload?.name);
-				const el = ensureElement(node);
-				el.removeAttribute(name);
-				return null;
-			}
-			case "getProp": {
-				const name = ensurePropName(payload?.name, false);
-				if (!(name in node)) {
-					throw new Error(`ref property not supported on element: ${name}`);
-				}
-				return (node as any)[name];
-			}
-			case "setProp": {
-				const name = ensurePropName(payload?.name, true);
-				if (!(name in node)) {
-					throw new Error(`ref property not supported on element: ${name}`);
-				}
-				(node as any)[name] = payload?.value;
-				return (node as any)[name];
-			}
-			case "setStyle": {
-				const el = ensureHTMLElement(node);
-				const styles = payload?.styles;
-				if (!styles || typeof styles !== "object") {
-					throw new Error("setStyle() requires a styles object");
-				}
-				for (const [rawKey, rawValue] of Object.entries(styles)) {
-					if (!rawKey) {
-						throw new Error("style key must be non-empty");
-					}
-					const value = normalizeStyleValue(rawValue);
-					if (rawKey.includes("-")) {
-						if (value == null) {
-							el.style.removeProperty(rawKey);
-						} else {
-							el.style.setProperty(rawKey, value);
-						}
-						continue;
-					}
-					if (value == null) {
-						(el.style as any)[rawKey] = "";
-					} else {
-						(el.style as any)[rawKey] = value;
-					}
-				}
-				return null;
-			}
-			default:
-				throw new Error(`Unsupported ref op: ${op}`);
-		}
-	}
-}
 
 export interface SocketIODirectives {
 	headers?: Record<string, string>;
@@ -497,7 +57,8 @@ export class PulseSocketIOClient {
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
 	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
-	#refControllers: Map<string, RefController> = new Map();
+	#refRegistry: RefRegistry | null = null;
+	#refChannelId: string | null = null;
 	#url: string;
 	#frameworkNavigate: NavigateFunction;
 	#directives: Directives;
@@ -708,10 +269,11 @@ export class PulseSocketIOClient {
 			bridge.dispose(new PulseChannelResetError("Client disconnected"));
 		}
 		this.#channels.clear();
-		for (const controller of this.#refControllers.values()) {
-			controller.dispose();
+		if (this.#refRegistry) {
+			this.#refRegistry.dispose();
+			this.#refRegistry = null;
+			this.#refChannelId = null;
 		}
-		this.#refControllers.clear();
 		this.#currentStatus = "ok";
 		this.#hasConnectedOnce = false;
 	}
@@ -925,7 +487,7 @@ export class PulseSocketIOClient {
 			this.#channels.delete(message.channel);
 		}
 		if (message.event === "__close__" || closed) {
-			this.#disposeRefControllersForChannel(message.channel);
+			this.#disposeRefRegistryForChannel(message.channel);
 		}
 	}
 
@@ -935,22 +497,31 @@ export class PulseSocketIOClient {
 		}
 	}
 
-	public getRefCallback(channelId: string, refId: string): (node: any) => void {
-		const key = `${channelId}:${refId}`;
-		let controller = this.#refControllers.get(key);
-		if (!controller) {
-			controller = new RefController(this, channelId, refId);
-			this.#refControllers.set(key, controller);
+	#ensureRefRegistry(channelId: string): RefRegistry {
+		if (this.#refRegistry) {
+			if (this.#refChannelId !== channelId) {
+				throw new Error("[Pulse] Ref channel changed unexpectedly");
+			}
+			return this.#refRegistry;
 		}
-		return controller.callback;
+		const entry = this.#ensureChannelEntry(channelId);
+		const registry = new RefRegistry(entry.bridge);
+		this.#refRegistry = registry;
+		this.#refChannelId = channelId;
+		return registry;
 	}
 
-	#disposeRefControllersForChannel(channelId: string): void {
-		for (const [key, controller] of this.#refControllers.entries()) {
-			if (controller.channelId !== channelId) continue;
-			controller.dispose();
-			this.#refControllers.delete(key);
+	public getRefCallback(channelId: string, refId: string): (node: any) => void {
+		return this.#ensureRefRegistry(channelId).getCallback(refId);
+	}
+
+	#disposeRefRegistryForChannel(channelId: string): void {
+		if (!this.#refRegistry || this.#refChannelId !== channelId) {
+			return;
 		}
+		this.#refRegistry.dispose();
+		this.#refRegistry = null;
+		this.#refChannelId = null;
 	}
 
 	_ensureChannelEntry(id: string): {

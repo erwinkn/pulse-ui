@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { PulseSocketIOClient } from "./client";
 import type { PulsePrerenderView } from "./pulse";
+import { isPulseRefSpec } from "./ref";
 import type {
 	ComponentRegistry,
 	JsonValue,
@@ -16,7 +17,6 @@ import type {
 	VDOMNode,
 	VDOMPropValue,
 	VDOMUpdate,
-	PulseRefSpec,
 } from "./vdom";
 import { isElementNode, isExprNode, MOUNT_POINT_PREFIX as REF_PREFIX } from "./vdom";
 
@@ -24,10 +24,6 @@ type Env = Record<string, unknown>;
 
 function isCallbackPlaceholder(v: unknown): v is "$cb" {
 	return v === "$cb";
-}
-
-function isPulseRefSpec(v: unknown): v is PulseRefSpec {
-	return typeof v === "object" && v !== null && "__pulse_ref__" in (v as any);
 }
 
 type ElementMeta = {

@@ -41,18 +41,19 @@ def RefsPage():
 	with ps.init():
 		state = RefDemoState()
 
-	input_ref = ps.ref()
+	input_ref = ps.ref(
+		on_mount=lambda: state.add_log("input mounted"),
+		on_unmount=lambda: state.add_log("input unmounted"),
+	)
 	click_ref = ps.ref()
-	target_ref = ps.ref()
+	target_ref = ps.ref(
+		on_mount=lambda: state.add_log("target mounted"),
+		on_unmount=lambda: state.add_log("target unmounted"),
+	)
 	text_ref = ps.ref()
 
-	def bind_handlers():
-		input_ref.on_mount(lambda: state.add_log("input mounted"))
-		input_ref.on_unmount(lambda: state.add_log("input unmounted"))
-		target_ref.on_mount(lambda: state.add_log("target mounted"))
-		target_ref.on_unmount(lambda: state.add_log("target unmounted"))
-
-	ps.setup(bind_handlers)
+	async def test():
+		x = await input_ref.set_prop("checked", 1)  # noqa: F841
 
 	async def run(label: str, fn):
 		try:
@@ -76,11 +77,13 @@ def RefsPage():
 		await run("select", input_ref.select)
 
 	async def set_input_value():
-		value = await run("set_value", lambda: input_ref.set_value("Pulse refs"))
+		value = await run(
+			"set_value", lambda: input_ref.set_prop("value", "Pulse refs")
+		)
 		state.last_value = value
 
 	async def get_input_value():
-		value = await run("get_value", input_ref.get_value)
+		value = await run("get_value", lambda: input_ref.get_prop("value"))
 		state.last_value = value
 
 	async def set_text_value():

@@ -129,7 +129,8 @@ class ChannelsManager:
 		if not response_to:
 			return
 
-		if error := message.get("error") is not None:
+		error = message.get("error")
+		if error is not None:
 			self.resolve_pending_error(response_to, error)
 		else:
 			self._resolve_pending_success(response_to, message.get("payload"))

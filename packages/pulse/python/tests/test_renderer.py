@@ -1057,6 +1057,34 @@ def test_ref_prop_serializes_with_eval():
 	assert "ref" in vdom.get("eval", [])
 
 
+def test_ref_hook_handlers_register():
+	events: list[str] = []
+	handle: RefHandle[Any] | None = None
+
+	def on_mount() -> None:
+		events.append("mount")
+
+	def on_unmount() -> None:
+		events.append("unmount")
+
+	@component
+	def WithRef() -> ps.Element:
+		nonlocal handle
+		handle = ps.ref(on_mount=on_mount, on_unmount=on_unmount)
+		return div(ref=handle)
+
+	app = ps.App()
+	render = ps.RenderSession("render-ref-handlers", app.routes)
+	session: Any = SimpleNamespace(sid="session-ref-handlers")
+	with ps.PulseContext(app=app, session=session, render=render):
+		tree = RenderTree(WithRef())
+		tree.render()
+	assert handle is not None
+	handle._on_mounted({"refId": handle.id})
+	handle._on_unmounted({"refId": handle.id})
+	assert events == ["mount", "unmount"]
+
+
 def test_ref_prop_rejects_non_ref_key():
 	@component
 	def BadRef() -> ps.Element:

@@ -224,6 +224,21 @@ class StateEffect(Generic[T], InitializableProperty):
 		setattr(state, name, effect)
 
 
+def _state_layout_signature(
+	namespace: dict[str, Any],
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+	fields = sorted(
+		name for name, value in namespace.items() if isinstance(value, StateProperty)
+	)
+	computeds = sorted(
+		name for name, value in namespace.items() if isinstance(value, ComputedProperty)
+	)
+	effects = sorted(
+		name for name, value in namespace.items() if isinstance(value, StateEffect)
+	)
+	return (tuple(fields), tuple(computeds), tuple(effects))
+
+
 class StateMeta(ABCMeta):
 	"""
 	Metaclass that automatically converts annotated attributes into reactive properties.
@@ -286,6 +301,9 @@ class StateMeta(ABCMeta):
 				continue
 			# Convert plain class var into a StateProperty
 			namespace[attr_name] = StateProperty(attr_name, value)
+
+		_state_layout = _state_layout_signature(namespace)
+		namespace["__pulse_layout_signature__"] = _state_layout
 
 		return super().__new__(mcs, name, bases, namespace)
 
@@ -516,6 +534,43 @@ class State(Disposable, metaclass=StateMeta):
 			raise RuntimeError(
 				f"State.dispose() missed effects defined on its Scope: {[e.name for e in undisposed_effects]}"
 			)
+
+	def _refresh_reactive_layout(self) -> None:
+		"""Refresh computed/effect instances after class reload."""
+		self._reset_computeds()
+		self._reset_effects()
+		self._reinitialize_initializables()
+
+	def _reset_computeds(self) -> None:
+		for cls in self.__class__.__mro__:
+			if cls in (State, ABC):
+				continue
+			for _name, comp_prop in cls.__dict__.items():
+				if isinstance(comp_prop, ComputedProperty):
+					private_name = comp_prop.private_name
+					if private_name in self.__dict__:
+						self.__dict__.pop(private_name, None)
+
+	def _reset_effects(self) -> None:
+		for name, value in list(self.__dict__.items()):
+			if isinstance(value, Effect):
+				try:
+					value.dispose()
+				except Exception:
+					pass
+				self.__dict__.pop(name, None)
+
+	def _reinitialize_initializables(self) -> None:
+		self._scope = Scope()
+		with self._scope:
+			for cls in self.__class__.__mro__:
+				if cls is State or cls is ABC:
+					continue
+				for name, attr in cls.__dict__.items():
+					if getattr(self.__class__, name, attr) is not attr:
+						continue
+					if isinstance(attr, InitializableProperty):
+						attr.initialize(self, name)
 
 	@override
 	def __repr__(self) -> str:

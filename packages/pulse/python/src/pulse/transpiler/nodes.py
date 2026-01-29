@@ -761,9 +761,20 @@ class PulseNode:
 	kwargs: dict[str, Any] = field(default_factory=dict)
 	key: str | None = None
 	name: str | None = None  # Optional component name for debug messages.
+	component_id: str = ""
+	signature_hash: str | None = None
+	signature: list[Any] | None = None
 	# Renderer state (mutable, set during render)
 	hooks: Any = None  # HookContext
 	contents: Node | None = None
+
+	def __post_init__(self) -> None:
+		if not self.component_id:
+			mod = getattr(self.fn, "__module__", "<unknown>")
+			qname = getattr(
+				self.fn, "__qualname__", getattr(self.fn, "__name__", "<callable>")
+			)
+			self.component_id = f"{mod}:{qname}"
 
 	def emit(self, out: list[str]) -> None:
 		fn_name = getattr(self.fn, "__name__", "unknown")
@@ -793,6 +804,9 @@ class PulseNode:
 			kwargs=self.kwargs,
 			key=self.key,
 			name=self.name,
+			component_id=self.component_id,
+			signature_hash=self.signature_hash,
+			signature=self.signature,
 		)
 
 

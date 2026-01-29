@@ -10,7 +10,12 @@ from collections.abc import Callable, Sequence
 from typing import Any, Literal, cast, override
 
 from pulse.helpers import getsourcecode
-from pulse.hooks.core import HookState, hooks
+from pulse.hooks.core import (
+	HOOK_CONTEXT,
+	HookState,
+	hooks,
+	next_hot_reload_identity,
+)
 from pulse.transpiler.errors import TranspileError
 
 # Storage keyed by (code object, lineno) of the `with ps.init()` call site.
@@ -69,7 +74,7 @@ class InitContext:
 	```
 	"""
 
-	callsite: tuple[Any, int] | None
+	callsite: Any | None
 	frame: types.FrameType | None
 	first_render: bool
 	pre_keys: set[str]
@@ -81,21 +86,42 @@ class InitContext:
 		self.first_render = False
 		self.pre_keys = set()
 		self.saved = {}
+		self._storage_keys: list[object] = []
 
 	def __enter__(self):
 		self.frame = previous_frame()
 		self.pre_keys = set(self.frame.f_locals.keys())
-		# Use code object to disambiguate identical line numbers in different fns.
-		self.callsite = (self.frame.f_code, self.frame.f_lineno)
+		ctx = HOOK_CONTEXT.get()
+		hot_reload_mode = ctx.hot_reload_mode if ctx is not None else False
+		hot_identity = next_hot_reload_identity(None, record=True)
+		callsite_identity = (self.frame.f_code, self.frame.f_lineno)
+
+		keys: list[object] = []
+		if hot_reload_mode and hot_identity is not None:
+			keys.append(hot_identity)
+			keys.append(callsite_identity)
+			self.callsite = hot_identity
+		else:
+			keys.append(callsite_identity)
+			if hot_identity is not None:
+				keys.append(hot_identity)
+			self.callsite = callsite_identity
+		self._storage_keys = keys
 
 		storage = _init_hook().storage
-		entry = storage.get(self.callsite)
+		entry = None
+		for key in self._storage_keys:
+			entry = storage.get(key)
+			if entry is not None:
+				break
 		if entry is None:
 			self.first_render = True
 			self.saved = {}
 		else:
 			self.first_render = False
 			self.saved = entry["vars"]
+			for key in self._storage_keys:
+				storage.setdefault(key, entry)
 		return self
 
 	def restore_variables(self):
@@ -107,9 +133,9 @@ class InitContext:
 
 	def save(self, values: dict[str, Any]):
 		self.saved = values
-		assert self.callsite is not None, "callsite is None"
 		storage = _init_hook().storage
-		storage[self.callsite] = {"vars": values}
+		for key in self._storage_keys:
+			storage[key] = {"vars": values}
 
 	def _capture_new_locals(self) -> dict[str, Any]:
 		frame = self.frame
@@ -131,9 +157,9 @@ class InitContext:
 	) -> Literal[False]:
 		if exc_type is None:
 			captured = self._capture_new_locals()
-			assert self.callsite is not None, "callsite  None"
 			storage = _init_hook().storage
-			storage[self.callsite] = {"vars": captured}
+			for key in self._storage_keys:
+				storage[key] = {"vars": captured}
 		self.frame = None
 		return False
 
@@ -661,7 +687,7 @@ def _resolve_init_bindings(func: Callable[..., Any]) -> tuple[set[str], set[str]
 
 class InitState(HookState):
 	def __init__(self) -> None:
-		self.storage: dict[tuple[Any, int], dict[str, Any]] = {}
+		self.storage: dict[object, dict[str, Any]] = {}
 
 	@override
 	def dispose(self) -> None:

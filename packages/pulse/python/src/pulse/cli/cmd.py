@@ -24,7 +24,7 @@ from pulse.cli.dependencies import (
 	prepare_web_dependencies,
 )
 from pulse.cli.folder_lock import FolderLock
-from pulse.cli.helpers import load_app_from_target
+from pulse.cli.helpers import ensure_gitignore_has, load_app_from_target
 from pulse.cli.logging import CLILogger
 from pulse.cli.models import AppLoadResult, CommandSpec
 from pulse.cli.processes import execute_commands
@@ -46,6 +46,13 @@ cli = typer.Typer(
 	name="pulse",
 	help="Pulse UI - Python to TypeScript bridge with server-side callbacks",
 	no_args_is_help=True,
+)
+
+HOT_RELOAD_DIR_OPTION = typer.Option(
+	[], "--hot-reload-dir", help="Extra hot reload watch roots"
+)
+HOT_RELOAD_EXCLUDE_OPTION = typer.Option(
+	[], "--hot-reload-exclude", help="Extra hot reload exclude globs"
 )
 
 
@@ -78,6 +85,11 @@ def run(
 		help="Full URL of React server (required for single-server + --server-only)",
 	),
 	reload: bool | None = typer.Option(None, "--reload/--no-reload"),
+	hot_reload: bool | None = typer.Option(
+		None, "--hot-reload/--no-hot-reload", help="Enable Pulse hot reload"
+	),
+	hot_reload_dir: list[str] = HOT_RELOAD_DIR_OPTION,
+	hot_reload_exclude: list[str] = HOT_RELOAD_EXCLUDE_OPTION,
 	find_port: bool = typer.Option(True, "--find-port/--no-find-port"),
 	verbose: bool = typer.Option(
 		False, "--verbose", help="Show all logs without filtering"
@@ -100,6 +112,8 @@ def run(
 	# Turn on reload in dev only
 	if reload is None:
 		reload = env.pulse_env == "dev"
+	if hot_reload is None:
+		hot_reload = env.pulse_env == "dev"
 
 	if server_only and web_only:
 		logger.error("Cannot use --server-only and --web-only at the same time.")
@@ -217,11 +231,20 @@ def run(
 		env.react_server_address = f"http://localhost:{web_port}"
 
 	if not web_only:
+		trigger_path = _configure_hot_reload_env(
+			app_ctx=app_ctx,
+			web_root=web_root,
+			hot_reload=hot_reload,
+			hot_reload_dirs=hot_reload_dir,
+			hot_reload_excludes=hot_reload_exclude,
+		)
 		server_cmd = build_uvicorn_command(
 			app_ctx=app_ctx,
 			address=address,
 			port=port,
 			reload_enabled=reload,
+			hot_reload_enabled=hot_reload,
+			hot_reload_trigger=trigger_path,
 			extra_args=server_args,
 			dev_secret=dev_secret,
 			server_only=server_only,
@@ -389,6 +412,8 @@ def build_uvicorn_command(
 	address: str,
 	port: int,
 	reload_enabled: bool,
+	hot_reload_enabled: bool,
+	hot_reload_trigger: Path | None,
 	extra_args: Sequence[str],
 	dev_secret: str | None,
 	server_only: bool,
@@ -414,17 +439,22 @@ def build_uvicorn_command(
 
 	if reload_enabled:
 		args.append("--reload")
-		args.extend(["--reload-include", "*.css"])
-		app_dir = app_ctx.app_dir or Path.cwd()
-		args.extend(["--reload-dir", str(app_dir)])
-		if web_root.exists():
-			args.extend(["--reload-dir", str(web_root)])
-			pulse_dir = str(app_ctx.app.codegen.cfg.pulse_dir)
-			pulse_app_dir = web_root / "app" / pulse_dir
-			rel_path = Path(os.path.relpath(pulse_app_dir, cwd))
-			if not rel_path.is_absolute():
-				args.extend(["--reload-exclude", str(rel_path)])
-				args.extend(["--reload-exclude", str(rel_path / "**")])
+		if hot_reload_enabled and hot_reload_trigger is not None:
+			args.extend(["--reload-include", hot_reload_trigger.name])
+			args.extend(["--reload-exclude", "*.py"])
+			args.extend(["--reload-dir", str(hot_reload_trigger.parent)])
+		else:
+			args.extend(["--reload-include", "*.css"])
+			app_dir = app_ctx.app_dir or Path.cwd()
+			args.extend(["--reload-dir", str(app_dir)])
+			if web_root.exists():
+				args.extend(["--reload-dir", str(web_root)])
+				pulse_dir = str(app_ctx.app.codegen.cfg.pulse_dir)
+				pulse_app_dir = web_root / "app" / pulse_dir
+				rel_path = Path(os.path.relpath(pulse_app_dir, cwd))
+				if not rel_path.is_absolute():
+					args.extend(["--reload-exclude", str(rel_path)])
+					args.extend(["--reload-exclude", str(rel_path / "**")])
 
 	if app_ctx.app.env == "prod":
 		args.extend(production_flags())
@@ -532,6 +562,31 @@ def _apply_app_context_to_env(app_ctx: AppLoadResult) -> None:
 		env.pulse_app_file = str(app_ctx.app_file)
 	if app_ctx.app_dir:
 		env.pulse_app_dir = str(app_ctx.app_dir)
+
+
+def _configure_hot_reload_env(
+	*,
+	app_ctx: AppLoadResult,
+	web_root: Path,
+	hot_reload: bool,
+	hot_reload_dirs: list[str],
+	hot_reload_excludes: list[str],
+) -> Path | None:
+	env.pulse_hot_reload = hot_reload
+	env.pulse_hot_reload_dirs = hot_reload_dirs
+	env.pulse_hot_reload_excludes = hot_reload_excludes
+
+	if not hot_reload:
+		env.pulse_hot_reload_trigger = None
+		return None
+
+	root = web_root if web_root.exists() else (app_ctx.app_dir or Path.cwd())
+	trigger_path = root / ".pulse" / "hot-reload.trigger"
+	ensure_gitignore_has(root, ".pulse/")
+	trigger_path.parent.mkdir(parents=True, exist_ok=True)
+	trigger_path.touch(exist_ok=True)
+	env.pulse_hot_reload_trigger = str(trigger_path)
+	return trigger_path
 
 
 def _run_dependency_plan(

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, ParamSpec, TypeVar, cast, override
 
-from pulse.hooks.core import HookMetadata, HookState, hooks
+from pulse.hooks.core import HookMetadata, HookState, hooks, next_hot_reload_identity
 from pulse.reactive import Effect, Scope, Signal
 
 P = ParamSpec("P")
@@ -195,6 +195,7 @@ def setup(init_func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
 		- Use ``ps.setup()`` directly when AST rewriting is problematic
 		- Arguments must be consistent across renders (same count and names)
 	"""
+	next_hot_reload_identity(None)
 	state = _setup_hook()
 	state.ensure_not_called()
 

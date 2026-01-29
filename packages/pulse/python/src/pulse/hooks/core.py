@@ -229,11 +229,19 @@ class HookContext:
 	render_cycle: int
 	namespaces: dict[str, HookNamespace[Any]]
 	_token: "Token[HookContext | None] | None"
+	component_id: str | None
+	signature_hash: str | None
+	hot_reload_mode: bool
+	hook_index: int
 
 	def __init__(self) -> None:
 		self.render_cycle = 0
 		self.namespaces = {}
 		self._token = None
+		self.component_id = None
+		self.signature_hash = None
+		self.hot_reload_mode = False
+		self.hook_index = 0
 
 	@staticmethod
 	def require(caller: str | None = None):
@@ -276,6 +284,23 @@ class HookContext:
 		for namespace in self.namespaces.values():
 			namespace.dispose()
 		self.namespaces.clear()
+
+
+def next_hot_reload_identity(
+	key: str | None, *, record: bool = False
+) -> tuple[str, int] | tuple[str, str] | None:
+	ctx = HOOK_CONTEXT.get()
+	if ctx is None:
+		return None
+	if ctx.component_id is None or ctx.signature_hash is None:
+		return None
+	index = ctx.hook_index
+	ctx.hook_index += 1
+	if not (ctx.hot_reload_mode or record):
+		return None
+	if key is not None:
+		return (ctx.component_id, key)
+	return (ctx.component_id, index)
 
 
 HOOK_CONTEXT: ContextVar[HookContext | None] = ContextVar(

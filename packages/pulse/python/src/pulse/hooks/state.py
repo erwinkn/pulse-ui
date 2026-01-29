@@ -4,7 +4,13 @@ from types import CodeType, FrameType
 from typing import Any, TypeVar, override
 
 from pulse.component import is_component_code
-from pulse.hooks.core import HookMetadata, HookState, hooks
+from pulse.hooks.core import (
+	HOOK_CONTEXT,
+	HookMetadata,
+	HookState,
+	hooks,
+	next_hot_reload_identity,
+)
 from pulse.state import State
 
 S = TypeVar("S", bound=State)
@@ -41,6 +47,7 @@ class StateHookState(HookState):
 		identity: Any,
 		key: str | None,
 		arg: State | Callable[[], State],
+		alt_identity: Any | None = None,
 	) -> State:
 		full_identity = self._make_key(identity, key)
 		if full_identity in self.called_keys:
@@ -55,6 +62,16 @@ class StateHookState(HookState):
 		self.called_keys.add(full_identity)
 
 		existing = self.instances.get(full_identity)
+		if (
+			existing is None
+			and alt_identity is not None
+			and key is None
+			and alt_identity is not identity
+		):
+			alt_key = self._make_key(alt_identity, None)
+			existing = self.instances.get(alt_key)
+			if existing is not None:
+				self.instances[full_identity] = existing
 		if existing is not None:
 			# Dispose any State instances passed directly as args that aren't being used
 			if isinstance(arg, State) and arg is not existing:
@@ -76,6 +93,8 @@ class StateHookState(HookState):
 				+ "Do not dispose states passed to `pulse.state`."
 			)
 		self.instances[full_identity] = instance
+		if alt_identity is not None and key is None and alt_identity is not identity:
+			self.instances[self._make_key(alt_identity, None)] = instance
 		return instance
 
 	@override
@@ -175,18 +194,37 @@ def state(
 	resolved_key = key
 	resolved_arg = arg
 
-	identity: Any
+	ctx = HOOK_CONTEXT.get()
+	hot_reload_mode = ctx.hot_reload_mode if ctx is not None else False
+	hot_identity = next_hot_reload_identity(resolved_key, record=True)
+
+	callsite_identity: Any | None = None
 	if resolved_key is None:
 		frame = inspect.currentframe()
 		assert frame is not None
 		caller = frame.f_back
 		assert caller is not None
-		identity = collect_component_identity(caller)
+		callsite_identity = collect_component_identity(caller)
+
+	identity: Any
+	alt_identity: Any | None = None
+	if hot_reload_mode and hot_identity is not None:
+		identity = hot_identity
+		alt_identity = callsite_identity
 	else:
-		identity = resolved_key
+		if resolved_key is None:
+			identity = callsite_identity
+			alt_identity = hot_identity
+		else:
+			identity = resolved_key
 
 	hook_state = _state_hook()
-	return hook_state.get_or_create_state(identity, resolved_key, resolved_arg)  # pyright: ignore[reportReturnType]
+	return hook_state.get_or_create_state(
+		identity,
+		resolved_key,
+		resolved_arg,
+		alt_identity=alt_identity,
+	)  # pyright: ignore[reportReturnType]
 
 
 __all__ = ["state", "StateHookState"]

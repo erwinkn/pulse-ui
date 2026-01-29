@@ -2,9 +2,9 @@
 
 import inspect
 from collections.abc import Awaitable, Callable
-from typing import Any, ParamSpec, Protocol, TypeVar, cast, overload
+from typing import Any, ParamSpec, Protocol, TypeVar, overload
 
-from pulse.hooks.core import HOOK_CONTEXT
+from pulse.hooks.core import HOOK_CONTEXT, next_hot_reload_identity
 from pulse.hooks.effects import inline_effect_hook
 from pulse.hooks.state import collect_component_identity
 from pulse.reactive import (
@@ -331,13 +331,30 @@ def effect(
 		):
 			caller = caller.f_back
 			assert caller is not None
+		hot_identity = next_hot_reload_identity(key, record=True)
+		callsite_identity = None
 		if key is None:
-			identity = collect_component_identity(caller)
+			callsite_identity = collect_component_identity(caller)
+
+		identity: Any
+		alt_identity: Any | None = None
+		if ctx.hot_reload_mode and hot_identity is not None:
+			identity = hot_identity
+			alt_identity = callsite_identity
 		else:
-			identity = key
+			if key is None:
+				identity = callsite_identity
+				alt_identity = hot_identity
+			else:
+				identity = key
 
 		state = inline_effect_hook()
-		return state.get_or_create(cast(Any, identity), key, create_effect)
+		return state.get_or_create(
+			identity,
+			key,
+			create_effect,
+			alt_identity=alt_identity,
+		)
 
 	if fn is not None:
 		return decorator(fn)

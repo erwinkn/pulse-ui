@@ -39,6 +39,7 @@ class InlineEffectHookState(HookState):
 		identity: Any,
 		key: str | None,
 		factory: Callable[[], Effect | AsyncEffect],
+		alt_identity: Any | None = None,
 	) -> Effect | AsyncEffect:
 		"""Return cached effect or create a new one."""
 		# Effects with explicit keys fully bypass identity matching.
@@ -57,11 +58,23 @@ class InlineEffectHookState(HookState):
 		self._seen_this_render.add(full_identity)
 
 		existing = self.effects.get(full_identity)
+		if (
+			existing is None
+			and alt_identity is not None
+			and key is None
+			and alt_identity is not identity
+		):
+			alt_key = self._make_key(alt_identity, None)
+			existing = self.effects.get(alt_key)
+			if existing is not None:
+				self.effects[full_identity] = existing
 		if existing is not None:
 			return existing
 
 		effect = factory()
 		self.effects[full_identity] = effect
+		if alt_identity is not None and key is None and alt_identity is not identity:
+			self.effects[self._make_key(alt_identity, None)] = effect
 		return effect
 
 	@override

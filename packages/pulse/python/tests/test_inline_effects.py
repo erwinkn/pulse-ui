@@ -4,7 +4,7 @@ from typing import cast
 import pulse as ps
 import pytest
 from pulse import HookContext, Signal
-from pulse.reactive import AsyncEffect, Batch, Effect
+from pulse.reactive import AsyncEffect, Batch, Computed, Effect
 from pulse.test_helpers import wait_for
 
 
@@ -424,7 +424,8 @@ class TestContextDetection:
 		assert isinstance(module_effect, Effect)
 
 	def test_state_class_effect_unchanged(self):
-		from pulse.state import State, StateEffect
+		from pulse.state.property import StateEffect
+		from pulse.state.state import State
 
 		class MyState(State):
 			@ps.effect
@@ -763,6 +764,111 @@ class TestEdgeCases:
 		assert len(parent_effects) == 1
 		assert len(child_effects) == 1
 		assert parent_effects[0] is not child_effects[0]
+
+
+class TestNoDoubleDispose:
+	"""Test that inline effects don't get double-disposed.
+
+	Inline effects are tracked by InlineEffectHookState. They should NOT also
+	be tracked as children of the parent render Effect's scope, otherwise
+	both disposal paths would run.
+	"""
+
+	def test_inline_effect_not_in_parent_scope(self):
+		"""Inline effects should not become children of a parent Effect."""
+		inline_effect_ref: list[Effect] = []
+
+		@ps.component
+		def Comp():
+			@ps.effect
+			def my_effect():
+				pass
+
+			inline_effect_ref.append(my_effect)
+			return None
+
+		# Create a parent Effect that renders the component
+		ctx = HookContext()
+		parent_effect_ref: list[Effect] = []
+
+		def parent_fn():
+			with ctx:
+				Comp.fn()
+
+		parent_effect = Effect(parent_fn, immediate=True)
+		parent_effect_ref.append(parent_effect)
+
+		# The inline effect should NOT be a child of the parent effect
+		assert len(inline_effect_ref) == 1
+		inline_effect = inline_effect_ref[0]
+		assert len(parent_effect.children) == 0, (
+			"Inline effects should not be registered as children of parent effects"
+		)
+		assert inline_effect.parent is None, (
+			"Inline effects should not have a parent effect set"
+		)
+
+		# Clean up
+		ctx.unmount()
+		parent_effect.dispose()
+
+	def test_inline_effect_dispose_only_once(self):
+		"""Inline effects should be disposed exactly once on unmount."""
+		dispose_count = 0
+
+		@ps.component
+		def Comp():
+			@ps.effect(immediate=True)
+			def my_effect():
+				def cleanup():
+					nonlocal dispose_count
+					dispose_count += 1
+
+				return cleanup
+
+			return None
+
+		# Simulate render within a parent Effect (like render Effect does)
+		ctx = HookContext()
+
+		def parent_fn():
+			with ctx:
+				Comp.fn()
+
+		parent_effect = Effect(parent_fn, immediate=True)
+
+		assert dispose_count == 0
+
+		# Dispose both - should not cause double-dispose
+		ctx.unmount()
+		parent_effect.dispose()
+
+		assert dispose_count == 1, (
+			f"Effect cleanup should run exactly once, got {dispose_count}"
+		)
+
+
+class TestComputedInteraction:
+	def test_inline_effect_in_computed_still_errors(self):
+		"""Inline effects created inside computed should still raise."""
+
+		@ps.component
+		def Comp():
+			def compute():
+				@ps.effect
+				def my_effect():
+					pass
+
+				return 1
+
+			value = Computed(compute, name="c")
+			_ = value()
+			return None
+
+		ctx = HookContext()
+		with pytest.raises(RuntimeError, match="effect was created within a computed"):
+			with ctx:
+				Comp.fn()
 
 
 class TestIntegration:

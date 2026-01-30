@@ -104,6 +104,9 @@ A Python behavior where closures capture variable references, not values. In loo
 **Event Handler**
 A function that runs when a user interacts with the UI—clicking a button, typing in an input, submitting a form. In Pulse, event handlers execute on the server.
 
+**Debounce**
+A technique that delays a handler until input stops for a short time. In Pulse, debouncing happens in the browser, so the server only sees the last call after the pause.
+
 **Event Payload**
 Data sent with an event—the input's current value, mouse coordinates, which key was pressed. Pulse automatically captures and sends relevant event data.
 
@@ -117,6 +120,12 @@ When an event on a child element "bubbles up" through parent elements. Clicking 
 
 **Query**
 A declarative way to fetch and cache data. You define what data you need, and the framework handles loading states, caching, refetching, and error handling.
+
+**Query Key**
+A list or tuple that uniquely identifies a query in the cache (e.g. `("user", user_id)`).
+
+**QueryKeys**
+A wrapper for selecting multiple query keys at once (used for filtering in `ps.queries`).
 
 **Mutation**
 An operation that changes server-side data (create, update, delete). Unlike queries, mutations are triggered explicitly and often invalidate cached queries.

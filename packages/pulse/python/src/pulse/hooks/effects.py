@@ -2,10 +2,10 @@ from collections.abc import Callable
 from typing import Any, override
 
 from pulse.hooks.core import HookMetadata, HookState, hooks
-from pulse.reactive import AsyncEffect, Effect
+from pulse.reactive import REACTIVE_CONTEXT, AsyncEffect, Effect
 
 
-class InlineEffectHookState(HookState):
+class EffectState(HookState):
 	"""Stores inline effects keyed by function identity or explicit key."""
 
 	__slots__ = ("effects", "_seen_this_render")  # pyright: ignore[reportUnannotatedClassAttribute]
@@ -33,6 +33,20 @@ class InlineEffectHookState(HookState):
 			if key not in self._seen_this_render:
 				self.effects[key].dispose()
 				del self.effects[key]
+		# Remove inline effects from the active render scope to avoid parent cleanup.
+		rc = REACTIVE_CONTEXT.get()
+		scope = rc.scope
+		if scope is None or not scope.effects:
+			return
+		for key in self._seen_this_render:
+			effect = self.effects.get(key)
+			if effect is None:
+				continue
+			try:
+				scope.effects.remove(effect)
+				effect.parent = None
+			except ValueError:
+				pass
 
 	def get_or_create(
 		self,
@@ -72,9 +86,9 @@ class InlineEffectHookState(HookState):
 		self._seen_this_render.clear()
 
 
-inline_effect_hook = hooks.create(
+effect_state = hooks.create(
 	"pulse:core.inline_effects",
-	lambda: InlineEffectHookState(),
+	factory=EffectState,
 	metadata=HookMetadata(
 		owner="pulse.core",
 		description="Storage for inline @ps.effect decorators in components",
@@ -83,6 +97,6 @@ inline_effect_hook = hooks.create(
 
 
 __all__ = [
-	"InlineEffectHookState",
-	"inline_effect_hook",
+	"EffectState",
+	"effect_state",
 ]

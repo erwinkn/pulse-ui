@@ -1,23 +1,23 @@
 [project]
 name = "pulse-framework"
-version = "0.1.70"
+version = "0.1.75"
 description = "Pulse - Full-stack framework for building real-time React applications in Python"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
-    "websockets>=12.0",
     "fastapi>=0.128.0",
     "uvicorn>=0.24.0",
     "mako>=1.3.10",
     "typer>=0.16.0",
     "python-socketio>=5.16.0",
     "rich>=13.7.1",
-    "python-multipart>=0.0.20",
+    "python-multipart>=0.0.22",
     "python-dateutil>=2.9.0.post0",
     "starlette>=0.50.0,<0.51.0",
     "urllib3>=2.6.3",
     "watchfiles>=1.1.0",
     "httpx>=0.28.1",
+    "aiohttp>=3.12.0",
 ]
 
 [tool.uv]

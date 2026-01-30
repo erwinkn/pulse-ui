@@ -7,6 +7,7 @@ Full-stack Python framework for interactive web apps. Runs on React with WebSock
 - Be extremely concise. Sacrifice grammar for the sake of concision.
 - Read the README.md in the relevant package before starting work
 - Always add tests when implementing a new feature. 
+- If dependencies are not installed, run `make sync`
 - Run `make test` after implementing
 - Run `make all` before committing
 - Check `examples/` for usage patterns
@@ -64,3 +65,4 @@ Before writing or editing docs, read `docs/GUIDELINES.md` for tone, structure, a
 - Code first, explain after
 - Be conversational—write like you're explaining to a friend
 - Update `docs/content/docs/(core)/glossary.mdx` if introducing new terms
+- When changing behavior/APIs, update both `docs/` and `skills/` (if the feature is covered there)

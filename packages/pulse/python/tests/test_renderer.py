@@ -318,6 +318,50 @@ def test_render_tree_initial_callbacks():
 	assert set(tree.callbacks.keys()) == {"0.onClick"}
 
 
+def test_render_tree_debounced_callbacks():
+	def on_click() -> None:
+		pass
+
+	root = Element(
+		"div",
+		children=[
+			Element(
+				"button",
+				props={"onClick": ps.debounced(on_click, 250)},
+				children=["Click"],
+			)
+		],
+	)
+
+	tree = RenderTree(root)
+	vdom = tree.render()
+
+	assert vdom == {
+		"tag": "div",
+		"children": [
+			{
+				"tag": "button",
+				"props": {"onClick": "$cb:250"},
+				"children": ["Click"],
+				"eval": ["onClick"],
+			}
+		],
+	}
+	assert set(tree.callbacks.keys()) == {"0.onClick"}
+
+
+def test_debounced_to_immediate_updates_placeholder():
+	def on_click() -> None:
+		pass
+
+	tree = RenderTree(div(button(onClick=ps.debounced(on_click, 250))["Click"]))
+	tree.render()
+
+	ops = tree.rerender(div(button(onClick=on_click)["Click"]))
+	update_props = [op for op in ops if op["type"] == "update_props"]
+	assert any(op["data"].get("set", {}).get("onClick") == "$cb" for op in update_props)
+
+
 def test_callback_removal_clears_callbacks():
 	def on_click() -> None:
 		pass
@@ -1124,7 +1168,7 @@ async def test_ref_on_mount_uses_route_context():
 	mounted = asyncio.Event()
 
 	def on_mount() -> None:
-		seen["path"] = ps.route().pulse_route.unique_path()
+		seen["path"] = ps.pulse_route().unique_path()
 		mounted.set()
 
 	@component

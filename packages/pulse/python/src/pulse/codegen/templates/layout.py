@@ -32,7 +32,9 @@ export async function loader(args: LoaderFunctionArgs) {
   if (cookie) fwd.set("cookie", cookie);
   if (authorization) fwd.set("authorization", authorization);
   fwd.set("content-type", "application/json");
-  const res = await fetch(`${internal_server_address}$${"{"}config.apiPrefix}/prerender`, {
+  // Internal server address for server-side loader requests.
+  const internalServerAddress = "${internal_server_address}";
+  const res = await fetch(`$${"{"}internalServerAddress}$${"{"}config.apiPrefix}/prerender`, {
     method: "POST",
     headers: fwd,
     body: JSON.stringify({ paths, routeInfo: extractServerRouteInfo(args) }),

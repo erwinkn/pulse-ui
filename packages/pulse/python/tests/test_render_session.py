@@ -529,7 +529,7 @@ async def test_route_info_updated_on_reconnect():
 	route_info1: RouteInfo = {
 		"pathname": "/a",
 		"hash": "",
-		"query": "?foo=bar",
+		"query": "foo=bar",
 		"queryParams": {"foo": "bar"},
 		"pathParams": {},
 		"catchall": [],
@@ -539,7 +539,7 @@ async def test_route_info_updated_on_reconnect():
 		session.attach("/a", route_info1)
 
 	mount = session.route_mounts["/a"]
-	assert mount.route.query == "?foo=bar"
+	assert mount.route.query == "foo=bar"
 
 	# Disconnect
 	session.disconnect()
@@ -550,7 +550,7 @@ async def test_route_info_updated_on_reconnect():
 	route_info2: RouteInfo = {
 		"pathname": "/a",
 		"hash": "",
-		"query": "?baz=qux",
+		"query": "baz=qux",
 		"queryParams": {"baz": "qux"},
 		"pathParams": {},
 		"catchall": [],
@@ -559,7 +559,7 @@ async def test_route_info_updated_on_reconnect():
 		session.attach("/a", route_info2)
 
 	# Route info should be updated
-	assert mount.route.query == "?baz=qux"
+	assert mount.route.query == "baz=qux"
 
 	session.close()
 
@@ -1007,6 +1007,49 @@ async def test_session_close_cancels_tracked_timers():
 	assert fired is False
 
 
+@pytest.mark.asyncio
+async def test_session_close_cancels_cleanup_timers():
+	class TimerState(ps.State):
+		_render: RenderSession | None = None
+		fired: bool = False
+
+		def capture_render(self) -> None:
+			self._render = ps.PulseContext.get().render
+
+		@override
+		def on_dispose(self) -> None:
+			render = self._render
+			assert render is not None
+
+			def on_fire() -> None:
+				self.fired = True
+
+			render.schedule_later(0.05, on_fire)
+
+	state_box: list[TimerState] = []
+
+	@ps.component
+	def component():
+		state = ps.state(TimerState)
+		state.capture_render()
+		if not state_box:
+			state_box.append(state)
+		return ps.div()
+
+	routes = RouteTree([Route("a", component)])
+	session = RenderSession("test-id", routes)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	assert state_box
+	session.close()
+
+	await asyncio.sleep(0.1)
+	assert state_box[0].fired is False
+
+
 def test_handle_api_result_ignores_unknown_id():
 	"""Test that handle_api_result silently ignores unknown correlation IDs."""
 	routes = RouteTree([Route("a", simple_component)])
@@ -1205,7 +1248,7 @@ async def test_prerender_keeps_mounts_for_unrendered_paths():
 	assert mount_b.state == "active"
 
 	nav_info = make_route_info("/a")
-	nav_info["query"] = "?page=2"
+	nav_info["query"] = "page=2"
 	nav_info["queryParams"] = {"page": "2"}
 
 	with ps.PulseContext.update(render=session):
@@ -1215,7 +1258,7 @@ async def test_prerender_keeps_mounts_for_unrendered_paths():
 	assert session.route_mounts["/a"] is mount_a
 	assert mount_a.effect is effect_a
 	assert mount_a.state == "active"
-	assert mount_a.route.query == "?page=2"
+	assert mount_a.route.query == "page=2"
 	assert session.route_mounts["/b"] is mount_b
 	assert mount_b.effect is effect_b
 
@@ -1347,7 +1390,7 @@ async def test_update_route_updates_route_context():
 	initial_info: RouteInfo = {
 		"pathname": "/a",
 		"hash": "",
-		"query": "?x=1",
+		"query": "x=1",
 		"queryParams": {"x": "1"},
 		"pathParams": {},
 		"catchall": [],
@@ -1357,21 +1400,21 @@ async def test_update_route_updates_route_context():
 		session.attach("/a", initial_info)
 
 	mount = session.route_mounts["/a"]
-	assert mount.route.query == "?x=1"
+	assert mount.route.query == "x=1"
 
 	# Update route
 	updated_info: RouteInfo = {
 		"pathname": "/a",
-		"hash": "#section",
-		"query": "?y=2",
+		"hash": "section",
+		"query": "y=2",
 		"queryParams": {"y": "2"},
 		"pathParams": {},
 		"catchall": [],
 	}
 	session.update_route("/a", updated_info)
 
-	assert mount.route.query == "?y=2"
-	assert mount.route.hash == "#section"
+	assert mount.route.query == "y=2"
+	assert mount.route.hash == "section"
 
 	session.close()
 

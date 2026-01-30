@@ -185,6 +185,18 @@ def expressions(x, y):
     return result
 ```
 
+### Subscript access
+
+```python
+@ps.javascript
+def last(arr):
+    return arr[-1]
+
+# -> return arr[-1];
+```
+
+Negative indices are not rewritten. Use `.at(-1)` or `arr[arr.length - 1]` for array-last behavior.
+
 ### List and Dict Comprehensions
 
 ```python
@@ -289,9 +301,37 @@ def with_class():
 Access JavaScript globals via `pulse.js`:
 
 ```python
-from pulse.js import Math, console, window, document, JSON
+from pulse.js import Math, console, window, document, JSON, Intl, crypto
 from pulse.js.date import Date
-from pulse.js import Promise, Set, Map, Array, Object, Error
+from pulse.js import (
+    AbortController,
+    Array,
+    ArrayBuffer,
+    Blob,
+    CustomEvent,
+    DOMParser,
+    Error,
+    File,
+    FileReader,
+    FormData,
+    Headers,
+    IntersectionObserver,
+    Map,
+    MutationObserver,
+    Object,
+    PerformanceObserver,
+    Promise,
+    Request,
+    ResizeObserver,
+    Response,
+    Set,
+    TextDecoder,
+    TextEncoder,
+    URL,
+    URLSearchParams,
+    Uint8Array,
+    XMLSerializer,
+)
 
 @ps.javascript
 def using_builtins():

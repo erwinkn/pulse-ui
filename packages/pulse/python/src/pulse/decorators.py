@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, ParamSpec, Protocol, TypeVar, cast, overload
 
 from pulse.hooks.core import HOOK_CONTEXT
-from pulse.hooks.effects import inline_effect_hook
+from pulse.hooks.effects import effect_state
 from pulse.hooks.state import collect_component_identity
 from pulse.reactive import (
 	AsyncEffect,
@@ -16,7 +16,8 @@ from pulse.reactive import (
 	EffectFn,
 	Signal,
 )
-from pulse.state import ComputedProperty, State, StateEffect
+from pulse.state.property import ComputedProperty, StateEffect
+from pulse.state.state import State
 
 T = TypeVar("T")
 TState = TypeVar("TState", bound=State)
@@ -336,7 +337,7 @@ def effect(
 		else:
 			identity = key
 
-		state = inline_effect_hook()
+		state = effect_state()
 		return state.get_or_create(cast(Any, identity), key, create_effect)
 
 	if fn is not None:

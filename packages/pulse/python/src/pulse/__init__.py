@@ -60,6 +60,14 @@ from pulse.context import PulseContext as PulseContext
 from pulse.cookies import Cookie as Cookie
 from pulse.cookies import SetCookie as SetCookie
 
+# Debounce
+from pulse.debounce import (
+	Debounced as Debounced,
+)
+from pulse.debounce import (
+	debounced as debounced,
+)
+
 # Decorators
 from pulse.decorators import computed as computed
 from pulse.decorators import effect as effect
@@ -1200,7 +1208,7 @@ from pulse.hooks.core import (
 )
 
 # Hooks - Effects (import to register inline_effect_hook before registry locks)
-from pulse.hooks.effects import InlineEffectHookState as InlineEffectHookState
+from pulse.hooks.effects import EffectState as EffectState
 
 # Hooks - Init
 from pulse.hooks.init import (
@@ -1236,6 +1244,9 @@ from pulse.hooks.runtime import (
 	not_found as not_found,
 )
 from pulse.hooks.runtime import (
+	pulse_route as pulse_route,
+)
+from pulse.hooks.runtime import (
 	redirect as redirect,
 )
 from pulse.hooks.runtime import (
@@ -1259,7 +1270,7 @@ from pulse.hooks.runtime import (
 
 # Hooks - Setup
 from pulse.hooks.setup import (
-	SetupHookState as SetupHookState,
+	SetupState as SetupState,
 )
 from pulse.hooks.setup import (
 	setup as setup,
@@ -1271,7 +1282,7 @@ from pulse.hooks.stable import (
 	StableEntry as StableEntry,
 )
 from pulse.hooks.stable import (
-	StableRegistry as StableRegistry,
+	StableState as StableState,
 )
 
 # Hooks - Stable
@@ -1322,14 +1333,21 @@ from pulse.middleware import (
 
 # Plugin
 from pulse.plugin import Plugin as Plugin
+
+# Proxy
+from pulse.proxy import ProxyConfig as ProxyConfig
 from pulse.queries.client import QueryClient as QueryClient
 from pulse.queries.client import QueryFilter as QueryFilter
 from pulse.queries.client import queries as queries
 from pulse.queries.common import ActionError as ActionError
 from pulse.queries.common import ActionResult as ActionResult
 from pulse.queries.common import ActionSuccess as ActionSuccess
+from pulse.queries.common import Key as Key
 from pulse.queries.common import QueryKey as QueryKey
+from pulse.queries.common import QueryKeys as QueryKeys
 from pulse.queries.common import QueryStatus as QueryStatus
+from pulse.queries.common import keys as keys
+from pulse.queries.common import normalize_key as normalize_key
 from pulse.queries.infinite_query import infinite_query as infinite_query
 from pulse.queries.mutation import mutation as mutation
 from pulse.queries.protocol import QueryResult as QueryResult
@@ -1438,7 +1456,8 @@ from pulse.serializer import deserialize as deserialize
 from pulse.serializer import serialize as serialize
 
 # State and routing
-from pulse.state import State as State
+from pulse.state.query_param import QueryParam as QueryParam
+from pulse.state.state import State as State
 
 # Transpiler v2
 from pulse.transpiler.function import JsFunction as JsFunction

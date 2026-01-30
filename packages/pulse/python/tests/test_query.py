@@ -56,6 +56,54 @@ async def test_query_store_create_and_get():
 
 
 @pytest.mark.asyncio
+async def test_query_gc_uses_render_timers():
+	app = ps.PulseContext.get().app
+	routes = RouteTree([])
+	session = RenderSession("test-session", routes)
+	query = session.query_store.ensure(("gc", "timers"), gc_time=0.05, retries=0)
+
+	app_handles = len(app._timers._handles)  # pyright: ignore[reportPrivateUsage]
+	assert len(session._timers._handles) == 0  # pyright: ignore[reportPrivateUsage]
+
+	with ps.PulseContext.update(render=session):
+		query.schedule_gc()
+
+	assert len(session._timers._handles) == 1  # pyright: ignore[reportPrivateUsage]
+	assert len(app._timers._handles) == app_handles  # pyright: ignore[reportPrivateUsage]
+
+	query.cancel_gc()
+	session._timers.cancel_all()  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
+async def test_query_store_list_key():
+	"""Test that list keys are normalized to tuples and work correctly."""
+	store = QueryStore()
+
+	# Create with list key
+	entry1 = store.ensure(["test", 1])
+	assert entry1.key == ("test", 1)  # Normalized to tuple
+
+	# Get with tuple key finds it
+	assert store.get(("test", 1)) is entry1
+
+	# Get with list key also finds it
+	assert store.get(["test", 1]) is entry1
+
+	# Ensure with tuple key returns same entry
+	entry2 = store.ensure(("test", 1))
+	assert entry2 is entry1
+
+
+@pytest.mark.asyncio
+async def test_query_store_rejects_unhashable_key():
+	store = QueryStore()
+
+	with pytest.raises(TypeError, match="Query key contains unhashable value"):
+		store.ensure(("test", []))  # pyright: ignore[reportArgumentType]
+
+
+@pytest.mark.asyncio
 async def test_query_entry_lifecycle():
 	key = ("test", 1)
 
@@ -88,6 +136,32 @@ async def test_query_entry_lifecycle():
 	assert entry.is_fetching.read() is False
 	assert entry.data.read() == "result"
 	assert entry.error.read() is None
+
+
+@pytest.mark.asyncio
+async def test_keyed_query_unobserve_after_dispose_no_gc_handle():
+	async def fetcher():
+		return "result"
+
+	query: KeyedQuery[str] = KeyedQuery(
+		("test", "unobserve"),
+		gc_time=0.01,
+		retries=0,
+		retry_delay=0.01,
+	)
+	query_computed = Computed(lambda: query, name="test_query(unobserve)")
+	observer = KeyedQueryResult(
+		query_computed,
+		fetch_fn=fetcher,
+		gc_time=0.01,
+		fetch_on_mount=False,
+	)
+
+	query.dispose()
+	assert query._gc_handle is None  # pyright: ignore[reportPrivateUsage]
+
+	observer.dispose()
+	assert query._gc_handle is None  # pyright: ignore[reportPrivateUsage]
 
 
 @pytest.mark.asyncio
@@ -1423,6 +1497,100 @@ async def test_state_query_on_error_handler_async_only():
 	await asyncio.sleep(0)
 	assert s.calls == 2
 	assert s.async_err_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_unkeyed_query_on_success_handler_reads_are_untracked():
+	"""Test that on_success callbacks in unkeyed queries don't create dependencies."""
+	max_fetches = 3  # Guard against infinite loop
+
+	class S(ps.State):
+		count: int = 0
+		unrelated: int = 0
+		success_calls: int = 0
+
+		@ps.computed
+		def doubled(self) -> int:
+			return self.unrelated * 2
+
+		@ps.query(retries=0)
+		async def value(self) -> int:
+			self.count += 1
+			if self.count > max_fetches:
+				raise RuntimeError("Too many fetches - callback dependency bug")
+			await asyncio.sleep(0)
+			return self.count
+
+		@value.on_success
+		def _on_success(self, data: int):
+			# Read signals in callback - should NOT be tracked as dependencies
+			_ = self.unrelated
+			_ = self.doubled
+			self.success_calls += 1
+
+	s = S()
+	_ = s.value
+	await s.value.wait()
+	await asyncio.sleep(0)  # Wait for on_success
+	assert s.count == 1
+	assert s.success_calls == 1
+
+	# Changing signals read in on_success should NOT trigger refetch
+	s.unrelated = 5
+	# Give time for any (buggy) refetch to trigger
+	await asyncio.sleep(0.01)
+	# Should NOT have refetched
+	assert s.count == 1, "Changing signal read in on_success should not trigger refetch"
+	assert s.success_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_unkeyed_query_on_error_handler_reads_are_untracked():
+	"""Test that on_error callbacks in unkeyed queries don't create dependencies."""
+	max_fetches = 3  # Guard against infinite loop
+
+	class S(ps.State):
+		fetch_count: int = 0
+		unrelated: int = 0
+		error_calls: int = 0
+
+		@ps.computed
+		def doubled(self) -> int:
+			return self.unrelated * 2
+
+		@ps.query(retries=0)
+		async def fail(self) -> int:
+			self.fetch_count += 1
+			if self.fetch_count > max_fetches:
+				raise RuntimeError("Too many fetches - callback dependency bug")
+			await asyncio.sleep(0)
+			raise RuntimeError("boom")
+
+		@fail.on_error
+		def _on_error(self, e: Exception):
+			if "Too many fetches" in str(e):
+				return  # Don't count the guard error
+			# Read signals in callback - should NOT be tracked as dependencies
+			_ = self.unrelated
+			_ = self.doubled
+			self.error_calls += 1
+
+	s = S()
+	_ = s.fail
+	await s.fail.wait()
+	await asyncio.sleep(0)  # Wait for on_error
+	assert s.fetch_count == 1
+	assert s.error_calls == 1
+
+	# Changing signals read in on_error should NOT trigger refetch
+	s.unrelated = 5
+	# Give time for any (buggy) refetch to trigger
+	await asyncio.sleep(0.01)
+	# Should NOT have refetched
+	assert s.fetch_count == 1, (
+		"Changing signal read in on_error should not trigger refetch"
+	)
+	assert s.error_calls == 1
 
 
 @pytest.mark.asyncio
@@ -3209,3 +3377,102 @@ async def test_query_result_protocol_isinstance_unkeyed():
 	s = S()
 	result = s.my_query
 	assert isinstance(result, UnkeyedQueryResult)
+
+
+# --- List Key Tests ---
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_query_with_static_list_key():
+	"""Test that a static list key works and is normalized to tuple."""
+
+	class S(ps.State):
+		@ps.query(key=["users", "current"])
+		async def current_user(self):
+			return {"name": "Alice"}
+
+	s = S()
+	q = s.current_user
+	await q.wait()
+
+	assert q.data == {"name": "Alice"}
+
+	# The query should be accessible via both list and tuple keys
+	store = ps.PulseContext.get().render.query_store  # pyright: ignore[reportOptionalMemberAccess]
+	assert store.get(["users", "current"]) is not None
+	assert store.get(("users", "current")) is not None
+	assert store.get(["users", "current"]) is store.get(("users", "current"))
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_query_with_dynamic_list_key():
+	"""Test that a dynamic list key (from method) works and is normalized to tuple."""
+
+	class S(ps.State):
+		user_id: int = 1
+
+		@ps.query
+		async def user(self):
+			return {"id": self.user_id}
+
+		@user.key
+		def _user_key(self) -> ps.QueryKey:
+			return ["user", self.user_id]  # List key
+
+	s = S()
+	q = s.user
+	await q.wait()
+
+	assert q.data == {"id": 1}
+
+	# The query should be accessible via both list and tuple keys
+	store = ps.PulseContext.get().render.query_store  # pyright: ignore[reportOptionalMemberAccess]
+	assert store.get(["user", 1]) is not None
+	assert store.get(("user", 1)) is not None
+	assert store.get(["user", 1]) is store.get(("user", 1))
+
+	# Change user_id and verify new key works
+	s.user_id = 2
+	await q.wait()
+	assert q.data == {"id": 2}
+	assert store.get(["user", 2]) is not None
+	assert store.get(("user", 2)) is not None
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_query_with_callable_list_key_updates_on_inplace_change():
+	"""Callable list keys should be normalized so in-place changes update the key."""
+
+	class S(ps.State):
+		user_id: int = 1
+		key_parts: list[Any]
+
+		def __init__(self):
+			self.key_parts = ["user", 1]
+
+		def _key(self) -> ps.QueryKey:
+			_ = self.user_id  # ensure reactive dependency
+			return self.key_parts
+
+		@ps.query(retries=0, gc_time=10, key=_key)
+		async def user(self) -> int:
+			return self.user_id
+
+	s = S()
+	q = s.user
+	await q.wait()
+	result = query_result(q)
+	assert isinstance(result, KeyedQueryResult)
+	assert result._query().key == ("user", 1)  # pyright: ignore[reportPrivateUsage]
+
+	# Mutate list in-place and trigger recompute
+	s.key_parts[1] = 2
+	s.user_id = 2
+
+	def key_matches() -> bool:
+		return result._query().key == ("user", 2)  # pyright: ignore[reportPrivateUsage]
+
+	assert await wait_for(key_matches, timeout=0.2)

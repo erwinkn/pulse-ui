@@ -35,7 +35,7 @@ class StableEntry:
 		self.wrapper = wrapper
 
 
-class StableRegistry(HookState):
+class StableState(HookState):
 	"""Internal hook state that stores stable entries by key.
 
 	Maintains a dictionary of StableEntry objects, allowing stable
@@ -50,13 +50,9 @@ class StableRegistry(HookState):
 		self.entries: dict[str, StableEntry] = {}
 
 
-def _stable_factory(*_: object) -> StableRegistry:
-	return StableRegistry()
-
-
-_stable_hook = hooks.create(
+stable_state = hooks.create(
 	"pulse:core.stable",
-	_stable_factory,
+	factory=StableState,
 	metadata=HookMetadata(
 		owner="pulse.core",
 		description="Internal registry for pulse.stable values",
@@ -119,7 +115,7 @@ def stable(key: str, value: Any = MISSING) -> Any:
 	if not key:
 		raise ValueError("stable() requires a non-empty string key")
 
-	registry = _stable_hook()
+	registry = stable_state()
 	entry = registry.entries.get(key)
 
 	if value is not MISSING:
@@ -135,4 +131,4 @@ def stable(key: str, value: Any = MISSING) -> Any:
 	return entry.wrapper
 
 
-__all__ = ["stable", "StableRegistry", "StableEntry"]
+__all__ = ["stable", "StableState", "StableEntry"]

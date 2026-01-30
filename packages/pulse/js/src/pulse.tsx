@@ -179,10 +179,16 @@ export function PulseView({ path, registry }: PulseViewProps) {
 	const routeInfo = useMemo(() => {
 		const { "*": catchall = "", ...pathParams } = params;
 		const queryParams = new URLSearchParams(location.search);
+		const query = location.search.startsWith("?")
+			? location.search.slice(1)
+			: location.search;
+		const hash = location.hash.startsWith("#")
+			? location.hash.slice(1)
+			: location.hash;
 		return {
-			hash: location.hash,
+			hash,
 			pathname: location.pathname,
-			query: location.search,
+			query,
 			queryParams: Object.fromEntries(queryParams.entries()),
 			pathParams,
 			catchall: catchall.length > 0 ? catchall.split("/") : [],
@@ -215,8 +221,9 @@ export function PulseView({ path, registry }: PulseViewProps) {
 				onServerError: setServerError,
 			});
 			return () => {
-				client.detach(path);
+				renderer.clearPendingCallbacks();
 				renderer.dispose();
+				client.detach(path);
 			};
 		}
 		//  routeInfo is NOT included here on purpose

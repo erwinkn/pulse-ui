@@ -1150,6 +1150,15 @@ class Unary(Expr):
 			out.append(" ")
 		else:
 			out.append(self.op)
+		if (
+			self.op in {"+", "-"}
+			and isinstance(self.operand, Unary)
+			and self.operand.op == self.op
+		):
+			out.append("(")
+			self.operand.emit(out)
+			out.append(")")
+			return
 		_emit_paren(self.operand, self.op, "unary", out)
 
 	@override
@@ -1508,7 +1517,7 @@ class If(Stmt):
 
 @dataclass(slots=True)
 class ForOf(Stmt):
-	"""JS for-of loop: for (const x of iter) { ... }
+	"""JS for-of loop: for (x of iter) { ... }
 
 	target can be a single name or array pattern for destructuring: [a, b]
 	"""
@@ -1519,7 +1528,7 @@ class ForOf(Stmt):
 
 	@override
 	def emit(self, out: list[str]) -> None:
-		out.append("for (const ")
+		out.append("for (")
 		out.append(self.target)
 		out.append(" of ")
 		self.iter.emit(out)
@@ -1574,17 +1583,32 @@ class Assign(Stmt):
 	op: None for =, or "+", "-", etc. for augmented assignment
 	"""
 
-	target: str
+	target: str | Identifier | Member | Subscript
 	value: Expr
 	declare: Lit["let", "const"] | None = None
 	op: str | None = None  # For augmented: +=, -=, etc.
 
+	@staticmethod
+	def _validate_target(target: object) -> None:
+		if not isinstance(target, (str, Identifier, Member, Subscript)):
+			raise TypeError(
+				"Assign target must be str, Identifier, Member, or Subscript; "
+				+ f"got {type(target).__name__}: {target!r}"
+			)
+
+	def __post_init__(self) -> None:
+		self._validate_target(self.target)
+
 	@override
 	def emit(self, out: list[str]) -> None:
+		self._validate_target(self.target)
 		if self.declare:
 			out.append(self.declare)
 			out.append(" ")
-		out.append(self.target)
+		if isinstance(self.target, str):
+			out.append(self.target)
+		else:
+			_emit_primary(self.target, out)
 		if self.op:
 			out.append(" ")
 			out.append(self.op)
@@ -1592,6 +1616,21 @@ class Assign(Stmt):
 		else:
 			out.append(" = ")
 		self.value.emit(out)
+		out.append(";")
+
+
+@dataclass(slots=True)
+class LetDecl(Stmt):
+	"""JS let declaration: let a, b;"""
+
+	names: Sequence[str]
+
+	@override
+	def emit(self, out: list[str]) -> None:
+		if not self.names:
+			return
+		out.append("let ")
+		out.append(", ".join(self.names))
 		out.append(";")
 
 

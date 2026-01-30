@@ -18,19 +18,44 @@ import pytest
 
 # Class imports (correct pattern - import the class, not the module)
 from pulse.js import (
+	URL,
+	AbortController,
 	Array,
+	ArrayBuffer,
+	Blob,
+	CustomEvent,
 	Date,
+	DOMParser,
 	Error,
+	File,
+	FileReader,
+	FormData,
+	Headers,
+	IntersectionObserver,
+	Intl,
 	Map,
 	Math,
+	MutationObserver,
 	Number,
 	Object,
+	PerformanceObserver,
 	Promise,
 	RegExp,
+	Request,
+	ResizeObserver,
+	Response,
 	Set,
 	String,
+	TextDecoder,
+	TextEncoder,
+	Uint8Array,
+	URLSearchParams,
 	WeakMap,
 	WeakSet,
+	XMLSerializer,
+	crypto,
+	fetch,
+	obj,
 	undefined,
 )
 from pulse.transpiler import (
@@ -332,7 +357,7 @@ class TestSet:
 		code = emit(fn)
 		assert (
 			code
-			== "function set_ops_1() {\nlet s = new Set([1, 2, 3]);\ns.add(4);\ns.delete(1);\nreturn s.has(2);\n}"
+			== "function set_ops_1() {\nlet s;\ns = new Set([1, 2, 3]);\ns.add(4);\ns.delete(1);\nreturn s.has(2);\n}"
 		)
 
 
@@ -371,7 +396,7 @@ class TestMap:
 		code = emit(fn)
 		assert (
 			code
-			== 'function map_ops_1() {\nlet m = new Map([["a", 1], ["b", 2]]);\nm.set("c", 3);\nreturn m.get("a");\n}'
+			== 'function map_ops_1() {\nlet m;\nm = new Map([["a", 1], ["b", 2]]);\nm.set("c", 3);\nreturn m.get("a");\n}'
 		)
 
 
@@ -409,7 +434,7 @@ class TestDate:
 		code = emit(fn)
 		assert (
 			code
-			== "function date_ops_1() {\nlet d = new Date();\nreturn [d.getTime(), d.getFullYear()];\n}"
+			== "function date_ops_1() {\nlet d;\nd = new Date();\nreturn [d.getTime(), d.getFullYear()];\n}"
 		)
 
 
@@ -453,7 +478,367 @@ class TestPromise:
 		code = emit(fn)
 		assert (
 			code
-			== "function promise_chain_1() {\nlet p = Promise.resolve(1);\nreturn p.then(x => x + 1);\n}"
+			== "function promise_chain_1() {\nlet p;\np = Promise.resolve(1);\nreturn p.then(x => x + 1);\n}"
+		)
+
+
+# =============================================================================
+# URL Module
+# =============================================================================
+
+
+class TestURL:
+	def test_url_search_params(self):
+		@javascript
+		def url_ops():
+			url = URL("https://example.com?foo=1")
+			params = URLSearchParams(url.search)
+			params.append("bar", "2")
+			return url.href, params.toString()
+
+		fn = url_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function url_ops_1() {\nlet params, url;\nurl = new URL("https://example.com?foo=1");\nparams = new URLSearchParams(url.search);\nparams.append("bar", "2");\nreturn [url.href, params.toString()];\n}'
+		)
+
+
+# =============================================================================
+# AbortController Module
+# =============================================================================
+
+
+class TestAbortController:
+	def test_abort_controller(self):
+		@javascript
+		def abort_ops():
+			controller = AbortController()
+			controller.abort()
+			return controller.signal.aborted
+
+		fn = abort_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function abort_ops_1() {\nlet controller;\ncontroller = new AbortController();\ncontroller.abort();\nreturn controller.signal.aborted;\n}"
+		)
+
+
+# =============================================================================
+# Fetch Module
+# =============================================================================
+
+
+class TestFetch:
+	def test_fetch_request(self):
+		@javascript
+		def fetch_ops():
+			headers = Headers()
+			headers.set("Content-Type", "application/json")
+			req = Request(
+				"/api",
+				obj(method="POST", headers=headers, body="{}"),
+			)
+			return fetch(req)
+
+		fn = fetch_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function fetch_ops_1() {\nlet headers, req;\nheaders = new Headers();\nheaders.set("Content-Type", "application/json");\nreq = new Request("/api", {"method": "POST", "headers": headers, "body": "{}"});\nreturn fetch(req);\n}'
+		)
+
+	def test_response_constructor(self):
+		@javascript
+		def response_ops():
+			res = Response("ok", obj(status=200))
+			return res.ok, res.status
+
+		fn = response_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function response_ops_1() {\nlet res;\nres = new Response("ok", {"status": 200});\nreturn [res.ok, res.status];\n}'
+		)
+
+
+# =============================================================================
+# FormData Module
+# =============================================================================
+
+
+class TestFormData:
+	def test_form_data_basic(self):
+		@javascript
+		def form_ops():
+			form = FormData()
+			form.append("name", "Ada")
+			return form.get("name")
+
+		fn = form_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function form_ops_1() {\nlet form;\nform = new FormData();\nform.append("name", "Ada");\nreturn form.get("name");\n}'
+		)
+
+
+# =============================================================================
+# Blob/File/FileReader Modules
+# =============================================================================
+
+
+class TestBlobFile:
+	def test_blob_basic(self):
+		@javascript
+		def blob_ops():
+			blob = Blob(["hi"], obj(type="text/plain"))
+			return blob.type
+
+		fn = blob_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function blob_ops_1() {\nlet blob;\nblob = new Blob(["hi"], {"type": "text/plain"});\nreturn blob.type;\n}'
+		)
+
+	def test_file_basic(self):
+		@javascript
+		def file_ops():
+			file = File(["hi"], "note.txt", obj(type="text/plain"))
+			return file.name
+
+		fn = file_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function file_ops_1() {\nlet file;\nfile = new File(["hi"], "note.txt", {"type": "text/plain"});\nreturn file.name;\n}'
+		)
+
+	def test_file_reader_basic(self):
+		@javascript
+		def reader_ops(blob):
+			reader = FileReader()
+			reader.readAsText(blob)
+			return reader.result
+
+		fn = reader_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function reader_ops_1(blob) {\nlet reader;\nreader = new FileReader();\nreader.readAsText(blob);\nreturn reader.result;\n}"
+		)
+
+
+# =============================================================================
+# TextEncoder/TextDecoder Modules
+# =============================================================================
+
+
+class TestTextEncoding:
+	def test_text_encoding(self):
+		@javascript
+		def text_ops(text: str):
+			encoder = TextEncoder()
+			data = encoder.encode(text)
+			decoder = TextDecoder("utf-8")
+			return decoder.decode(data)
+
+		fn = text_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function text_ops_1(text) {\nlet data, decoder, encoder;\nencoder = new TextEncoder();\ndata = encoder.encode(text);\ndecoder = new TextDecoder("utf-8");\nreturn decoder.decode(data);\n}'
+		)
+
+
+# =============================================================================
+# ArrayBuffer/TypedArray Modules
+# =============================================================================
+
+
+class TestArrayBuffer:
+	def test_array_buffer_basic(self):
+		@javascript
+		def buffer_ops():
+			buf = ArrayBuffer(8)
+			view = Uint8Array(buf)
+			return buf.byteLength, view.byteLength
+
+		fn = buffer_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function buffer_ops_1() {\nlet buf, view;\nbuf = new ArrayBuffer(8);\nview = new Uint8Array(buf);\nreturn [buf.byteLength, view.byteLength];\n}"
+		)
+
+
+# =============================================================================
+# Observer Modules
+# =============================================================================
+
+
+class TestIntersectionObserver:
+	def test_intersection_observer(self):
+		@javascript
+		def intersection_ops(target):
+			observer = IntersectionObserver(
+				lambda entries, obs: None,
+				obj(threshold=0.5),
+			)
+			observer.observe(target)
+			observer.disconnect()
+			return observer.takeRecords()
+
+		fn = intersection_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function intersection_ops_1(target) {\nlet observer;\nobserver = new IntersectionObserver((entries, obs) => null, {"threshold": 0.5});\nobserver.observe(target);\nobserver.disconnect();\nreturn observer.takeRecords();\n}'
+		)
+
+
+class TestResizeObserver:
+	def test_resize_observer(self):
+		@javascript
+		def resize_ops(target):
+			observer = ResizeObserver(lambda entries, obs: None)
+			observer.observe(target, obj(box="border-box"))
+			observer.unobserve(target)
+			return observer.disconnect()
+
+		fn = resize_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function resize_ops_1(target) {\nlet observer;\nobserver = new ResizeObserver((entries, obs) => null);\nobserver.observe(target, {"box": "border-box"});\nobserver.unobserve(target);\nreturn observer.disconnect();\n}'
+		)
+
+
+class TestPerformanceObserver:
+	def test_performance_observer(self):
+		@javascript
+		def perf_ops():
+			observer = PerformanceObserver(lambda list_, obs: None)
+			observer.observe(obj(entryTypes=["mark", "measure"]))
+			return observer.takeRecords()
+
+		fn = perf_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function perf_ops_1() {\nlet observer;\nobserver = new PerformanceObserver((list_, obs) => null);\nobserver.observe({"entryTypes": ["mark", "measure"]});\nreturn observer.takeRecords();\n}'
+		)
+
+
+# =============================================================================
+# DOMParser/XMLSerializer Module
+# =============================================================================
+
+
+class TestDomParser:
+	def test_dom_parser(self):
+		@javascript
+		def dom_ops(source: str):
+			parser = DOMParser()
+			doc = parser.parseFromString(source, "text/html")
+			serializer = XMLSerializer()
+			return serializer.serializeToString(doc)
+
+		fn = dom_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function dom_ops_1(source) {\nlet doc, parser, serializer;\nparser = new DOMParser();\ndoc = parser.parseFromString(source, "text/html");\nserializer = new XMLSerializer();\nreturn serializer.serializeToString(doc);\n}'
+		)
+
+
+# =============================================================================
+# CustomEvent Module
+# =============================================================================
+
+
+class TestCustomEvent:
+	def test_custom_event(self):
+		@javascript
+		def custom_event_ops():
+			event = CustomEvent("ping", obj(detail=obj(ok=True)))
+			return event.detail
+
+		fn = custom_event_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function custom_event_ops_1() {\nlet event;\nevent = new CustomEvent("ping", {"detail": {"ok": true}});\nreturn event.detail;\n}'
+		)
+
+
+# =============================================================================
+# Intl/Crypto Modules
+# =============================================================================
+
+
+class TestIntlCrypto:
+	def test_intl_number_format(self):
+		@javascript
+		def intl_ops(value: float):
+			fmt = Intl.NumberFormat("en-US")
+			return fmt.format(value)
+
+		fn = intl_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function intl_ops_1(value) {\nlet fmt;\nfmt = new Intl.NumberFormat("en-US");\nreturn fmt.format(value);\n}'
+		)
+
+	def test_crypto_random(self):
+		@javascript
+		def crypto_ops():
+			buf = Uint8Array(16)
+			crypto.getRandomValues(buf)
+			return crypto.randomUUID()
+
+		fn = crypto_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function crypto_ops_1() {\nlet buf;\nbuf = new Uint8Array(16);\ncrypto.getRandomValues(buf);\nreturn crypto.randomUUID();\n}"
+		)
+
+
+# =============================================================================
+# MutationObserver Module
+# =============================================================================
+
+
+class TestMutationObserver:
+	def test_mutation_observer_constructor(self):
+		@javascript
+		def make_observer():
+			return MutationObserver(lambda records, observer: None)
+
+		fn = make_observer.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function make_observer_1() {\nreturn new MutationObserver((records, observer) => null);\n}"
+		)
+
+	def test_mutation_observer_methods(self):
+		@javascript
+		def observer_ops(target):
+			observer = MutationObserver(lambda records, obs: None)
+			observer.observe(target, obj(childList=True, subtree=True))
+			observer.disconnect()
+			return observer.takeRecords()
+
+		fn = observer_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function observer_ops_1(target) {\nlet observer;\nobserver = new MutationObserver((records, obs) => null);\nobserver.observe(target, {"childList": true, "subtree": true});\nobserver.disconnect();\nreturn observer.takeRecords();\n}'
 		)
 
 
@@ -515,7 +900,7 @@ class TestRegExp:
 		code = emit(fn)
 		assert (
 			code
-			== "function regexp_ops_1(pattern, text) {\nlet re = new RegExp(pattern);\nreturn [re.test(text), re.exec(text)];\n}"
+			== "function regexp_ops_1(pattern, text) {\nlet re;\nre = new RegExp(pattern);\nreturn [re.test(text), re.exec(text)];\n}"
 		)
 
 
@@ -589,7 +974,7 @@ class TestWeakMap:
 		code = emit(fn)
 		assert (
 			code
-			== "function weakmap_ops_1(key, value) {\nlet wm = new WeakMap();\nwm.set(key, value);\nreturn [wm.get(key), wm.has(key)];\n}"
+			== "function weakmap_ops_1(key, value) {\nlet wm;\nwm = new WeakMap();\nwm.set(key, value);\nreturn [wm.get(key), wm.has(key)];\n}"
 		)
 
 
@@ -619,7 +1004,7 @@ class TestWeakSet:
 		code = emit(fn)
 		assert (
 			code
-			== "function weakset_ops_1(value) {\nlet ws = new WeakSet();\nws.add(value);\nreturn [ws.has(value), ws.delete(value)];\n}"
+			== "function weakset_ops_1(value) {\nlet ws;\nws = new WeakSet();\nws.add(value);\nreturn [ws.has(value), ws.delete(value)];\n}"
 		)
 
 

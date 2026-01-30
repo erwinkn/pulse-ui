@@ -18,6 +18,7 @@ Configuration for the Pulse client.
 ```ts
 interface PulseConfig {
   serverAddress: string;
+  apiPrefix: string;
   connectionStatus: ConnectionStatusConfig;
 }
 ```
@@ -113,8 +114,8 @@ interface RouteInfo {
 | Field | Description |
 |-------|-------------|
 | `pathname` | URL path (e.g., `/users/123`) |
-| `hash` | URL hash including `#` (e.g., `#section`) |
-| `query` | Query string including `?` (e.g., `?page=1`) |
+| `hash` | URL hash fragment (e.g., `section`) |
+| `query` | Query string (e.g., `page=1`) |
 | `queryParams` | Parsed query parameters |
 | `pathParams` | Route parameters from path |
 | `catchall` | Segments from catch-all route (`/*`) |

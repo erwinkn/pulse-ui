@@ -124,7 +124,7 @@ export interface NewExpr {
 // VDOM tree
 // -----------------------------------------------------------------------------
 
-export type CallbackPlaceholder = "$cb";
+export type CallbackPlaceholder = "$cb" | `$cb:${number}`;
 
 export interface PulseRefPayload {
 	channelId: string;

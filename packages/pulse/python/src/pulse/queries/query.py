@@ -26,16 +26,19 @@ from pulse.queries.common import (
 	ActionError,
 	ActionResult,
 	ActionSuccess,
+	Key,
 	OnErrorFn,
 	OnSuccessFn,
 	QueryKey,
 	QueryStatus,
 	bind_state,
+	normalize_key,
 )
 from pulse.queries.effect import AsyncQueryEffect
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.scheduling import TimerHandleLike, create_task, is_pytest, later
-from pulse.state import InitializableProperty, State
+from pulse.state.property import InitializableProperty
+from pulse.state.state import State
 
 if TYPE_CHECKING:
 	from pulse.queries.protocol import QueryResult
@@ -239,7 +242,8 @@ async def run_fetch_with_retries(
 				result = await fetch_fn()
 			state.set_success(result)
 			if on_success:
-				await maybe_await(call_flexible(on_success, result))
+				with Untrack():
+					await maybe_await(call_flexible(on_success, result))
 			return
 		except asyncio.CancelledError:
 			raise
@@ -252,7 +256,8 @@ async def run_fetch_with_retries(
 				state.retry_reason.write(e)
 				state.apply_error(e)
 				if on_error:
-					await maybe_await(call_flexible(on_error, e))
+					with Untrack():
+						await maybe_await(call_flexible(on_error, e))
 				return
 
 
@@ -263,7 +268,7 @@ class KeyedQuery(Generic[T], Disposable):
 	Multiple observers can share the same query.
 	"""
 
-	key: QueryKey
+	key: Key
 	state: QueryState[T]
 	observers: "list[KeyedQueryResult[T]]"
 	_task: asyncio.Task[None] | None
@@ -283,7 +288,7 @@ class KeyedQuery(Generic[T], Disposable):
 		gc_time: float = 300.0,
 		on_dispose: Callable[[Any], None] | None = None,
 	):
-		self.key = key
+		self.key = normalize_key(key)
 		self.state = QueryState(
 			name=str(key),
 			retries=retries,
@@ -559,7 +564,8 @@ class KeyedQuery(Generic[T], Disposable):
 				)
 
 		if len(self.observers) == 0:
-			self.schedule_gc()
+			if not self.__disposed__:
+				self.schedule_gc()
 
 	def schedule_gc(self):
 		self.cancel_gc()
@@ -1055,7 +1061,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 	_initial_data_updated_at: float | dt.datetime | None
 	_enabled: bool
 	_initial_data: T | Callable[[TState], T] | Missing | None
-	_key: QueryKey | Callable[[TState], QueryKey] | None
+	_key: Key | Callable[[TState], Key] | None
 	# Not using OnSuccessFn and OnErrorFn since unions of callables are not well
 	# supported in the type system. We just need to be careful to use
 	# call_flexible to invoke these functions.
@@ -1081,7 +1087,17 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 	):
 		self.name = name
 		self._fetch_fn = fetch_fn
-		self._key = key
+		if key is None:
+			self._key = None
+		elif callable(key):
+			key_fn = key
+
+			def normalized_key(state: TState) -> Key:
+				return normalize_key(key_fn(state))
+
+			self._key = normalized_key
+		else:
+			self._key = normalize_key(key)
 		self._on_success_fn = None
 		self._on_error_fn = None
 		self._keep_previous_data = keep_previous_data
@@ -1102,7 +1118,11 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 			raise RuntimeError(
 				f"Cannot use @{self.name}.key decorator when a key is already provided to @query(key=...)."
 			)
-		self._key = fn
+
+		def normalized_key(state: TState) -> Key:
+			return normalize_key(fn(state))
+
+		self._key = normalized_key
 		return fn
 
 	# Decorator to attach a function providing initial data
@@ -1270,6 +1290,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 def query(
 	fn: Callable[[TState], Awaitable[T]],
 	*,
+	key: QueryKey | Callable[[TState], QueryKey] | None = None,
 	stale_time: float = 0.0,
 	gc_time: float | None = 300.0,
 	refetch_interval: float | None = None,
@@ -1279,7 +1300,6 @@ def query(
 	initial_data_updated_at: float | dt.datetime | None = None,
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
-	key: QueryKey | None = None,
 ) -> QueryProperty[T, TState]: ...
 
 
@@ -1287,6 +1307,7 @@ def query(
 def query(
 	fn: None = None,
 	*,
+	key: QueryKey | Callable[[TState], QueryKey] | None = None,
 	stale_time: float = 0.0,
 	gc_time: float | None = 300.0,
 	refetch_interval: float | None = None,
@@ -1296,13 +1317,13 @@ def query(
 	initial_data_updated_at: float | dt.datetime | None = None,
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
-	key: QueryKey | None = None,
 ) -> Callable[[Callable[[TState], Awaitable[T]]], QueryProperty[T, TState]]: ...
 
 
 def query(
 	fn: Callable[[TState], Awaitable[T]] | None = None,
 	*,
+	key: QueryKey | Callable[[TState], QueryKey] | None = None,
 	stale_time: float = 0.0,
 	gc_time: float | None = 300.0,
 	refetch_interval: float | None = None,
@@ -1312,7 +1333,6 @@ def query(
 	initial_data_updated_at: float | dt.datetime | None = None,
 	enabled: bool = True,
 	fetch_on_mount: bool = True,
-	key: QueryKey | None = None,
 ) -> (
 	QueryProperty[T, TState]
 	| Callable[[Callable[[TState], Awaitable[T]]], QueryProperty[T, TState]]

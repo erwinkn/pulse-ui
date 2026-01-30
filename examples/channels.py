@@ -12,11 +12,7 @@ from pulse.js import Math, obj
 from pulse.js.date import Date
 from pulse.js.json import stringify
 from pulse.js.pulse import usePulseChannel
-
-# React hooks for transpiled components
-useState = ps.Import("useState", "react")
-useEffect = ps.Import("useEffect", "react")
-useCallback = ps.Import("useCallback", "react")
+from pulse.js.react import useEffect, useState
 
 
 @ps.javascript(jsx=True)

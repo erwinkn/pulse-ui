@@ -7,13 +7,17 @@ Tests for control flow transpilation: if/else, loops, assignments, etc.
 from collections.abc import Iterable
 from typing import Any
 
+import pulse.js.array as js_array
 import pytest
+from pulse.js import Array
 from pulse.transpiler import (
+	TranspileError,
 	clear_function_cache,
 	clear_import_registry,
 	emit,
 	javascript,
 )
+from pulse.transpiler.nodes import Expr, Identifier, Literal, Subscript
 
 
 @pytest.fixture(autouse=True)
@@ -61,7 +65,7 @@ class TestMultiStatement:
 		code = emit(fn)
 		assert (
 			code
-			== "function swap_1(x, y) {\nlet temp = x;\nx = y;\ny = temp;\nreturn [x, y];\n}"
+			== "function swap_1(x, y) {\nlet temp;\ntemp = x;\nx = y;\ny = temp;\nreturn [x, y];\n}"
 		)
 
 	def test_while_loop(self):
@@ -90,7 +94,21 @@ class TestMultiStatement:
 		code = emit(fn)
 		assert (
 			code
-			== "function sum_items_1(items) {\nlet total = 0;\nfor (const x of items) {\ntotal = total + x;\n}\nreturn total;\n}"
+			== "function sum_items_1(items) {\nlet total, x;\ntotal = 0;\nfor (x of items) {\ntotal = total + x;\n}\nreturn total;\n}"
+		)
+
+	def test_for_target_reassign(self):
+		@javascript
+		def last_item(items: Iterable[int]) -> int:
+			for x in items:
+				x = x + 1
+			return x
+
+		fn = last_item.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function last_item_1(items) {\nlet x;\nfor (x of items) {\nx = x + 1;\n}\nreturn x;\n}"
 		)
 
 	def test_for_of_with_tuple_unpacking(self):
@@ -105,7 +123,7 @@ class TestMultiStatement:
 		code = emit(fn)
 		assert (
 			code
-			== "function sum_pairs_1(pairs) {\nlet total = 0;\nfor (const [a, b] of pairs) {\ntotal = total + a + b;\n}\nreturn total;\n}"
+			== "function sum_pairs_1(pairs) {\nlet a, b, total;\ntotal = 0;\nfor ([a, b] of pairs) {\ntotal = total + a + b;\n}\nreturn total;\n}"
 		)
 
 	def test_break_statement(self):
@@ -122,7 +140,7 @@ class TestMultiStatement:
 		code = emit(fn)
 		assert (
 			code
-			== "function find_first_1(items, target) {\nlet result = null;\nfor (const x of items) {\nif (x === target) {\nresult = x;\nbreak;\n}\n}\nreturn result;\n}"
+			== "function find_first_1(items, target) {\nlet result, x;\nresult = null;\nfor (x of items) {\nif (x === target) {\nresult = x;\nbreak;\n}\n}\nreturn result;\n}"
 		)
 
 	def test_continue_statement(self):
@@ -139,7 +157,7 @@ class TestMultiStatement:
 		code = emit(fn)
 		assert (
 			code
-			== "function count_positive_1(items) {\nlet count = 0;\nfor (const x of items) {\nif (x <= 0) {\ncontinue;\n}\ncount = count + 1;\n}\nreturn count;\n}"
+			== "function count_positive_1(items) {\nlet count, x;\ncount = 0;\nfor (x of items) {\nif (x <= 0) {\ncontinue;\n}\ncount = count + 1;\n}\nreturn count;\n}"
 		)
 
 	def test_augmented_assignment(self):
@@ -164,7 +182,54 @@ class TestMultiStatement:
 		code = emit(fn)
 		assert (
 			code
-			== "function outer_1(x) {\nconst inner = function(y) {\nreturn x + y;\n};\nreturn inner(10);\n}"
+			== "function outer_1(x) {\nlet inner;\ninner = function(y) {\nreturn x + y;\n};\nreturn inner(10);\n}"
+		)
+
+	def test_nested_function_recursive_reference(self):
+		@javascript
+		def outer(n: int) -> int:
+			def inner(x: int) -> int:
+				if x <= 0:
+					return 0
+				return inner(x - 1)
+
+			return inner(n)
+
+		fn = outer.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function outer_1(n) {\nlet inner;\ninner = function(x) {\nif (x <= 0) {\nreturn 0;\n}\nreturn inner(x - 1);\n};\nreturn inner(n);\n}"
+		)
+
+	def test_nested_function_rebinds_own_name(self):
+		@javascript
+		def outer() -> int:
+			def inner() -> int:
+				inner = 1
+				return inner
+
+			return inner()
+
+		fn = outer.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function outer_1() {\nlet inner;\ninner = function() {\nlet inner;\ninner = 1;\nreturn inner;\n};\nreturn inner();\n}"
+		)
+
+	def test_use_before_assign_is_local(self):
+		@javascript
+		def read_before_assign() -> int:
+			y = x  # noqa: F821
+			x = 1  # noqa: F841
+			return y
+
+		fn = read_before_assign.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function read_before_assign_1() {\nlet x, y;\ny = x;\nx = 1;\nreturn y;\n}"
 		)
 
 	def test_tuple_unpacking_assignment(self):
@@ -177,7 +242,7 @@ class TestMultiStatement:
 		code = emit(fn)
 		assert (
 			code
-			== "function unpack_1(t) {\nconst $tmp0 = t;\nlet a = $tmp0[0];\nlet b = $tmp0[1];\nreturn a + b;\n}"
+			== "function unpack_1(t) {\nlet a, b;\nconst $tmp0 = t;\na = $tmp0[0];\nb = $tmp0[1];\nreturn a + b;\n}"
 		)
 
 
@@ -221,7 +286,7 @@ class TestExceptionHandling:
 		code = emit(fn)
 		assert (
 			code
-			== "function safe_divide_1(a, b) {\ntry {\nreturn Math.floor(a / b);\n} catch (e) {\nconsole.log(e);\nreturn 0;\n}\n}"
+			== "function safe_divide_1(a, b) {\nlet e;\ntry {\nreturn Math.floor(a / b);\n} catch (e) {\nconsole.log(e);\nreturn 0;\n}\n}"
 		)
 
 	def test_try_finally(self):
@@ -283,3 +348,244 @@ class TestExceptionHandling:
 		fn = rethrow.transpile()
 		code = emit(fn)
 		assert code == "function rethrow_1(e) {\nthrow e;\n}"
+
+
+# =============================================================================
+# Subscript and Attribute Assignment
+# =============================================================================
+
+
+class TestSubscriptAssignment:
+	"""Test subscript and attribute assignment transpilation."""
+
+	class SubscriptAlias(Expr):
+		__slots__ = ("target",)
+
+		def __init__(self, target: Identifier) -> None:
+			self.target = target
+
+		def emit(self, out: list[str]) -> None:
+			self.target.emit(out)
+
+		def render(self):
+			return self.target.render()
+
+		def transpile_subscript(self, key, ctx):  # type: ignore[override]
+			return self.target
+
+	class AttributeAlias(Expr):
+		__slots__ = ("target",)
+
+		def __init__(self, target: Expr) -> None:
+			self.target = target
+
+		def emit(self, out: list[str]) -> None:
+			self.target.emit(out)
+
+		def render(self):
+			return self.target.render()
+
+		def transpile_getattr(self, attr, ctx):  # type: ignore[override]
+			return self.target
+
+	def test_array_index_assignment(self):
+		@javascript
+		def f(arr: list[int], val: int) -> list[int]:
+			arr[0] = val
+			return arr
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(arr, val) {\narr[0] = val;\nreturn arr;\n}"
+		)
+
+	def test_negative_index_assignment(self):
+		@javascript
+		def f(arr: list[int], val: int) -> list[int]:
+			arr[-1] = val
+			return arr
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(arr, val) {\narr[-1] = val;\nreturn arr;\n}"
+		)
+
+	def test_negative_index_assignment_expression(self):
+		@javascript
+		def f(arr: list[int], idx: int, val: int) -> list[int]:
+			arr[-idx] = val
+			return arr
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(arr, idx, val) {\narr[-idx] = val;\nreturn arr;\n}"
+		)
+
+	def test_negative_index_assignment_with_attribute_base(self):
+		@javascript
+		def f(obj: Any, val: int) -> Any:
+			obj.arr[-1] = val
+			return obj
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(obj, val) {\nobj.arr[-1] = val;\nreturn obj;\n}"
+		)
+
+	def test_dict_key_assignment(self):
+		@javascript
+		def f(d: dict[str, int]) -> dict[str, int]:
+			d["key"] = 42
+			return d
+
+		assert emit(f.transpile()) == 'function f_1(d) {\nd["key"] = 42;\nreturn d;\n}'
+
+	def test_dynamic_key_assignment(self):
+		@javascript
+		def f(d: dict[str, int], k: str, v: int) -> dict[str, int]:
+			d[k] = v
+			return d
+
+		assert emit(f.transpile()) == "function f_1(d, k, v) {\nd[k] = v;\nreturn d;\n}"
+
+	def test_augmented_subscript_assignment(self):
+		@javascript
+		def f(arr: list[int], idx: int) -> list[int]:
+			arr[idx] += 1
+			return arr
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(arr, idx) {\narr[idx] += 1;\nreturn arr;\n}"
+		)
+
+	def test_augmented_negative_index_expression(self):
+		@javascript
+		def f(arr: list[int], idx: int) -> list[int]:
+			arr[-idx] += 10
+			return arr
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(arr, idx) {\narr[-idx] += 10;\nreturn arr;\n}"
+		)
+
+	def test_augmented_negative_index(self):
+		@javascript
+		def f(arr: list[int]) -> list[int]:
+			arr[-1] += 10
+			return arr
+
+		assert (
+			emit(f.transpile()) == "function f_1(arr) {\narr[-1] += 10;\nreturn arr;\n}"
+		)
+
+	def test_augmented_negative_index_with_attribute_base(self):
+		@javascript
+		def f(obj: Any) -> Any:
+			obj.arr[-1] += 1
+			return obj
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(obj) {\nobj.arr[-1] += 1;\nreturn obj;\n}"
+		)
+
+	def test_attribute_assignment(self):
+		@javascript
+		def f(ref: Any, val: int) -> Any:
+			ref.current = val
+			return ref
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(ref, val) {\nref.current = val;\nreturn ref;\n}"
+		)
+
+	def test_attribute_assignment_keyword_escape(self):
+		@javascript
+		def f(val: Any) -> Any:
+			Array.from_ = val
+			return Array
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(val) {\nArray.from = val;\nreturn Array;\n}"
+		)
+
+	def test_attribute_assignment_identifier_target(self):
+		alias = self.AttributeAlias(Identifier("ref"))
+
+		@javascript
+		def f(ref: Any, val: int) -> Any:
+			alias.current = val
+			return ref
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(ref, val) {\nref = val;\nreturn ref;\n}"
+		)
+
+	def test_attribute_assignment_subscript_target(self):
+		alias = self.AttributeAlias(Subscript(Identifier("arr"), Literal(0)))
+
+		@javascript
+		def f(arr: list[int], val: int) -> list[int]:
+			alias.current = val
+			return arr
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(arr, val) {\narr[0] = val;\nreturn arr;\n}"
+		)
+
+	def test_augmented_attribute_assignment(self):
+		@javascript
+		def f(obj: Any) -> Any:
+			obj.count += 1
+			return obj
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(obj) {\nobj.count += 1;\nreturn obj;\n}"
+		)
+
+	def test_tuple_subscript_assignment_error(self):
+		@javascript
+		def f(arr: list[list[int]]) -> list[list[int]]:
+			arr[0, 1] = 3
+			return arr
+
+		with pytest.raises(TranspileError, match="Multiple indices"):
+			f.transpile()
+
+	def test_slice_assignment_error(self):
+		@javascript
+		def f(arr: list[int]) -> list[int]:
+			arr[1:3] = [1, 2]
+			return arr
+
+		with pytest.raises(TranspileError, match="Slice assignment"):
+			f.transpile()
+
+	def test_subscript_assignment_disallowed_target(self):
+		@javascript
+		def f(val: int) -> int:
+			js_array[0] = val
+			return val
+
+		with pytest.raises(TypeError, match="cannot be subscripted"):
+			f.transpile()
+
+	def test_subscript_assignment_identifier_target(self):
+		alias = self.SubscriptAlias(Identifier("arr"))
+
+		@javascript
+		def f(arr: list[int], val: int) -> list[int]:
+			alias[0] = val
+			return arr
+
+		assert (
+			emit(f.transpile())
+			== "function f_1(arr, val) {\narr = val;\nreturn arr;\n}"
+		)

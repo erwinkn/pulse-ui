@@ -67,7 +67,7 @@ from pulse.middleware import (
 	Redirect,
 )
 from pulse.plugin import Plugin
-from pulse.proxy import ReactProxy
+from pulse.proxy import ProxyConfig, ReactProxy
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
@@ -211,6 +211,7 @@ class App:
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
 	_proxy: ReactProxy | None
+	proxy_config: ProxyConfig | None
 	session_timeout: float
 	connection_status: ConnectionStatusConfig
 	render_loop_limit: int
@@ -232,6 +233,7 @@ class App:
 		not_found: str = "/not-found",
 		# Deployment and integration options
 		mode: PulseMode = "single-server",
+		proxy: ProxyConfig | None = None,
 		api_prefix: str = "/_pulse",
 		cors: CORSOptions | None = None,
 		fastapi: dict[str, Any] | None = None,
@@ -245,6 +247,7 @@ class App:
 		# Resolve mode from environment and expose on the app instance
 		self.env = envvars.pulse_env
 		self.mode = mode
+		self.proxy_config = proxy
 		self.status = AppStatus.created
 		# Persist the server address for use by sessions (API calls, etc.) in ci/prod.
 		self.server_address = server_address if self.env in ("ci", "prod") else None
@@ -506,15 +509,22 @@ class App:
 			)
 			render_id = request.headers.get("x-pulse-render-id")
 			render = self._get_render_for_session(render_id, session)
-			with PulseContext.update(session=session, render=render):
-				res: Response = await call_next(request)
-			session.handle_response(res)
-
-			self._sessions_in_request[session.sid] -= 1
-			if self._sessions_in_request[session.sid] == 0:
-				del self._sessions_in_request[session.sid]
-
-			return res
+			try:
+				with PulseContext.update(session=session, render=render):
+					res: Response = await call_next(request)
+				session.handle_response(res)
+				return res
+			except RuntimeError as exc:
+				# Client disconnected before response was sent. This happens when
+				# ASGI handlers (like the proxy) return early on disconnect without
+				# sending a response, which is valid ASGI but breaks BaseHTTPMiddleware.
+				if "No response returned" in str(exc):
+					return Response(status_code=499)
+				raise
+			finally:
+				self._sessions_in_request[session.sid] -= 1
+				if self._sessions_in_request[session.sid] == 0:
+					del self._sessions_in_request[session.sid]
 
 		# Apply prefix to all routes
 		prefix = self.api_prefix
@@ -654,10 +664,8 @@ class App:
 		for plugin in self.plugins:
 			plugin.on_setup(self)
 
-		# In single-server mode, add catch-all route to proxy unmatched requests to React server
-		# This route must be registered last so FastAPI tries all specific routes first
-		# FastAPI will match specific routes before this catch-all, but we add an explicit check
-		# as a safety measure to ensure API routes are never proxied
+		# In single-server mode, add catch-all route to proxy unmatched requests to React server.
+		# This route must be registered last so FastAPI tries all specific routes first.
 		if self.mode == "single-server":
 			react_server_address = envvars.react_server_address
 			if not react_server_address:
@@ -666,11 +674,12 @@ class App:
 					+ "Use 'pulse run' CLI command or set the environment variable."
 				)
 
-			self._proxy = ReactProxy(
+			proxy_handler = ReactProxy(
 				react_server_address=react_server_address,
 				server_address=server_address,
+				config=self.proxy_config,
 			)
-			proxy_handler = self._proxy
+			self._proxy = proxy_handler
 
 			# In dev mode, proxy WebSocket connections to React Router (e.g. Vite HMR)
 			# Socket.IO handles /socket.io/ at ASGI level before reaching FastAPI
@@ -680,14 +689,8 @@ class App:
 				async def websocket_proxy(websocket: WebSocket, path: str):  # pyright: ignore[reportUnusedFunction]
 					await proxy_handler.proxy_websocket(websocket)
 
-			@self.fastapi.api_route(
-				"/{path:path}",
-				methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
-				include_in_schema=False,
-			)
-			async def proxy_catch_all(request: Request, path: str):  # pyright: ignore[reportUnusedFunction]
-				# Proxy all unmatched HTTP requests to React Router
-				return await proxy_handler(request)
+			# Register ASGI-level catch-all last.
+			self.fastapi.mount("/", proxy_handler, name="react-proxy")
 
 		@self.sio.event
 		async def connect(  # pyright: ignore[reportUnusedFunction]

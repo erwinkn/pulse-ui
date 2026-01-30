@@ -498,6 +498,40 @@ class TestJsxFunction:
 			== 'function Toggle_1({visible = true}) {\nreturn <div>{visible ? "content" : "hidden"}</div>;\n}'
 		)
 
+	def test_jsx_function_with_default_lambda(self):
+		"""Default lambda in JSX props is emitted."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+
+		div = TagExpr("div")
+
+		@javascript(jsx=True)
+		def WithCallback(cb: Any = lambda x: x) -> Any:
+			return div(cb(1))
+
+		fn = WithCallback.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function WithCallback_1({cb = x => x}) {\nreturn <div>{cb(1)}</div>;\n}"
+		)
+
+	def test_jsx_function_with_default_comprehension(self):
+		"""Default comprehension in JSX props is emitted."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+
+		div = TagExpr("div")
+
+		@javascript(jsx=True)
+		def WithItems(items: list[int] = tuple([x * 2 for x in [1, 2, 3]])) -> Any:
+			return div(items[0])
+
+		fn = WithItems.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function WithItems_1({items = Array.from([1, 2, 3].map(x => x * 2))}) {\nreturn <div>{items[0]}</div>;\n}"
+		)
+
 	def test_jsx_function_with_children_and_defaults(self):
 		"""JsxFunction with *children and default kwargs works as React component."""
 		from pulse.transpiler.modules.pulse.tags import TagExpr
@@ -514,6 +548,123 @@ class TestJsxFunction:
 			code
 			== 'function Container_1({children, className = "default"}) {\nreturn <div className={className} />;\n}'
 		)
+
+	def test_jsx_default_uses_dep_when_shadowed_by_local(self):
+		"""Default value should reference deps even if shadowed by local assignment."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+
+		div = TagExpr("div")
+		Button = Import("Button", "@ui/core")
+
+		@javascript(jsx=True)
+		def Toolbar(icon: Any = Button) -> Any:
+			Button = 1  # noqa: F841
+			return div(icon)
+
+		fn = Toolbar.transpile()
+		code = emit(fn)
+		expected = (
+			f"function {Toolbar.js_name}({{icon = {Button.js_name}}}) {{\n"
+			"let Button;\n"
+			"Button = 1;\n"
+			"return <div>{icon}</div>;\n"
+			"}"
+		)
+		assert code == expected
+
+	def test_jsx_default_same_name_as_param_prefers_dep(self):
+		"""Default value should reference deps, not the parameter binding."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+
+		div = TagExpr("div")
+		Button = Import("Button", "@ui/core")
+
+		@javascript(jsx=True)
+		def Panel(Button: Any = Button) -> Any:
+			return div(Button)
+
+		fn = Panel.transpile()
+		code = emit(fn)
+		expected = (
+			f"function {Panel.js_name}({{Button = {Button.js_name}}}) {{\n"
+			"return <div>{Button}</div>;\n"
+			"}"
+		)
+		assert code == expected
+
+	def test_jsx_default_other_param_name_prefers_outer(self):
+		"""Default value should not bind to earlier params (Python semantics)."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+
+		div = TagExpr("div")
+		a = 10
+
+		@javascript(jsx=True)
+		def Banner(a: int, b: int = a) -> Any:
+			return div(a + b)
+
+		fn = Banner.transpile()
+		code = emit(fn)
+		expected = (
+			f"function {Banner.js_name}({{a, b = 10}}) {{\n"
+			"return <div>{a + b}</div>;\n"
+			"}"
+		)
+		assert code == expected
+
+	def test_jsx_default_shadowed_by_for_loop(self):
+		"""Default value should reference deps even if for-loop creates local."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+
+		div = TagExpr("div")
+		Button = Import("Button", "@ui/core")
+
+		@javascript(jsx=True)
+		def Toolbar(icon: Any = Button, items: list[int] = [1]) -> Any:  # noqa: B006
+			for Button in items:
+				Button = Button
+			return div(icon)
+
+		fn = Toolbar.transpile()
+		code = emit(fn)
+		expected = (
+			f"function {Toolbar.js_name}({{icon = {Button.js_name}, items = [1]}}) {{\n"
+			"let Button;\n"
+			"for (Button of items) {\n"
+			"Button = Button;\n"
+			"}\n"
+			"return <div>{icon}</div>;\n"
+			"}"
+		)
+		assert code == expected
+
+	def test_jsx_default_shadowed_by_except_binding(self):
+		"""Default value should reference deps even if except binding creates local."""
+		from pulse.transpiler.modules.pulse.tags import TagExpr
+
+		div = TagExpr("div")
+		Button = Import("Button", "@ui/core")
+
+		@javascript(jsx=True)
+		def Toolbar(icon: Any = Button) -> Any:
+			try:
+				raise Exception("x")
+			except Exception as Button:  # noqa: F841
+				return div(icon)
+
+		fn = Toolbar.transpile()
+		code = emit(fn)
+		expected = (
+			f"function {Toolbar.js_name}({{icon = {Button.js_name}}}) {{\n"
+			"let Button;\n"
+			"try {\n"
+			'throw new Error("x");\n'
+			"} catch (Button) {\n"
+			"return <div>{icon}</div>;\n"
+			"}\n"
+			"}"
+		)
+		assert code == expected
 
 
 # =============================================================================

@@ -38,7 +38,7 @@ def CounterRow(title: str, counter: GlobalCounter):
 @ps.component
 def GlobalStateDemo():
 	server = ps.server_address()
-	room = ps.route().pathParams.get("room")
+	room = ps.route()["pathParams"].get("room")
 
 	# Per-session singleton
 	a = session_counter(label="Session")

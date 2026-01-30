@@ -9,7 +9,7 @@ import {
 } from "react";
 import type { PulseSocketIOClient } from "./client";
 import type { PulsePrerenderView } from "./pulse";
-import { isPulseRefSpec } from "./ref";
+import { isPulseRefSpec, RefRegistry } from "./ref";
 import type {
 	ComponentRegistry,
 	JsonValue,
@@ -36,6 +36,7 @@ export class VDOMRenderer {
 	#client: PulseSocketIOClient;
 	#path: string;
 	#registry: ComponentRegistry;
+	#refRegistry: RefRegistry;
 
 	// Cache callback functions keyed by "path.prop"
 	#callbackCache: Map<string, (...args: any[]) => void>;
@@ -49,6 +50,9 @@ export class VDOMRenderer {
 		this.#registry = registry;
 		this.#callbackCache = new Map();
 		this.#metaMap = new WeakMap();
+		this.#refRegistry = new RefRegistry((channelId) => {
+			return this.#client._ensureChannelEntry(channelId).bridge;
+		});
 	}
 
 	getObject(key: string): unknown {
@@ -222,7 +226,7 @@ export class VDOMRenderer {
 		if (isCallbackPlaceholder(value)) return this.#getCallback(path, prop);
 		if (isPulseRefSpec(value)) {
 			const payload = value.__pulse_ref__;
-			return this.#client.getRefCallback(payload.channelId, payload.refId);
+			return this.#refRegistry.getCallback(payload.channelId, payload.refId);
 		}
 		if (isExprNode(value)) return this.#evalExpr(value, {});
 		if (typeof value === "object" && value !== null && "tag" in value) {
@@ -319,6 +323,10 @@ export class VDOMRenderer {
 
 	init(view: PulsePrerenderView & { vdom: VDOM }): ReactNode {
 		return this.renderNode(view.vdom);
+	}
+
+	dispose(): void {
+		this.#refRegistry.dispose();
 	}
 
 	/**

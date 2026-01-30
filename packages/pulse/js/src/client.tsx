@@ -1,7 +1,6 @@
 import type { NavigateFunction } from "react-router";
 import { io, type Socket } from "socket.io-client";
 import { ChannelBridge, PulseChannelResetError } from "./channel";
-import { RefRegistry } from "./ref";
 import type { RouteInfo } from "./helpers";
 import type {
 	ClientApiResultMessage,
@@ -57,8 +56,6 @@ export class PulseSocketIOClient {
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
 	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
-	#refRegistry: RefRegistry | null = null;
-	#refChannelId: string | null = null;
 	#url: string;
 	#frameworkNavigate: NavigateFunction;
 	#directives: Directives;
@@ -269,11 +266,6 @@ export class PulseSocketIOClient {
 			bridge.dispose(new PulseChannelResetError("Client disconnected"));
 		}
 		this.#channels.clear();
-		if (this.#refRegistry) {
-			this.#refRegistry.dispose();
-			this.#refRegistry = null;
-			this.#refChannelId = null;
-		}
 		this.#currentStatus = "ok";
 		this.#hasConnectedOnce = false;
 	}
@@ -486,42 +478,12 @@ export class PulseSocketIOClient {
 		if (closed && entry.refCount === 0) {
 			this.#channels.delete(message.channel);
 		}
-		if (message.event === "__close__" || closed) {
-			this.#disposeRefRegistryForChannel(message.channel);
-		}
 	}
 
 	#handleTransportDisconnect(): void {
 		for (const entry of this.#channels.values()) {
 			entry.bridge.handleDisconnect(new PulseChannelResetError("Connection lost"));
 		}
-	}
-
-	#ensureRefRegistry(channelId: string): RefRegistry {
-		if (this.#refRegistry) {
-			if (this.#refChannelId !== channelId) {
-				throw new Error("[Pulse] Ref channel changed unexpectedly");
-			}
-			return this.#refRegistry;
-		}
-		const entry = this.#ensureChannelEntry(channelId);
-		const registry = new RefRegistry(entry.bridge);
-		this.#refRegistry = registry;
-		this.#refChannelId = channelId;
-		return registry;
-	}
-
-	public getRefCallback(channelId: string, refId: string): (node: any) => void {
-		return this.#ensureRefRegistry(channelId).getCallback(refId);
-	}
-
-	#disposeRefRegistryForChannel(channelId: string): void {
-		if (!this.#refRegistry || this.#refChannelId !== channelId) {
-			return;
-		}
-		this.#refRegistry.dispose();
-		this.#refRegistry = null;
-		this.#refChannelId = null;
 	}
 
 	_ensureChannelEntry(id: string): {

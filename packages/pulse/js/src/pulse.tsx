@@ -216,6 +216,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 			});
 			return () => {
 				client.detach(path);
+				renderer.dispose();
 			};
 		}
 		//  routeInfo is NOT included here on purpose

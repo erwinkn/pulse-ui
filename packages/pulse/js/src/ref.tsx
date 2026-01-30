@@ -14,6 +14,8 @@ type RefEntry = {
 	callback: (node: any) => void;
 };
 
+type ChannelBridgeProvider = (channelId: string) => ChannelBridge;
+
 const ATTR_ALIASES: Record<string, string> = {
 	className: "class",
 	htmlFor: "for",
@@ -178,23 +180,18 @@ export function isPulseRefSpec(v: unknown): v is PulseRefSpec {
 }
 
 export class RefRegistry {
-	#bridge: ChannelBridge;
+	#getBridge: ChannelBridgeProvider;
+	#bridge: ChannelBridge | null = null;
+	#channelId: string | null = null;
 	#entries: Map<string, RefEntry> = new Map();
 	#cleanup: Array<() => void> = [];
 
-	constructor(bridge: ChannelBridge) {
-		this.#bridge = bridge;
-		this.#cleanup.push(
-			this.#bridge.on("ref:call", (payload) => {
-				this.#handleCall(payload);
-			}),
-			this.#bridge.on("ref:request", (payload) => {
-				return this.#handleRequest(payload);
-			}),
-		);
+	constructor(getBridge: ChannelBridgeProvider) {
+		this.#getBridge = getBridge;
 	}
 
-	getCallback(refId: string): (node: any) => void {
+	getCallback(channelId: string, refId: string): (node: any) => void {
+		this.#ensureChannel(channelId);
 		let entry = this.#entries.get(refId);
 		if (!entry) {
 			const callback = (node: any) => {
@@ -207,8 +204,35 @@ export class RefRegistry {
 	}
 
 	dispose(): void {
+		this.#teardown();
+	}
+
+	#ensureChannel(channelId: string): void {
+		if (this.#bridge) {
+			if (this.#channelId !== channelId) {
+				throw new Error("[Pulse] Ref channel changed unexpectedly");
+			}
+			return;
+		}
+		const bridge = this.#getBridge(channelId);
+		this.#bridge = bridge;
+		this.#channelId = channelId;
+		this.#cleanup.push(
+			bridge.on("ref:call", (payload) => {
+				this.#handleCall(payload);
+			}),
+			bridge.on("ref:request", (payload) => {
+				return this.#handleRequest(payload);
+			}),
+		);
+	}
+
+	#teardown(): void {
 		for (const fn of this.#cleanup) fn();
 		this.#cleanup = [];
+		this.#entries.clear();
+		this.#bridge = null;
+		this.#channelId = null;
 	}
 
 	#setNode(refId: string, node: any): void {
@@ -216,10 +240,12 @@ export class RefRegistry {
 		if (!entry) return;
 		if (entry.node === node) return;
 		entry.node = node;
+		const bridge = this.#bridge;
+		if (!bridge) return;
 		if (node) {
-			this.#bridge.emit("ref:mounted", { refId });
+			bridge.emit("ref:mounted", { refId });
 		} else {
-			this.#bridge.emit("ref:unmounted", { refId });
+			bridge.emit("ref:unmounted", { refId });
 		}
 	}
 

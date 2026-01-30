@@ -42,8 +42,8 @@ class FakeBridge {
 describe("RefRegistry", () => {
 	it("emits mount and unmount", () => {
 		const bridge = new FakeBridge();
-		const registry = new RefRegistry(bridge as any);
-		const cb = registry.getCallback("ref-1");
+		const registry = new RefRegistry(() => bridge as any);
+		const cb = registry.getCallback("chan-1", "ref-1");
 
 		cb({});
 		cb(null);
@@ -56,8 +56,8 @@ describe("RefRegistry", () => {
 
 	it("handles request ops", () => {
 		const bridge = new FakeBridge();
-		const registry = new RefRegistry(bridge as any);
-		const cb = registry.getCallback("ref-1");
+		const registry = new RefRegistry(() => bridge as any);
+		const cb = registry.getCallback("chan-1", "ref-1");
 
 		const element = {
 			getAttribute: (name: string) => (name === "data-test" ? "ok" : null),
@@ -75,8 +75,8 @@ describe("RefRegistry", () => {
 
 	it("handles call ops", () => {
 		const bridge = new FakeBridge();
-		const registry = new RefRegistry(bridge as any);
-		const cb = registry.getCallback("ref-1");
+		const registry = new RefRegistry(() => bridge as any);
+		const cb = registry.getCallback("chan-1", "ref-1");
 
 		const focus = vi.fn();
 		cb({ focus });
@@ -88,5 +88,16 @@ describe("RefRegistry", () => {
 		});
 
 		expect(focus).toHaveBeenCalled();
+	});
+
+	it("locks to a single channel until disposed", () => {
+		const bridge = new FakeBridge();
+		const registry = new RefRegistry(() => bridge as any);
+		registry.getCallback("chan-1", "ref-1");
+		expect(() => registry.getCallback("chan-2", "ref-2")).toThrow(
+			"[Pulse] Ref channel changed unexpectedly",
+		);
+		registry.dispose();
+		expect(() => registry.getCallback("chan-2", "ref-2")).not.toThrow();
 	});
 });

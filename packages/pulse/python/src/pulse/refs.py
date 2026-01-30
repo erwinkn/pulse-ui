@@ -12,7 +12,7 @@ from pulse.context import PulseContext
 from pulse.helpers import Disposable
 from pulse.hooks.core import HookMetadata, HookState, hooks
 from pulse.hooks.state import collect_component_identity
-from pulse.scheduling import create_future
+from pulse.scheduling import create_future, create_task
 
 T = TypeVar("T")
 Number = int | float
@@ -704,12 +704,7 @@ class RefHandle(Disposable, Generic[T]):
 			if not fut.done():
 				fut.set_result(None)
 		self._mount_waiters.clear()
-		for handler in list(self._mount_handlers):
-			try:
-				handler()
-			except Exception:
-				# Fail early: propagate on next render via error log if desired
-				raise
+		self._run_handlers(self._mount_handlers, label="mount")
 
 	def _on_unmounted(self, payload: Any) -> None:
 		if isinstance(payload, dict):
@@ -717,11 +712,36 @@ class RefHandle(Disposable, Generic[T]):
 			if ref_id is not None and str(ref_id) != self.id:
 				return
 		self._mounted = False
-		for handler in list(self._unmount_handlers):
+		self._run_handlers(self._unmount_handlers, label="unmount")
+
+	def _run_handlers(self, handlers: list[Callable[[], Any]], *, label: str) -> None:
+		for handler in list(handlers):
 			try:
-				handler()
+				result = handler()
 			except Exception:
+				# Fail early: propagate on next render via error log if desired
 				raise
+			if inspect.isawaitable(result):
+				task = create_task(result, name=f"ref:{self.id}:{label}")
+
+				def _on_done(done_task: asyncio.Future[Any]) -> None:
+					if done_task.cancelled():
+						return
+					try:
+						done_task.result()
+					except asyncio.CancelledError:
+						return
+					except Exception as exc:
+						loop = done_task.get_loop()
+						loop.call_exception_handler(
+							{
+								"message": f"Unhandled exception in ref {label} handler",
+								"exception": exc,
+								"context": {"ref_id": self.id, "handler": label},
+							}
+						)
+
+				task.add_done_callback(_on_done)
 
 	@override
 	def dispose(self) -> None:

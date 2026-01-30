@@ -74,6 +74,15 @@ When a component is removed from the UI. Cleanup code runs—subscriptions are c
 **Component Lifecycle**
 The stages a component goes through: mount → update (re-render) → unmount. Different code can run at each stage.
 
+**Ref (Reference)**
+A server-side handle for imperative DOM operations. Unlike React refs (which are client-side), Pulse refs send commands over WebSocket to control elements in the browser—focusing inputs, scrolling, measuring dimensions.
+
+**Fire-and-Forget**
+An operation that sends a command without waiting for a response. In Pulse refs, methods like `focus()`, `click()`, and `scroll_to()` are fire-and-forget—they return immediately after sending the command.
+
+**Request-Response**
+An operation that sends a request and awaits a response. In Pulse refs, methods like `measure()`, `get_prop()`, and `set_style()` are request-response—they must be awaited because they need data back from the browser.
+
 ## Hooks
 
 **Hook**

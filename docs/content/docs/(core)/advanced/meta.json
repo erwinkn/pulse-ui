@@ -2,6 +2,7 @@
   "title": "Advanced",
   "pages": [
     "channels",
+    "refs",
     "js-interop",
     "custom-hooks",
     "middleware"

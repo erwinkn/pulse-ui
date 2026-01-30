@@ -1,0 +1,240 @@
+---
+title: "Refs"
+---
+
+Most of the time, you declare what your UI should look like and let Pulse handle the DOM. But sometimes you need to reach into the browser and do something imperatively: focus an input, scroll to an element, measure a component's size. That's what refs are for.
+
+If you've used React, you might be familiar with refs. Pulse refs work differently. In React, refs are client-side—your JavaScript code holds a direct reference to a DOM node. In Pulse, refs are server-side handles that send commands over WebSocket. The ref lives in Python, but it controls an element in the browser.
+
+## When to use refs
+
+Refs solve a specific set of problems—DOM operations that can't be expressed declaratively:
+
+| Use refs for | Use state for |
+|--------------|---------------|
+| Focusing inputs | Input values |
+| Scrolling to elements | What's visible |
+| Measuring element dimensions | Layout decisions |
+| Triggering animations | Animation state |
+| Reading properties the server doesn't know | Data your component tracks |
+
+Here's the mental model: **state controls what appears, refs control what happens**. If you want a button to show "Submit", that's state. If you want to scroll to that button when an error occurs, that's a ref.
+
+## The server-client bridge
+
+When you create a ref, you're setting up a communication channel between your Python code and a specific DOM element:
+
+```
+Python (server)                    Browser (client)
+    |                                   |
+    |   ps.ref() creates handle         |
+    |---------------------------------->|
+    |                                   | Element mounts
+    |   "ref:mounted" event             |
+    |<----------------------------------|
+    |                                   |
+    |   ref.focus() sends command       |
+    |---------------------------------->|
+    |                                   | Element receives focus
+```
+
+This is why some ref operations are async (they need a response from the browser) while others are fire-and-forget (they just send a command).
+
+## Fire-and-forget vs request-response
+
+Ref methods fall into two categories:
+
+**Fire-and-forget** methods send a command and return immediately. You don't wait for confirmation—you trust that the browser will handle it.
+
+```python
+input_ref.focus()         # Returns immediately
+button_ref.click()        # Doesn't wait for click to complete
+element_ref.scroll_into_view(behavior="smooth")
+```
+
+These are synchronous. Call them from any handler.
+
+**Request-response** methods send a request and wait for the browser to reply. You need information back from the client.
+
+```python
+rect = await element_ref.measure()           # Need the dimensions
+value = await input_ref.get_prop("value")    # Need the current value
+await element_ref.set_style({"color": "red"}) # Wait for confirmation
+```
+
+These are async. You must `await` them.
+
+Why the distinction? Fire-and-forget is faster—you don't pay the round-trip cost. Use it when you don't need confirmation. Use request-response when you need data back or want to ensure the operation completed.
+
+## The mount lifecycle
+
+A ref isn't immediately usable when you create it. The element needs to mount in the browser first:
+
+```python
+@ps.component
+def Example():
+    input_ref = ps.ref()
+
+    # This would fail! The element hasn't mounted yet.
+    # input_ref.focus()  # RefNotMounted error
+
+    return ps.input(ref=input_ref)
+```
+
+You have several options for handling this:
+
+**Option 1: Use on_mount callback**
+
+```python
+input_ref = ps.ref(on_mount=lambda: input_ref.focus())
+```
+
+The callback runs when the element mounts. This is the simplest approach for fire-and-forget operations.
+
+**Option 2: Wait for mount explicitly**
+
+```python
+async def handle_click():
+    await input_ref.wait_mounted(timeout=2.0)
+    input_ref.focus()
+```
+
+Use this when you need to ensure the element exists before operating on it, especially in event handlers.
+
+**Option 3: Check the mounted property**
+
+```python
+if input_ref.mounted:
+    input_ref.focus()
+```
+
+A quick check when you're not sure if the element is available.
+
+## Common patterns
+
+### Auto-focus on mount
+
+The most common use case. Focus an input when a form appears:
+
+```python
+@ps.component
+def LoginForm():
+    email_ref = ps.ref(on_mount=lambda: email_ref.focus())
+
+    return ps.form(
+        ps.input(ref=email_ref, type="email", placeholder="Email"),
+        ps.input(type="password", placeholder="Password"),
+        ps.button("Log in"),
+    )
+```
+
+### Scroll to element
+
+Bring an element into view—useful for navigating long forms or jumping to errors:
+
+```python
+@ps.component
+def ScrollDemo():
+    with ps.init():
+        state = FormState()
+
+    target_ref = ps.ref()
+
+    async def scroll_to_target():
+        await target_ref.wait_mounted()
+        target_ref.scroll_into_view(behavior="smooth", block="center")
+
+    return ps.div(
+        ps.button("Scroll to target", onClick=scroll_to_target),
+        ps.div(className="h-screen"),  # Spacer
+        ps.div("Target element", ref=target_ref),
+    )
+```
+
+### Measure before positioning
+
+When you need to position something relative to another element:
+
+```python
+async def show_tooltip(target_ref, tooltip_ref):
+    rect = await target_ref.measure()
+    await tooltip_ref.set_style({
+        "position": "absolute",
+        "top": f"{rect['bottom'] + 8}px",
+        "left": f"{rect['left']}px",
+    })
+```
+
+### Read input value imperatively
+
+Sometimes you want the exact current value without tracking it in state:
+
+```python
+async def get_current_input():
+    value = await input_ref.get_prop("value")
+    print(f"Current value: {value}")
+```
+
+This is rarely needed—usually you'd use controlled inputs with state. But it's useful for one-off reads.
+
+## Error handling
+
+Ref operations can fail in two ways:
+
+**RefNotMounted**: You tried to use a ref that isn't mounted yet.
+
+```python
+from pulse import RefNotMounted
+
+try:
+    input_ref.focus()
+except RefNotMounted:
+    # Element doesn't exist in the browser yet
+    pass
+```
+
+**RefTimeout**: You waited for mount but the element never appeared.
+
+```python
+from pulse import RefTimeout
+
+try:
+    await input_ref.wait_mounted(timeout=2.0)
+except RefTimeout:
+    # Element didn't mount within 2 seconds
+    pass
+```
+
+A robust pattern for optional focusing:
+
+```python
+async def try_focus(ref):
+    try:
+        await ref.wait_mounted(timeout=1.0)
+        ref.focus()
+    except RefTimeout:
+        pass  # Element never mounted, that's okay
+```
+
+## Using refs in loops
+
+When creating refs inside loops, you must provide a `key` parameter:
+
+```python
+@ps.component
+def ItemList():
+    with ps.init():
+        items = ["a", "b", "c"]
+
+    for item in items:
+        item_ref = ps.ref(key=item)  # Key required!
+        # ... use item_ref
+```
+
+Without the key, Pulse can't tell which ref is which across renders. This mirrors how `ps.state()` and `@ps.effect` work in loops.
+
+## See also
+
+- [Reference: Refs](/docs/reference/pulse/refs) - Complete API documentation
+- [Reference: Channels](/docs/reference/pulse/channels) - The underlying communication mechanism
+- [Hooks](/docs/advanced/custom-hooks) - Creating custom initialization patterns

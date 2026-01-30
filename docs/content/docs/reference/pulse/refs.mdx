@@ -1,0 +1,429 @@
+---
+title: "Refs"
+description: "Imperative DOM operations via server-side ref handles"
+---
+
+Server-side handles for imperative DOM operations. Commands are sent to the client over WebSocket.
+
+## Functions
+
+### ref
+
+```python
+def ref(
+    *,
+    key: str | None = None,
+    on_mount: Callable[[], Any] | None = None,
+    on_unmount: Callable[[], Any] | None = None,
+) -> RefHandle
+```
+
+Create or retrieve a stable ref handle for a component.
+
+**Parameters:**
+- `key` - Optional key to disambiguate multiple refs at the same callsite (required in loops).
+- `on_mount` - Optional handler called when the ref mounts.
+- `on_unmount` - Optional handler called when the ref unmounts.
+
+**Returns:** `RefHandle` instance.
+
+**Raises:**
+- `TypeError` if `key` is not a string.
+- `ValueError` if `key` is an empty string.
+- `RuntimeError` if called outside an active render session.
+
+```python
+import pulse as ps
+
+@ps.component
+def AutoFocusInput():
+    input_ref = ps.ref(on_mount=lambda: input_ref.focus())
+    return ps.input(ref=input_ref, placeholder="Auto-focused")
+```
+
+## Classes
+
+### RefHandle
+
+Server-side handle for a client DOM ref.
+
+#### Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `id` | `str` | Unique ref identifier |
+| `channel_id` | `str` | Associated channel ID |
+| `mounted` | `bool` | Whether the ref is currently mounted |
+
+#### Lifecycle Methods
+
+##### wait_mounted
+
+```python
+async def wait_mounted(self, timeout: float | None = None) -> None
+```
+
+Wait for the ref to mount.
+
+**Parameters:**
+- `timeout` - Maximum time to wait in seconds. `None` waits indefinitely.
+
+**Raises:** `RefTimeout` if timeout expires before mount.
+
+```python
+await input_ref.wait_mounted(timeout=2.0)
+input_ref.focus()
+```
+
+##### on_mount
+
+```python
+def on_mount(self, handler: Callable[[], Any]) -> Callable[[], None]
+```
+
+Register a handler called when the ref mounts.
+
+**Parameters:**
+- `handler` - Callback function. Can be sync or async.
+
+**Returns:** Callable that removes the handler when invoked.
+
+##### on_unmount
+
+```python
+def on_unmount(self, handler: Callable[[], Any]) -> Callable[[], None]
+```
+
+Register a handler called when the ref unmounts.
+
+**Parameters:**
+- `handler` - Callback function. Can be sync or async.
+
+**Returns:** Callable that removes the handler when invoked.
+
+#### Fire-and-Forget Methods
+
+These methods send commands without waiting for a response. They raise `RefNotMounted` if called before the ref is mounted.
+
+##### focus
+
+```python
+def focus(self, *, prevent_scroll: bool | None = None) -> None
+```
+
+Focus the element.
+
+**Parameters:**
+- `prevent_scroll` - If `True`, prevents scrolling the element into view.
+
+##### blur
+
+```python
+def blur(self) -> None
+```
+
+Remove focus from the element.
+
+##### click
+
+```python
+def click(self) -> None
+```
+
+Programmatically click the element.
+
+##### submit
+
+```python
+def submit(self) -> None
+```
+
+Submit the form element.
+
+##### reset
+
+```python
+def reset(self) -> None
+```
+
+Reset the form element.
+
+##### scroll_into_view
+
+```python
+def scroll_into_view(
+    self,
+    *,
+    behavior: str | None = None,
+    block: str | None = None,
+    inline: str | None = None,
+) -> None
+```
+
+Scroll the element into view.
+
+**Parameters:**
+- `behavior` - `"auto"` or `"smooth"`.
+- `block` - Vertical alignment: `"start"`, `"center"`, `"end"`, `"nearest"`.
+- `inline` - Horizontal alignment: `"start"`, `"center"`, `"end"`, `"nearest"`.
+
+##### scroll_to
+
+```python
+def scroll_to(
+    self,
+    *,
+    top: float | int | None = None,
+    left: float | int | None = None,
+    behavior: str | None = None,
+) -> None
+```
+
+Scroll to a position within the element.
+
+**Parameters:**
+- `top` - Vertical scroll position in pixels.
+- `left` - Horizontal scroll position in pixels.
+- `behavior` - `"auto"` or `"smooth"`.
+
+##### scroll_by
+
+```python
+def scroll_by(
+    self,
+    *,
+    top: float | int | None = None,
+    left: float | int | None = None,
+    behavior: str | None = None,
+) -> None
+```
+
+Scroll by a relative amount within the element.
+
+**Parameters:**
+- `top` - Vertical scroll delta in pixels.
+- `left` - Horizontal scroll delta in pixels.
+- `behavior` - `"auto"` or `"smooth"`.
+
+##### select
+
+```python
+def select(self) -> None
+```
+
+Select all text in the input or textarea.
+
+##### set_selection_range
+
+```python
+def set_selection_range(
+    self, start: int, end: int, *, direction: str | None = None
+) -> None
+```
+
+Set the selection range in an input or textarea.
+
+**Parameters:**
+- `start` - Selection start index.
+- `end` - Selection end index.
+- `direction` - `"forward"`, `"backward"`, or `"none"`.
+
+#### Request-Response Methods
+
+These async methods send a request and await the response. They raise `RefNotMounted` if called before mount.
+
+##### measure
+
+```python
+async def measure(self, *, timeout: float | None = None) -> dict[str, Any] | None
+```
+
+Get the element's bounding client rect.
+
+**Parameters:**
+- `timeout` - Request timeout in seconds.
+
+**Returns:** Dictionary with `x`, `y`, `width`, `height`, `top`, `right`, `bottom`, `left`.
+
+```python
+rect = await element_ref.measure()
+print(f"Size: {rect['width']}x{rect['height']}")
+```
+
+##### get_value
+
+```python
+async def get_value(self, *, timeout: float | None = None) -> Any
+```
+
+Get the element's value (for inputs) or text content.
+
+##### set_value
+
+```python
+async def set_value(self, value: Any, *, timeout: float | None = None) -> Any
+```
+
+Set the element's value.
+
+**Returns:** The new value after setting.
+
+##### get_text
+
+```python
+async def get_text(self, *, timeout: float | None = None) -> str | None
+```
+
+Get the element's text content.
+
+##### set_text
+
+```python
+async def set_text(self, text: str, *, timeout: float | None = None) -> str | None
+```
+
+Set the element's text content.
+
+**Returns:** The new text content after setting.
+
+##### get_prop
+
+```python
+async def get_prop(self, name: str, *, timeout: float | None = None) -> Any
+```
+
+Get a DOM property value.
+
+**Parameters:**
+- `name` - Property name. Must be one of the allowed properties.
+
+**Allowed properties:** `value`, `checked`, `disabled`, `readOnly`, `selectedIndex`, `selectionStart`, `selectionEnd`, `selectionDirection`, `scrollTop`, `scrollLeft`, `scrollHeight`, `scrollWidth`, `clientWidth`, `clientHeight`, `offsetWidth`, `offsetHeight`, `innerText`, `textContent`, `className`, `id`, `name`, `type`, `tabIndex`
+
+```python
+is_checked = await checkbox_ref.get_prop("checked")
+scroll_pos = await container_ref.get_prop("scrollTop")
+```
+
+##### set_prop
+
+```python
+async def set_prop(self, name: str, value: Any, *, timeout: float | None = None) -> Any
+```
+
+Set a DOM property value.
+
+**Parameters:**
+- `name` - Property name. Must be one of the settable properties.
+- `value` - New value.
+
+**Returns:** The new property value after setting.
+
+**Settable properties:** `value`, `checked`, `disabled`, `readOnly`, `selectedIndex`, `selectionStart`, `selectionEnd`, `selectionDirection`, `scrollTop`, `scrollLeft`, `className`, `id`, `name`, `type`, `tabIndex`
+
+```python
+await input_ref.set_prop("value", "New text")
+await checkbox_ref.set_prop("checked", True)
+```
+
+##### get_attr
+
+```python
+async def get_attr(self, name: str, *, timeout: float | None = None) -> str | None
+```
+
+Get an HTML attribute value.
+
+**Parameters:**
+- `name` - Attribute name. Cannot start with "on" (event handlers).
+
+```python
+href = await link_ref.get_attr("href")
+data = await div_ref.get_attr("data-id")
+```
+
+##### set_attr
+
+```python
+async def set_attr(
+    self, name: str, value: Any, *, timeout: float | None = None
+) -> str | None
+```
+
+Set an HTML attribute value.
+
+**Parameters:**
+- `name` - Attribute name. Cannot start with "on".
+- `value` - New value. `None` removes the attribute.
+
+**Returns:** The new attribute value after setting.
+
+##### remove_attr
+
+```python
+async def remove_attr(self, name: str, *, timeout: float | None = None) -> None
+```
+
+Remove an HTML attribute.
+
+##### set_style
+
+```python
+async def set_style(
+    self, styles: dict[str, Any], *, timeout: float | None = None
+) -> None
+```
+
+Set inline styles on the element.
+
+**Parameters:**
+- `styles` - Dictionary of style property names to values. Values can be strings, numbers, or `None` (to remove).
+
+```python
+await element_ref.set_style({
+    "backgroundColor": "red",
+    "font-size": "16px",
+    "opacity": 0.5,
+    "display": None,  # Removes the style
+})
+```
+
+## Exceptions
+
+### RefNotMounted
+
+```python
+class RefNotMounted(RuntimeError)
+```
+
+Raised when a ref operation is attempted before the ref is mounted.
+
+```python
+from pulse import RefNotMounted
+
+try:
+    input_ref.focus()
+except RefNotMounted:
+    print("Ref not mounted yet")
+```
+
+### RefTimeout
+
+```python
+class RefTimeout(asyncio.TimeoutError)
+```
+
+Raised when `wait_mounted()` times out.
+
+```python
+from pulse import RefTimeout
+
+try:
+    await input_ref.wait_mounted(timeout=2.0)
+except RefTimeout:
+    print("Timed out waiting for mount")
+```
+
+## See also
+
+- [Refs (explanation)](/docs/advanced/refs) - When to use refs and how they work
+- [Channels](/docs/reference/pulse/channels) - Low-level communication channels

@@ -43,6 +43,7 @@ app = ps.App([ps.Route("/", App)])
 | One-time setup | `ps.setup(fn, *args)` | Hooks |
 | Inline state | `ps.state(lambda: State(), key=...)` | Hooks |
 | Effects | `@ps.effect` decorator | Hooks |
+| DOM refs | `ps.ref()` | Refs |
 | Route info | `ps.route()` | Navigation |
 | Navigate | `ps.navigate(path)`, `ps.Link` | Navigation |
 | Forms | `ps.Form(on_submit=handler)` | Forms |
@@ -144,6 +145,25 @@ def TodoApp():
 - `on_dispose()` method for cleanup when component unmounts
 
 See `references/state.md` for computed properties, effects on State, and global state patterns.
+
+### Refs
+
+Server-side handles for imperative DOM operations. Commands sent over WebSocket.
+
+```python
+@ps.component
+def AutoFocus():
+    input_ref = ps.ref(on_mount=lambda: input_ref.focus())
+    return ps.input(ref=input_ref, placeholder="Auto-focused")
+```
+
+**Fire-and-forget:** `focus()`, `blur()`, `click()`, `submit()`, `reset()`, `scroll_to()`, `scroll_into_view()`, `select()`
+
+**Request-response (async):** `measure()`, `get_value()`, `set_value()`, `get_prop()`, `set_prop()`, `get_attr()`, `set_attr()`, `get_text()`, `set_text()`, `set_style()`
+
+**Lifecycle:** `wait_mounted()`, `on_mount`, `on_unmount`, `mounted` property
+
+See `references/refs.md` for full API.
 
 ### Hooks
 
@@ -673,6 +693,7 @@ For advanced topics, see `references/` folder:
 **Core:**
 - `state.md` — Computed properties, global state, State effects
 - `hooks.md` — Inline effects, setup patterns, lifecycle
+- `refs.md` — DOM refs, imperative operations, lifecycle
 - `reactive.md` — Signal, Computed, Effect, ReactiveDict/List/Set
 - `routing.md` — Layouts, nested routes, path parameters
 - `forms.md` — ManualForm, file uploads, validation

@@ -68,6 +68,7 @@ from pulse.dom.events import (
 	TextAreaDOMEvents,
 )
 from pulse.helpers import CSSProperties
+from pulse.refs import RefHandle
 from pulse.transpiler.nodes import Expr
 
 Booleanish = Literal[True, False, "true", "false"]
@@ -82,6 +83,7 @@ class BaseHTMLProps(TypedDict, total=False):
 	defaultValue: str | int | list[str]
 	suppressContentEditableWarning: bool
 	suppressHydrationWarning: bool
+	ref: RefHandle[Any]
 
 	# Standard HTML Attributes
 	accessKey: str

@@ -1409,6 +1409,18 @@ from pulse.reactive_extensions import (
 from pulse.reactive_extensions import (
 	unwrap as unwrap,
 )
+from pulse.refs import (
+	RefHandle as RefHandle,
+)
+from pulse.refs import (
+	RefNotMounted as RefNotMounted,
+)
+from pulse.refs import (
+	RefTimeout as RefTimeout,
+)
+from pulse.refs import (
+	ref as ref,
+)
 
 # JavaScript execution
 from pulse.render_session import JsExecError as JsExecError

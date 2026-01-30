@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { PulseSocketIOClient } from "./client";
 import type { PulsePrerenderView } from "./pulse";
+import { isPulseRefSpec, RefRegistry } from "./ref";
 import { extractEvent } from "./serialize/events";
 import type {
 	ComponentRegistry,
@@ -56,6 +57,7 @@ export class VDOMRenderer {
 	#client: PulseSocketIOClient;
 	#path: string;
 	#registry: ComponentRegistry;
+	#refRegistry: RefRegistry;
 
 	// Track callback entries for teardown.
 	#callbackEntries: Set<CallbackEntry>;
@@ -69,6 +71,9 @@ export class VDOMRenderer {
 		this.#registry = registry;
 		this.#callbackEntries = new Set();
 		this.#metaMap = new WeakMap();
+		this.#refRegistry = new RefRegistry((channelId) => {
+			return this.#client._ensureChannelEntry(channelId).bridge;
+		});
 	}
 
 	getObject(key: string): unknown {
@@ -350,6 +355,10 @@ export class VDOMRenderer {
 	#transformEvalProp(path: string, meta: ElementMeta, prop: string, value: VDOMPropValue) {
 		const cbDelay = parseCallbackPlaceholder(value);
 		if (cbDelay !== undefined) return this.#getCallback(meta, prop, cbDelay);
+		if (isPulseRefSpec(value)) {
+			const payload = value.__pulse_ref__;
+			return this.#refRegistry.getCallback(payload.channelId, payload.refId);
+		}
 		if (isExprNode(value)) return this.#evalExpr(value, {});
 		if (typeof value === "object" && value !== null && "tag" in value) {
 			// Render-prop subtree; traverse as a prop path segment (non-numeric).
@@ -453,6 +462,10 @@ export class VDOMRenderer {
 
 	init(view: PulsePrerenderView & { vdom: VDOM }): ReactNode {
 		return this.renderNode(view.vdom);
+	}
+
+	dispose(): void {
+		this.#refRegistry.dispose();
 	}
 
 	/**
@@ -575,8 +588,9 @@ export class VDOMRenderer {
 							}
 						}
 
-						if (update.data.remove && update.data.remove.length > 0) {
-							for (const key of update.data.remove) {
+						const removedKeys = update.data.remove ?? [];
+						if (removedKeys.length > 0) {
+							for (const key of removedKeys) {
 								const removedValue = currentProps[key];
 								if (removedValue !== undefined) {
 									this.#dropCallbacksInSubtree(removedValue, this.#propPath(prevPath, key));
@@ -607,10 +621,18 @@ export class VDOMRenderer {
 						meta.eval = nextEval;
 						meta.path = path;
 
-						const removedSomething = (update.data.remove?.length ?? 0) > 0;
+						const removedSomething = removedKeys.length > 0;
+						const refRemoved = removedKeys.includes("ref");
+						const hasNextRef = Object.prototype.hasOwnProperty.call(nextProps, "ref");
+						const propsHasRef = Object.prototype.hasOwnProperty.call(currentProps, "ref");
+						const propsRef = propsHasRef ? currentProps.ref : undefined;
+						const existingRef = (element as any).ref ?? propsRef;
+						const nextRef = hasNextRef ? nextProps.ref : refRemoved ? undefined : existingRef;
 						if (removedSomething) {
 							nextProps.key = (element as any).key;
-							nextProps.ref = (element as any).ref;
+							if (!refRemoved && !hasNextRef && nextRef !== undefined) {
+								nextProps.ref = nextRef;
+							}
 							return this.#rememberMeta(
 								createElement(element.type, nextProps, ...this.#ensureChildrenArray(element)),
 								meta,

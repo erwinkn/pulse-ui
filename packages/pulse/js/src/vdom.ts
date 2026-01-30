@@ -126,7 +126,21 @@ export interface NewExpr {
 
 export type CallbackPlaceholder = "$cb" | `$cb:${number}`;
 
-export type VDOMPropValue = JsonValue | VDOMExpr | VDOMElement | CallbackPlaceholder;
+export interface PulseRefPayload {
+	channelId: string;
+	refId: string;
+}
+
+export interface PulseRefSpec {
+	__pulse_ref__: PulseRefPayload;
+}
+
+export type VDOMPropValue =
+	| JsonValue
+	| VDOMExpr
+	| VDOMElement
+	| CallbackPlaceholder
+	| PulseRefSpec;
 
 export interface VDOMElement {
 	tag: string | VDOMExpr;

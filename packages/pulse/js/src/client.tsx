@@ -17,6 +17,7 @@ import { extractEvent } from "./serialize/events";
 import { deserialize, serialize } from "./serialize/serializer";
 import type { VDOMUpdate } from "./vdom";
 
+
 export interface SocketIODirectives {
 	headers?: Record<string, string>;
 	auth?: Record<string, string>;
@@ -483,5 +484,12 @@ export class PulseSocketIOClient {
 		for (const entry of this.#channels.values()) {
 			entry.bridge.handleDisconnect(new PulseChannelResetError("Connection lost"));
 		}
+	}
+
+	_ensureChannelEntry(id: string): {
+		bridge: ChannelBridge;
+		refCount: number;
+	} {
+		return this.#ensureChannelEntry(id);
 	}
 }

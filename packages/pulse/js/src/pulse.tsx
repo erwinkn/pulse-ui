@@ -219,12 +219,13 @@ export function PulseView({ path, registry }: PulseViewProps) {
 					client.sendJsResult(msg.id, result, error);
 				},
 				onServerError: setServerError,
-				});
-				return () => {
-					renderer.clearPendingCallbacks();
-					client.detach(path);
-				};
-			}
+			});
+			return () => {
+				renderer.clearPendingCallbacks();
+				renderer.dispose();
+				client.detach(path);
+			};
+		}
 		//  routeInfo is NOT included here on purpose
 	}, [client, renderer, path]);
 

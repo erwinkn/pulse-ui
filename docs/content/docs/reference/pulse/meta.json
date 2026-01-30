@@ -8,6 +8,7 @@
     "dom",
     "state",
     "hooks",
+    "refs",
     "reactive",
     "scheduling",
     "queries",

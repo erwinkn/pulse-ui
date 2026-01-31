@@ -86,7 +86,7 @@ ifndef PKG
 	@echo "Usage: make bump PKG=<package-name> [ARGS='--patch|--minor|--major|--alpha|--beta|--rc|--version X.Y.Z']"
 	@echo "Example: make bump PKG=pulse ARGS='--alpha'"
 	@echo "Example: make bump PKG=pulse ARGS='--beta'"
-	@python scripts/bump_version.py
+	@uv run scripts/bump_version.py
 else
-	@python scripts/bump_version.py $(PKG) $(ARGS)
+	@uv run scripts/bump_version.py $(PKG) $(ARGS)
 endif

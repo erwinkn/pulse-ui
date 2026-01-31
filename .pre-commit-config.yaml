@@ -23,7 +23,7 @@ repos:
     hooks:
       - id: sync-versions
         name: Sync Python to JS package versions
-        entry: python scripts/sync_versions.py
+        entry: uv run scripts/sync_versions.py
         language: system
         files: ^packages/.*/python/pyproject\.toml$
         pass_filenames: false

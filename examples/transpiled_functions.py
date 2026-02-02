@@ -28,7 +28,10 @@ from pulse.js import Math, console, obj
 from pulse.js.math import PI, floor, sin
 from pulse.js.math import abs as js_abs
 from pulse.js.number import Number
-from pulse.js.react import useEffect, useState
+from pulse.js.react import createElement, useEffect, useState
+
+# Third-party JS imports
+useAutoAnimate = ps.Import("useAutoAnimate", "@formkit/auto-animate/react")
 
 # =============================================================================
 # Using Import as a typed decorator
@@ -467,6 +470,54 @@ def full_pipeline(x: float) -> float:
 
 
 @ps.javascript(jsx=True)
+def AutoAnimate(*children: Any, component: Any = "div", **props: Any):
+	"""Wrap a component and auto-animate its child changes."""
+	parent_ref, _set_enabled = useAutoAnimate()
+	props = props or obj()
+	props = obj(ref=parent_ref, **props)
+	return createElement(component, props, children)
+
+
+class AutoAnimateState(ps.State):
+	items: list[str] = ["Alpha", "Beta", "Gamma"]
+	active: bool = True
+
+	def toggle(self):
+		if self.active:
+			self.items = ["Alpha", "Gamma", "Delta"]
+		else:
+			self.items = ["Alpha", "Beta", "Gamma"]
+		self.active = not self.active
+
+
+@ps.component
+def AutoAnimateDemo():
+	"""Auto-animate a list when items change."""
+	with ps.init():
+		state = AutoAnimateState()
+
+	return ps.div(className="mt-8 rounded border border-slate-700 p-4")[
+		ps.h3(
+			"AutoAnimate (client-side)",
+			className="text-lg font-semibold text-white",
+		),
+		ps.p(
+			"Click to swap list items — the list animates in-place.",
+			className="text-slate-400 text-sm mt-2",
+		),
+		ps.button(
+			"Toggle list",
+			onClick=state.toggle,
+			className="mt-3 px-3 py-1 bg-slate-700 text-white rounded hover:bg-slate-600 text-sm",
+		),
+		AutoAnimate(
+			component="ul",
+			className="mt-3 list-disc pl-6 space-y-1 text-slate-300",
+		)[*[ps.li(item, key=item) for item in state.items]],
+	]
+
+
+@ps.javascript(jsx=True)
 def ToggleComponent(*children: ps.Node, initial_visible: bool = True):
 	"""React component with show/hide toggle using useState and useEffect.
 
@@ -585,6 +636,7 @@ def ReactHooksDemo():
 					],
 				],
 			],
+			AutoAnimateDemo(),
 			ps.div(className="mt-8")[
 				ps.h2("How it works", className="text-2xl font-semibold mb-4"),
 				ps.div(className="space-y-4 text-slate-300")[

@@ -5,14 +5,13 @@ Provides a declarative way to render lists, similar to JavaScript's Array.map().
 
 from collections.abc import Callable, Iterable
 from inspect import Parameter, signature
-from typing import TYPE_CHECKING, Any, TypeVar, overload
+from typing import Any, TypeVar, overload
 
-from pulse.transpiler.nodes import Call, Element, Expr, Member, transformer
-
-if TYPE_CHECKING:
-	from pulse.transpiler.transpiler import Transpiler
+from pulse.transpiler.nodes import Call, Expr, Member, Node, transformer
+from pulse.transpiler.transpiler import Transpiler
 
 T = TypeVar("T")
+TNode = TypeVar("TNode", bound=Node)
 
 
 @transformer("For")
@@ -24,14 +23,14 @@ def emit_for(items: Any, fn: Any, *, ctx: "Transpiler") -> Expr:
 
 
 @overload
-def For(items: Iterable[T], fn: Callable[[T], Element]) -> list[Element]: ...
+def For(items: Iterable[T], fn: Callable[[T], TNode]) -> list[TNode]: ...
 
 
 @overload
-def For(items: Iterable[T], fn: Callable[[T, int], Element]) -> list[Element]: ...
+def For(items: Iterable[T], fn: Callable[[T, int], TNode]) -> list[TNode]: ...
 
 
-def For(items: Iterable[T], fn: Callable[..., Element]) -> list[Element]:
+def For(items: Iterable[T], fn: Callable[..., TNode]) -> list[TNode]:
 	"""Map items to elements, like JavaScript's Array.map().
 
 	Iterates over `items` and calls `fn` for each one, returning a list of

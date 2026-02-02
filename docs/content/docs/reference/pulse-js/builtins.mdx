@@ -11,6 +11,7 @@ JavaScript built-in classes wrapped for use in `@ps.javascript` decorated functi
 from pulse.js import (
     AbortController,
     AbortSignal,
+    Animation,
     Array,
     ArrayBuffer,
     BigInt64Array,
@@ -20,6 +21,7 @@ from pulse.js import (
     DataView,
     Date,
     DOMParser,
+    DocumentTimeline,
     Error,
     File,
     FileReader,
@@ -31,6 +33,7 @@ from pulse.js import (
     Int32Array,
     Int8Array,
     IntersectionObserver,
+    KeyframeEffect,
     Map,
     MutationObserver,
     Number,
@@ -884,6 +887,180 @@ def example():
 | `observe(options)` | Start observing |
 | `disconnect()` | Stop observing |
 | `takeRecords()` | Pending entries |
+
+---
+
+## Web animations
+
+The [Web Animations API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Animations_API) lets you create smooth, performant animations from Python code. Unlike CSS animations, you get programmatic control—pause, reverse, seek to any point, or chain animations with promises.
+
+```python
+from pulse.js import Animation, KeyframeEffect, document, obj
+
+@ps.javascript
+def fade_in(element):
+    # Define what animates: target element, keyframes, and timing
+    effect = KeyframeEffect(
+        element,
+        [obj(opacity=0), obj(opacity=1)],  # From invisible to visible
+        obj(duration=300, easing="ease-out", fill="forwards"),
+    )
+
+    # Create and start the animation
+    animation = Animation(effect, document.timeline)
+    animation.play()
+    return animation
+```
+
+### When to use Web Animations
+
+Use it when you need to:
+- Control animations from code (pause, reverse, speed up)
+- Wait for an animation to finish before doing something else
+- Animate based on runtime values (user input, scroll position)
+- Coordinate multiple animations
+
+For simple hover effects or static transitions, CSS is usually simpler.
+
+### KeyframeEffect
+
+Defines what gets animated. Pass a target element, keyframes, and timing options.
+
+```python
+effect = KeyframeEffect(
+    target,                                    # Element to animate
+    [obj(opacity=0), obj(opacity=1)],          # Keyframes (array of states)
+    obj(duration=300, easing="ease-in-out"),   # Timing options
+)
+```
+
+**Keyframes** are an array of style states. The animation interpolates between them:
+
+```python
+# Slide and fade in
+[
+    obj(opacity=0, transform="translateY(-20px)"),
+    obj(opacity=1, transform="translateY(0)"),
+]
+
+# Bounce effect (multiple keyframes)
+[
+    obj(transform="scale(1)"),
+    obj(transform="scale(1.2)"),
+    obj(transform="scale(1)"),
+]
+```
+
+**Timing options** control how the animation plays:
+
+| Option | Description |
+|--------|-------------|
+| `duration` | Length in milliseconds (e.g., `300`) |
+| `easing` | Timing function: `"linear"`, `"ease"`, `"ease-in"`, `"ease-out"`, `"ease-in-out"`, or a cubic-bezier |
+| `fill` | What happens when animation ends: `"none"`, `"forwards"` (keep end state), `"backwards"`, `"both"` |
+| `iterations` | How many times to repeat (use `Infinity` for forever) |
+| `direction` | `"normal"`, `"reverse"`, `"alternate"`, `"alternate-reverse"` |
+| `delay` | Wait before starting (milliseconds) |
+| `endDelay` | Wait after ending (milliseconds) |
+| `iterationStart` | Offset into the iteration to start at (0-1) |
+
+#### KeyframeEffect properties
+
+| Property | Description |
+|----------|-------------|
+| `target` | The element being animated |
+| `composite` | How values combine with underlying styles |
+| `iterationComposite` | How values accumulate across iterations |
+| `pseudoElement` | Target pseudo-element (e.g., `"::before"`) |
+
+#### KeyframeEffect methods
+
+| Method | Description |
+|--------|-------------|
+| `getTiming()` | Get current timing options |
+| `getComputedTiming()` | Get computed values including progress |
+| `getKeyframes()` | Get the computed keyframes |
+| `setKeyframes(keyframes)` | Replace keyframes mid-animation |
+| `updateTiming(timing)` | Update timing options mid-animation |
+
+### Animation
+
+Controls playback of a KeyframeEffect. Think of it like a video player for your effect.
+
+```python
+animation = Animation(effect, document.timeline)
+animation.play()  # Start it
+```
+
+#### Animation properties
+
+| Property | Description |
+|----------|-------------|
+| `currentTime` | Current position in milliseconds (read/write) |
+| `playState` | `"idle"`, `"running"`, `"paused"`, `"finished"` |
+| `playbackRate` | Speed multiplier (1 = normal, 2 = double speed, -1 = reverse) |
+| `finished` | Promise that resolves when animation completes |
+| `ready` | Promise that resolves when animation is ready to play |
+| `pending` | True if play/pause is pending |
+| `startTime` | When animation started on the timeline |
+| `effect` | The KeyframeEffect being played (read/write) |
+| `timeline` | The timeline this animation is attached to (read/write) |
+| `id` | Animation identifier string (read/write) |
+| `replaceState` | `"active"`, `"removed"`, or `"persisted"` |
+| `overallProgress` | Progress across all iterations (0-1) |
+
+#### Animation methods
+
+| Method | Description |
+|--------|-------------|
+| `play()` | Start or resume playback |
+| `pause()` | Pause at current position |
+| `reverse()` | Play backwards from current position |
+| `finish()` | Jump to end (or start if reversed) |
+| `cancel()` | Stop and reset to initial state |
+| `commitStyles()` | Write current animated values to element's style |
+| `persist()` | Prevent automatic removal when finished |
+| `updatePlaybackRate(rate)` | Smoothly change speed without jumping |
+
+### Waiting for animations
+
+The `finished` promise lets you chain actions:
+
+```python
+@ps.javascript
+async def animate_then_remove(element):
+    effect = KeyframeEffect(
+        element,
+        [obj(opacity=1), obj(opacity=0)],
+        obj(duration=200, fill="forwards"),
+    )
+    animation = Animation(effect, document.timeline)
+    animation.play()
+
+    # Wait for fade out to complete
+    await animation.finished
+
+    # Now safe to remove
+    element.remove()
+```
+
+### DocumentTimeline
+
+The default timeline tied to `document.timeline`. You rarely need to create one yourself, but you can for custom timing:
+
+```python
+from pulse.js import DocumentTimeline
+
+# Custom timeline with offset origin
+timeline = DocumentTimeline(obj(originTime=1000))
+animation = Animation(effect, timeline)
+```
+
+| Property | Description |
+|----------|-------------|
+| `currentTime` | Current time on this timeline (milliseconds since origin) |
+
+**Learn more:** [Animation (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/Animation), [KeyframeEffect (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/KeyframeEffect)
 
 ---
 

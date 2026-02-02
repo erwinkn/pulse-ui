@@ -304,18 +304,21 @@ Access JavaScript globals via `pulse.js`:
 from pulse.js import Math, console, window, document, JSON, Intl, crypto
 from pulse.js.date import Date
 from pulse.js import (
+    Animation,
     AbortController,
     Array,
     ArrayBuffer,
     Blob,
     CustomEvent,
     DOMParser,
+    DocumentTimeline,
     Error,
     File,
     FileReader,
     FormData,
     Headers,
     IntersectionObserver,
+    KeyframeEffect,
     Map,
     MutationObserver,
     Object,

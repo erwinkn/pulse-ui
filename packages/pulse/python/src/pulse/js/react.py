@@ -156,7 +156,7 @@ def useReducer(
 
 
 def useEffect(
-	effect: _Callable[[], None | _Callable[[], None]],
+	effect: _Callable[[], None | _Callable[[], _Any]],
 	deps: list[_Any] | None = None,
 ) -> None:
 	"""Accepts a function that contains imperative, possibly effectful code.
@@ -172,7 +172,7 @@ def useEffect(
 
 
 def useLayoutEffect(
-	effect: _Callable[[], None | _Callable[[], None]],
+	effect: _Callable[[], None | _Callable[[], _Any]],
 	deps: list[_Any] | None = None,
 ) -> None:
 	"""Like `useEffect`, but fires synchronously after all DOM mutations.

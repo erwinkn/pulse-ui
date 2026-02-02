@@ -17,6 +17,7 @@ Full-stack Python framework for interactive web apps. Runs on React with WebSock
 - Test examples by running them with `pulse run` in a background task and using the agent-browser CLI for interacting with the UI.
 - While debugging, feel free to add debug print statements, spin up test files, modify existing code, or anything else that would improve your feedback loop and accelerate the troubleshooting process. Remove those debug changes after fixing the issue.
 
+
 ## Code Style
 
 - No `getattr`/`setattr` unless necessary
@@ -43,20 +44,12 @@ bun <file.ts>                     # Run JS/TS
 uv run pulse run examples/app.py  # Run a Pulse app (dev server on :8000)
 ```
 
-## Structure
-
-```
-packages/
-├── pulse/python/src/pulse/   # Core Python (app, state, component, renderer, vdom, hooks/, queries/)
-├── pulse/js/src/             # JS client (client.tsx, renderer.tsx, serialize/)
-├── pulse-mantine/            # Mantine UI
-├── pulse-ag-grid/            # AG Grid
-├── pulse-recharts/           # Charts
-├── pulse-lucide/             # Icons
-├── pulse-msal/               # MS auth
-└── pulse-aws/                # AWS deploy
-examples/                     # Example apps
-```
+## Subagents
+- ALWAYS wait for all subagents to complete before yielding.
+- Spawn subagents automatically when:
+- Parallelizable work (e.g., install + verify, npm test + typecheck, multiple tasks from plan)
+- Long-running or blocking tasks where a worker can run independently.
+Isolation for risky changes or checks
 
 ## Documentation
 

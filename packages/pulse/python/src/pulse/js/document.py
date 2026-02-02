@@ -15,6 +15,8 @@ from pulse.js._types import Element as _Element
 from pulse.js._types import HTMLCollection as _HTMLCollection
 from pulse.js._types import HTMLElement as _HTMLElement
 from pulse.js._types import NodeList as _NodeList
+from pulse.js.animation import Animation as _Animation
+from pulse.js.animation import DocumentTimeline as _DocumentTimeline
 from pulse.transpiler.js_module import JsModule
 
 # Read-only properties
@@ -28,6 +30,7 @@ cookie: str
 referrer: str
 URL: str
 domain: str
+timeline: _DocumentTimeline
 
 
 # Query methods
@@ -119,6 +122,11 @@ def hasFocus() -> bool:
 # Selection
 def getSelection() -> _Any:
 	"""Return the current selection."""
+	...
+
+
+def getAnimations() -> list[_Animation]:
+	"""Return animations associated with this document."""
 	...
 
 

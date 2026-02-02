@@ -176,10 +176,12 @@ Access JS globals via `pulse.js`:
 ```python
 from pulse.js import (
     AbortController,
+    Animation,
     ArrayBuffer,
     Blob,
     CustomEvent,
     DOMParser,
+    DocumentTimeline,
     Error,
     File,
     FileReader,
@@ -188,6 +190,7 @@ from pulse.js import (
     Intl,
     IntersectionObserver,
     JSON,
+    KeyframeEffect,
     Math,
     MutationObserver,
     Promise,
@@ -488,6 +491,29 @@ def LineChart(
 ```
 
 ### Client-Side Animation
+
+Using the Web Animations API for smooth, hardware-accelerated animations:
+
+```python
+from pulse.js import Animation, KeyframeEffect, obj
+
+@ps.javascript
+def slide_in(element):
+    """Slide an element in from the left with a fade."""
+    effect = KeyframeEffect(
+        element,
+        [
+            obj(opacity=0, transform="translateX(-20px)"),
+            obj(opacity=1, transform="translateX(0)"),
+        ],
+        obj(duration=300, easing="ease-out", fill="forwards"),
+    )
+    animation = Animation(effect, document.timeline)
+    animation.play()
+    return animation  # Return so caller can await animation.finished
+```
+
+Or use React hooks for state-driven animations:
 
 ```python
 @ps.javascript(jsx=True)

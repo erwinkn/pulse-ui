@@ -67,6 +67,17 @@ from pulse.js._types import (
 )
 from pulse.js.abort_controller import AbortController as AbortController
 from pulse.js.abort_controller import AbortSignal as AbortSignal
+from pulse.js.animation import Animation as Animation
+from pulse.js.animation import ComputedEffectTiming as ComputedEffectTiming
+from pulse.js.animation import ComputedKeyframe as ComputedKeyframe
+from pulse.js.animation import DocumentTimeline as DocumentTimeline
+from pulse.js.animation import DocumentTimelineOptions as DocumentTimelineOptions
+from pulse.js.animation import EffectTiming as EffectTiming
+from pulse.js.animation import Keyframe as Keyframe
+from pulse.js.animation import KeyframeEffect as KeyframeEffect
+from pulse.js.animation import KeyframeEffectOptions as KeyframeEffectOptions
+from pulse.js.animation import OptionalEffectTiming as OptionalEffectTiming
+from pulse.js.animation import PropertyIndexedKeyframes as PropertyIndexedKeyframes
 
 # Re-export classes with proper generic types
 from pulse.js.array import Array as Array

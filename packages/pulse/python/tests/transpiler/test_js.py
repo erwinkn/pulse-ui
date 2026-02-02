@@ -20,11 +20,13 @@ import pytest
 from pulse.js import (
 	URL,
 	AbortController,
+	Animation,
 	Array,
 	ArrayBuffer,
 	Blob,
 	CustomEvent,
 	Date,
+	DocumentTimeline,
 	DOMParser,
 	Error,
 	File,
@@ -33,6 +35,7 @@ from pulse.js import (
 	Headers,
 	IntersectionObserver,
 	Intl,
+	KeyframeEffect,
 	Map,
 	Math,
 	MutationObserver,
@@ -729,6 +732,45 @@ class TestPerformanceObserver:
 		assert (
 			code
 			== 'function perf_ops_1() {\nlet observer;\nobserver = new PerformanceObserver((list_, obs) => null);\nobserver.observe({"entryTypes": ["mark", "measure"]});\nreturn observer.takeRecords();\n}'
+		)
+
+
+# =============================================================================
+# Web Animations API
+# =============================================================================
+
+
+class TestWebAnimations:
+	def test_keyframe_effect_animation(self):
+		@javascript
+		def animate(target):
+			effect = KeyframeEffect(
+				target,
+				[obj(opacity=0), obj(opacity=1)],
+				obj(duration=300, easing="ease-in-out"),
+			)
+			animation = Animation(effect, document.timeline)
+			animation.play()
+			return animation.playState
+
+		fn = animate.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function animate_1(target) {\nlet animation, effect;\neffect = new KeyframeEffect(target, [{"opacity": 0}, {"opacity": 1}], {"duration": 300, "easing": "ease-in-out"});\nanimation = new Animation(effect, document.timeline);\nanimation.play();\nreturn animation.playState;\n}'
+		)
+
+	def test_document_timeline(self):
+		@javascript
+		def timeline_ops():
+			timeline = DocumentTimeline(obj(originTime=0))
+			return timeline.currentTime
+
+		fn = timeline_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== 'function timeline_ops_1() {\nlet timeline;\ntimeline = new DocumentTimeline({"originTime": 0});\nreturn timeline.currentTime;\n}'
 		)
 
 

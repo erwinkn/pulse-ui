@@ -67,6 +67,7 @@ _MODULE_EXPORTS_NAMESPACE: dict[str, str] = {
 _MODULE_EXPORTS_ATTRIBUTE: dict[str, str] = {
 	"AbortController": "pulse.js.abort_controller",
 	"AbortSignal": "pulse.js.abort_controller",
+	"Animation": "pulse.js.animation",
 	"Array": "pulse.js.array",
 	"ArrayBuffer": "pulse.js.array_buffer",
 	"BigInt64Array": "pulse.js.array_buffer",
@@ -76,6 +77,7 @@ _MODULE_EXPORTS_ATTRIBUTE: dict[str, str] = {
 	"DOMParser": "pulse.js.dom_parser",
 	"DataView": "pulse.js.array_buffer",
 	"Date": "pulse.js.date",
+	"DocumentTimeline": "pulse.js.animation",
 	"Error": "pulse.js.error",
 	"File": "pulse.js.file",
 	"FileReader": "pulse.js.file_reader",
@@ -87,6 +89,7 @@ _MODULE_EXPORTS_ATTRIBUTE: dict[str, str] = {
 	"Int32Array": "pulse.js.array_buffer",
 	"Int8Array": "pulse.js.array_buffer",
 	"IntersectionObserver": "pulse.js.intersection_observer",
+	"KeyframeEffect": "pulse.js.animation",
 	"Map": "pulse.js.map",
 	"MutationObserver": "pulse.js.mutation_observer",
 	"Object": "pulse.js.object",

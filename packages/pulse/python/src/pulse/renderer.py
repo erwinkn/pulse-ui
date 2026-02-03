@@ -6,10 +6,11 @@ from dataclasses import dataclass
 from types import NoneType
 from typing import Any, NamedTuple, TypeAlias, cast
 
+from pulse.context import PulseContext
 from pulse.debounce import Debounced
 from pulse.helpers import values_equal
 from pulse.hooks.core import HookContext
-from pulse.refs import RefHandle
+from pulse.refs import Ref
 from pulse.transpiler import Import
 from pulse.transpiler.function import Constant, JsFunction, JsxFunction
 from pulse.transpiler.nodes import (
@@ -35,7 +36,7 @@ from pulse.transpiler.vdom import (
 	VDOMPropValue,
 )
 
-PropValue: TypeAlias = Node | Callable[..., Any] | Debounced[Any, Any] | RefHandle[Any]
+PropValue: TypeAlias = Node | Callable[..., Any] | Debounced[Any, Any] | Ref[Any]
 
 FRAGMENT_TAG = ""
 MOUNT_PREFIX = "$$"
@@ -406,18 +407,40 @@ class Renderer:
 					updated[key] = value.render()
 				continue
 
-			if isinstance(value, RefHandle):
+			if key == "ref" and callable(value) and not isinstance(value, Ref):
+				eval_keys.add(key)
+				if isinstance(old_value, (Element, PulseNode)):
+					unmount_element(old_value)
+				if normalized is None:
+					normalized = current.copy()
+				if isinstance(old_value, Ref):
+					handle = old_value
+				else:
+					ctx = PulseContext.get()
+					if ctx.render is None:
+						raise RuntimeError("ref() requires an active render session")
+					handle = Ref(ctx.render.get_ref_channel(), owns_channel=False)
+				handle.bind_callback(value)
+				normalized[key] = handle
+				if not (isinstance(old_value, Ref) and values_equal(old_value, handle)):
+					updated[key] = {
+						"__pulse_ref__": {
+							"channelId": handle.channel_id,
+							"refId": handle.id,
+						}
+					}
+				continue
+
+			if isinstance(value, Ref):
 				if key != "ref":
-					raise TypeError("RefHandle can only be used as the 'ref' prop")
+					raise TypeError("Ref can only be used as the 'ref' prop")
 				eval_keys.add(key)
 				if isinstance(old_value, (Element, PulseNode)):
 					unmount_element(old_value)
 				if normalized is None:
 					normalized = current.copy()
 				normalized[key] = value
-				if not (
-					isinstance(old_value, RefHandle) and values_equal(old_value, value)
-				):
+				if not (isinstance(old_value, Ref) and values_equal(old_value, value)):
 					updated[key] = {
 						"__pulse_ref__": {
 							"channelId": value.channel_id,
@@ -519,7 +542,7 @@ def prop_requires_eval(value: PropValue) -> bool:
 		return True
 	if isinstance(value, Expr):
 		return True
-	if isinstance(value, RefHandle):
+	if isinstance(value, Ref):
 		return True
 	if isinstance(value, Debounced):
 		return True

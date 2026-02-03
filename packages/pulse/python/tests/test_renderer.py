@@ -9,7 +9,7 @@ import pytest
 from pulse.component import component
 from pulse.dom.tags import button, div, li, span, ul
 from pulse.hooks.core import HookContext
-from pulse.refs import RefHandle
+from pulse.refs import Ref
 from pulse.renderer import RenderTree
 from pulse.transpiler.nodes import Element, PulseNode
 from pulse.transpiler.vdom import VDOMElement, VDOMExpr
@@ -1076,7 +1076,7 @@ def test_keyed_head_tail_placeholders_deep_reconcile_props_change():
 
 
 def test_ref_prop_serializes_with_eval():
-	handle: RefHandle[Any] | None = None
+	handle: Ref[Any] | None = None
 
 	@component
 	def WithRef() -> ps.Element:
@@ -1102,9 +1102,106 @@ def test_ref_prop_serializes_with_eval():
 	assert "ref" in vdom.get("eval", [])
 
 
+def test_ref_outside_render_creates_handle():
+	handle: Ref[Any] | None = None
+
+	@component
+	def WithRef() -> ps.Element:
+		assert handle is not None
+		return div(ref=handle)
+
+	app = ps.App()
+	render = ps.RenderSession("render-ref-outside", app.routes)
+	session: Any = SimpleNamespace(sid="session-ref-outside")
+	with ps.PulseContext(app=app, session=session, render=render):
+		channel = render.get_ref_channel()
+		handle = ps.ref()
+		tree = RenderTree(WithRef())
+		vdom = tree.render()
+
+	assert handle is not None
+	assert isinstance(vdom, dict)
+	assert handle.channel_id == channel.id
+	props = vdom.get("props", {})
+	ref_spec = props.get("ref")
+	assert isinstance(ref_spec, dict)
+	assert ref_spec.get("__pulse_ref__") == {
+		"channelId": handle.channel_id,
+		"refId": handle.id,
+	}
+	assert "ref" in vdom.get("eval", [])
+
+
+def test_ref_outside_render_handlers_fire():
+	events: list[str] = []
+	handle: Ref[Any] | None = None
+
+	def on_mount() -> None:
+		events.append("mount")
+
+	def on_unmount() -> None:
+		events.append("unmount")
+
+	@component
+	def WithRef() -> ps.Element:
+		assert handle is not None
+		return div(ref=handle)
+
+	app = ps.App()
+	render = ps.RenderSession("render-ref-outside-handlers", app.routes)
+	session: Any = SimpleNamespace(sid="session-ref-outside-handlers")
+	with ps.PulseContext(app=app, session=session, render=render):
+		handle = ps.ref(on_mount=on_mount, on_unmount=on_unmount)
+		tree = RenderTree(WithRef())
+		tree.render()
+
+	assert handle is not None
+	handle_any = cast(Any, handle)
+	handle_any._on_mounted({"refId": handle.id})
+	handle_any._on_unmounted({"refId": handle.id})
+	assert events == ["mount", "unmount"]
+
+
+def test_ref_callback_serializes_and_invokes():
+	received: list[Ref[Any] | None] = []
+
+	def ref_cb(value: Ref[Any] | None) -> None:
+		received.append(value)
+
+	@component
+	def WithRef() -> ps.Element:
+		return div(ref=ref_cb)
+
+	app = ps.App()
+	render = ps.RenderSession("render-ref-callback", app.routes)
+	session: Any = SimpleNamespace(sid="session-ref-callback")
+	with ps.PulseContext(app=app, session=session, render=render):
+		tree = RenderTree(WithRef())
+		vdom = tree.render()
+
+	assert isinstance(vdom, dict)
+	props = vdom.get("props", {})
+	ref_spec = props.get("ref")
+	assert isinstance(ref_spec, dict)
+	assert "ref" in vdom.get("eval", [])
+
+	assert isinstance(tree.element, PulseNode)
+	contents = tree.element.contents
+	assert isinstance(contents, Element)
+	props_dict = contents.props_dict()
+	handle = props_dict.get("ref")
+	assert isinstance(handle, Ref)
+
+	handle_any = cast(Any, handle)
+	handle_any._on_mounted({"refId": handle.id})
+	handle_any._on_unmounted({"refId": handle.id})
+
+	assert received == [handle, None]
+
+
 def test_ref_handles_share_session_channel():
-	handle_a: RefHandle[Any] | None = None
-	handle_b: RefHandle[Any] | None = None
+	handle_a: Ref[Any] | None = None
+	handle_b: Ref[Any] | None = None
 
 	@component
 	def WithRefA() -> ps.Element:
@@ -1131,9 +1228,9 @@ def test_ref_handles_share_session_channel():
 
 
 def test_ref_handles_use_route_channels():
-	handle_root_a: RefHandle[Any] | None = None
-	handle_root_b: RefHandle[Any] | None = None
-	handle_other: RefHandle[Any] | None = None
+	handle_root_a: Ref[Any] | None = None
+	handle_root_b: Ref[Any] | None = None
+	handle_other: Ref[Any] | None = None
 
 	@component
 	def Root() -> ps.Element:
@@ -1164,7 +1261,7 @@ def test_ref_handles_use_route_channels():
 @pytest.mark.asyncio
 async def test_ref_on_mount_uses_route_context():
 	seen: dict[str, str] = {}
-	handle: RefHandle[Any] | None = None
+	handle: Ref[Any] | None = None
 	mounted = asyncio.Event()
 
 	def on_mount() -> None:
@@ -1199,7 +1296,7 @@ async def test_ref_on_mount_uses_route_context():
 
 def test_ref_hook_handlers_register():
 	events: list[str] = []
-	handle: RefHandle[Any] | None = None
+	handle: Ref[Any] | None = None
 
 	def on_mount() -> None:
 		events.append("mount")
@@ -1228,7 +1325,7 @@ def test_ref_hook_handlers_register():
 @pytest.mark.asyncio
 async def test_ref_async_handlers_run():
 	events: list[str] = []
-	handle: RefHandle[Any] | None = None
+	handle: Ref[Any] | None = None
 	mounted = asyncio.Event()
 	unmounted = asyncio.Event()
 
@@ -1273,7 +1370,5 @@ def test_ref_prop_rejects_non_ref_key():
 	session: Any = SimpleNamespace(sid="session-ref-2")
 	with ps.PulseContext(app=app, session=session, render=render):
 		tree = RenderTree(BadRef())
-		with pytest.raises(
-			TypeError, match="RefHandle can only be used as the 'ref' prop"
-		):
+		with pytest.raises(TypeError, match="Ref can only be used as the 'ref' prop"):
 			tree.render()

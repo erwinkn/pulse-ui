@@ -1410,7 +1410,7 @@ from pulse.reactive_extensions import (
 	unwrap as unwrap,
 )
 from pulse.refs import (
-	RefHandle as RefHandle,
+	Ref as Ref,
 )
 from pulse.refs import (
 	RefNotMounted as RefNotMounted,

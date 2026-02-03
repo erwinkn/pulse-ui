@@ -108,6 +108,24 @@ if input_ref.mounted:
     input_ref.focus()
 ```
 
+You can also create refs outside render as long as a render session is active. Each call returns a new handle (no hook identity), which you can pass into a component later.
+
+## Ref callbacks
+
+If you prefer the React-style ref callback, you can pass a function to `ref=`. It receives the `Ref` on mount and `None` on unmount.
+
+```python
+import pulse as ps
+
+@ps.component
+def Example():
+    def on_ref(value: ps.Ref | None):
+        if value:
+            value.focus()
+
+    return ps.input(ref=on_ref)
+```
+
 A quick check when you're not sure if the element is available.
 
 ## Common patterns

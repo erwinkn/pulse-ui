@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import pytest
 from pulse.channel import Channel
-from pulse.refs import RefHandle
+from pulse.refs import Ref
 
 
 class DummyChannel:
@@ -39,9 +39,9 @@ class DummyChannel:
 
 def make_handle(
 	responses: list[Any] | None = None,
-) -> tuple[RefHandle[Any], DummyChannel]:
+) -> tuple[Ref[Any], DummyChannel]:
 	channel = DummyChannel(responses)
-	handle = RefHandle(cast(Channel, cast(object, channel)), ref_id="ref-1")
+	handle = Ref(cast(Channel, cast(object, channel)), ref_id="ref-1")
 	handle._on_mounted({"refId": "ref-1"})  # pyright: ignore[reportPrivateUsage]
 	return handle, channel
 

@@ -1,6 +1,6 @@
 from typing import Any, ParamSpec
 
-from pulse.transpiler.nodes import Element, Node
+from pulse.transpiler.nodes import Child, Element
 
 P = ParamSpec("P")
 
@@ -17,7 +17,7 @@ def define_tag(name: str, default_props: dict[str, Any] | None = None):
 	    A function that creates UITreeNode instances
 	"""
 
-	def create_element(*children: Node, **props: Any) -> Element:
+	def create_element(*children: Child, **props: Any) -> Element:
 		"""Create a UI element for this tag."""
 		if default_props:
 			props = default_props | props

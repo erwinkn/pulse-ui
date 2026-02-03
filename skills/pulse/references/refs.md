@@ -18,10 +18,11 @@ def AutoFocusInput():
     return ps.input(ref=input_ref, placeholder="Auto-focused")
 ```
 
-**Outside render (requires active render session):**
+**Outside render:**
 ```python
 handle = ps.ref()
 ```
+Handles are inert until passed to an element. They detach automatically on unmount.
 
 **Ref callback:**
 ```python

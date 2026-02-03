@@ -259,7 +259,6 @@ class RenderSession:
 	_pending_api: dict[str, asyncio.Future[dict[str, Any]]]
 	_pending_js_results: dict[str, asyncio.Future[Any]]
 	_ref_channel: Channel | None
-	_ref_channels_by_route: dict[str, Channel]
 	_global_states: dict[str, State]
 	_global_queue: list[ServerMessage]
 	_tasks: TaskRegistry
@@ -294,7 +293,6 @@ class RenderSession:
 		self._pending_api = {}
 		self._pending_js_results = {}
 		self._ref_channel = None
-		self._ref_channels_by_route = {}
 		self._tasks = TaskRegistry(name=f"render:{id}")
 		self._timers = TimerRegistry(tasks=self._tasks, name=f"render:{id}")
 		self.query_store = QueryStore()
@@ -484,7 +482,6 @@ class RenderSession:
 			return
 		try:
 			self.route_mounts.pop(path, None)
-			self._ref_channels_by_route.pop(path, None)
 			mount.dispose()
 		except Exception as e:
 			self.report_error(path, "unmount", e)
@@ -492,7 +489,6 @@ class RenderSession:
 	def detach(self, path: str, *, timeout: float | None = None):
 		"""Client no longer wants updates. Queue briefly, then dispose."""
 		path = ensure_absolute_path(path)
-		self._ref_channels_by_route.pop(path, None)
 		mount = self.route_mounts.get(path)
 		if not mount:
 			return
@@ -606,7 +602,6 @@ class RenderSession:
 				fut.cancel()
 		self._pending_js_results.clear()
 		self._ref_channel = None
-		self._ref_channels_by_route.clear()
 		# Close any timer that may have been scheduled during cleanup (ex: query GC)
 		self._timers.cancel_all()
 		self._global_queue = []
@@ -629,22 +624,10 @@ class RenderSession:
 		return inst
 
 	def get_ref_channel(self) -> Channel:
-		ctx = PulseContext.get()
-		if ctx.route is None:
-			if self._ref_channel is not None and not self._ref_channel.closed:
-				return self._ref_channel
-			self._ref_channel = self.channels.create(bind_route=False)
+		if self._ref_channel is not None and not self._ref_channel.closed:
 			return self._ref_channel
-
-		route_path = ctx.route.pulse_route.unique_path()
-		channel = self._ref_channels_by_route.get(route_path)
-		if channel is not None and channel.closed:
-			self._ref_channels_by_route.pop(route_path, None)
-			channel = None
-		if channel is None:
-			channel = self.channels.create(bind_route=True)
-			self._ref_channels_by_route[route_path] = channel
-		return channel
+		self._ref_channel = self.channels.create(bind_route=False)
+		return self._ref_channel
 
 	def flush(self):
 		with PulseContext.update(render=self):

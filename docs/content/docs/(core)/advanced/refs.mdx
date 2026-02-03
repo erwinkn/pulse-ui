@@ -108,7 +108,7 @@ if input_ref.mounted:
     input_ref.focus()
 ```
 
-You can also create refs outside render as long as a render session is active. Each call returns a new handle (no hook identity), which you can pass into a component later.
+You can also create refs outside render. They start inert and only attach when you pass them to an element. Each call returns a new handle (no hook identity), which you can pass into a component later. When the element unmounts, the ref detaches automatically.
 
 ## Ref callbacks
 

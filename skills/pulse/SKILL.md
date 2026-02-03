@@ -167,8 +167,9 @@ ps.input(ref=on_ref)
 ```
 
 **Outside render:**
-- `ps.ref()` can be called outside render when a render session is active.
-- Each call returns a new handle (no hook identity).
+- `ps.ref()` can be called outside render.
+- Handles are inert until passed to an element.
+- Refs attach on mount and detach on unmount (no manual cleanup).
 
 **Fire-and-forget:** `focus()`, `blur()`, `click()`, `submit()`, `reset()`, `scroll_to()`, `scroll_into_view()`, `select()`
 

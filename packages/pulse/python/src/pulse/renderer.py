@@ -416,11 +416,14 @@ class Renderer:
 				if isinstance(old_value, Ref):
 					handle = old_value
 				else:
-					ctx = PulseContext.get()
-					if ctx.render is None:
-						raise RuntimeError("ref() requires an active render session")
-					handle = Ref(ctx.render.get_ref_channel(), owns_channel=False)
+					handle = Ref()
 				handle.bind_callback(value)
+				ctx = PulseContext.get()
+				if ctx.render is None:
+					raise RuntimeError("ref() requires an active render session")
+				handle.attach(
+					ctx.render.get_ref_channel(), render=ctx.render, route_ctx=ctx.route
+				)
 				normalized[key] = handle
 				if not (isinstance(old_value, Ref) and values_equal(old_value, handle)):
 					updated[key] = {
@@ -439,6 +442,12 @@ class Renderer:
 					unmount_element(old_value)
 				if normalized is None:
 					normalized = current.copy()
+				ctx = PulseContext.get()
+				if ctx.render is None:
+					raise RuntimeError("ref() requires an active render session")
+				value.attach(
+					ctx.render.get_ref_channel(), render=ctx.render, route_ctx=ctx.route
+				)
 				normalized[key] = value
 				if not (isinstance(old_value, Ref) and values_equal(old_value, value)):
 					updated[key] = {

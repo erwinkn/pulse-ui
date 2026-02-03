@@ -20,7 +20,7 @@ def ref(
 
 Create or retrieve a stable ref handle for a component.
 
-If called outside render, a new handle is created using the active render session.
+If called outside render, a new handle is created. The handle attaches when you pass it to an element and detaches on unmount.
 
 **Parameters:**
 - `key` - Optional key to disambiguate multiple refs at the same callsite (required in loops).
@@ -32,7 +32,6 @@ If called outside render, a new handle is created using the active render sessio
 **Raises:**
 - `TypeError` if `key` is not a string.
 - `ValueError` if `key` is an empty string.
-- `RuntimeError` if no active render session is available.
 
 ```python
 import pulse as ps

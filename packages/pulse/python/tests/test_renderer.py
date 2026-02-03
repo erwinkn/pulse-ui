@@ -1255,7 +1255,7 @@ def test_ref_handles_use_route_channels():
 	assert handle_root_b is not None
 	assert handle_other is not None
 	assert handle_root_a.channel_id == handle_root_b.channel_id
-	assert handle_root_a.channel_id != handle_other.channel_id
+	assert handle_root_a.channel_id == handle_other.channel_id
 
 
 @pytest.mark.asyncio

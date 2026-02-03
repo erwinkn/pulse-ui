@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
 from typing import Any, cast
 
+import pulse as ps
 import pytest
 from pulse.channel import Channel
-from pulse.refs import Ref
+from pulse.refs import Ref, RefNotMounted
 
 
 class DummyChannel:
@@ -14,11 +17,23 @@ class DummyChannel:
 	def __init__(self, responses: list[Any] | None = None) -> None:
 		self.emitted: list[tuple[str, Any]] = []
 		self.requested: list[tuple[str, Any, float | None]] = []
+		self.close_handlers: list[Any] = []
 		self.responses = list(responses or [])
 
 	def on(self, event: str, handler: Any):
 		def _remove() -> None:
 			return None
+
+		return _remove
+
+	def on_close(self, handler: Any):
+		self.close_handlers.append(handler)
+
+		def _remove() -> None:
+			try:
+				self.close_handlers.remove(handler)
+			except ValueError:
+				return None
 
 		return _remove
 
@@ -34,14 +49,21 @@ class DummyChannel:
 		return None
 
 	def close(self) -> None:
-		return None
+		for handler in list(self.close_handlers):
+			handler("closed")
+		self.close_handlers.clear()
 
 
 def make_handle(
 	responses: list[Any] | None = None,
 ) -> tuple[Ref[Any], DummyChannel]:
 	channel = DummyChannel(responses)
-	handle = Ref(cast(Channel, cast(object, channel)), ref_id="ref-1")
+	handle = Ref(ref_id="ref-1")
+	handle.attach(
+		cast(Channel, cast(object, channel)),
+		render=SimpleNamespace(),
+		route_ctx=None,
+	)
 	handle._on_mounted({"refId": "ref-1"})  # pyright: ignore[reportPrivateUsage]
 	return handle, channel
 
@@ -202,3 +224,55 @@ async def test_ref_set_style_rejects_bool() -> None:
 		TypeError, match="set_style\\(\\) values must be string, number, or None"
 	):
 		await handle.set_style({"display": True})
+
+
+def test_ref_can_be_created_without_render_session() -> None:
+	handle = ps.ref()
+	assert isinstance(handle, Ref)
+
+
+@pytest.mark.asyncio
+async def test_ref_detach_cancels_waiters() -> None:
+	handle = Ref()
+	channel = DummyChannel()
+	handle.attach(
+		cast(Channel, cast(object, channel)),
+		render=SimpleNamespace(),
+		route_ctx=None,
+	)
+	waiter = asyncio.create_task(handle.wait_mounted())
+	await asyncio.sleep(0)
+	handle.detach()
+	with pytest.raises(RefNotMounted, match="Ref detached"):
+		await waiter
+
+
+def test_ref_unmount_handlers_only_after_mount() -> None:
+	events: list[str] = []
+
+	handle = Ref()
+	handle.on_unmount(lambda: events.append("unmount"))
+	channel = DummyChannel()
+	handle.attach(
+		cast(Channel, cast(object, channel)),
+		render=SimpleNamespace(),
+		route_ctx=None,
+	)
+	handle.detach()
+
+	assert events == []
+
+
+def test_ref_channel_close_detaches() -> None:
+	handle = Ref()
+	channel = DummyChannel()
+	handle.attach(
+		cast(Channel, cast(object, channel)),
+		render=SimpleNamespace(),
+		route_ctx=None,
+	)
+	handle._on_mounted({"refId": handle.id})  # pyright: ignore[reportPrivateUsage]
+	channel.close()
+	assert handle.mounted is False
+	with pytest.raises(RuntimeError, match="Ref is not attached"):
+		_ = handle.channel_id

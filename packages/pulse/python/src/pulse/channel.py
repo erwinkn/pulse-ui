@@ -312,6 +312,7 @@ class ChannelsManager:
 		# 	if pending.channel_id == channel.id
 		# )
 		# print(f"Disposing channel id={channel.id} render={channel.render_id} session={channel.session_id} route={channel.route_path} reason={reason or 'unspecified'} pending={pending}")
+		channel.notify_close(reason)
 		self._cleanup_channel_refs(channel)
 		self._cancel_pending_for_channel(channel.id)
 		self._channels.pop(channel.id, None)
@@ -373,6 +374,8 @@ class Channel:
 	session_id: str
 	route_path: str | None
 	_handlers: dict[str, list[ChannelHandler]]
+	_close_handlers: list[Callable[[str | None], Any]]
+	_close_notified: bool
 	closed: bool
 
 	def __init__(
@@ -390,6 +393,8 @@ class Channel:
 		self.session_id = session_id
 		self.route_path = route_path
 		self._handlers = defaultdict(list)
+		self._close_handlers = []
+		self._close_notified = False
 		self.closed = False
 
 	# ---------------------------------------------------------------------
@@ -434,6 +439,34 @@ class Channel:
 				self._handlers.pop(event, None)
 
 		return _remove
+
+	def on_close(self, handler: Callable[[str | None], Any]) -> Callable[[], None]:
+		if self.closed:
+			try:
+				handler("closed")
+			except Exception:
+				logger.exception("Error in channel close handler")
+			return lambda: None
+		self._close_handlers.append(handler)
+
+		def _remove() -> None:
+			try:
+				self._close_handlers.remove(handler)
+			except ValueError:
+				return
+
+		return _remove
+
+	def notify_close(self, reason: str | None) -> None:
+		if self._close_notified:
+			return
+		self._close_notified = True
+		for handler in list(self._close_handlers):
+			try:
+				handler(reason)
+			except Exception:
+				logger.exception("Error in channel close handler")
+		self._close_handlers.clear()
 
 	# ---------------------------------------------------------------------
 	# Outgoing messages

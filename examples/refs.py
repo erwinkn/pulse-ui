@@ -15,6 +15,10 @@ class RefDemoState(ps.State):
 	last_text: str | None
 	measured: dict[str, Any] | None
 	show_target: bool
+	list_ids: list[int]
+	next_item_id: int
+	item_refs: dict[int, ps.Ref[Any]]
+	list_ref: ps.Ref[Any] | None
 
 	def __init__(self) -> None:
 		self.log = []
@@ -23,6 +27,10 @@ class RefDemoState(ps.State):
 		self.last_text = None
 		self.measured = None
 		self.show_target = True
+		self.list_ids = []
+		self.next_item_id = 1
+		self.item_refs = {}
+		self.list_ref = None
 
 	def add_log(self, message: str) -> None:
 		self.log = [*self.log, message][-40:]
@@ -34,6 +42,62 @@ class RefDemoState(ps.State):
 		self.show_target = not self.show_target
 		state = "shown" if self.show_target else "hidden"
 		self.add_log(f"target {state}")
+
+	def set_list_ref(self, value: ps.Ref[Any] | None) -> None:
+		if value is None:
+			self.add_log("list unmounted (callback)")
+			return
+		self.list_ref = value
+		self.add_log("list mounted (callback)")
+
+	def add_item(self) -> None:
+		item_id = self.next_item_id
+		self.next_item_id += 1
+		self.item_refs[item_id] = ps.ref(
+			on_mount=lambda: self.on_mount(item_id),
+			on_unmount=lambda: self.on_unmount(item_id),
+		)
+		self.list_ids = [*self.list_ids, item_id]
+		self.add_log(f"item {item_id} added")
+
+	def on_mount(self, item_id) -> None:
+		self.add_log(f"item {item_id} mounted")
+
+	def on_unmount(self, item_id) -> None:
+		self.add_log(f"item {item_id} unmounted")
+
+	def remove_item(self, item_id: int) -> None:
+		self.list_ids = [item for item in self.list_ids if item != item_id]
+		self.add_log(f"item {item_id} removed")
+
+	async def scroll_to_item(self, item_id: int) -> None:
+		ref = self.item_refs.get(item_id)
+		if ref is None:
+			self.add_log(f"item {item_id} missing ref")
+			return
+		if not ref.mounted:
+			self.add_log(f"item {item_id} not mounted yet, waiting")
+			try:
+				await ref.wait_mounted(timeout=1.0)
+			except Exception as exc:
+				self.add_log(f"item {item_id} wait error: {exc}")
+				return
+		ref.scroll_into_view(behavior="smooth", block="center")
+		self.add_log(f"scrolled to item {item_id}")
+
+	async def scroll_list_top(self) -> None:
+		if self.list_ref is None:
+			self.add_log("list ref missing")
+			return
+		if not self.list_ref.mounted:
+			self.add_log("list not mounted yet, waiting")
+			try:
+				await self.list_ref.wait_mounted(timeout=1.0)
+			except Exception as exc:
+				self.add_log(f"list wait error: {exc}")
+				return
+		self.list_ref.scroll_to(top=0, behavior="smooth")
+		self.add_log("list scrolled to top")
 
 
 @ps.component
@@ -220,6 +284,65 @@ def RefsPage():
 			ps.p(
 				f"Measured: {state.measured}",
 				className="text-xs text-gray-600 mt-2",
+			),
+			className="p-4 border rounded mb-6",
+		),
+		ps.section(
+			ps.h2("Dynamic list refs", className="text-xl font-semibold mb-2"),
+			ps.p(
+				"Refs are created outside render when items are added.",
+				className="text-sm text-gray-600 mb-4",
+			),
+			ps.div(className="flex flex-wrap gap-2 mb-3")[
+				ps.button(
+					"Add item",
+					onClick=state.add_item,
+					className="btn-primary btn-sm",
+				),
+				ps.button(
+					"Scroll list top",
+					onClick=state.scroll_list_top,
+					className="btn-light btn-sm",
+				),
+			],
+			ps.div(
+				ps.div(className="flex flex-wrap gap-2 mb-3")[
+					ps.For(
+						state.list_ids,
+						lambda item_id, _idx: ps.button(
+							f"Item {item_id}",
+							onClick=lambda _evt=None,
+							item_id=item_id: state.scroll_to_item(item_id),
+							className="btn-secondary btn-xs",
+							key=f"jump-{item_id}",
+						),
+					)
+					if state.list_ids
+					else ps.span("No items yet", className="text-xs text-gray-500"),
+				],
+				ps.div(
+					ps.For(
+						state.list_ids,
+						lambda item_id: ps.div(
+							ps.div(f"Item {item_id}", className="font-medium"),
+							ps.button(
+								"Remove",
+								onClick=lambda: state.remove_item(item_id),
+								className="btn-light btn-xs",
+							),
+							ref=state.item_refs.get(item_id),
+							key=f"item-{item_id}",
+							className="flex items-center justify-between gap-3 border rounded p-2",
+						),
+					)
+					if state.list_ids
+					else ps.div(
+						"Add items to create refs and scroll targets.",
+						className="text-xs text-gray-500",
+					),
+					ref=state.set_list_ref,
+					className="max-h-52 overflow-auto border rounded p-3 space-y-2 bg-gray-50",
+				),
 			),
 			className="p-4 border rounded mb-6",
 		),

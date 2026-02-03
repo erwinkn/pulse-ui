@@ -157,6 +157,19 @@ def AutoFocus():
     return ps.input(ref=input_ref, placeholder="Auto-focused")
 ```
 
+**Ref callbacks:**
+```python
+def on_ref(value: ps.Ref | None):
+    if value:
+        value.focus()
+
+ps.input(ref=on_ref)
+```
+
+**Outside render:**
+- `ps.ref()` can be called outside render when a render session is active.
+- Each call returns a new handle (no hook identity).
+
 **Fire-and-forget:** `focus()`, `blur()`, `click()`, `submit()`, `reset()`, `scroll_to()`, `scroll_into_view()`, `select()`
 
 **Request-response (async):** `measure()`, `get_value()`, `set_value()`, `get_prop()`, `set_prop()`, `get_attr()`, `set_attr()`, `get_text()`, `set_text()`, `set_style()`

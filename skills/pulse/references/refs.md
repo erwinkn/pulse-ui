@@ -18,6 +18,20 @@ def AutoFocusInput():
     return ps.input(ref=input_ref, placeholder="Auto-focused")
 ```
 
+**Outside render (requires active render session):**
+```python
+handle = ps.ref()
+```
+
+**Ref callback:**
+```python
+def on_ref(value: ps.Ref | None):
+    if value:
+        value.focus()
+
+ps.input(ref=on_ref)
+```
+
 **With lifecycle callbacks:**
 ```python
 input_ref = ps.ref(

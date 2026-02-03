@@ -9,8 +9,8 @@ from typing import Any, Generic, Literal, TypeVar, cast, overload, override
 
 from pulse.channel import Channel
 from pulse.context import PulseContext
-from pulse.helpers import Disposable
-from pulse.hooks.core import HookMetadata, HookState, hooks
+from pulse.helpers import Disposable, call_flexible
+from pulse.hooks.core import HOOK_CONTEXT, HookMetadata, HookState, hooks
 from pulse.hooks.state import collect_component_identity
 from pulse.scheduling import create_future, create_task
 
@@ -109,7 +109,7 @@ class RefTimeout(asyncio.TimeoutError):
 	"""Raised when waiting for a ref mount times out."""
 
 
-class RefHandle(Disposable, Generic[T]):
+class Ref(Disposable, Generic[T]):
 	"""Server-side handle for a client DOM ref."""
 
 	__slots__: tuple[str, ...] = (
@@ -119,13 +119,15 @@ class RefHandle(Disposable, Generic[T]):
 		"_mount_waiters",
 		"_mount_handlers",
 		"_unmount_handlers",
+		"callback",
 		"_owns_channel",
 		"_remove_mount",
 		"_remove_unmount",
 	)
 
-	_channel: Channel
 	id: str
+	callback: Callable[[Ref[Any] | None], Any] | None
+	_channel: Channel
 	_mounted: bool
 	_mount_waiters: list[asyncio.Future[None]]
 	_mount_handlers: list[Callable[[], Any]]
@@ -143,6 +145,7 @@ class RefHandle(Disposable, Generic[T]):
 	) -> None:
 		self._channel = channel
 		self.id = ref_id or uuid.uuid4().hex
+		self.callback = None
 		self._mounted = False
 		self._mount_waiters = []
 		self._mount_handlers = []
@@ -180,6 +183,9 @@ class RefHandle(Disposable, Generic[T]):
 				return
 
 		return _remove
+
+	def bind_callback(self, handler: Callable[[Ref[Any] | None], Any]) -> None:
+		self.callback = handler
 
 	async def wait_mounted(self, timeout: float | None = None) -> None:
 		if self._mounted:
@@ -705,6 +711,7 @@ class RefHandle(Disposable, Generic[T]):
 				fut.set_result(None)
 		self._mount_waiters.clear()
 		self._run_handlers(self._mount_handlers, label="mount")
+		self._run_ref_callback(self, label="ref_callback_mount")
 
 	def _on_unmounted(self, payload: Any) -> None:
 		if isinstance(payload, dict):
@@ -713,35 +720,50 @@ class RefHandle(Disposable, Generic[T]):
 				return
 		self._mounted = False
 		self._run_handlers(self._unmount_handlers, label="unmount")
+		self._run_ref_callback(None, label="ref_callback_unmount")
+
+	def _run_ref_callback(self, value: Ref[Any] | None, *, label: str) -> None:
+		if self.callback is None:
+			return
+		self._run_handler(self.callback, label=label, args=(value,))
+
+	def _run_handler(
+		self,
+		handler: Callable[..., Any],
+		*,
+		label: str,
+		args: tuple[Any, ...],
+	) -> None:
+		try:
+			result = call_flexible(handler, *args)
+		except Exception:
+			# Fail early: propagate on next render via error log if desired
+			raise
+		if inspect.isawaitable(result):
+			task = create_task(result, name=f"ref:{self.id}:{label}")
+
+			def _on_done(done_task: asyncio.Future[Any]) -> None:
+				if done_task.cancelled():
+					return
+				try:
+					done_task.result()
+				except asyncio.CancelledError:
+					return
+				except Exception as exc:
+					loop = done_task.get_loop()
+					loop.call_exception_handler(
+						{
+							"message": f"Unhandled exception in ref {label} handler",
+							"exception": exc,
+							"context": {"ref_id": self.id, "handler": label},
+						}
+					)
+
+			task.add_done_callback(_on_done)
 
 	def _run_handlers(self, handlers: list[Callable[[], Any]], *, label: str) -> None:
 		for handler in list(handlers):
-			try:
-				result = handler()
-			except Exception:
-				# Fail early: propagate on next render via error log if desired
-				raise
-			if inspect.isawaitable(result):
-				task = create_task(result, name=f"ref:{self.id}:{label}")
-
-				def _on_done(done_task: asyncio.Future[Any]) -> None:
-					if done_task.cancelled():
-						return
-					try:
-						done_task.result()
-					except asyncio.CancelledError:
-						return
-					except Exception as exc:
-						loop = done_task.get_loop()
-						loop.call_exception_handler(
-							{
-								"message": f"Unhandled exception in ref {label} handler",
-								"exception": exc,
-								"context": {"ref_id": self.id, "handler": label},
-							}
-						)
-
-				task.add_done_callback(_on_done)
+			self._run_handler(handler, label=label, args=())
 
 	@override
 	def dispose(self) -> None:
@@ -758,12 +780,13 @@ class RefHandle(Disposable, Generic[T]):
 		self._mount_waiters.clear()
 		self._mount_handlers.clear()
 		self._unmount_handlers.clear()
+		self.callback = None
 		if self._owns_channel:
 			self._channel.close()
 
 	@override
 	def __repr__(self) -> str:
-		return f"RefHandle(id={self.id}, channel={self.channel_id})"
+		return f"Ref(id={self.id}, channel={self.channel_id})"
 
 
 class RefHookState(HookState):
@@ -772,7 +795,7 @@ class RefHookState(HookState):
 		"called_keys",
 		"_channel",
 	)
-	instances: dict[tuple[str, Any], RefHandle[Any]]
+	instances: dict[tuple[str, Any], Ref[Any]]
 	called_keys: set[tuple[str, Any]]
 	_channel: Channel | None
 
@@ -792,9 +815,7 @@ class RefHookState(HookState):
 		super().on_render_start(render_cycle)
 		self.called_keys.clear()
 
-	def get_or_create(
-		self, identity: Any, key: str | None
-	) -> tuple[RefHandle[Any], bool]:
+	def get_or_create(self, identity: Any, key: str | None) -> tuple[Ref[Any], bool]:
 		full_identity = self._make_key(identity, key)
 		if full_identity in self.called_keys:
 			if key is None:
@@ -812,7 +833,7 @@ class RefHookState(HookState):
 			if existing.__disposed__:
 				key_label = f"key='{key}'" if key is not None else "callsite"
 				raise RuntimeError(
-					"`pulse.ref` found a disposed cached RefHandle for "
+					"`pulse.ref` found a disposed cached Ref for "
 					+ key_label
 					+ ". Do not dispose handles returned by `pulse.ref`."
 				)
@@ -823,7 +844,7 @@ class RefHookState(HookState):
 			if ctx.render is None:
 				raise RuntimeError("ref() requires an active render session")
 			self._channel = ctx.render.get_ref_channel()
-		handle = RefHandle(self._channel, owns_channel=False)
+		handle = Ref(self._channel, owns_channel=False)
 		self.instances[full_identity] = handle
 		return handle, True
 
@@ -853,7 +874,7 @@ def ref(
 	key: str | None = None,
 	on_mount: Callable[[], Any] | None = None,
 	on_unmount: Callable[[], Any] | None = None,
-) -> RefHandle[Any]:
+) -> Ref[Any]:
 	"""Create or retrieve a stable ref handle for a component.
 
 	Args:
@@ -869,6 +890,17 @@ def ref(
 		raise TypeError("ref() on_mount must be callable")
 	if on_unmount is not None and not callable(on_unmount):
 		raise TypeError("ref() on_unmount must be callable")
+
+	if HOOK_CONTEXT.get() is None:
+		ctx = PulseContext.get()
+		if ctx.render is None:
+			raise RuntimeError("ref() requires an active render session")
+		handle = Ref(ctx.render.get_ref_channel(), owns_channel=False)
+		if on_mount is not None:
+			handle.on_mount(on_mount)
+		if on_unmount is not None:
+			handle.on_unmount(on_unmount)
+		return handle
 
 	identity: Any
 	if key is None:
@@ -890,4 +922,4 @@ def ref(
 	return handle
 
 
-__all__ = ["RefHandle", "RefNotMounted", "RefTimeout", "ref"]
+__all__ = ["Ref", "RefNotMounted", "RefTimeout", "ref"]

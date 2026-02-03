@@ -531,7 +531,7 @@ class Element(Expr):
 		self,
 		tag: str | Expr,
 		props: Sequence[tuple[str, Prop] | Spread] | dict[str, Any] | None = None,
-		children: Sequence[Node] | None = None,
+		children: Sequence[Child] | None = None,
 		key: str | Expr | None = None,
 	) -> None:
 		self.tag = tag
@@ -800,7 +800,7 @@ class PulseNode:
 # Children normalization helpers
 # =============================================================================
 def flatten_children(
-	children: Sequence[Node | Iterable[Node]],
+	children: Sequence[Child],
 	*,
 	parent_name: str | Expr,
 	warn_stacklevel: int | None = None,

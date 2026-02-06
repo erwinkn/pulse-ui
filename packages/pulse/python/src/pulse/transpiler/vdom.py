@@ -161,24 +161,18 @@ single sentinel string. Debounced callbacks use "$cb:<delay_ms>" in the wire for
 """
 
 
-class PulseRefPayload(TypedDict):
-	channelId: str
-	refId: str
-
-
-class PulseRefSpec(TypedDict):
-	__pulse_ref__: PulseRefPayload
+RefToken: TypeAlias = str
 
 
 VDOMPropValue: TypeAlias = (
-	"JsonValue | VDOMExpr | VDOMElement | CallbackPlaceholder | PulseRefSpec"
+	"JsonValue | VDOMExpr | VDOMElement | CallbackPlaceholder | RefToken"
 )
 """Allowed prop value types.
 
 Hot path:
 - If `VDOMElement.eval` is absent, props MUST be plain JSON (JsonValue).
 - If `VDOMElement.eval` is present, only the listed prop keys may contain
-  non-JSON values (VDOMExpr / VDOMElement / "$cb:...").
+  non-JSON values (VDOMExpr / VDOMElement / "$cb:..." / "#ref:<channelId>,<refId>").
 """
 
 

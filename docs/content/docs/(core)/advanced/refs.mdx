@@ -40,6 +40,8 @@ Python (server)                    Browser (client)
 
 This is why some ref operations are async (they need a response from the browser) while others are fire-and-forget (they just send a command).
 
+Under the hood, the `ref` prop is serialized as an eval-only token: `#ref:{channelId},{refId}`. You don't need to construct this yourself.
+
 ## Fire-and-forget vs request-response
 
 Ref methods fall into two categories:
@@ -108,7 +110,9 @@ if input_ref.mounted:
     input_ref.focus()
 ```
 
-You can also create refs outside render. They start inert and only attach when you pass them to an element. Each call returns a new handle (no hook identity), which you can pass into a component later. When the element unmounts, the ref detaches automatically.
+Refs are inert at creation, both inside and outside render. Render only provides stable identity (callsite or `key`). A ref becomes active only when you attach it via `ref=` or a ref callback.
+
+You can create refs outside render too. Each call returns a new handle (no hook identity), which you can pass into a component later. When the element unmounts, the ref becomes unmounted but stays attached; it detaches only when it disappears from the latest render or the route/session closes.
 
 ## Ref callbacks
 

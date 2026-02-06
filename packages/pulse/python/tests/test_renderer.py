@@ -1094,11 +1094,8 @@ def test_ref_prop_serializes_with_eval():
 	assert isinstance(vdom, dict)
 	props = vdom.get("props", {})
 	ref_spec = props.get("ref")
-	assert isinstance(ref_spec, dict)
-	assert ref_spec.get("__pulse_ref__") == {
-		"channelId": handle.channel_id,
-		"refId": handle.id,
-	}
+	assert isinstance(ref_spec, str)
+	assert ref_spec == f"#ref:{handle.channel_id},{handle.id}"
 	assert "ref" in vdom.get("eval", [])
 
 
@@ -1124,11 +1121,8 @@ def test_ref_outside_render_creates_handle():
 	assert handle.channel_id == channel.id
 	props = vdom.get("props", {})
 	ref_spec = props.get("ref")
-	assert isinstance(ref_spec, dict)
-	assert ref_spec.get("__pulse_ref__") == {
-		"channelId": handle.channel_id,
-		"refId": handle.id,
-	}
+	assert isinstance(ref_spec, str)
+	assert ref_spec == f"#ref:{handle.channel_id},{handle.id}"
 	assert "ref" in vdom.get("eval", [])
 
 
@@ -1157,8 +1151,8 @@ def test_ref_outside_render_handlers_fire():
 
 	assert handle is not None
 	handle_any = cast(Any, handle)
-	handle_any._on_mounted({"refId": handle.id})
-	handle_any._on_unmounted({"refId": handle.id})
+	handle_any._handle_mounted()
+	handle_any._handle_unmounted(detach=False)
 	assert events == ["mount", "unmount"]
 
 
@@ -1182,7 +1176,7 @@ def test_ref_callback_serializes_and_invokes():
 	assert isinstance(vdom, dict)
 	props = vdom.get("props", {})
 	ref_spec = props.get("ref")
-	assert isinstance(ref_spec, dict)
+	assert isinstance(ref_spec, str)
 	assert "ref" in vdom.get("eval", [])
 
 	assert isinstance(tree.element, PulseNode)
@@ -1193,8 +1187,8 @@ def test_ref_callback_serializes_and_invokes():
 	assert isinstance(handle, Ref)
 
 	handle_any = cast(Any, handle)
-	handle_any._on_mounted({"refId": handle.id})
-	handle_any._on_unmounted({"refId": handle.id})
+	handle_any._handle_mounted()
+	handle_any._handle_unmounted(detach=False)
 
 	assert received == [handle, None]
 
@@ -1317,8 +1311,8 @@ def test_ref_hook_handlers_register():
 		tree = RenderTree(WithRef())
 		tree.render()
 	assert handle is not None
-	handle._on_mounted({"refId": handle.id})
-	handle._on_unmounted({"refId": handle.id})
+	handle._handle_mounted()
+	handle._handle_unmounted(detach=False)
 	assert events == ["mount", "unmount"]
 
 
@@ -1352,9 +1346,9 @@ async def test_ref_async_handlers_run():
 		tree = RenderTree(WithRef())
 		tree.render()
 		assert handle is not None
-		handle._on_mounted({"refId": handle.id})
+		handle._handle_mounted()
 		await asyncio.wait_for(mounted.wait(), timeout=1)
-		handle._on_unmounted({"refId": handle.id})
+		handle._handle_unmounted(detach=False)
 		await asyncio.wait_for(unmounted.wait(), timeout=1)
 	assert events == ["mount", "unmount"]
 

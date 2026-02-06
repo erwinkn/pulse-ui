@@ -22,7 +22,9 @@ def AutoFocusInput():
 ```python
 handle = ps.ref()
 ```
-Handles are inert until passed to an element. They detach automatically on unmount.
+Refs are inert at creation (inside or outside render). They become active only when attached via `ref=` or a ref callback. On unmount they become unmounted but stay attached; they detach only when removed from the latest render or the route/session closes.
+
+Wire format: `ref` props are serialized as the eval-only token `#ref:{channelId},{refId}`.
 
 **Ref callback:**
 ```python

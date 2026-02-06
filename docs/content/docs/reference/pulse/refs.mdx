@@ -20,7 +20,7 @@ def ref(
 
 Create or retrieve a stable ref handle for a component.
 
-If called outside render, a new handle is created. The handle attaches when you pass it to an element and detaches on unmount.
+If called outside render, a new handle is created. The handle attaches when you pass it to an element or ref callback. It stays attached until it disappears from the latest render or the route/session closes.
 
 **Parameters:**
 - `key` - Optional key to disambiguate multiple refs at the same callsite (required in loops).
@@ -58,6 +58,10 @@ def WithRefCallback():
 
     return ps.input(ref=on_ref)
 ```
+
+#### Wire format
+
+The `ref` prop is serialized as an eval-only token: `#ref:{channelId},{refId}`.
 
 ## Classes
 

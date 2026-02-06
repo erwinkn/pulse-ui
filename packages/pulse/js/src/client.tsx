@@ -13,6 +13,7 @@ import type {
 	ServerMessage,
 } from "./messages";
 import type { PulsePrerenderView } from "./pulse";
+import { RefRegistry } from "./ref";
 import { extractEvent } from "./serialize/events";
 import { deserialize, serialize } from "./serialize/serializer";
 import type { VDOMUpdate } from "./vdom";
@@ -56,6 +57,7 @@ export class PulseSocketIOClient {
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
 	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
+	#refRegistry: RefRegistry;
 	#url: string;
 	#frameworkNavigate: NavigateFunction;
 	#directives: Directives;
@@ -86,6 +88,9 @@ export class PulseSocketIOClient {
 		this.#activeViews = new Map();
 		this.#messageQueue = [];
 		this.#connectionStatusConfig = connectionStatusConfig;
+		this.#refRegistry = new RefRegistry((channelId) => {
+			return this.#ensureChannelEntry(channelId).bridge;
+		});
 	}
 	public setDirectives(directives: Directives) {
 		this.#directives = directives;
@@ -262,12 +267,17 @@ export class PulseSocketIOClient {
 		this.#messageQueue = [];
 		this.#connectionListeners.clear();
 		this.#activeViews.clear();
+		this.#refRegistry.dispose();
 		for (const { bridge } of this.#channels.values()) {
 			bridge.dispose(new PulseChannelResetError("Client disconnected"));
 		}
 		this.#channels.clear();
 		this.#currentStatus = "ok";
 		this.#hasConnectedOnce = false;
+	}
+
+	public getRefCallback(channelId: string, refId: string): (node: any) => void {
+		return this.#refRegistry.getCallback(channelId, refId);
 	}
 
 	#handleServerMessage(message: ServerMessage) {

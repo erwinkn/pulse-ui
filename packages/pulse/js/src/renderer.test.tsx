@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "bun:test";
 import React from "react";
 import { ChannelBridge } from "./channel";
+import { RefRegistry } from "./ref";
 import { VDOMRenderer } from "./renderer";
 
 import type { VDOMNode, VDOMUpdate } from "./vdom";
@@ -16,10 +17,21 @@ describe("VDOMRenderer", () => {
 			sent.push(message);
 		});
 		const bridges = new Map<string, ChannelBridge>();
+		let client: any;
+		const refRegistry = new RefRegistry((channelId) => {
+			let bridge = bridges.get(channelId);
+			if (!bridge) {
+				bridge = new ChannelBridge(client, channelId);
+				bridges.set(channelId, bridge);
+			}
+			return bridge;
+		});
 		const invokeCallback = vi.fn();
-		const client: any = {
+		client = {
 			sendMessage,
 			invokeCallback,
+			getRefCallback: (channelId: string, refId: string) =>
+				refRegistry.getCallback(channelId, refId),
 			_ensureChannelEntry: (id: string) => {
 				let bridge = bridges.get(id);
 				if (!bridge) {
@@ -92,9 +104,66 @@ describe("VDOMRenderer", () => {
 		const tree = renderer.renderNode({
 			tag: "input",
 			props: {
-				ref: { __pulse_ref__: { channelId: "chan-1", refId: "ref-1" } },
+				ref: "#ref:chan-1,ref-1",
 			},
 			eval: ["ref"],
+		});
+
+		const input = tree as React.ReactElement;
+		const hasRefProp = Object.prototype.hasOwnProperty.call(input.props ?? {}, "ref");
+		if (hasRefProp) {
+			expect(typeof (input.props as any).ref).toBe("function");
+			(input.props as any).ref({});
+		}
+		const mounted = sent.filter(
+			(message) => message.type === "channel_message" && message.event === "ref:mounted",
+		);
+		expect(mounted).toEqual([
+			{
+				type: "channel_message",
+				channel: "chan-1",
+				event: "ref:mounted",
+				payload: { refId: "ref-1" },
+			},
+		]);
+	});
+
+	it("hydrates ref tokens even without eval list", () => {
+		const { renderer, sent } = makeRenderer();
+		const tree = renderer.renderNode({
+			tag: "input",
+			props: {
+				ref: "#ref:chan-1,ref-1",
+			},
+		});
+
+		const input = tree as React.ReactElement;
+		const hasRefProp = Object.prototype.hasOwnProperty.call(input.props ?? {}, "ref");
+		if (hasRefProp) {
+			expect(typeof (input.props as any).ref).toBe("function");
+			(input.props as any).ref({});
+		}
+		const mounted = sent.filter(
+			(message) => message.type === "channel_message" && message.event === "ref:mounted",
+		);
+		expect(mounted).toEqual([
+			{
+				type: "channel_message",
+				channel: "chan-1",
+				event: "ref:mounted",
+				payload: { refId: "ref-1" },
+			},
+		]);
+	});
+
+	it("hydrates ref tokens even when eval list is empty", () => {
+		const { renderer, sent } = makeRenderer();
+		const tree = renderer.renderNode({
+			tag: "input",
+			props: {
+				ref: "#ref:chan-1,ref-1",
+			},
+			eval: [],
 		});
 
 		const input = tree as React.ReactElement;
@@ -121,7 +190,7 @@ describe("VDOMRenderer", () => {
 		let tree = renderer.renderNode({
 			tag: "input",
 			props: {
-				ref: { __pulse_ref__: { channelId: "chan-1", refId: "ref-1" } },
+				ref: "#ref:chan-1,ref-1",
 			},
 			eval: ["ref"],
 		});
@@ -147,19 +216,19 @@ describe("VDOMRenderer", () => {
 		}
 	});
 
-	it("handles multiple ref channels across renderers", () => {
+	it("shares a single ref channel across renderers", () => {
 		const shared = makeClient();
 		const rendererA = new VDOMRenderer(shared.client, "/a", {});
 		const rendererB = new VDOMRenderer(shared.client, "/b", {});
 
 		const treeA = rendererA.renderNode({
 			tag: "input",
-			props: { ref: { __pulse_ref__: { channelId: "chan-a", refId: "ref-a" } } },
+			props: { ref: "#ref:chan-1,ref-a" },
 			eval: ["ref"],
 		});
 		const treeB = rendererB.renderNode({
 			tag: "input",
-			props: { ref: { __pulse_ref__: { channelId: "chan-b", refId: "ref-b" } } },
+			props: { ref: "#ref:chan-1,ref-b" },
 			eval: ["ref"],
 		});
 
@@ -172,7 +241,7 @@ describe("VDOMRenderer", () => {
 			.filter((message) => message.type === "channel_message" && message.event === "ref:mounted")
 			.map((message) => message.channel);
 
-		expect(mountedChannels).toEqual(["chan-a", "chan-b"]);
+		expect(mountedChannels).toEqual(["chan-1", "chan-1"]);
 	});
 
 	it("debounces callbacks when placeholder includes delay", async () => {

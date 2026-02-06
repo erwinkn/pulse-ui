@@ -7,7 +7,7 @@ from typing import Any, cast
 import pulse as ps
 import pytest
 from pulse.channel import Channel
-from pulse.refs import Ref, RefNotMounted
+from pulse.refs import Ref, RefNotMounted, RefsManager
 
 
 class DummyChannel:
@@ -58,13 +58,15 @@ def make_handle(
 	responses: list[Any] | None = None,
 ) -> tuple[Ref[Any], DummyChannel]:
 	channel = DummyChannel(responses)
+	manager = RefsManager(cast(Channel, cast(object, channel)))
 	handle = Ref(ref_id="ref-1")
 	handle.attach(
-		cast(Channel, cast(object, channel)),
+		manager,
 		render=SimpleNamespace(),
 		route_ctx=None,
+		route_path="/",
 	)
-	handle._on_mounted({"refId": "ref-1"})  # pyright: ignore[reportPrivateUsage]
+	handle._handle_mounted()  # pyright: ignore[reportPrivateUsage]
 	return handle, channel
 
 
@@ -235,10 +237,12 @@ def test_ref_can_be_created_without_render_session() -> None:
 async def test_ref_detach_cancels_waiters() -> None:
 	handle = Ref()
 	channel = DummyChannel()
+	manager = RefsManager(cast(Channel, cast(object, channel)))
 	handle.attach(
-		cast(Channel, cast(object, channel)),
+		manager,
 		render=SimpleNamespace(),
 		route_ctx=None,
+		route_path="/",
 	)
 	waiter = asyncio.create_task(handle.wait_mounted())
 	await asyncio.sleep(0)
@@ -253,10 +257,12 @@ def test_ref_unmount_handlers_only_after_mount() -> None:
 	handle = Ref()
 	handle.on_unmount(lambda: events.append("unmount"))
 	channel = DummyChannel()
+	manager = RefsManager(cast(Channel, cast(object, channel)))
 	handle.attach(
-		cast(Channel, cast(object, channel)),
+		manager,
 		render=SimpleNamespace(),
 		route_ctx=None,
+		route_path="/",
 	)
 	handle.detach()
 
@@ -266,13 +272,94 @@ def test_ref_unmount_handlers_only_after_mount() -> None:
 def test_ref_channel_close_detaches() -> None:
 	handle = Ref()
 	channel = DummyChannel()
+	manager = RefsManager(cast(Channel, cast(object, channel)))
 	handle.attach(
-		cast(Channel, cast(object, channel)),
+		manager,
 		render=SimpleNamespace(),
 		route_ctx=None,
+		route_path="/",
 	)
-	handle._on_mounted({"refId": handle.id})  # pyright: ignore[reportPrivateUsage]
+	handle._handle_mounted()  # pyright: ignore[reportPrivateUsage]
 	channel.close()
 	assert handle.mounted is False
 	with pytest.raises(RuntimeError, match="Ref is not attached"):
 		_ = handle.channel_id
+
+
+def test_ref_unmount_allows_remount() -> None:
+	events: list[str] = []
+	channel = DummyChannel()
+	manager = RefsManager(cast(Channel, cast(object, channel)))
+	handle = Ref(ref_id="ref-1")
+	handle.on_mount(lambda: events.append("mount"))
+	handle.on_unmount(lambda: events.append("unmount"))
+	manager.begin_render("/")
+	handle.attach(
+		manager,
+		render=SimpleNamespace(),
+		route_ctx=None,
+		route_path="/",
+	)
+	manager.commit_render("/")
+	manager_any = cast(Any, manager)
+	manager_any._on_mounted({"refId": handle.id})
+	manager_any._on_unmounted({"refId": handle.id})
+	assert handle.mounted is False
+	assert handle.channel_id == channel.id
+	manager_any._on_mounted({"refId": handle.id})
+	assert events == ["mount", "unmount", "mount"]
+
+
+def test_ref_removed_from_render_detaches() -> None:
+	events: list[str] = []
+	channel = DummyChannel()
+	manager = RefsManager(cast(Channel, cast(object, channel)))
+	handle = Ref(ref_id="ref-1")
+	handle.on_unmount(lambda: events.append("unmount"))
+	manager.begin_render("/")
+	handle.attach(
+		manager,
+		render=SimpleNamespace(),
+		route_ctx=None,
+		route_path="/",
+	)
+	manager.commit_render("/")
+	manager_any = cast(Any, manager)
+	manager_any._on_mounted({"refId": handle.id})
+	manager.begin_render("/")
+	manager.commit_render("/")
+	assert events == ["unmount"]
+	with pytest.raises(RuntimeError, match="Ref is not attached"):
+		_ = handle.channel_id
+
+
+def test_ref_handler_exception_isolated() -> None:
+	channel = DummyChannel()
+	manager = RefsManager(cast(Channel, cast(object, channel)))
+	bad = Ref(ref_id="ref-bad")
+	good = Ref(ref_id="ref-good")
+	events: list[str] = []
+
+	def boom() -> None:
+		raise ValueError("boom")
+
+	bad.on_mount(boom)
+	good.on_mount(lambda: events.append("ok"))
+	manager.begin_render("/")
+	bad.attach(
+		manager,
+		render=SimpleNamespace(),
+		route_ctx=None,
+		route_path="/",
+	)
+	good.attach(
+		manager,
+		render=SimpleNamespace(),
+		route_ctx=None,
+		route_path="/",
+	)
+	manager.commit_render("/")
+	manager_any = cast(Any, manager)
+	manager_any._on_mounted({"refId": bad.id})
+	manager_any._on_mounted({"refId": good.id})
+	assert events == ["ok"]

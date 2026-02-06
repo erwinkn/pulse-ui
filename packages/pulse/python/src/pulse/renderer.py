@@ -359,6 +359,20 @@ class Renderer:
 		eval_keys: set[str] = set()
 		removed_keys = set(previous.keys()) - set(current.keys())
 
+		def _attach_ref_handle(handle: Ref[Any]) -> str:
+			ctx = PulseContext.get()
+			if ctx.render is None:
+				raise RuntimeError("ref() requires an active render session")
+			route_ctx = ctx.route
+			route_path = route_ctx.pathname if route_ctx is not None else "<root>"
+			handle.attach(
+				ctx.render.get_refs_manager(),
+				render=ctx.render,
+				route_ctx=route_ctx,
+				route_path=route_path,
+			)
+			return f"#ref:{handle.channel_id},{handle.id}"
+
 		for key, value in current.items():
 			old_value = previous.get(key)
 			prop_path = join_path(path, key)
@@ -418,20 +432,10 @@ class Renderer:
 				else:
 					handle = Ref()
 				handle.bind_callback(value)
-				ctx = PulseContext.get()
-				if ctx.render is None:
-					raise RuntimeError("ref() requires an active render session")
-				handle.attach(
-					ctx.render.get_ref_channel(), render=ctx.render, route_ctx=ctx.route
-				)
+				token = _attach_ref_handle(handle)
 				normalized[key] = handle
 				if not (isinstance(old_value, Ref) and values_equal(old_value, handle)):
-					updated[key] = {
-						"__pulse_ref__": {
-							"channelId": handle.channel_id,
-							"refId": handle.id,
-						}
-					}
+					updated[key] = token
 				continue
 
 			if isinstance(value, Ref):
@@ -442,20 +446,10 @@ class Renderer:
 					unmount_element(old_value)
 				if normalized is None:
 					normalized = current.copy()
-				ctx = PulseContext.get()
-				if ctx.render is None:
-					raise RuntimeError("ref() requires an active render session")
-				value.attach(
-					ctx.render.get_ref_channel(), render=ctx.render, route_ctx=ctx.route
-				)
+				token = _attach_ref_handle(value)
 				normalized[key] = value
 				if not (isinstance(old_value, Ref) and values_equal(old_value, value)):
-					updated[key] = {
-						"__pulse_ref__": {
-							"channelId": value.channel_id,
-							"refId": value.id,
-						}
-					}
+					updated[key] = token
 				continue
 			if isinstance(value, Debounced):
 				eval_keys.add(key)

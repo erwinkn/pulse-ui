@@ -20,6 +20,7 @@ from pulse.messages import (
 )
 from pulse.queries.store import QueryStore
 from pulse.reactive import REACTIVE_CONTEXT, Effect, flush_effects
+from pulse.refs import RefsManager
 from pulse.renderer import RenderTree
 from pulse.routing import (
 	Layout,
@@ -259,6 +260,7 @@ class RenderSession:
 	_pending_api: dict[str, asyncio.Future[dict[str, Any]]]
 	_pending_js_results: dict[str, asyncio.Future[Any]]
 	_ref_channel: Channel | None
+	_refs_manager: RefsManager | None
 	_global_states: dict[str, State]
 	_global_queue: list[ServerMessage]
 	_tasks: TaskRegistry
@@ -293,6 +295,7 @@ class RenderSession:
 		self._pending_api = {}
 		self._pending_js_results = {}
 		self._ref_channel = None
+		self._refs_manager = None
 		self._tasks = TaskRegistry(name=f"render:{id}")
 		self._timers = TimerRegistry(tasks=self._tasks, name=f"render:{id}")
 		self.query_store = QueryStore()
@@ -481,6 +484,8 @@ class RenderSession:
 		if current is not mount:
 			return
 		try:
+			if self._refs_manager is not None:
+				self._refs_manager.dispose_route(path)
 			self.route_mounts.pop(path, None)
 			mount.dispose()
 		except Exception as e:
@@ -527,10 +532,16 @@ class RenderSession:
 		with PulseContext.update(
 			session=render_session, render=self, route=mount.route
 		):
+			refs_manager: RefsManager | None = None
+			if render_session is not None:
+				refs_manager = self.get_refs_manager()
+				refs_manager.begin_render(path)
 			try:
 				self._check_render_loop(mount, path)
-				return render_fn()
+				result = render_fn()
 			except RedirectInterrupt as r:
+				if refs_manager is not None:
+					refs_manager.abort_render(path)
 				return ServerNavigateToMessage(
 					type="navigate_to",
 					path=r.path,
@@ -538,6 +549,8 @@ class RenderSession:
 					hard=False,
 				)
 			except NotFoundInterrupt:
+				if refs_manager is not None:
+					refs_manager.abort_render(path)
 				ctx = PulseContext.get()
 				return ServerNavigateToMessage(
 					type="navigate_to",
@@ -545,6 +558,13 @@ class RenderSession:
 					replace=True,
 					hard=False,
 				)
+			except Exception:
+				if refs_manager is not None:
+					refs_manager.abort_render(path)
+				raise
+			if refs_manager is not None:
+				refs_manager.commit_render(path)
+			return result
 
 	def render(
 		self, mount: RouteMount, path: str, *, session: Any | None = None
@@ -581,6 +601,8 @@ class RenderSession:
 		self._timers.cancel_all()
 		self.forms.dispose()
 		self._tasks.cancel_all()
+		if self._refs_manager is not None:
+			self._refs_manager.close()
 		for path in list(self.route_mounts.keys()):
 			self.detach(path, timeout=0)
 		self.route_mounts.clear()
@@ -602,6 +624,7 @@ class RenderSession:
 				fut.cancel()
 		self._pending_js_results.clear()
 		self._ref_channel = None
+		self._refs_manager = None
 		# Close any timer that may have been scheduled during cleanup (ex: query GC)
 		self._timers.cancel_all()
 		self._global_queue = []
@@ -624,10 +647,17 @@ class RenderSession:
 		return inst
 
 	def get_ref_channel(self) -> Channel:
-		if self._ref_channel is not None and not self._ref_channel.closed:
+		if self._ref_channel is None:
+			self._ref_channel = self.channels.create(bind_route=False)
 			return self._ref_channel
-		self._ref_channel = self.channels.create(bind_route=False)
+		if self._ref_channel.closed:
+			raise RuntimeError("Ref channel is closed")
 		return self._ref_channel
+
+	def get_refs_manager(self) -> RefsManager:
+		if self._refs_manager is None:
+			self._refs_manager = RefsManager(self.get_ref_channel())
+		return self._refs_manager
 
 	def flush(self):
 		with PulseContext.update(render=self):

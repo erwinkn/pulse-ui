@@ -9,7 +9,7 @@ import {
 } from "react";
 import type { PulseSocketIOClient } from "./client";
 import type { PulsePrerenderView } from "./pulse";
-import { isPulseRefSpec, RefRegistry } from "./ref";
+import { parseRefToken } from "./ref";
 import { extractEvent } from "./serialize/events";
 import type {
 	ComponentRegistry,
@@ -57,7 +57,6 @@ export class VDOMRenderer {
 	#client: PulseSocketIOClient;
 	#path: string;
 	#registry: ComponentRegistry;
-	#refRegistry: RefRegistry;
 
 	// Track callback entries for teardown.
 	#callbackEntries: Set<CallbackEntry>;
@@ -71,9 +70,6 @@ export class VDOMRenderer {
 		this.#registry = registry;
 		this.#callbackEntries = new Set();
 		this.#metaMap = new WeakMap();
-		this.#refRegistry = new RefRegistry((channelId) => {
-			return this.#client._ensureChannelEntry(channelId).bridge;
-		});
 	}
 
 	getObject(key: string): unknown {
@@ -355,9 +351,9 @@ export class VDOMRenderer {
 	#transformEvalProp(path: string, meta: ElementMeta, prop: string, value: VDOMPropValue) {
 		const cbDelay = parseCallbackPlaceholder(value);
 		if (cbDelay !== undefined) return this.#getCallback(meta, prop, cbDelay);
-		if (isPulseRefSpec(value)) {
-			const payload = value.__pulse_ref__;
-			return this.#refRegistry.getCallback(payload.channelId, payload.refId);
+		if (prop === "ref") {
+			const token = parseRefToken(value);
+			if (token) return this.#client.getRefCallback(token.channelId, token.refId);
 		}
 		if (isExprNode(value)) return this.#evalExpr(value, {});
 		if (typeof value === "object" && value !== null && "tag" in value) {
@@ -433,6 +429,16 @@ export class VDOMRenderer {
 					);
 				}
 			}
+			const refToken = parseRefToken(newProps.ref);
+			if (refToken) {
+				newProps.ref = this.#client.getRefCallback(refToken.channelId, refToken.refId);
+				if (!evalSet) {
+					evalSet = new Set(["ref"]);
+					meta.eval = evalSet;
+				} else if (!evalSet.has("ref")) {
+					evalSet.add("ref");
+				}
+			}
 			if (node.key) newProps.key = node.key;
 
 			// 3. Render children
@@ -465,7 +471,7 @@ export class VDOMRenderer {
 	}
 
 	dispose(): void {
-		this.#refRegistry.dispose();
+		this.clearPendingCallbacks();
 	}
 
 	/**
@@ -565,7 +571,7 @@ export class VDOMRenderer {
 						const prevEval = meta.eval;
 						const prevPath = prevMeta?.path ?? path;
 						const evalPatch = update.data.eval;
-						const nextEval: Set<string> | undefined =
+						let nextEval: Set<string> | undefined =
 							evalPatch === undefined
 								? prevEval
 								: evalPatch.length === 0
@@ -608,7 +614,15 @@ export class VDOMRenderer {
 									this.#dropCallbacksInSubtree(prevValue, this.#propPath(prevPath, k));
 								}
 								// Only interpret eval-marked keys; otherwise treat as JSON.
-								const isEval = nextEval?.has(k) === true;
+								let isEval = nextEval?.has(k) === true;
+								if (!isEval && k === "ref") {
+									const refToken = parseRefToken(v);
+									if (refToken) {
+										nextEval ??= new Set();
+										nextEval.add("ref");
+										isEval = true;
+									}
+								}
 								const cbDelay = isEval ? parseCallbackPlaceholder(v) : undefined;
 								nextProps[k] = isEval
 									? this.#transformEvalProp(path, meta, k, v as any)

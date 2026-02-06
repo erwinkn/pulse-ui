@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import re
 import uuid
 from collections.abc import Callable
-from typing import Any, Generic, Literal, TypeVar, cast, overload, override
+from typing import Any, Generic, Literal, TypeVar, overload, override
 
 from pulse.channel import Channel
 from pulse.context import PULSE_CONTEXT, PulseContext
@@ -13,6 +14,8 @@ from pulse.helpers import Disposable, call_flexible
 from pulse.hooks.core import HOOK_CONTEXT, HookMetadata, HookState, hooks
 from pulse.hooks.state import collect_component_identity
 from pulse.scheduling import create_future, create_task
+
+logger = logging.getLogger(__file__)
 
 T = TypeVar("T")
 Number = int | float
@@ -116,15 +119,13 @@ class Ref(Disposable, Generic[T]):
 		"_channel",
 		"_render",
 		"_route_ctx",
+		"_route_path",
 		"id",
 		"_mounted",
 		"_mount_waiters",
 		"_mount_handlers",
 		"_unmount_handlers",
 		"callback",
-		"_remove_mount",
-		"_remove_unmount",
-		"_remove_close",
 	)
 
 	id: str
@@ -132,27 +133,23 @@ class Ref(Disposable, Generic[T]):
 	_channel: Channel | None
 	_render: Any | None
 	_route_ctx: Any | None
+	_route_path: str | None
 	_mounted: bool
 	_mount_waiters: list[asyncio.Future[None]]
 	_mount_handlers: list[Callable[[], Any]]
 	_unmount_handlers: list[Callable[[], Any]]
-	_remove_mount: Callable[[], None] | None
-	_remove_unmount: Callable[[], None] | None
-	_remove_close: Callable[[], None] | None
 
 	def __init__(self, *, ref_id: str | None = None) -> None:
 		self._channel = None
 		self._render = None
 		self._route_ctx = None
+		self._route_path = None
 		self.id = ref_id or uuid.uuid4().hex
 		self.callback = None
 		self._mounted = False
 		self._mount_waiters = []
 		self._mount_handlers = []
 		self._unmount_handlers = []
-		self._remove_mount = None
-		self._remove_unmount = None
-		self._remove_close = None
 
 	@property
 	def channel_id(self) -> str:
@@ -189,45 +186,32 @@ class Ref(Disposable, Generic[T]):
 	def bind_callback(self, handler: Callable[[Ref[Any] | None], Any]) -> None:
 		self.callback = handler
 
-	def attach(self, channel: Channel, *, render: Any, route_ctx: Any | None) -> None:
+	def attach(
+		self,
+		manager: "RefsManager",
+		*,
+		render: Any,
+		route_ctx: Any | None,
+		route_path: str,
+	) -> None:
+		channel = manager.channel
 		if self._channel is not None:
-			if self._channel is channel:
-				self._render = render
-				self._route_ctx = route_ctx
-				return
-			raise RuntimeError("Ref is already attached to a different channel")
-		self._channel = channel
+			if self._channel is not channel:
+				raise RuntimeError("Ref is already attached to a different channel")
+		else:
+			self._channel = channel
+		if self._route_path is not None and self._route_path != route_path:
+			manager._drop_ref_from_route(self._route_path, self.id)
 		self._render = render
 		self._route_ctx = route_ctx
-		self._remove_mount = channel.on("ref:mounted", self._on_mounted)
-		self._remove_unmount = channel.on("ref:unmounted", self._on_unmounted)
-		self._remove_close = channel.on_close(lambda _reason=None: self.detach())
+		self._route_path = route_path
+		manager.mark_seen(route_path, self)
 
 	def detach(self, *, reason: str | None = None) -> None:
 		_ = reason
 		if self._channel is None:
 			return
-		if self._mounted:
-			self._mounted = False
-			self._run_handlers(self._unmount_handlers, label="unmount")
-			self._run_ref_callback(None, label="ref_callback_unmount")
-		for fut in list(self._mount_waiters):
-			if not fut.done():
-				fut.set_exception(RefNotMounted("Ref detached"))
-		self._mount_waiters.clear()
-		if self._remove_mount is not None:
-			self._remove_mount()
-			self._remove_mount = None
-		if self._remove_unmount is not None:
-			self._remove_unmount()
-			self._remove_unmount = None
-		if self._remove_close is not None:
-			self._remove_close()
-			self._remove_close = None
-		self.callback = None
-		self._channel = None
-		self._render = None
-		self._route_ctx = None
+		self._handle_unmounted(detach=True)
 
 	async def wait_mounted(self, timeout: float | None = None) -> None:
 		if self._mounted:
@@ -750,13 +734,11 @@ class Ref(Disposable, Generic[T]):
 		if not self._mounted:
 			raise RefNotMounted("Ref is not mounted")
 
-	def _on_mounted(self, payload: Any) -> None:
+	def _handle_mounted(self) -> None:
 		if self._channel is None:
 			return
-		if isinstance(payload, dict):
-			ref_id = cast(dict[str, Any], payload).get("refId")
-			if ref_id is not None and str(ref_id) != self.id:
-				return
+		if self._mounted:
+			return
 		self._mounted = True
 		for fut in list(self._mount_waiters):
 			if not fut.done():
@@ -765,14 +747,24 @@ class Ref(Disposable, Generic[T]):
 		self._run_handlers(self._mount_handlers, label="mount")
 		self._run_ref_callback(self, label="ref_callback_mount")
 
-	def _on_unmounted(self, payload: Any) -> None:
+	def _handle_unmounted(self, *, detach: bool) -> None:
 		if self._channel is None:
 			return
-		if isinstance(payload, dict):
-			ref_id = cast(dict[str, Any], payload).get("refId")
-			if ref_id is not None and str(ref_id) != self.id:
-				return
-		self.detach()
+		if self._mounted:
+			self._mounted = False
+			self._run_handlers(self._unmount_handlers, label="unmount")
+			self._run_ref_callback(None, label="ref_callback_unmount")
+		if not detach:
+			return
+		for fut in list(self._mount_waiters):
+			if not fut.done():
+				fut.set_exception(RefNotMounted("Ref detached"))
+		self._mount_waiters.clear()
+		self.callback = None
+		self._channel = None
+		self._render = None
+		self._route_ctx = None
+		self._route_path = None
 
 	def _run_ref_callback(self, value: Ref[Any] | None, *, label: str) -> None:
 		if self.callback is None:
@@ -786,12 +778,28 @@ class Ref(Disposable, Generic[T]):
 		label: str,
 		args: tuple[Any, ...],
 	) -> None:
+		def _report_error(exc: Exception) -> None:
+			try:
+				loop = asyncio.get_running_loop()
+			except RuntimeError:
+				logger.exception(
+					"Unhandled exception in ref %s handler", label, exc_info=exc
+				)
+				return
+			loop.call_exception_handler(
+				{
+					"message": f"Unhandled exception in ref {label} handler",
+					"exception": exc,
+					"context": {"ref_id": self.id, "handler": label},
+				}
+			)
+
 		def _invoke() -> None:
 			try:
 				result = call_flexible(handler, *args)
-			except Exception:
-				# Fail early: propagate on next render via error log if desired
-				raise
+			except Exception as exc:
+				_report_error(exc)
+				return
 			if inspect.isawaitable(result):
 				task = create_task(result, name=f"ref:{self.id}:{label}")
 
@@ -846,6 +854,174 @@ class Ref(Disposable, Generic[T]):
 		if self._channel is None:
 			return f"Ref(id={self.id}, attached=False)"
 		return f"Ref(id={self.id}, channel={self._channel.id})"
+
+
+class RefsManager:
+	__slots__: tuple[str, ...] = (
+		"_channel",
+		"_refs",
+		"_expected_by_route",
+		"_seen_by_route",
+		"_remove_mount",
+		"_remove_unmount",
+		"_remove_close",
+		"_closed",
+	)
+
+	_channel: Channel
+	_refs: dict[str, Ref[Any]]
+	_expected_by_route: dict[str, set[str]]
+	_seen_by_route: dict[str, set[str]]
+	_remove_mount: Callable[[], None] | None
+	_remove_unmount: Callable[[], None] | None
+	_remove_close: Callable[[], None] | None
+	_closed: bool
+
+	def __init__(self, channel: Channel) -> None:
+		self._channel = channel
+		self._refs = {}
+		self._expected_by_route = {}
+		self._seen_by_route = {}
+		self._closed = False
+		self._remove_mount = channel.on("ref:mounted", self._on_mounted)
+		self._remove_unmount = channel.on("ref:unmounted", self._on_unmounted)
+		self._remove_close = channel.on_close(lambda _reason=None: self.close())
+
+	@property
+	def channel(self) -> Channel:
+		return self._channel
+
+	def begin_render(self, route_path: str) -> None:
+		self._seen_by_route[route_path] = set()
+
+	def mark_seen(self, route_path: str, ref: Ref[Any]) -> None:
+		self._register_ref(ref)
+		seen = self._seen_by_route.get(route_path)
+		if seen is None:
+			self._expected_by_route.setdefault(route_path, set()).add(ref.id)
+			return
+		seen.add(ref.id)
+
+	def commit_render(self, route_path: str) -> None:
+		seen = self._seen_by_route.pop(route_path, None)
+		if seen is None:
+			return
+		expected = self._expected_by_route.get(route_path, set())
+		for ref_id in expected - seen:
+			self._detach_ref(ref_id)
+		if seen:
+			self._expected_by_route[route_path] = set(seen)
+		else:
+			self._expected_by_route.pop(route_path, None)
+
+	def abort_render(self, route_path: str) -> None:
+		seen = self._seen_by_route.pop(route_path, None)
+		if seen is None:
+			return
+		expected = self._expected_by_route.get(route_path, set())
+		for ref_id in seen - expected:
+			self._detach_ref(ref_id)
+
+	def dispose_route(self, route_path: str) -> None:
+		expected = self._expected_by_route.pop(route_path, set())
+		seen = self._seen_by_route.pop(route_path, set())
+		for ref_id in expected | seen:
+			self._detach_ref(ref_id)
+
+	def close(self) -> None:
+		if self._closed:
+			return
+		self._closed = True
+		if self._remove_mount is not None:
+			self._remove_mount()
+			self._remove_mount = None
+		if self._remove_unmount is not None:
+			self._remove_unmount()
+			self._remove_unmount = None
+		if self._remove_close is not None:
+			self._remove_close()
+			self._remove_close = None
+		for ref_id in list(self._refs.keys()):
+			self._detach_ref(ref_id)
+		self._expected_by_route.clear()
+		self._seen_by_route.clear()
+
+	def _register_ref(self, ref: Ref[Any]) -> None:
+		existing = self._refs.get(ref.id)
+		if existing is None:
+			self._refs[ref.id] = ref
+			return
+		if existing is not ref:
+			raise RuntimeError(f"Ref id '{ref.id}' is already registered")
+
+	def _drop_ref_from_route(self, route_path: str, ref_id: str) -> None:
+		seen = self._seen_by_route.get(route_path)
+		if seen is not None:
+			seen.discard(ref_id)
+			if not seen:
+				self._seen_by_route.pop(route_path, None)
+		expected = self._expected_by_route.get(route_path)
+		if expected is not None:
+			expected.discard(ref_id)
+			if not expected:
+				self._expected_by_route.pop(route_path, None)
+
+	def _parse_ref_id(self, payload: Any) -> str | None:
+		if not isinstance(payload, dict):
+			return None
+		ref_id = payload.get("refId")
+		if ref_id is None:
+			return None
+		return str(ref_id)
+
+	def _report_ref_error(self, ref_id: str, label: str, exc: Exception) -> None:
+		try:
+			loop = asyncio.get_running_loop()
+		except RuntimeError:
+			logger.exception(
+				"Unhandled exception in ref %s (%s)", ref_id, label, exc_info=exc
+			)
+			return
+		loop.call_exception_handler(
+			{
+				"message": f"Unhandled exception in ref {label} handler",
+				"exception": exc,
+				"context": {"ref_id": ref_id, "handler": label},
+			}
+		)
+
+	def _detach_ref(self, ref_id: str) -> None:
+		ref = self._refs.pop(ref_id, None)
+		if ref is None:
+			return
+		try:
+			ref.detach(reason="refs_manager")
+		except Exception as exc:
+			self._report_ref_error(ref_id, "detach", exc)
+
+	def _on_mounted(self, payload: Any) -> None:
+		ref_id = self._parse_ref_id(payload)
+		if ref_id is None:
+			return
+		ref = self._refs.get(ref_id)
+		if ref is None:
+			return
+		try:
+			ref._handle_mounted()
+		except Exception as exc:
+			self._report_ref_error(ref_id, "mount", exc)
+
+	def _on_unmounted(self, payload: Any) -> None:
+		ref_id = self._parse_ref_id(payload)
+		if ref_id is None:
+			return
+		ref = self._refs.get(ref_id)
+		if ref is None:
+			return
+		try:
+			ref._handle_unmounted(detach=False)
+		except Exception as exc:
+			self._report_ref_error(ref_id, "unmount", exc)
 
 
 class RefHookState(HookState):

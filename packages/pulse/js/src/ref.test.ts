@@ -100,4 +100,19 @@ describe("RefRegistry", () => {
 		registry.dispose();
 		expect(() => registry.getCallback("chan-2", "ref-2")).not.toThrow();
 	});
+
+	it("warns on unknown ref id for call and throws for request", () => {
+		const bridge = new FakeBridge();
+		const registry = new RefRegistry(() => bridge as any);
+		registry.getCallback("chan-1", "ref-1");
+
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		bridge.trigger("ref:call", { refId: "missing", op: "focus", payload: null });
+		expect(warn).toHaveBeenCalled();
+		warn.mockRestore();
+
+		expect(() =>
+			bridge.trigger("ref:request", { refId: "missing", op: "getValue" }),
+		).toThrow("unknown ref id");
+	});
 });

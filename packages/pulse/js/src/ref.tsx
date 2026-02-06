@@ -1,5 +1,4 @@
 import type { ChannelBridge } from "./channel";
-import type { PulseRefSpec } from "./vdom";
 
 type RefPayload = {
 	refId?: string;
@@ -15,6 +14,8 @@ type RefEntry = {
 };
 
 type ChannelBridgeProvider = (channelId: string) => ChannelBridge;
+
+const REF_TOKEN_PREFIX = "#ref:";
 
 const ATTR_ALIASES: Record<string, string> = {
 	className: "class",
@@ -175,8 +176,23 @@ function parseRefPayload(payload: unknown): {
 	};
 }
 
-export function isPulseRefSpec(v: unknown): v is PulseRefSpec {
-	return typeof v === "object" && v !== null && "__pulse_ref__" in (v as any);
+export function parseRefToken(
+	value: unknown,
+): { channelId: string; refId: string } | null {
+	if (typeof value !== "string" || !value.startsWith(REF_TOKEN_PREFIX)) {
+		return null;
+	}
+	const raw = value.slice(REF_TOKEN_PREFIX.length);
+	const comma = raw.indexOf(",");
+	if (comma <= 0 || comma === raw.length - 1) {
+		throw new Error(`[Pulse] Invalid ref token: ${value}`);
+	}
+	const channelId = raw.slice(0, comma);
+	const refId = raw.slice(comma + 1);
+	if (!channelId || !refId) {
+		throw new Error(`[Pulse] Invalid ref token: ${value}`);
+	}
+	return { channelId, refId };
 }
 
 export class RefRegistry {
@@ -272,7 +288,13 @@ export class RefRegistry {
 
 	#perform(refId: string, op: string, payload: any, needsResult: boolean): RefOpResult {
 		const entry = this.#entries.get(refId);
-		const node = entry?.node as any;
+		if (!entry) {
+			const msg = "unknown ref id";
+			if (needsResult) throw new Error(msg);
+			console.warn(`[Pulse] ${msg}`);
+			return null;
+		}
+		const node = entry.node as any;
 		if (!node) {
 			const msg = "ref is not mounted";
 			if (needsResult) throw new Error(msg);

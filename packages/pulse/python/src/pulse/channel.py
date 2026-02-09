@@ -82,11 +82,23 @@ class ChannelsManager:
 
 	# ------------------------------------------------------------------
 	def create(
-		self, identifier: str | None = None, *, bind_route: bool = True
+		self,
+		identifier: str | None = None,
+		*,
+		bind_route: bool = True,
+		render: "RenderSession | None" = None,
+		session: "UserSession | None" = None,
 	) -> "Channel":
-		ctx = PulseContext.get()
-		render = ctx.render
-		session = ctx.session
+		ctx: PulseContext | None = None
+		if render is None or session is None or bind_route:
+			try:
+				ctx = PulseContext.get()
+			except RuntimeError:
+				ctx = None
+		if render is None and ctx is not None:
+			render = ctx.render
+		if session is None and ctx is not None:
+			session = ctx.session
 		if render is None or session is None:
 			raise RuntimeError("Channels require an active render and session")
 
@@ -95,7 +107,7 @@ class ChannelsManager:
 			raise ValueError(f"Channel id '{channel_id}' is already in use")
 
 		route_path: str | None = None
-		if bind_route and ctx.route is not None:
+		if bind_route and ctx is not None and ctx.route is not None:
 			# unique_path() returns absolute path, use as-is for keys
 			route_path = ctx.route.pulse_route.unique_path()
 

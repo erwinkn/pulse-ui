@@ -20,6 +20,24 @@ class DummyRender:
 		self.sent.append(message)
 
 
+def test_channel_create_accepts_explicit_render_and_session() -> None:
+	app = ps.App()
+	session = SimpleNamespace(sid="session-explicit")
+	render = ps.RenderSession("render-explicit", app.routes)
+
+	channel = render.channels.create(
+		"explicit-channel",
+		bind_route=False,
+		render=render,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+	)
+
+	assert channel.id == "explicit-channel"
+	assert channel.render_id == render.id
+	assert channel.session_id == session.sid
+	assert channel.route_path is None
+
+
 @pytest.mark.asyncio
 async def test_channel_emit_sends_message():
 	app = ps.App()

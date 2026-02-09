@@ -259,8 +259,7 @@ class RenderSession:
 	_send_message: Callable[[ServerMessage], Any] | None
 	_pending_api: dict[str, asyncio.Future[dict[str, Any]]]
 	_pending_js_results: dict[str, asyncio.Future[Any]]
-	_ref_channel: Channel | None
-	_refs_manager: RefsManager | None
+	refs: RefsManager | None
 	_global_states: dict[str, State]
 	_global_queue: list[ServerMessage]
 	_tasks: TaskRegistry
@@ -273,6 +272,7 @@ class RenderSession:
 		*,
 		server_address: str | None = None,
 		client_address: str | None = None,
+		session: Any | None = None,
 		prerender_queue_timeout: float = 60.0,
 		detach_queue_timeout: float = 15.0,
 		disconnect_queue_timeout: float = 300.0,
@@ -294,8 +294,11 @@ class RenderSession:
 		self.forms = FormRegistry(self)
 		self._pending_api = {}
 		self._pending_js_results = {}
-		self._ref_channel = None
-		self._refs_manager = None
+		self.refs = (
+			RefsManager(channels=self.channels, render=self, session=session)
+			if session is not None
+			else None
+		)
 		self._tasks = TaskRegistry(name=f"render:{id}")
 		self._timers = TimerRegistry(tasks=self._tasks, name=f"render:{id}")
 		self.query_store = QueryStore()
@@ -484,8 +487,8 @@ class RenderSession:
 		if current is not mount:
 			return
 		try:
-			if self._refs_manager is not None:
-				self._refs_manager.dispose_route(path)
+			if self.refs is not None:
+				self.refs.dispose_route(path)
 			self.route_mounts.pop(path, None)
 			mount.dispose()
 		except Exception as e:
@@ -601,8 +604,8 @@ class RenderSession:
 		self._timers.cancel_all()
 		self.forms.dispose()
 		self._tasks.cancel_all()
-		if self._refs_manager is not None:
-			self._refs_manager.close()
+		if self.refs is not None:
+			self.refs.close()
 		for path in list(self.route_mounts.keys()):
 			self.detach(path, timeout=0)
 		self.route_mounts.clear()
@@ -623,8 +626,7 @@ class RenderSession:
 			if not fut.done():
 				fut.cancel()
 		self._pending_js_results.clear()
-		self._ref_channel = None
-		self._refs_manager = None
+		self.refs = None
 		# Close any timer that may have been scheduled during cleanup (ex: query GC)
 		self._timers.cancel_all()
 		self._global_queue = []
@@ -647,17 +649,18 @@ class RenderSession:
 		return inst
 
 	def get_ref_channel(self) -> Channel:
-		if self._ref_channel is None:
-			self._ref_channel = self.channels.create(bind_route=False)
-			return self._ref_channel
-		if self._ref_channel.closed:
-			raise RuntimeError("Ref channel is closed")
-		return self._ref_channel
+		return self.get_refs_manager().channel
 
 	def get_refs_manager(self) -> RefsManager:
-		if self._refs_manager is None:
-			self._refs_manager = RefsManager(self.get_ref_channel())
-		return self._refs_manager
+		if self.refs is not None:
+			return self.refs
+		ctx = PulseContext.get()
+		if ctx.session is None:
+			raise RuntimeError("RefsManager requires an active user session")
+		self.refs = RefsManager(
+			channels=self.channels, render=self, session=ctx.session
+		)
+		return self.refs
 
 	def flush(self):
 		with PulseContext.update(render=self):

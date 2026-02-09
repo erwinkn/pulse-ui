@@ -1014,6 +1014,7 @@ class App:
 			self.routes,
 			server_address=self.server_address,
 			client_address=client_address,
+			session=session,
 			prerender_queue_timeout=self.prerender_queue_timeout,
 			detach_queue_timeout=self.detach_queue_timeout,
 			disconnect_queue_timeout=self.disconnect_queue_timeout,

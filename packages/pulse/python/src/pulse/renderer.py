@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from types import NoneType
 from typing import Any, NamedTuple, TypeAlias, cast
 
-from pulse.context import PulseContext
 from pulse.debounce import Debounced
 from pulse.helpers import values_equal
 from pulse.hooks.core import HookContext
@@ -359,20 +358,6 @@ class Renderer:
 		eval_keys: set[str] = set()
 		removed_keys = set(previous.keys()) - set(current.keys())
 
-		def _attach_ref_handle(handle: Ref[Any]) -> str:
-			ctx = PulseContext.get()
-			if ctx.render is None:
-				raise RuntimeError("ref() requires an active render session")
-			route_ctx = ctx.route
-			route_path = route_ctx.pathname if route_ctx is not None else "<root>"
-			handle.attach(
-				ctx.render.get_refs_manager(),
-				render=ctx.render,
-				route_ctx=route_ctx,
-				route_path=route_path,
-			)
-			return f"#ref:{handle.channel_id},{handle.id}"
-
 		for key, value in current.items():
 			old_value = previous.get(key)
 			prop_path = join_path(path, key)
@@ -427,12 +412,12 @@ class Renderer:
 					unmount_element(old_value)
 				if normalized is None:
 					normalized = current.copy()
-				if isinstance(old_value, Ref):
+				if isinstance(old_value, Ref) and old_value.callback is value:
 					handle = old_value
 				else:
-					handle = Ref()
-				handle.bind_callback(value)
-				token = _attach_ref_handle(handle)
+					handle = Ref(callback=value)
+				handle.attach()
+				token = handle.serialized_handle
 				normalized[key] = handle
 				if not (isinstance(old_value, Ref) and values_equal(old_value, handle)):
 					updated[key] = token
@@ -446,7 +431,8 @@ class Renderer:
 					unmount_element(old_value)
 				if normalized is None:
 					normalized = current.copy()
-				token = _attach_ref_handle(value)
+				value.attach()
+				token = value.serialized_handle
 				normalized[key] = value
 				if not (isinstance(old_value, Ref) and values_equal(old_value, value)):
 					updated[key] = token

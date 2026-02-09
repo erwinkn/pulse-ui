@@ -82,6 +82,32 @@ def _get_reconciliation_ops(ops: Sequence[Any], path: str = "") -> list[dict[str
 	]
 
 
+def _render_with_ref_lifecycle(
+	render: ps.RenderSession, tree: RenderTree, *, route_path: str = "<root>"
+) -> Any:
+	refs = render.get_refs_manager()
+	refs.begin_render(route_path)
+	try:
+		return tree.render()
+	finally:
+		refs.commit_render(route_path)
+
+
+def _rerender_with_ref_lifecycle(
+	render: ps.RenderSession,
+	tree: RenderTree,
+	node: Any,
+	*,
+	route_path: str = "<root>",
+) -> list[Any]:
+	refs = render.get_refs_manager()
+	refs.begin_render(route_path)
+	try:
+		return tree.rerender(node)
+	finally:
+		refs.commit_render(route_path)
+
+
 class TrackingHookContext(HookContext):
 	did_unmount: bool
 
@@ -1089,7 +1115,7 @@ def test_ref_prop_serializes_with_eval():
 	session: Any = SimpleNamespace(sid="session-ref")
 	with ps.PulseContext(app=app, session=session, render=render):
 		tree = RenderTree(WithRef())
-		vdom = tree.render()
+		vdom = _render_with_ref_lifecycle(render, tree)
 	assert handle is not None
 	assert isinstance(vdom, dict)
 	props = vdom.get("props", {})
@@ -1114,7 +1140,7 @@ def test_ref_outside_render_creates_handle():
 		channel = render.get_ref_channel()
 		handle = ps.ref()
 		tree = RenderTree(WithRef())
-		vdom = tree.render()
+		vdom = _render_with_ref_lifecycle(render, tree)
 
 	assert handle is not None
 	assert isinstance(vdom, dict)
@@ -1147,12 +1173,12 @@ def test_ref_outside_render_handlers_fire():
 	with ps.PulseContext(app=app, session=session, render=render):
 		handle = ps.ref(on_mount=on_mount, on_unmount=on_unmount)
 		tree = RenderTree(WithRef())
-		tree.render()
+		_render_with_ref_lifecycle(render, tree)
 
 	assert handle is not None
 	handle_any = cast(Any, handle)
-	handle_any._handle_mounted()
-	handle_any._handle_unmounted(detach=False)
+	handle_any.handle_mounted()
+	handle_any.handle_unmounted(detach=False)
 	assert events == ["mount", "unmount"]
 
 
@@ -1171,7 +1197,7 @@ def test_ref_callback_serializes_and_invokes():
 	session: Any = SimpleNamespace(sid="session-ref-callback")
 	with ps.PulseContext(app=app, session=session, render=render):
 		tree = RenderTree(WithRef())
-		vdom = tree.render()
+		vdom = _render_with_ref_lifecycle(render, tree)
 
 	assert isinstance(vdom, dict)
 	props = vdom.get("props", {})
@@ -1187,10 +1213,38 @@ def test_ref_callback_serializes_and_invokes():
 	assert isinstance(handle, Ref)
 
 	handle_any = cast(Any, handle)
-	handle_any._handle_mounted()
-	handle_any._handle_unmounted(detach=False)
+	handle_any.handle_mounted()
+	handle_any.handle_unmounted(detach=False)
 
 	assert received == [handle, None]
+
+
+def test_ref_switch_from_handle_to_callback_creates_new_ref():
+	received: list[Ref[Any] | None] = []
+	handle = ps.ref()
+
+	def ref_cb(value: Ref[Any] | None) -> None:
+		received.append(value)
+
+	app = ps.App()
+	render = ps.RenderSession("render-ref-switch-callback", app.routes)
+	session: Any = SimpleNamespace(sid="session-ref-switch-callback")
+	with ps.PulseContext(app=app, session=session, render=render):
+		tree = RenderTree(div(ref=handle))
+		_render_with_ref_lifecycle(render, tree)
+		ops = _rerender_with_ref_lifecycle(render, tree, div(ref=ref_cb))
+
+	assert isinstance(tree.element, Element)
+	next_ref = tree.element.props_dict().get("ref")
+	assert isinstance(next_ref, Ref)
+	assert next_ref is not handle
+	assert next_ref.callback is ref_cb
+	assert handle.callback is None
+	assert any(
+		op["type"] == "update_props"
+		and isinstance(op.get("data", {}).get("set", {}).get("ref"), str)
+		for op in ops
+	)
 
 
 def test_ref_handles_share_session_channel():
@@ -1214,7 +1268,7 @@ def test_ref_handles_share_session_channel():
 	session: Any = SimpleNamespace(sid="session-ref-shared-channel")
 	with ps.PulseContext(app=app, session=session, render=render):
 		tree = RenderTree(div(WithRefA(), WithRefB()))
-		tree.render()
+		_render_with_ref_lifecycle(render, tree)
 
 	assert handle_a is not None
 	assert handle_b is not None
@@ -1309,10 +1363,10 @@ def test_ref_hook_handlers_register():
 	session: Any = SimpleNamespace(sid="session-ref-handlers")
 	with ps.PulseContext(app=app, session=session, render=render):
 		tree = RenderTree(WithRef())
-		tree.render()
+		_render_with_ref_lifecycle(render, tree)
 	assert handle is not None
-	handle._handle_mounted()
-	handle._handle_unmounted(detach=False)
+	handle.handle_mounted()
+	handle.handle_unmounted(detach=False)
 	assert events == ["mount", "unmount"]
 
 
@@ -1344,13 +1398,58 @@ async def test_ref_async_handlers_run():
 	session: Any = SimpleNamespace(sid="session-ref-async-handlers")
 	with ps.PulseContext(app=app, session=session, render=render):
 		tree = RenderTree(WithRef())
-		tree.render()
+		_render_with_ref_lifecycle(render, tree)
 		assert handle is not None
-		handle._handle_mounted()
+		handle.handle_mounted()
 		await asyncio.wait_for(mounted.wait(), timeout=1)
-		handle._handle_unmounted(detach=False)
+		handle.handle_unmounted(detach=False)
 		await asyncio.wait_for(unmounted.wait(), timeout=1)
 	assert events == ["mount", "unmount"]
+
+
+@pytest.mark.asyncio
+async def test_ref_async_unmount_handler_runs_on_render_close_without_context():
+	handle: Ref[Any] | None = None
+	unmounted = asyncio.Event()
+
+	async def on_unmount() -> None:
+		await asyncio.sleep(0)
+		unmounted.set()
+
+	@component
+	def WithRef() -> ps.Element:
+		nonlocal handle
+		handle = ps.ref(on_unmount=on_unmount)
+		return div(ref=handle)
+
+	app = ps.App()
+	render = ps.RenderSession("render-ref-close-async-unmount", app.routes)
+	session: Any = SimpleNamespace(sid="session-ref-close-async-unmount")
+	with ps.PulseContext(app=app, session=session, render=render):
+		tree = RenderTree(WithRef())
+		_render_with_ref_lifecycle(render, tree)
+		assert handle is not None
+		handle.handle_mounted()
+
+	errors: list[dict[str, Any]] = []
+	loop = asyncio.get_running_loop()
+	prev_handler = loop.get_exception_handler()
+
+	def _capture(_loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+		errors.append(context)
+		if prev_handler is not None:
+			prev_handler(_loop, context)
+
+	loop.set_exception_handler(_capture)
+	try:
+		render.close()
+		await asyncio.wait_for(unmounted.wait(), timeout=1)
+	finally:
+		loop.set_exception_handler(prev_handler)
+
+	assert not [
+		ctx for ctx in errors if "ref detach handler" in str(ctx.get("message", ""))
+	]
 
 
 def test_ref_prop_rejects_non_ref_key():

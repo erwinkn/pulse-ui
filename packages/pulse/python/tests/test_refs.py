@@ -54,19 +54,41 @@ class DummyChannel:
 		self.close_handlers.clear()
 
 
+class DummyRender:
+	_manager: RefsManager
+
+	def __init__(self, manager: RefsManager) -> None:
+		self._manager = manager
+
+	def get_refs_manager(self) -> RefsManager:
+		return self._manager
+
+
+def attach_handle(
+	handle: Ref[Any], manager: RefsManager, *, route_path: str = "/"
+) -> None:
+	render = DummyRender(manager)
+	route = SimpleNamespace(pathname=route_path)
+	with ps.PulseContext.update(render=cast(Any, render), route=cast(Any, route)):
+		handle.attach()
+
+
+def attach_handle_in_render_cycle(
+	handle: Ref[Any], manager: RefsManager, *, route_path: str = "/"
+) -> None:
+	manager.begin_render(route_path)
+	attach_handle(handle, manager, route_path=route_path)
+	manager.commit_render(route_path)
+
+
 def make_handle(
 	responses: list[Any] | None = None,
 ) -> tuple[Ref[Any], DummyChannel]:
 	channel = DummyChannel(responses)
 	manager = RefsManager(cast(Channel, cast(object, channel)))
-	handle = Ref(ref_id="ref-1")
-	handle.attach(
-		manager,
-		render=SimpleNamespace(),
-		route_ctx=None,
-		route_path="/",
-	)
-	handle._handle_mounted()  # pyright: ignore[reportPrivateUsage]
+	handle: Ref[Any] = Ref(ref_id="ref-1")
+	attach_handle_in_render_cycle(handle, manager)
+	handle.handle_mounted()
 	return handle, channel
 
 
@@ -233,17 +255,20 @@ def test_ref_can_be_created_without_render_session() -> None:
 	assert isinstance(handle, Ref)
 
 
-@pytest.mark.asyncio
-async def test_ref_detach_cancels_waiters() -> None:
-	handle = Ref()
+def test_ref_attach_requires_begin_render() -> None:
+	handle: Ref[Any] = Ref()
 	channel = DummyChannel()
 	manager = RefsManager(cast(Channel, cast(object, channel)))
-	handle.attach(
-		manager,
-		render=SimpleNamespace(),
-		route_ctx=None,
-		route_path="/",
-	)
+	with pytest.raises(RuntimeError, match="begin_render\\(\\) must be called"):
+		attach_handle(handle, manager)
+
+
+@pytest.mark.asyncio
+async def test_ref_detach_cancels_waiters() -> None:
+	handle: Ref[Any] = Ref()
+	channel = DummyChannel()
+	manager = RefsManager(cast(Channel, cast(object, channel)))
+	attach_handle_in_render_cycle(handle, manager)
 	waiter = asyncio.create_task(handle.wait_mounted())
 	await asyncio.sleep(0)
 	handle.detach()
@@ -254,32 +279,22 @@ async def test_ref_detach_cancels_waiters() -> None:
 def test_ref_unmount_handlers_only_after_mount() -> None:
 	events: list[str] = []
 
-	handle = Ref()
+	handle: Ref[Any] = Ref()
 	handle.on_unmount(lambda: events.append("unmount"))
 	channel = DummyChannel()
 	manager = RefsManager(cast(Channel, cast(object, channel)))
-	handle.attach(
-		manager,
-		render=SimpleNamespace(),
-		route_ctx=None,
-		route_path="/",
-	)
+	attach_handle_in_render_cycle(handle, manager)
 	handle.detach()
 
 	assert events == []
 
 
 def test_ref_channel_close_detaches() -> None:
-	handle = Ref()
+	handle: Ref[Any] = Ref()
 	channel = DummyChannel()
 	manager = RefsManager(cast(Channel, cast(object, channel)))
-	handle.attach(
-		manager,
-		render=SimpleNamespace(),
-		route_ctx=None,
-		route_path="/",
-	)
-	handle._handle_mounted()  # pyright: ignore[reportPrivateUsage]
+	attach_handle_in_render_cycle(handle, manager)
+	handle.handle_mounted()
 	channel.close()
 	assert handle.mounted is False
 	with pytest.raises(RuntimeError, match="Ref is not attached"):
@@ -290,16 +305,11 @@ def test_ref_unmount_allows_remount() -> None:
 	events: list[str] = []
 	channel = DummyChannel()
 	manager = RefsManager(cast(Channel, cast(object, channel)))
-	handle = Ref(ref_id="ref-1")
+	handle: Ref[Any] = Ref(ref_id="ref-1")
 	handle.on_mount(lambda: events.append("mount"))
 	handle.on_unmount(lambda: events.append("unmount"))
 	manager.begin_render("/")
-	handle.attach(
-		manager,
-		render=SimpleNamespace(),
-		route_ctx=None,
-		route_path="/",
-	)
+	attach_handle(handle, manager)
 	manager.commit_render("/")
 	manager_any = cast(Any, manager)
 	manager_any._on_mounted({"refId": handle.id})
@@ -314,15 +324,10 @@ def test_ref_removed_from_render_detaches() -> None:
 	events: list[str] = []
 	channel = DummyChannel()
 	manager = RefsManager(cast(Channel, cast(object, channel)))
-	handle = Ref(ref_id="ref-1")
+	handle: Ref[Any] = Ref(ref_id="ref-1")
 	handle.on_unmount(lambda: events.append("unmount"))
 	manager.begin_render("/")
-	handle.attach(
-		manager,
-		render=SimpleNamespace(),
-		route_ctx=None,
-		route_path="/",
-	)
+	attach_handle(handle, manager)
 	manager.commit_render("/")
 	manager_any = cast(Any, manager)
 	manager_any._on_mounted({"refId": handle.id})
@@ -333,11 +338,34 @@ def test_ref_removed_from_render_detaches() -> None:
 		_ = handle.channel_id
 
 
+def test_ref_route_move_drops_previous_route_tracking() -> None:
+	channel = DummyChannel()
+	manager = RefsManager(cast(Channel, cast(object, channel)))
+	handle: Ref[Any] = Ref(ref_id="ref-1")
+
+	manager.begin_render("/a")
+	attach_handle(handle, manager, route_path="/a")
+	manager.commit_render("/a")
+
+	manager.begin_render("/b")
+	attach_handle(handle, manager, route_path="/b")
+	manager.commit_render("/b")
+
+	manager.begin_render("/a")
+	manager.commit_render("/a")
+	assert handle.channel_id == channel.id
+
+	manager.begin_render("/b")
+	manager.commit_render("/b")
+	with pytest.raises(RuntimeError, match="Ref is not attached"):
+		_ = handle.channel_id
+
+
 def test_ref_handler_exception_isolated() -> None:
 	channel = DummyChannel()
 	manager = RefsManager(cast(Channel, cast(object, channel)))
-	bad = Ref(ref_id="ref-bad")
-	good = Ref(ref_id="ref-good")
+	bad: Ref[Any] = Ref(ref_id="ref-bad")
+	good: Ref[Any] = Ref(ref_id="ref-good")
 	events: list[str] = []
 
 	def boom() -> None:
@@ -346,20 +374,18 @@ def test_ref_handler_exception_isolated() -> None:
 	bad.on_mount(boom)
 	good.on_mount(lambda: events.append("ok"))
 	manager.begin_render("/")
-	bad.attach(
-		manager,
-		render=SimpleNamespace(),
-		route_ctx=None,
-		route_path="/",
-	)
-	good.attach(
-		manager,
-		render=SimpleNamespace(),
-		route_ctx=None,
-		route_path="/",
-	)
+	attach_handle(bad, manager)
+	attach_handle(good, manager)
 	manager.commit_render("/")
 	manager_any = cast(Any, manager)
 	manager_any._on_mounted({"refId": bad.id})
 	manager_any._on_mounted({"refId": good.id})
 	assert events == ["ok"]
+
+
+def test_ref_serialized_handle_property() -> None:
+	handle: Ref[Any] = Ref(ref_id="ref-1")
+	channel = DummyChannel()
+	manager = RefsManager(cast(Channel, cast(object, channel)))
+	attach_handle_in_render_cycle(handle, manager)
+	assert handle.serialized_handle == "#ref:chan-test,ref-1"

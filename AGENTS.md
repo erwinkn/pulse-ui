@@ -27,6 +27,16 @@ Full-stack Python framework for interactive web apps. Runs on React with WebSock
 - Avoid single-use helpers (except for sequential task orchestration)
 - Avoid `typing.TYPE_CHECKING` and non-global imports unless avoiding import cycles
 
+## Code Architecture
+
+- Keep one owner per invariant/state machine. Put lifecycle transitions in that owner.
+- Avoid pass-through wrappers (`a()` just calls `b()`) unless they enforce a boundary/API.
+- If a helper is only called once, inline it unless it substantially improves readability.
+- Avoid public/private duplicate pairs with same behavior (`foo` + `_foo`); keep one path.
+- Merge duplicated event pipelines into one dispatch helper when logic is same.
+- Prefer explicit lifecycle contracts over fallback branches that mask ordering bugs.
+- When simplifying, remove old wrapper/compat paths in same change (don’t keep both).
+
 ## Commands
 
 ```bash

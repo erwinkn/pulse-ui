@@ -7,6 +7,7 @@ that updates from one session do not leak into the other.
 """
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any, cast, override
 
 import pulse as ps
@@ -68,6 +69,17 @@ def make_route_info(pathname: str) -> RouteInfo:
 		"pathParams": {},
 		"catchall": [],
 	}
+
+
+def test_render_session_eager_refs_manager_with_session() -> None:
+	routes = make_routes()
+	session = SimpleNamespace(sid="session-eager-refs")
+	render = RenderSession("render-eager-refs", routes, session=cast(Any, session))
+
+	manager = render.get_refs_manager()
+	assert render.refs is manager
+	assert manager.channel.render_id == render.id
+	assert manager.channel.session_id == session.sid
 
 
 def transition_mount_to_idle(session: RenderSession, path: str) -> None:

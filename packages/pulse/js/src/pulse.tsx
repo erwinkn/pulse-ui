@@ -10,8 +10,13 @@ import {
 } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
+import {
+	getActiveServerErrorOverlayEntry,
+	INITIAL_SERVER_ERROR_OVERLAY_STATE,
+	reduceServerErrorOverlay,
+	ServerErrorOverlay,
+} from "./errorOverlay";
 import type { RouteInfo } from "./helpers";
-import type { ServerError } from "./messages";
 import { VDOMRenderer } from "./renderer";
 import type { VDOM } from "./vdom";
 
@@ -39,32 +44,6 @@ export type PulsePrerender = {
 	views: Record<string, PulsePrerenderView>;
 	directives: Directives;
 };
-
-type ServerErrorOverlayAction =
-	| {
-			type: "init";
-	  }
-	| {
-			type: "update";
-	  }
-	| {
-			type: "error";
-			error: ServerError;
-	  };
-
-export function reduceServerErrorOverlay(
-	current: ServerError | null,
-	action: ServerErrorOverlayAction,
-): ServerError | null {
-	switch (action.type) {
-		case "init":
-			return null;
-		case "update":
-			return current;
-		case "error":
-			return action.error;
-	}
-}
 
 // =================================================================
 // Context and Hooks
@@ -105,6 +84,7 @@ export interface PulseProviderProps {
 }
 
 const inBrowser = typeof window !== "undefined";
+const showDevServerErrorOverlay = process.env.NODE_ENV !== "production";
 
 export function PulseProvider({ children, config, prerender }: PulseProviderProps) {
 	const [status, setStatus] = useState<ConnectionStatus>("ok");
@@ -198,7 +178,10 @@ export function PulseView({ path, registry }: PulseViewProps) {
 		[client, path, registry],
 	);
 	const [tree, setTree] = useState<ReactNode>(() => renderer.init(initialView));
-	const [serverError, dispatchServerError] = useReducer(reduceServerErrorOverlay, null);
+	const [serverError, dispatchServerError] = useReducer(
+		reduceServerErrorOverlay,
+		INITIAL_SERVER_ERROR_OVERLAY_STATE,
+	);
 
 	const location = useLocation();
 	const params = useParams();
@@ -247,6 +230,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 					client.sendJsResult(msg.id, result, error);
 				},
 				onServerError: (error) => {
+					if (!showDevServerErrorOverlay) return;
 					dispatchServerError({ type: "error", error });
 				},
 			});
@@ -281,57 +265,25 @@ export function PulseView({ path, registry }: PulseViewProps) {
 		// not just on unmount, which would cause subsequent runs to skip setTree.
 	}, [initialView, renderer]);
 
+	const activeEntry = getActiveServerErrorOverlayEntry(serverError);
+	const canGoPrevious = serverError.activeIndex > 0;
+	const canGoNext = serverError.activeIndex < serverError.entries.length - 1;
+
 	return (
 		<>
 			{tree}
-			{serverError && <ServerErrorOverlay error={serverError} />}
+			{showDevServerErrorOverlay && serverError.isOpen && activeEntry && (
+				<ServerErrorOverlay
+					entry={activeEntry}
+					activeIndex={serverError.activeIndex}
+					errorCount={serverError.entries.length}
+					onClose={() => dispatchServerError({ type: "dismiss" })}
+					onPrevious={
+						canGoPrevious ? () => dispatchServerError({ type: "previous" }) : undefined
+					}
+					onNext={canGoNext ? () => dispatchServerError({ type: "next" }) : undefined}
+				/>
+			)}
 		</>
-	);
-}
-
-function ServerErrorOverlay({ error }: { error: ServerError }) {
-	return (
-		<div
-			style={{
-				position: "fixed",
-				inset: 0,
-				padding: 24,
-				background: "rgba(10, 10, 10, 0.45)",
-				zIndex: 2147483647,
-				overflow: "auto",
-			}}
-		>
-			<div
-				style={{
-					maxWidth: 960,
-					margin: "24px auto",
-					padding: 16,
-					border: "1px solid #e00",
-					background: "#fff5f5",
-					color: "#900",
-					boxShadow: "0 12px 36px rgba(0, 0, 0, 0.45)",
-					fontFamily:
-						'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-					whiteSpace: "pre-wrap",
-				}}
-			>
-				<div style={{ fontWeight: 700, marginBottom: 8 }}>Server Error: {error.code}</div>
-				{error.message && <div>{error.message}</div>}
-				{error.stack && (
-					<details open style={{ marginTop: 8 }}>
-						<summary>Stack trace</summary>
-						<pre
-							style={{
-								margin: 0,
-								maxHeight: "65vh",
-								overflow: "auto",
-							}}
-						>
-							{error.stack}
-						</pre>
-					</details>
-				)}
-			</div>
-		</div>
 	);
 }

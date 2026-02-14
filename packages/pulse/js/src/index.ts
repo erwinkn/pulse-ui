@@ -38,8 +38,14 @@ export type {
 	ServerUpdateMessage,
 } from "./messages";
 export type { PulseConfig, PulsePrerender, PulseProviderProps } from "./pulse";
+export type {
+	ServerErrorOverlayEntry,
+	ServerErrorOverlayProps,
+	ServerErrorOverlayState,
+} from "./errorOverlay";
 // Core React bindings
 export { PulseProvider, PulseView, usePulseClient } from "./pulse";
+export { reduceServerErrorOverlay, ServerErrorOverlay } from "./errorOverlay";
 // Renderer helpers
 // Renderer (structural expressions + eval-keyed props)
 export { VDOMRenderer } from "./renderer";

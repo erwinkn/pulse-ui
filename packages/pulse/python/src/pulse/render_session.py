@@ -1,6 +1,4 @@
 import asyncio
-import logging
-import traceback
 import uuid
 from asyncio import iscoroutine
 from collections.abc import Awaitable, Callable
@@ -11,7 +9,6 @@ from pulse.context import PulseContext
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import (
 	ServerApiCallMessage,
-	ServerErrorPhase,
 	ServerInitMessage,
 	ServerJsExecMessage,
 	ServerMessage,
@@ -43,8 +40,6 @@ from pulse.transpiler.nodes import Expr
 if TYPE_CHECKING:
 	from pulse.channel import ChannelsManager
 	from pulse.forms import FormRegistry
-
-logger = logging.getLogger(__file__)
 
 
 class JsExecError(Exception):
@@ -215,13 +210,14 @@ class RouteMount:
 				self.render.send(message)
 
 		def _report_render_error(exc: Exception) -> None:
-			details: dict[str, Any] | None = None
+			details: dict[str, Any] = {"path": self.path}
+			code = "render"
 			if isinstance(exc, RenderLoopError):
-				details = {
-					"renders": exc.renders,
-					"batch_id": exc.batch_id,
-				}
-			self.render.report_error(self.path, "render", exc, details)
+				code = "render.loop"
+				details["renders"] = exc.renders
+				details["batch_id"] = exc.batch_id
+			with PulseContext.update(render=self.render, route=self.route):
+				PulseContext.get().errors.report(exc, code=code, details=details)
 
 		self.effect = Effect(
 			_render_effect,
@@ -319,11 +315,6 @@ class RenderSession:
 			raise RuntimeError("Client address not set")
 		return self._client_address
 
-	def _on_effect_error(self, effect: Effect, exc: Exception):
-		details = {"effect": effect.name or "<unnamed>"}
-		for path in list(self.route_mounts.keys()):
-			self.report_error(path, "effect", exc, details)
-
 	# ---- Connection lifecycle ----
 
 	def connect(self, send_message: Callable[[ServerMessage], Any]):
@@ -379,33 +370,6 @@ class RenderSession:
 		if mount.state == "pending":
 			mount.deliver(message, lambda _: None)
 		# idle: drop (effect should be paused anyway)
-
-	def report_error(
-		self,
-		path: str,
-		phase: ServerErrorPhase,
-		exc: BaseException,
-		details: dict[str, Any] | None = None,
-	):
-		self.send(
-			{
-				"type": "server_error",
-				"path": path,
-				"error": {
-					"message": str(exc),
-					"stack": traceback.format_exc(),
-					"phase": phase,
-					"details": details or {},
-				},
-			}
-		)
-		logger.error(
-			"Error reported for path %r during %s: %s\n%s",
-			path,
-			phase,
-			exc,
-			traceback.format_exc(),
-		)
 
 	# ---- State transitions ----
 
@@ -476,11 +440,18 @@ class RenderSession:
 	def update_route(self, path: str, route_info: RouteInfo):
 		"""Update routing state (query params, etc.) for attached path."""
 		path = ensure_absolute_path(path)
+		mount = self.route_mounts.get(path)
 		try:
-			mount = self.get_route_mount(path)
+			if mount is None:
+				raise ValueError(f"No active route for '{path}'")
 			mount.update_route(route_info)
-		except Exception as e:
-			self.report_error(path, "navigate", e)
+		except Exception as exc:
+			with PulseContext.update(render=self, route=mount.route if mount else None):
+				PulseContext.get().errors.report(
+					exc,
+					code="navigate",
+					details={"path": path},
+				)
 
 	def dispose_mount(self, path: str, mount: RouteMount) -> None:
 		current = self.route_mounts.get(path)
@@ -491,8 +462,13 @@ class RenderSession:
 				self.refs.dispose_route(path)
 			self.route_mounts.pop(path, None)
 			mount.dispose()
-		except Exception as e:
-			self.report_error(path, "unmount", e)
+		except Exception as exc:
+			with PulseContext.update(render=self, route=mount.route):
+				PulseContext.get().errors.report(
+					exc,
+					code="ref.unmount",
+					details={"path": path},
+				)
 
 	def detach(self, path: str, *, timeout: float | None = None):
 		"""Client no longer wants updates. Queue briefly, then dispose."""
@@ -692,8 +668,13 @@ class RenderSession:
 		mount = self.route_mounts[path]
 		cb = mount.tree.callbacks[key]
 
-		def report(e: BaseException, is_async: bool = False):
-			self.report_error(path, "callback", e, {"callback": key, "async": is_async})
+		def report(exc: BaseException, is_async: bool = False) -> None:
+			with PulseContext.update(render=self, route=mount.route):
+				PulseContext.get().errors.report(
+					exc,
+					code="callback",
+					details={"path": path, "callback": key, "async": is_async},
+				)
 
 		try:
 			with PulseContext.update(render=self, route=mount.route):
@@ -711,8 +692,8 @@ class RenderSession:
 							report(exc, True)
 
 					self.create_task(res, name=f"callback:{key}", on_done=_on_done)
-		except Exception as e:
-			report(e)
+		except Exception as exc:
+			report(exc)
 
 	# ---- API calls ----
 

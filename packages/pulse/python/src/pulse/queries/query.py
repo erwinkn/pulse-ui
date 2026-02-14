@@ -49,6 +49,14 @@ TState = TypeVar("TState", bound=State)
 RETRY_DELAY_DEFAULT = 2.0 if not is_pytest() else 0.01
 
 
+def _report_query_handler_error(exc: BaseException, *, handler: str) -> None:
+	PulseContext.get().errors.report(
+		exc,
+		code="query.handler",
+		details={"handler": handler},
+	)
+
+
 @dataclass(slots=True)
 class QueryConfig(Generic[T]):
 	"""Configuration options for a query.
@@ -242,8 +250,11 @@ async def run_fetch_with_retries(
 				result = await fetch_fn()
 			state.set_success(result)
 			if on_success:
-				with Untrack():
-					await maybe_await(call_flexible(on_success, result))
+				try:
+					with Untrack():
+						await maybe_await(call_flexible(on_success, result))
+				except Exception as handler_exc:
+					_report_query_handler_error(handler_exc, handler="on_success")
 			return
 		except asyncio.CancelledError:
 			raise
@@ -256,8 +267,11 @@ async def run_fetch_with_retries(
 				state.retry_reason.write(e)
 				state.apply_error(e)
 				if on_error:
-					with Untrack():
-						await maybe_await(call_flexible(on_error, e))
+					try:
+						with Untrack():
+							await maybe_await(call_flexible(on_error, e))
+					except Exception as handler_exc:
+						_report_query_handler_error(handler_exc, handler="on_error")
 				return
 
 
@@ -377,12 +391,18 @@ class KeyedQuery(Generic[T], Disposable):
 		async def on_success(result: T):
 			for obs in observers:
 				if obs._on_success:  # pyright: ignore[reportPrivateUsage]
-					await maybe_await(call_flexible(obs._on_success, result))  # pyright: ignore[reportPrivateUsage]
+					try:
+						await maybe_await(call_flexible(obs._on_success, result))  # pyright: ignore[reportPrivateUsage]
+					except Exception as handler_exc:
+						_report_query_handler_error(handler_exc, handler="on_success")
 
 		async def on_error(e: Exception):
 			for obs in observers:
 				if obs._on_error:  # pyright: ignore[reportPrivateUsage]
-					await maybe_await(call_flexible(obs._on_error, e))  # pyright: ignore[reportPrivateUsage]
+					try:
+						await maybe_await(call_flexible(obs._on_error, e))  # pyright: ignore[reportPrivateUsage]
+					except Exception as handler_exc:
+						_report_query_handler_error(handler_exc, handler="on_error")
 
 		await run_fetch_with_retries(
 			self.state,

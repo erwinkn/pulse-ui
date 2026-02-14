@@ -199,10 +199,22 @@ class ChannelsManager:
 				):
 					result = await channel.dispatch(event, payload, request_id)
 			except Exception as exc:
+				with PulseContext.update(
+					session=session,
+					render=render,
+					route=route_ctx,
+				):
+					PulseContext.get().errors.report(
+						exc,
+						code="channel",
+						details={
+							"channel": channel.id,
+							"event": event,
+							"request_id": request_id,
+						},
+					)
 				if request_id:
 					self._send_error_response(channel.id, request_id, str(exc))
-				else:
-					logger.exception("Unhandled error in channel handler")
 				return
 
 			if request_id:
@@ -340,8 +352,8 @@ class ChannelsManager:
 				channel=channel,
 				msg=msg,
 			)
-		except Exception:
-			print(f"Failed to send close notification for channel {channel.id}")
+		except Exception as exc:
+			channel.report_error(exc, handler="close_notify")
 
 	def send_to_client(
 		self,
@@ -456,8 +468,8 @@ class Channel:
 		if self.closed:
 			try:
 				handler("closed")
-			except Exception:
-				logger.exception("Error in channel close handler")
+			except Exception as exc:
+				self.report_error(exc, handler="close")
 			return lambda: None
 		self._close_handlers.append(handler)
 
@@ -476,8 +488,8 @@ class Channel:
 		for handler in list(self._close_handlers):
 			try:
 				handler(reason)
-			except Exception:
-				logger.exception("Error in channel close handler")
+			except Exception as exc:
+				self.report_error(exc, handler="close")
 		self._close_handlers.clear()
 
 	# ---------------------------------------------------------------------
@@ -600,15 +612,45 @@ class Channel:
 				if asyncio.iscoroutine(result):
 					result = await result
 			except Exception as exc:
-				logger.exception(
-					"Error in channel handler '%s' for event '%s'", self.id, event
+				self.report_error(
+					exc,
+					handler="event",
+					event=event,
+					request_id=request_id,
 				)
-				raise exc
+				raise
 			if request_id is not None and result is not None:
 				return result
 			if result is not None:
 				last_result = result
 		return last_result
+
+	def _route_context(self):
+		if self.route_path is None:
+			return None
+		try:
+			return self._manager._render_session.get_route_mount(self.route_path).route  # pyright: ignore[reportPrivateUsage]
+		except Exception:
+			return None
+
+	def report_error(
+		self,
+		exc: BaseException,
+		*,
+		handler: str,
+		event: str | None = None,
+		request_id: str | None = None,
+	) -> None:
+		details: dict[str, Any] = {"channel": self.id, "handler": handler}
+		if event is not None:
+			details["event"] = event
+		if request_id is not None:
+			details["request_id"] = request_id
+		with PulseContext.update(
+			render=self._manager._render_session,  # pyright: ignore[reportPrivateUsage]
+			route=self._route_context(),
+		):
+			PulseContext.get().errors.report(exc, code="channel", details=details)
 
 
 def channel(identifier: str | None = None) -> Channel:

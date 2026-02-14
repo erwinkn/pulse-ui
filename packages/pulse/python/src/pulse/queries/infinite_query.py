@@ -309,8 +309,18 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 
 		for obs in self._observers:
 			if obs._on_success is not None:  # pyright: ignore[reportPrivateUsage]
-				with Untrack():
-					await maybe_await(call_flexible(obs._on_success, self.pages))  # pyright: ignore[reportPrivateUsage]
+				try:
+					with Untrack():
+						await maybe_await(call_flexible(obs._on_success, self.pages))  # pyright: ignore[reportPrivateUsage]
+				except Exception as handler_exc:
+					PulseContext.get().errors.report(
+						handler_exc,
+						code="query.handler",
+						details={
+							"handler": "on_success",
+							"query": str(self.key),
+						},
+					)
 
 	async def _commit_error(self, error: Exception):
 		"""Commit error state and run error callbacks."""
@@ -318,8 +328,18 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 
 		for obs in self._observers:
 			if obs._on_error is not None:  # pyright: ignore[reportPrivateUsage]
-				with Untrack():
-					await maybe_await(call_flexible(obs._on_error, error))  # pyright: ignore[reportPrivateUsage]
+				try:
+					with Untrack():
+						await maybe_await(call_flexible(obs._on_error, error))  # pyright: ignore[reportPrivateUsage]
+				except Exception as handler_exc:
+					PulseContext.get().errors.report(
+						handler_exc,
+						code="query.handler",
+						details={
+							"handler": "on_error",
+							"query": str(self.key),
+						},
+					)
 
 	def _commit_sync(self):
 		"""Synchronous commit - updates state based on current pages."""

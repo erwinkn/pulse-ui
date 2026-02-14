@@ -188,7 +188,15 @@ class FormRegistry(Disposable):
 			) from exc
 
 		with PulseContext.update(render=self._render, route=mount.route):
-			await call_flexible(registration.on_submit, data)
+			try:
+				await call_flexible(registration.on_submit, data)
+			except Exception as exc:
+				PulseContext.get().errors.report(
+					exc,
+					code="form",
+					details={"form_id": form_id, "route_path": registration.route_path},
+				)
+				raise
 
 		return Response(status_code=204)
 

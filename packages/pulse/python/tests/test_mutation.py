@@ -237,3 +237,51 @@ async def test_mutation_with_parameters():
 
 	# Check data property
 	assert mutation.data == 9
+
+
+@pytest.mark.asyncio
+async def test_mutation_on_success_handler_failure_reports_mutation_handler_code(
+	caplog: pytest.LogCaptureFixture,
+):
+	class S(ps.State):
+		@ps.mutation
+		async def run(self) -> int:
+			return 1
+
+		@run.on_success
+		def _on_success(self, _value: int):
+			raise RuntimeError("mutation_success_handler_fail")
+
+	routes = RouteTree([])
+	session = RenderSession("test-session", routes)
+	with ps.PulseContext.update(render=session):
+		s = S()
+		with caplog.at_level("ERROR"):
+			result = await s.run()
+
+	assert result == 1
+	assert any("code=mutation.handler" in rec.getMessage() for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_mutation_on_error_handler_failure_reports_mutation_handler_code(
+	caplog: pytest.LogCaptureFixture,
+):
+	class S(ps.State):
+		@ps.mutation
+		async def run(self) -> int:
+			raise RuntimeError("mutation_fail")
+
+		@run.on_error
+		def _on_error(self, _error: Exception):
+			raise RuntimeError("mutation_error_handler_fail")
+
+	routes = RouteTree([])
+	session = RenderSession("test-session", routes)
+	with ps.PulseContext.update(render=session):
+		s = S()
+		with caplog.at_level("ERROR"):
+			with pytest.raises(RuntimeError, match="mutation_fail"):
+				await s.run()
+
+	assert any("code=mutation.handler" in rec.getMessage() for rec in caplog.records)

@@ -51,6 +51,39 @@ export interface PulseClient {
 	detach(path: string): void;
 }
 
+function normalizeRoutePath(path: string): string {
+	if (path.length === 0) return "/";
+	if (path === "/") return "/";
+	const trimmed = path.replace(/\/+$/, "");
+	return trimmed.length > 0 ? trimmed : "/";
+}
+
+export function resolveServerErrorViewPath(
+	path: string | undefined,
+	activePaths: readonly string[],
+): string | undefined {
+	if (path !== undefined) {
+		if (activePaths.includes(path)) {
+			return path;
+		}
+
+		const normalized = normalizeRoutePath(path);
+		if (activePaths.includes(normalized)) {
+			return normalized;
+		}
+
+		if (normalized === "/" && activePaths.includes("")) {
+			return "";
+		}
+	}
+
+	if (activePaths.length === 1) {
+		return activePaths[0];
+	}
+
+	return undefined;
+}
+
 export class PulseSocketIOClient {
 	#activeViews: Map<string, MountedView>;
 	#socket: Socket | null = null;
@@ -297,8 +330,25 @@ export class PulseSocketIOClient {
 				break;
 			}
 			case "server_error": {
-				const route = this.#activeViews.get(message.path);
-				if (!route) return; // discard for inactive paths
+				const activePaths = [...this.#activeViews.keys()];
+				const resolvedPath = resolveServerErrorViewPath(message.path, activePaths);
+				if (resolvedPath === undefined) {
+					console.error(
+						"Server error could not be routed to an active view:",
+						message.error,
+						{ path: message.path, activePaths },
+					);
+					break;
+				}
+				const route = this.#activeViews.get(resolvedPath);
+				if (!route) {
+					console.error("Resolved route missing for server error:", {
+						path: message.path,
+						resolvedPath,
+						activePaths,
+					});
+					break;
+				}
 				route.onServerError(message.error);
 				break;
 			}

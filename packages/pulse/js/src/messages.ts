@@ -18,16 +18,41 @@ export interface ServerUpdateMessage {
 	ops: VDOMUpdate[];
 }
 
+export type ErrorCode =
+	| "render"
+	| "render.loop"
+	| "callback"
+	| "navigate"
+	| "ref.mount"
+	| "ref.unmount"
+	| "timer.later"
+	| "timer.repeat"
+	| "channel"
+	| "form"
+	| "api"
+	| "middleware.prerender"
+	| "middleware.connect"
+	| "middleware.message"
+	| "middleware.channel"
+	| "setup"
+	| "init"
+	| "plugin.startup"
+	| "plugin.setup"
+	| "plugin.shutdown"
+	| "query.handler"
+	| "mutation.handler"
+	| "system";
+
 export interface ServerError {
 	message: string;
 	stack?: string;
-	phase: "render" | "callback" | "mount" | "unmount" | "navigate" | "server";
+	code: ErrorCode;
 	details?: Record<string, any>;
 }
 
 export interface ServerErrorMessage {
 	type: "server_error";
-	path: string;
+	path?: string;
 	error: ServerError;
 }
 

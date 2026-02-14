@@ -1485,3 +1485,26 @@ async def test_attach_from_idle_requests_reload():
 	assert messages[0]["type"] == "reload"
 
 	session.close()
+
+
+def test_execute_callback_error_reports_callback_code():
+	def broken_component():
+		def explode():
+			raise RuntimeError("callback-boom")
+
+		return ps.button("x", onClick=explode)
+
+	routes = RouteTree([Route("a", ps.component(broken_component))])
+	session = RenderSession("callback-error", routes)
+	messages, disconnect = mount_with_listener(session, "/a")
+
+	key = next(iter(session.route_mounts["/a"].tree.callbacks))
+	session.execute_callback("/a", key, [])
+
+	server_errors = [m for m in messages if m.get("type") == "server_error"]
+	assert len(server_errors) == 1
+	assert server_errors[0]["error"]["code"] == "callback"
+	assert server_errors[0]["error"]["details"]["callback"] == key
+
+	disconnect()
+	session.close()

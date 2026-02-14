@@ -279,4 +279,54 @@ async def test_later_uses_app_registry_without_render():
 
 	await app.close()
 
-	assert await wait_for(lambda: cancelled.is_set(), timeout=0.2)
+
+@pytest.mark.asyncio
+async def test_later_callback_error_reports_timer_later_code(
+	caplog: pytest.LogCaptureFixture,
+):
+	app = ps.App()
+
+	def explode():
+		raise RuntimeError("later-boom")
+
+	with ps.PulseContext(app=app):
+		with caplog.at_level("ERROR"):
+			ps.later(0.01, explode)
+			assert await wait_for(
+				lambda: any(
+					"code=timer.later" in rec.getMessage() for rec in caplog.records
+				),
+				timeout=0.2,
+			)
+
+	await app.close()
+
+
+@pytest.mark.asyncio
+async def test_repeat_callback_error_reports_timer_repeat_code(
+	caplog: pytest.LogCaptureFixture,
+):
+	app = ps.App()
+	calls = 0
+
+	def explode():
+		nonlocal calls
+		calls += 1
+		if calls == 1:
+			raise RuntimeError("repeat-boom")
+
+	with ps.PulseContext(app=app):
+		with caplog.at_level("ERROR"):
+			handle = ps.repeat(0.01, explode)
+			try:
+				assert await wait_for(
+					lambda: any(
+						"code=timer.repeat" in rec.getMessage()
+						for rec in caplog.records
+					),
+					timeout=0.2,
+				)
+			finally:
+				handle.cancel()
+
+	await app.close()

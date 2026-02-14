@@ -1,12 +1,37 @@
 import asyncio
+import logging
 import os
 from collections.abc import Awaitable, Callable
 from typing import Any, ParamSpec, Protocol, TypeVar, override
 
 from anyio import from_thread
 
+from pulse.errors import ErrorCode
+
 T = TypeVar("T")
 P = ParamSpec("P")
+
+logger = logging.getLogger(__name__)
+
+
+def _report_timer_error(
+	exc: BaseException,
+	*,
+	code: ErrorCode,
+	message: str,
+	details: dict[str, Any],
+) -> None:
+	try:
+		from pulse.context import PulseContext
+
+		PulseContext.get().errors.report(
+			exc,
+			code=code,
+			message=message,
+			details=details,
+		)
+	except RuntimeError:
+		logger.exception(message, exc_info=exc)
 
 
 class TimerHandleLike(Protocol):
@@ -222,7 +247,6 @@ class TimerRegistry:
 	) -> RepeatHandle:
 		from pulse.reactive import Untrack
 
-		loop = asyncio.get_running_loop()
 		handle = RepeatHandle()
 
 		async def _runner():
@@ -242,13 +266,11 @@ class TimerRegistry:
 						# Propagate to outer handler to finish cleanly
 						raise
 					except Exception as exc:
-						# Surface exceptions via the loop's exception handler and continue
-						loop.call_exception_handler(
-							{
-								"message": "Unhandled exception in repeat() callback",
-								"exception": exc,
-								"context": {"callback": fn},
-							}
+						_report_timer_error(
+							exc,
+							code="timer.repeat",
+							message="Unhandled exception in repeat() callback",
+							details={"callback": repr(fn)},
 						)
 			except asyncio.CancelledError:
 				# Swallow task cancellation to avoid noisy "exception was never retrieved"
@@ -288,7 +310,7 @@ class TimerRegistry:
 				raise RuntimeError("later() requires an event loop") from exc
 
 		tracked_box: list[TimerHandleLike] = []
-		_run = self._prepare_run(loop, tracked_box, fn, args, kwargs, untrack=untrack)
+		_run = self._prepare_run(tracked_box, fn, args, kwargs, untrack=untrack)
 
 		handle = loop.call_later(delay, _run)
 		tracked = _TrackedTimerHandle(handle, self)
@@ -311,7 +333,7 @@ class TimerRegistry:
 				raise RuntimeError("call_soon() requires an event loop") from exc
 
 		tracked_box: list[TimerHandleLike] = []
-		_run = self._prepare_run(loop, tracked_box, fn, args, kwargs, untrack=False)
+		_run = self._prepare_run(tracked_box, fn, args, kwargs, untrack=False)
 
 		handle = loop.call_soon(_run)
 		tracked = _TrackedHandle(handle, self, when=loop.time())
@@ -321,7 +343,6 @@ class TimerRegistry:
 
 	def _prepare_run(
 		self,
-		loop: asyncio.AbstractEventLoop,
 		tracked_box: list[TimerHandleLike],
 		fn: Callable[..., Any],
 		args: tuple[Any, ...],
@@ -348,23 +369,20 @@ class TimerRegistry:
 							# Normal cancellation path
 							pass
 						except Exception as exc:
-							loop.call_exception_handler(
-								{
-									"message": "Unhandled exception in later() task",
-									"exception": exc,
-									"context": {"callback": fn},
-								}
+							_report_timer_error(
+								exc,
+								code="timer.later",
+								message="Unhandled exception in later() task",
+								details={"callback": repr(fn)},
 							)
 
 					task.add_done_callback(_log_task_exception)
 			except Exception as exc:
-				# Surface exceptions via the loop's exception handler and continue
-				loop.call_exception_handler(
-					{
-						"message": "Unhandled exception in later() callback",
-						"exception": exc,
-						"context": {"callback": fn},
-					}
+				_report_timer_error(
+					exc,
+					code="timer.later",
+					message="Unhandled exception in later() callback",
+					details={"callback": repr(fn)},
 				)
 			finally:
 				self.discard(tracked_box[0] if tracked_box else None)

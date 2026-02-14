@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import logging
 import re
 import uuid
 from collections.abc import Callable
@@ -30,8 +29,6 @@ if TYPE_CHECKING:
 	from pulse.render_session import RenderSession
 	from pulse.routing import RouteContext
 	from pulse.user_session import UserSession
-
-logger = logging.getLogger(__file__)
 
 T = TypeVar("T")
 Number = int | float
@@ -118,6 +115,12 @@ def _validate_prop_name(name: str, *, settable: bool) -> str:
 	if settable and trimmed not in _SETTABLE_PROPS:
 		raise ValueError(f"Ref property is read-only: {trimmed}")
 	return trimmed
+
+
+def _ref_error_code(label: str) -> Literal["ref.mount", "ref.unmount"]:
+	if "mount" in label and "unmount" not in label:
+		return "ref.mount"
+	return "ref.unmount"
 
 
 class RefNotMounted(RuntimeError):
@@ -832,20 +835,12 @@ class Ref(Disposable, Generic[T]):
 			)
 
 		def _report_error(exc: Exception) -> None:
-			try:
-				loop = asyncio.get_running_loop()
-			except RuntimeError:
-				logger.exception(
-					"Unhandled exception in ref %s handler", label, exc_info=exc
+			with PulseContext.update(render=render, route=self._route_ctx):
+				PulseContext.get().errors.report(
+					exc,
+					code=_ref_error_code(label),
+					details={"ref_id": self.id, "handler": label},
 				)
-				return
-			loop.call_exception_handler(
-				{
-					"message": f"Unhandled exception in ref {label} handler",
-					"exception": exc,
-					"context": {"ref_id": self.id, "handler": label},
-				}
-			)
 
 		def _invoke() -> None:
 			try:
@@ -864,14 +859,7 @@ class Ref(Disposable, Generic[T]):
 					except asyncio.CancelledError:
 						return
 					except Exception as exc:
-						loop = done_task.get_loop()
-						loop.call_exception_handler(
-							{
-								"message": f"Unhandled exception in ref {label} handler",
-								"exception": exc,
-								"context": {"ref_id": self.id, "handler": label},
-							}
-						)
+						_report_error(exc)
 
 				task.add_done_callback(_on_done)
 
@@ -1060,21 +1048,21 @@ class RefsManager:
 			return None
 		return str(ref_id)
 
-	def _report_ref_error(self, ref_id: str, label: str, exc: Exception) -> None:
-		try:
-			loop = asyncio.get_running_loop()
-		except RuntimeError:
-			logger.exception(
-				"Unhandled exception in ref %s (%s)", ref_id, label, exc_info=exc
+	def _report_ref_error(
+		self,
+		ref: Ref[Any] | None,
+		ref_id: str,
+		label: str,
+		exc: Exception,
+	) -> None:
+		render = ref._render if ref is not None else None  # pyright: ignore[reportPrivateUsage]
+		route = ref._route_ctx if ref is not None else None  # pyright: ignore[reportPrivateUsage]
+		with PulseContext.update(render=render, route=route):
+			PulseContext.get().errors.report(
+				exc,
+				code=_ref_error_code(label),
+				details={"ref_id": ref_id, "handler": label},
 			)
-			return
-		loop.call_exception_handler(
-			{
-				"message": f"Unhandled exception in ref {label} handler",
-				"exception": exc,
-				"context": {"ref_id": ref_id, "handler": label},
-			}
-		)
 
 	def _detach_ref(self, ref_id: str) -> None:
 		ref = self._refs.pop(ref_id, None)
@@ -1083,7 +1071,7 @@ class RefsManager:
 		try:
 			ref.detach(reason="refs_manager")
 		except Exception as exc:
-			self._report_ref_error(ref_id, "detach", exc)
+			self._report_ref_error(ref, ref_id, "detach", exc)
 
 	def _dispatch_ref_event(
 		self, payload: Any, *, event: Literal["mount", "unmount"]
@@ -1100,7 +1088,7 @@ class RefsManager:
 			else:
 				ref.handle_unmounted(detach=False)
 		except Exception as exc:
-			self._report_ref_error(ref_id, event, exc)
+			self._report_ref_error(ref, ref_id, event, exc)
 
 	def _on_mounted(self, payload: Any) -> None:
 		self._dispatch_ref_event(payload, event="mount")

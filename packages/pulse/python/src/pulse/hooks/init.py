@@ -134,6 +134,13 @@ class InitContext:
 			assert self.callsite is not None, "callsite  None"
 			storage = _init_hook().storage
 			storage[self.callsite] = {"vars": captured}
+		elif exc_value is not None:
+			from pulse.context import PulseContext
+
+			PulseContext.get().errors.report(
+				exc_value,
+				code="init",
+			)
 		self.frame = None
 		return False
 

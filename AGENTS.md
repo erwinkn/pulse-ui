@@ -26,6 +26,8 @@ Full-stack Python framework for interactive web apps. Runs on React with WebSock
 - No backwards compatibility unless instructed
 - Avoid single-use helpers (except for sequential task orchestration)
 - Avoid `typing.TYPE_CHECKING` and non-global imports unless avoiding import cycles
+- Avoid trivial property wrappers; use straightforward public attributes unless logic/validation is required.
+- Do not expose internal sentinel defaults in public types; keep sentinels implementation-only.
 
 ## Code Architecture
 

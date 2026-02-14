@@ -8,6 +8,7 @@ AI coding assistant skills for Pulse development. These files help AI tools unde
 |-------|-------------|
 | [pulse](./pulse/SKILL.md) | Complete Pulse framework reference with reactive state, components, routing, queries, channels, and JS interop |
 | [pulse-mantine](./pulse-mantine/SKILL.md) | Mantine UI components for Pulse |
+| [anti-pattern](./anti-pattern/SKILL.md) | Enforces anti-pattern workflow: add one-line prevention rule to AGENTS.md first, then implement the fix |
 
 ### Pulse Skill Structure
 

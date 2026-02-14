@@ -24,6 +24,7 @@ export type {
 	ClientChannelResponseMessage,
 	ClientDetachMessage,
 	ClientMessage,
+	ErrorCode,
 	ClientUpdateMessage,
 	ServerApiCallMessage,
 	ServerChannelMessage,

@@ -10,6 +10,7 @@ from typing import (
 	override,
 )
 
+from pulse.context import PulseContext
 from pulse.helpers import call_flexible, maybe_await
 from pulse.queries.common import OnErrorFn, OnSuccessFn, bind_state
 from pulse.reactive import Signal
@@ -96,13 +97,33 @@ class MutationResult(Generic[T, P]):
 			mutation_result = await self._fn(*args, **kwargs)
 			self._data.write(mutation_result)
 			if self._on_success:
-				await maybe_await(call_flexible(self._on_success, mutation_result))
+				try:
+					await maybe_await(call_flexible(self._on_success, mutation_result))
+				except Exception as handler_exc:
+					PulseContext.get().errors.report(
+						handler_exc,
+						code="mutation.handler",
+						details={
+							"handler": "on_success",
+							"mutation": getattr(self._fn, "__name__", "<unknown>"),
+						},
+					)
 			return mutation_result
-		except Exception as e:
-			self._error.write(e)
+		except Exception as exc:
+			self._error.write(exc)
 			if self._on_error:
-				await maybe_await(call_flexible(self._on_error, e))
-			raise e
+				try:
+					await maybe_await(call_flexible(self._on_error, exc))
+				except Exception as handler_exc:
+					PulseContext.get().errors.report(
+						handler_exc,
+						code="mutation.handler",
+						details={
+							"handler": "on_error",
+							"mutation": getattr(self._fn, "__name__", "<unknown>"),
+						},
+					)
+			raise
 		finally:
 			self._is_running.write(False)
 

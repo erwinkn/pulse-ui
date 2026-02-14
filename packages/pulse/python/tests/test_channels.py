@@ -180,3 +180,50 @@ async def test_channel_pending_cancelled_on_render_close():
 	real_render.close()
 	with pytest.raises(ChannelClosed):
 		await pending
+
+
+@pytest.mark.asyncio
+async def test_channel_handler_error_reports_channel_code(
+	caplog: pytest.LogCaptureFixture,
+):
+	app = ps.App()
+	render = DummyRender()
+	session = SimpleNamespace(sid="session-error")
+	real_render = ps.RenderSession(render.id, app.routes)
+	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
+
+	app.render_sessions[render.id] = real_render
+	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
+	app.user_sessions[session.sid] = session  # pyright: ignore[reportArgumentType]
+
+	with ps.PulseContext(
+		app=app,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		render=real_render,
+	):
+		channel = real_render.channels.create("error-channel")
+
+		def explode(_payload: Any):
+			raise RuntimeError("boom")
+
+		channel.on("explode", explode)
+
+	with caplog.at_level("ERROR"):
+		with ps.PulseContext(
+			app=app,
+			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+			render=real_render,
+		):
+			real_render.channels.handle_client_event(
+				render=real_render,
+				session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+				message={
+					"type": "channel_message",
+					"channel": "error-channel",
+					"event": "explode",
+					"payload": None,
+				},
+			)
+		await asyncio.sleep(0)
+
+	assert any("code=channel" in rec.getMessage() for rec in caplog.records)

@@ -323,6 +323,7 @@ class App:
 			mw_stack.extend(plugin.middleware())
 
 		self.middleware = MiddlewareStack(mw_stack)
+		PULSE_CONTEXT.set(PulseContext(app=self))
 
 	@asynccontextmanager
 	async def fastapi_lifespan(self, _: FastAPI):
@@ -334,7 +335,16 @@ class App:
 
 		# Call plugin on_startup hooks before serving
 		for plugin in self.plugins:
-			plugin.on_startup(self)
+			try:
+				plugin.on_startup(self)
+			except Exception as exc:
+				with PulseContext.update():
+					PulseContext.get().errors.report(
+						exc,
+						code="plugin.startup",
+						details={"plugin": plugin.__class__.__name__},
+					)
+				raise
 
 		if self.mode == "single-server":
 			react_server_address = envvars.react_server_address
@@ -470,7 +480,6 @@ class App:
 			return
 
 		self.server_address = server_address
-		PULSE_CONTEXT.set(PulseContext(app=self))
 
 		hooks.lock()
 
@@ -509,22 +518,63 @@ class App:
 			)
 			render_id = request.headers.get("x-pulse-render-id")
 			render = self._get_render_for_session(render_id, session)
+			if render is None and render_id:
+				render = self.render_sessions.get(render_id)
 			try:
 				with PulseContext.update(session=session, render=render):
-					res: Response = await call_next(request)
+					try:
+						res: Response = await call_next(request)
+					except RuntimeError as exc:
+						# Client disconnected before response was sent. This happens when
+						# ASGI handlers (like the proxy) return early on disconnect without
+						# sending a response, which is valid ASGI but breaks BaseHTTPMiddleware.
+						if "No response returned" in str(exc):
+							return Response(status_code=499)
+						raise
 				session.handle_response(res)
 				return res
-			except RuntimeError as exc:
-				# Client disconnected before response was sent. This happens when
-				# ASGI handlers (like the proxy) return early on disconnect without
-				# sending a response, which is valid ASGI but breaks BaseHTTPMiddleware.
-				if "No response returned" in str(exc):
-					return Response(status_code=499)
-				raise
 			finally:
 				self._sessions_in_request[session.sid] -= 1
 				if self._sessions_in_request[session.sid] == 0:
 					del self._sessions_in_request[session.sid]
+
+		@self.fastapi.exception_handler(Exception)
+		async def unhandled_api_exception(  # pyright: ignore[reportUnusedFunction]
+			request: Request, exc: Exception
+		) -> Response:
+			try:
+				ctx = PulseContext.get()
+				render = ctx.render
+				route = ctx.route
+
+				exc_render_id = getattr(exc, "__pulse_render_id__", None)
+				if render is None and isinstance(exc_render_id, str):
+					render = self.render_sessions.get(exc_render_id)
+
+				exc_route_path = getattr(exc, "__pulse_route_path__", None)
+				if (
+					route is None
+					and isinstance(exc_route_path, str)
+					and render is not None
+				):
+					mount = render.route_mounts.get(exc_route_path)
+					if mount is not None:
+						route = mount.route
+
+				with PulseContext.update(render=render, route=route):
+					PulseContext.get().errors.report(
+						exc,
+						code="api",
+						details={
+							"method": request.method,
+							"endpoint": request.url.path,
+						},
+					)
+			except RuntimeError:
+				logger.exception(
+					"Unhandled API exception outside PulseContext", exc_info=exc
+				)
+			return Response(status_code=500)
 
 		# Apply prefix to all routes
 		prefix = self.api_prefix
@@ -620,12 +670,20 @@ class App:
 
 					return Ok(result_data)
 
-				result = await self.middleware.prerender(
-					payload=payload,
-					request=PulseRequest.from_fastapi(request),
-					session=session.data,
-					next=_process_routes,
-				)
+				try:
+					result = await self.middleware.prerender(
+						payload=payload,
+						request=PulseRequest.from_fastapi(request),
+						session=session.data,
+						next=_process_routes,
+					)
+				except Exception as exc:
+					PulseContext.get().errors.report(
+						exc,
+						code="middleware.prerender",
+						details={"paths": list(paths)},
+					)
+					raise
 
 			# Handle redirect/notFound responses
 			if isinstance(result, Redirect):
@@ -662,7 +720,16 @@ class App:
 
 		# Call on_setup hooks after FastAPI routes/middleware are in place
 		for plugin in self.plugins:
-			plugin.on_setup(self)
+			try:
+				plugin.on_setup(self)
+			except Exception as exc:
+				with PulseContext.update():
+					PulseContext.get().errors.report(
+						exc,
+						code="plugin.setup",
+						details={"plugin": plugin.__class__.__name__},
+					)
+				raise
 
 		# In single-server mode, add catch-all route to proxy unmatched requests to React server.
 		# This route must be registered last so FastAPI tries all specific routes first.
@@ -757,7 +824,11 @@ class App:
 					)
 					res = _normalize_connect_response(res)
 				except Exception as exc:
-					render.report_error("/", "connect", exc)
+					PulseContext.get().errors.report(
+						exc,
+						code="middleware.connect",
+						details={"sid": sid},
+					)
 					res = Ok(None)
 				if isinstance(res, Deny):
 					# Tear down the created session if denied
@@ -792,9 +863,17 @@ class App:
 					await self._handle_channel_message(render, session, msg)
 				else:
 					await self._handle_pulse_message(render, session, msg)
-			except Exception as e:
-				path = msg.get("path", "")
-				render.report_error(path, "server", e)
+			except Exception as exc:
+				with PulseContext.update(session=session, render=render):
+					PulseContext.get().errors.report(
+						exc,
+						code="system",
+						details={
+							"surface": "socket.message",
+							"message_type": msg.get("type"),
+							"path": msg.get("path"),
+						},
+					)
 
 		self.status = AppStatus.initialized
 
@@ -868,17 +947,23 @@ class App:
 					next=_next,
 				)
 				res = _normalize_message_response(res)
-			except Exception:
-				logger.exception("Error in message middleware")
+			except Exception as exc:
+				PulseContext.get().errors.report(
+					exc,
+					code="middleware.message",
+					details={"message_type": msg.get("type"), "path": msg.get("path")},
+				)
 				return
 
 			if isinstance(res, Deny):
-				path = cast(str, msg.get("path", "api_response"))
-				render.report_error(
-					path,
-					"server",
+				PulseContext.get().errors.report(
 					Exception("Request denied by server"),
-					{"kind": "deny"},
+					code="middleware.message",
+					details={
+						"kind": "deny",
+						"path": msg.get("path"),
+						"message_type": msg.get("type"),
+					},
 				)
 
 	async def _handle_channel_message(
@@ -904,15 +989,29 @@ class App:
 				return Ok(None)
 
 			with PulseContext.update(session=session, render=render):
-				res = await self.middleware.channel(
-					channel_id=channel_id,
-					event=msg.get("event", ""),
-					payload=msg.get("payload"),
-					request_id=msg.get("requestId"),
-					session=session.data,
-					next=_next,
-				)
-				res = _normalize_message_response(res)
+				try:
+					res = await self.middleware.channel(
+						channel_id=channel_id,
+						event=msg.get("event", ""),
+						payload=msg.get("payload"),
+						request_id=msg.get("requestId"),
+						session=session.data,
+						next=_next,
+					)
+					res = _normalize_message_response(res)
+				except Exception as exc:
+					PulseContext.get().errors.report(
+						exc,
+						code="middleware.channel",
+						details={
+							"channel": channel_id,
+							"event": msg.get("event"),
+							"request_id": msg.get("requestId"),
+						},
+					)
+					if req_id := msg.get("requestId"):
+						render.channels.send_error(channel_id, req_id, str(exc))
+					return
 
 			if isinstance(res, Deny):
 				if req_id := msg.get("requestId"):
@@ -1083,8 +1182,13 @@ class App:
 		for plugin in self.plugins:
 			try:
 				plugin.on_shutdown(self)
-			except Exception:
-				logger.exception("Error during plugin.on_shutdown()")
+			except Exception as exc:
+				with PulseContext.update():
+					PulseContext.get().errors.report(
+						exc,
+						code="plugin.shutdown",
+						details={"plugin": plugin.__class__.__name__},
+					)
 
 	def refresh_cookies(self, sid: str):
 		# If the session is currently inside an HTTP request, we don't need to schedule

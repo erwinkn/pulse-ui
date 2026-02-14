@@ -1,9 +1,10 @@
 # pyright: reportImportCycles=false
 from contextvars import ContextVar, Token
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import TracebackType
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
+from pulse.errors import Errors
 from pulse.routing import RouteContext
 
 if TYPE_CHECKING:
@@ -39,7 +40,11 @@ class PulseContext:
 	session: "UserSession | None" = None
 	render: "RenderSession | None" = None
 	route: "RouteContext | None" = None
+	errors: Errors = field(init=False, repr=False)
 	_token: "Token[PulseContext | None] | None" = None
+
+	def __post_init__(self) -> None:
+		self.errors = Errors(self)
 
 	@classmethod
 	def get(cls) -> "PulseContext":
@@ -59,9 +64,7 @@ class PulseContext:
 	@classmethod
 	def update(
 		cls,
-		session: "UserSession | None" = None,
-		render: "RenderSession | None" = None,
-		route: "RouteContext | None" = None,
+		**kwargs: Any,
 	) -> "PulseContext":
 		"""Create a new context with updated values.
 
@@ -75,12 +78,20 @@ class PulseContext:
 		Returns:
 			New PulseContext instance with updated values.
 		"""
+		invalid = set(kwargs) - {"session", "render", "route"}
+		if invalid:
+			key = next(iter(invalid))
+			raise TypeError(f"update() got an unexpected keyword argument '{key}'")
+
 		ctx = cls.get()
+		session = kwargs["session"] if "session" in kwargs else ctx.session
+		render = kwargs["render"] if "render" in kwargs else ctx.render
+		route = kwargs["route"] if "route" in kwargs else ctx.route
 		return PulseContext(
 			app=ctx.app,
-			session=session or ctx.session,
-			render=render or ctx.render,
-			route=route or ctx.route,
+			session=session,
+			render=render,
+			route=route,
 		)
 
 	def __enter__(self):
@@ -93,6 +104,30 @@ class PulseContext:
 		exc_val: BaseException | None = None,
 		exc_tb: TracebackType | None = None,
 	) -> Literal[False]:
+		if exc_val is not None:
+			render = self.render
+			route = self.route
+			render_id = getattr(render, "id", None) if render is not None else None
+			route_path: str | None = None
+			if route is not None:
+				pulse_route = getattr(route, "pulse_route", None)
+				if pulse_route is not None and hasattr(pulse_route, "unique_path"):
+					route_path = pulse_route.unique_path()
+				else:
+					try:
+						route_path = str(route.pathname)
+					except AttributeError:
+						route_path = None
+			if render_id is not None:
+				try:
+					exc_val.__pulse_render_id__ = render_id  # pyright: ignore[reportAttributeAccessIssue]
+				except Exception:
+					pass
+			if route_path is not None:
+				try:
+					exc_val.__pulse_route_path__ = route_path  # pyright: ignore[reportAttributeAccessIssue]
+				except Exception:
+					pass
 		if self._token is not None:
 			PULSE_CONTEXT.reset(self._token)
 			self._token = None

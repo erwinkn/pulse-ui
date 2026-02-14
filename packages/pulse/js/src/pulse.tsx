@@ -4,6 +4,7 @@ import {
 	useContext,
 	useEffect,
 	useMemo,
+	useReducer,
 	useRef,
 	useState,
 } from "react";
@@ -38,6 +39,33 @@ export type PulsePrerender = {
 	views: Record<string, PulsePrerenderView>;
 	directives: Directives;
 };
+
+type ServerErrorOverlayAction =
+	| {
+			type: "init";
+	  }
+	| {
+			type: "update";
+	  }
+	| {
+			type: "error";
+			error: ServerError;
+	  };
+
+export function reduceServerErrorOverlay(
+	current: ServerError | null,
+	action: ServerErrorOverlayAction,
+): ServerError | null {
+	switch (action.type) {
+		case "init":
+			return null;
+		case "update":
+			return current;
+		case "error":
+			return action.error;
+	}
+}
+
 // =================================================================
 // Context and Hooks
 // =================================================================
@@ -170,7 +198,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 		[client, path, registry],
 	);
 	const [tree, setTree] = useState<ReactNode>(() => renderer.init(initialView));
-	const [serverError, setServerError] = useState<ServerError | null>(null);
+	const [serverError, dispatchServerError] = useReducer(reduceServerErrorOverlay, null);
 
 	const location = useLocation();
 	const params = useParams();
@@ -202,11 +230,11 @@ export function PulseView({ path, registry }: PulseViewProps) {
 				routeInfo,
 				onInit: (view) => {
 					setTree(renderer.init(view));
-					setServerError(null);
+					dispatchServerError({ type: "init" });
 				},
 				onUpdate: (ops) => {
 					setTree((prev) => (prev == null ? prev : renderer.applyUpdates(prev, ops)));
-					setServerError(null);
+					dispatchServerError({ type: "update" });
 				},
 				onJsExec: (msg) => {
 					let result: any;
@@ -218,7 +246,9 @@ export function PulseView({ path, registry }: PulseViewProps) {
 					}
 					client.sendJsResult(msg.id, result, error);
 				},
-				onServerError: setServerError,
+				onServerError: (error) => {
+					dispatchServerError({ type: "error", error });
+				},
 			});
 			return () => {
 				renderer.clearPendingCallbacks();
@@ -244,40 +274,64 @@ export function PulseView({ path, registry }: PulseViewProps) {
 		// 2nd+ rendering pass. Happens when a route stays mounted on navigation.
 		else {
 			setTree(renderer.init(initialView));
+			dispatchServerError({ type: "init" });
 		}
 		// Note: Do NOT reset hasRendered in cleanup. The cleanup runs when effect 
 		// deps change and at least once on mount with strict mode,
 		// not just on unmount, which would cause subsequent runs to skip setTree.
 	}, [initialView, renderer]);
 
-	if (serverError) {
-		return <ServerErrorPopup error={serverError} />;
-	}
-
-	return tree;
+	return (
+		<>
+			{tree}
+			{serverError && <ServerErrorOverlay error={serverError} />}
+		</>
+	);
 }
 
-function ServerErrorPopup({ error }: { error: ServerError }) {
+function ServerErrorOverlay({ error }: { error: ServerError }) {
 	return (
 		<div
 			style={{
-				padding: 16,
-				border: "1px solid #e00",
-				background: "#fff5f5",
-				color: "#900",
-				fontFamily:
-					'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-				whiteSpace: "pre-wrap",
+				position: "fixed",
+				inset: 0,
+				padding: 24,
+				background: "rgba(10, 10, 10, 0.45)",
+				zIndex: 2147483647,
+				overflow: "auto",
 			}}
 		>
-			<div style={{ fontWeight: 700, marginBottom: 8 }}>Server Error during {error.phase}</div>
-			{error.message && <div>{error.message}</div>}
-			{error.stack && (
-				<details open style={{ marginTop: 8 }}>
-					<summary>Stack trace</summary>
-					<pre style={{ margin: 0 }}>{error.stack}</pre>
-				</details>
-			)}
+			<div
+				style={{
+					maxWidth: 960,
+					margin: "24px auto",
+					padding: 16,
+					border: "1px solid #e00",
+					background: "#fff5f5",
+					color: "#900",
+					boxShadow: "0 12px 36px rgba(0, 0, 0, 0.45)",
+					fontFamily:
+						'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+					whiteSpace: "pre-wrap",
+				}}
+			>
+				<div style={{ fontWeight: 700, marginBottom: 8 }}>Server Error: {error.code}</div>
+				{error.message && <div>{error.message}</div>}
+				{error.stack && (
+					<details open style={{ marginTop: 8 }}>
+						<summary>Stack trace</summary>
+						<pre
+							style={{
+								margin: 0,
+								maxHeight: "65vh",
+								overflow: "auto",
+							}}
+						>
+							{error.stack}
+						</pre>
+					</details>
+				)}
+			</div>
 		</div>
 	);
 }

@@ -10,6 +10,7 @@ Full-stack Python framework for interactive web apps. Runs on React with WebSock
 - If dependencies are not installed, run `make sync`
 - Run `make test` after implementing
 - Run `make all` before committing
+- After changing JS source in `packages/pulse/js/src`, rerun `cd packages/pulse/js && bun run build` so `dist/` matches source.
 - Check `examples/` for usage patterns
 - Use `make bump` for changing package versions
 - When using a framework/library, do not make assumptions, fetch latest docs (using context7 for example)

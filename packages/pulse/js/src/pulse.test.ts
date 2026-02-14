@@ -1,31 +1,27 @@
 import { describe, expect, it } from "bun:test";
+import { INITIAL_SERVER_ERROR_OVERLAY_STATE, reduceServerErrorOverlay } from "./errorOverlay";
 import type { ServerError } from "./messages";
-import { reduceServerErrorOverlay } from "./pulse";
 
 function makeError(code: ServerError["code"], message: string): ServerError {
 	return { code, message };
 }
 
-describe("reduceServerErrorOverlay", () => {
-	it("keeps the current error across vdom updates", () => {
-		const current = makeError("callback", "callback failed");
-		const next = reduceServerErrorOverlay(current, { type: "update" });
-		expect(next).toBe(current);
-	});
-
-	it("clears the current error on init", () => {
-		const current = makeError("render", "render failed");
-		const next = reduceServerErrorOverlay(current, { type: "init" });
-		expect(next).toBeNull();
-	});
-
-	it("replaces the current error when a newer one arrives", () => {
-		const oldError = makeError("callback", "old");
-		const newError = makeError("api", "new");
-		const next = reduceServerErrorOverlay(oldError, {
+describe("PulseView error overlay reducer wiring", () => {
+	it("keeps queue across vdom updates", () => {
+		const withError = reduceServerErrorOverlay(INITIAL_SERVER_ERROR_OVERLAY_STATE, {
 			type: "error",
-			error: newError,
+			error: makeError("callback", "callback failed"),
 		});
-		expect(next).toEqual(newError);
+		const afterUpdate = reduceServerErrorOverlay(withError, { type: "update" });
+		expect(afterUpdate).toEqual(withError);
+	});
+
+	it("clears queue on init", () => {
+		const withError = reduceServerErrorOverlay(INITIAL_SERVER_ERROR_OVERLAY_STATE, {
+			type: "error",
+			error: makeError("render", "render failed"),
+		});
+		const cleared = reduceServerErrorOverlay(withError, { type: "init" });
+		expect(cleared).toEqual(INITIAL_SERVER_ERROR_OVERLAY_STATE);
 	});
 });

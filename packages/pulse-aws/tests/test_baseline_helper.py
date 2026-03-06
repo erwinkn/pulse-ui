@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pulse_aws.baseline as baseline_module
 import pytest
 from botocore.exceptions import ClientError
 from pulse_aws.baseline import (
@@ -10,6 +12,8 @@ from pulse_aws.baseline import (
 	DEFAULT_CDK_APP_DIR,
 	BaselineStackError,
 	BaselineStackOutputs,
+	_default_cdk_app_dir,
+	cdk_run,
 	ensure_baseline_stack,
 )
 from pulse_aws.certificate import check_domain_dns
@@ -72,10 +76,49 @@ class FakeCloudFormationClient:
 class FakeRun:
 	def __init__(self) -> None:
 		self.calls: list[list[str]] = []
+		self.kwargs: list[dict[str, Any]] = []
 
 	def __call__(self, args, **kwargs):  # noqa: ANN001
 		self.calls.append(list(args))
+		self.kwargs.append(kwargs)
 		return SimpleNamespace(returncode=0)
+
+
+def test_default_cdk_app_dir_points_to_packaged_cdk():
+	expected = Path(baseline_module.__file__).resolve().parent / "cdk"
+	assert DEFAULT_CDK_APP_DIR == expected
+	assert DEFAULT_CDK_APP_DIR.exists()
+
+
+def test_default_cdk_app_dir_handles_installed_package_layout(tmp_path):
+	module_file = (
+		tmp_path / "lib" / "python3.12" / "site-packages" / "pulse_aws" / "baseline.py"
+	)
+	module_file.parent.mkdir(parents=True)
+	module_file.write_text("# fake baseline module\n")
+
+	assert _default_cdk_app_dir(module_file) == module_file.parent / "cdk"
+
+
+def test_cdk_run_prefers_explicit_workdir(monkeypatch, tmp_path):
+	cdk_dir = tmp_path / "custom-cdk"
+	cdk_dir.mkdir()
+	run = FakeRun()
+	monkeypatch.setattr("pulse_aws.baseline.subprocess.run", run)
+	monkeypatch.setattr(
+		"pulse_aws.baseline._default_cdk_app_dir",
+		lambda *_args, **_kwargs: Path("/should/not/be/used"),
+	)
+
+	cdk_run(
+		"custom-cdk",
+		"synth",
+		{"deployment_name": "dev"},
+		workdir=cdk_dir,
+	)
+
+	assert run.calls == [["custom-cdk", "synth", "-c", "deployment_name=dev"]]
+	assert run.kwargs == [{"check": True, "cwd": str(cdk_dir)}]
 
 
 @pytest.mark.asyncio

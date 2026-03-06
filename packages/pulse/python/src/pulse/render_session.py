@@ -472,8 +472,10 @@ class RenderSession:
 	def update_route(self, path: str, route_info: RouteInfo):
 		"""Update routing state (query params, etc.) for attached path."""
 		path = ensure_absolute_path(path)
+		mount = self.route_mounts.get(path)
+		if mount is None:
+			return
 		try:
-			mount = self.get_route_mount(path)
 			mount.update_route(route_info)
 		except Exception as e:
 			self.report_error(path, "navigate", e)

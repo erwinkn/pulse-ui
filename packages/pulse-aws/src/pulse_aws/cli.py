@@ -101,6 +101,16 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 		help="Docker build context (env: PULSE_AWS_CONTEXT)",
 	)
 	parser.add_argument(
+		"--cdk-bin",
+		default=_env("PULSE_AWS_CDK_BIN") or "cdk",
+		help="CDK executable or wrapper path (env: PULSE_AWS_CDK_BIN)",
+	)
+	parser.add_argument(
+		"--cdk-workdir",
+		default=_env("PULSE_AWS_CDK_WORKDIR"),
+		help="CDK app directory override (env: PULSE_AWS_CDK_WORKDIR)",
+	)
+	parser.add_argument(
 		"--build-arg",
 		action="append",
 		default=[],
@@ -257,11 +267,16 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 	)
 	dockerfile_path = _resolve_path(project_root, args.dockerfile)
 	context_path = _resolve_path(project_root, args.context)
+	cdk_workdir = (
+		_resolve_path(project_root, args.cdk_workdir) if args.cdk_workdir else None
+	)
 
 	if not dockerfile_path.exists():
 		raise ValueError(f"Dockerfile not found: {dockerfile_path}")
 	if not context_path.exists():
 		raise ValueError(f"Context path not found: {context_path}")
+	if cdk_workdir is not None and not cdk_workdir.exists():
+		raise ValueError(f"CDK workdir not found: {cdk_workdir}")
 	if Path(args.app_file).is_absolute():
 		raise ValueError("app-file must be relative to the Docker build context")
 	if Path(args.web_root).is_absolute():
@@ -310,6 +325,9 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 	print(f"   Domain: {args.domain}")
 	print(f"   Dockerfile: {dockerfile_path}")
 	print(f"   Context: {context_path}")
+	print(f"   CDK bin: {args.cdk_bin}")
+	if cdk_workdir is not None:
+		print(f"   CDK workdir: {cdk_workdir}")
 	print(f"   Server address: {server_address}")
 	print()
 
@@ -319,6 +337,8 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 		docker=docker,
 		task=task_config,
 		health_check=health_check,
+		cdk_bin=args.cdk_bin,
+		cdk_workdir=cdk_workdir,
 	)
 
 	print()

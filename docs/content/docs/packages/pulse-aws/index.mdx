@@ -9,6 +9,7 @@ Deploy a Pulse app to AWS ECS with a guided, beginner-friendly workflow.
 
 - AWS credentials available to boto3 (AWS CLI profile or env vars)
 - Docker (can build Linux images)
+- AWS CDK CLI on `PATH`, or a wrapper you will pass via `--cdk-bin`
 - `uv` (to install/run `pulse-aws`)
 - A domain you control (for HTTPS)
 
@@ -156,12 +157,17 @@ uv run pulse-aws deploy \
   --app-file src/app/main.py \
   --web-root web \
   --dockerfile Dockerfile \
-  --context .
+  --context . \
+  --cdk-bin cdk
 ```
 
 You should now see a step-by-step deploy log ending with:
 - `Deployment Complete!`
 - `Deployment is live and healthy!`
+
+Advanced overrides:
+- `--cdk-bin /path/to/wrapper` lets you use a wrapper or alternate CDK executable.
+- `--cdk-workdir /path/to/cdk-app` tells `pulse-aws` to use a custom CDK app instead of the packaged one under `pulse_aws/cdk`.
 
 ## Step 4: respond to prompts
 

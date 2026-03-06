@@ -399,12 +399,12 @@ def cleanup_stuck_deploying_services(
 		# Delete listener rule and target group
 		rule_info = rules_map.get(deployment_id)
 		if rule_info:
-			# Delete rule first
-			try:
-				elbv2.delete_rule(RuleArn=rule_info["rule_arn"])
-				print("    ✅ Deleted listener rule")
-			except Exception as e:
-				print(f"    ⚠️  Failed to delete listener rule: {e}")
+			for rule_arn in rule_info.get("rule_arns", []):
+				try:
+					elbv2.delete_rule(RuleArn=rule_arn)
+					print(f"    ✅ Deleted listener rule {rule_arn}")
+				except Exception as e:
+					print(f"    ⚠️  Failed to delete listener rule {rule_arn}: {e}")
 
 			# Delete target group
 			if rule_info.get("target_group_arn"):
@@ -499,12 +499,12 @@ def cleanup_inactive_services(
 		# Delete listener rule and target group
 		rule_info = rules_map.get(deployment_id)
 		if rule_info:
-			# Delete rule first
-			try:
-				elbv2.delete_rule(RuleArn=rule_info["rule_arn"])
-				print("    ✅ Deleted listener rule")
-			except Exception as e:
-				print(f"    ⚠️  Failed to delete listener rule: {e}")
+			for rule_arn in rule_info.get("rule_arns", []):
+				try:
+					elbv2.delete_rule(RuleArn=rule_arn)
+					print(f"    ✅ Deleted listener rule {rule_arn}")
+				except Exception as e:
+					print(f"    ⚠️  Failed to delete listener rule {rule_arn}: {e}")
 
 			# Delete target group
 			if rule_info.get("target_group_arn"):
@@ -583,15 +583,15 @@ def cleanup_ssm_parameters(
 		print(f"      ⚠️  Failed to list/delete task parameters: {e}")
 
 
-def get_listener_rules_map(elbv2: Any, listener_arn: str) -> dict[str, dict[str, str]]:
-	"""Build a map of deployment_id -> rule/target group info.
+def get_listener_rules_map(elbv2: Any, listener_arn: str) -> dict[str, dict[str, Any]]:
+	"""Build a map of deployment_id -> listener rule/target group info.
 
 	Args:
 	    elbv2: boto3 ELBv2 client
 	    listener_arn: ALB listener ARN
 
 	Returns:
-	    Dictionary mapping deployment_id to rule/target group information
+	    Dictionary mapping deployment_id to rule ARNs and target group information
 	"""
 	rules_map = {}
 
@@ -603,22 +603,48 @@ def get_listener_rules_map(elbv2: Any, listener_arn: str) -> dict[str, dict[str,
 			if rule.get("Priority") == "default":
 				continue
 
-			# Check if this is a header-based affinity rule
+			deployment_id: str | None = None
 			for condition in rule.get("Conditions", []):
 				if condition.get("Field") == "http-header":
 					header_config = condition.get("HttpHeaderConfig", {})
-					if header_config.get("HttpHeaderName") == "X-Pulse-Render-Affinity":
-						values = header_config.get("Values", [])
-						if values:
-							dep_id = values[0]
-							actions = rule.get("Actions", [])
-							tg_arn = (
-								actions[0].get("TargetGroupArn") if actions else None
-							)
-							rules_map[dep_id] = {
-								"rule_arn": rule["RuleArn"],
-								"target_group_arn": tg_arn,
-							}
+					header_name = header_config.get("HttpHeaderName")
+					values = header_config.get("Values", [])
+					if not values:
+						continue
+					if header_name == "X-Pulse-Render-Affinity":
+						deployment_id = cast(str, values[0])
+						break
+					if header_name == "Cookie":
+						for value in values:
+							prefix = "*pulse_affinity="
+							suffix = "*"
+							if (
+								isinstance(value, str)
+								and value.startswith(prefix)
+								and value.endswith(suffix)
+							):
+								deployment_id = value.removeprefix(prefix).removesuffix(
+									suffix
+								)
+								break
+				if deployment_id is not None:
+					break
+
+			if deployment_id is None:
+				continue
+
+			actions = rule.get("Actions", [])
+			target_group_arn = actions[0].get("TargetGroupArn") if actions else None
+			entry = rules_map.setdefault(
+				deployment_id,
+				{
+					"rule_arns": [],
+					"target_group_arn": target_group_arn,
+				},
+			)
+			entry["rule_arns"].append(rule["RuleArn"])
+			if target_group_arn and not entry.get("target_group_arn"):
+				entry["target_group_arn"] = target_group_arn
 
 	except Exception as e:
 		print(f"  ⚠️  Failed to describe listener rules: {e}")

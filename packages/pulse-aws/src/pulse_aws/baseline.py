@@ -22,8 +22,6 @@ from pulse_aws.config import ReaperConfig
 STACK_NAME_TEMPLATE = "{env}-baseline"
 TOOLKIT_STACK_NAME = "CDKToolkit"
 BASELINE_STACK_VERSION = "0.0.12"  # Bump when baseline stack changes
-PACKAGE_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CDK_APP_DIR = PACKAGE_ROOT / "src" / "pulse_aws" / "cdk"
 STACK_SUCCEEDED = {
 	"CREATE_COMPLETE",
 	"UPDATE_COMPLETE",
@@ -44,6 +42,15 @@ STACK_DELETE_COMPLETE = "DELETE_COMPLETE"
 
 class BaselineStackError(RuntimeError):
 	"""Raised when provisioning or describing the baseline stack fails."""
+
+
+def _default_cdk_app_dir(module_file: str | Path | None = None) -> Path:
+	"""Resolve the packaged CDK app directory."""
+	package_dir = Path(module_file or __file__).resolve().parent
+	return package_dir / "cdk"
+
+
+DEFAULT_CDK_APP_DIR = _default_cdk_app_dir()
 
 
 @dataclass(slots=True)
@@ -231,7 +238,7 @@ def cdk_run(
 		return
 
 	# Other commands need to run from the CDK app directory
-	cwd = Path(workdir) if workdir is not None else DEFAULT_CDK_APP_DIR
+	cwd = Path(workdir) if workdir is not None else _default_cdk_app_dir()
 	if not cwd.exists():
 		msg = f"CDK app directory '{cwd}' does not exist"
 		raise BaselineStackError(msg)

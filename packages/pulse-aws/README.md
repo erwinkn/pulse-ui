@@ -29,7 +29,7 @@ scripts/
 
 ## Features
 
-- **Zero-downtime deployments** with header-based sticky sessions
+- **Zero-downtime deployments** with deployment-affinity routing for HTTP and websockets
 - **Automatic ACM certificate management** with DNS validation
 - **DNS configuration detection** - automatically detects and guides you through DNS setup
 - **Baseline infrastructure** as code using AWS CDK
@@ -41,8 +41,17 @@ scripts/
 # Install
 uv add pulse-aws
 
+# Requires a working `cdk` executable on PATH.
+# If you use a wrapper, pass it via --cdk-bin.
+
 # Deploy
-uv run scripts/deploy.py
+uv run pulse-aws deploy \
+  --deployment-name prod \
+  --domain app.example.com \
+  --app-file src/app/main.py \
+  --web-root web \
+  --dockerfile Dockerfile \
+  --context .
 ```
 
 ## Architecture
@@ -50,7 +59,7 @@ uv run scripts/deploy.py
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for a detailed overview of:
 
 - Infrastructure resources and how they relate
-- Traffic routing with sticky sessions
+- Traffic routing with deployment affinity
 - Zero-downtime deployment workflow
 - Security architecture
 
@@ -154,9 +163,9 @@ await install_listener_rules_and_switch_traffic(...)  # Waits for health checks
 Each deployment gets a unique ID (e.g., `prod-20251027-122112Z`):
 
 1. **New deployment starts** - New tasks spin up alongside old tasks
-2. **Header-based routing** - ALB creates a rule: `X-Pulse-Render-Affinity: <deployment-id>` → target group
+2. **Affinity routing** - ALB creates rules for `X-Pulse-Render-Affinity: <deployment-id>` and `pulse_affinity=<deployment-id>` → target group, then uses ALB cookie stickiness to keep that browser on the same ECS task within the deployment
 3. **Default action switches** - New users get new version
-4. **Old sessions continue** - Existing users stick to old version via header
+4. **Old sessions continue** - Existing users stay pinned to the same deployment via prerender headers and an affinity cookie
 5. **Drain old deployment** - When ready, call drain endpoint to shut down gracefully
 
 ```bash
@@ -172,15 +181,27 @@ curl -X POST \
 
 - `AWS_PROFILE` - AWS profile to use
 - `AWS_REGION` - AWS region (or set in `~/.aws/config`)
+- `PULSE_AWS_CDK_BIN` - optional CDK executable or wrapper path
+- `PULSE_AWS_CDK_WORKDIR` - optional custom CDK app directory
 
 ### Deployment Settings
 
 ```python
-# In your deploy script
-deployment_name = "prod"  # Used for resource naming
-domain = "api.example.com"  # Your domain
-dockerfile_path = Path("Dockerfile")  # Path to Dockerfile
+result = await deploy(
+    domain="api.example.com",
+    deployment_name="prod",
+    docker=DockerBuild(
+        dockerfile_path=Path("Dockerfile"),
+        context_path=Path("."),
+    ),
+    cdk_bin="cdk",
+    cdk_workdir=None,
+)
 ```
+
+- By default, `pulse-aws` uses the packaged CDK app that ships inside `pulse_aws/cdk`.
+- Use `cdk_bin` or `--cdk-bin` when you want to supply a wrapper script or alternate executable.
+- Use `cdk_workdir` or `--cdk-workdir` only when you want to point deploy at a custom CDK app directory.
 
 ## Security
 

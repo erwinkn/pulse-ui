@@ -27,6 +27,10 @@ from pulse_aws.config import (
 	ReaperConfig,
 	TaskConfig,
 )
+from pulse_aws.constants import (
+	AFFINITY_COOKIE_NAME,
+	TARGET_GROUP_STICKINESS_DURATION_SECONDS,
+)
 from pulse_aws.reporting import DeploymentContext, Reporter, create_context
 
 
@@ -56,6 +60,64 @@ def _resolve_reporter(reporter: Reporter | None) -> Reporter:
 	if reporter is None:
 		return create_context().reporter
 	return reporter
+
+
+def _target_group_name(deployment_id: str) -> str:
+	"""Generate a unique ALB target group name within the 32-character limit."""
+	suffix = hashlib.sha1(deployment_id.encode()).hexdigest()[:8]
+	prefix_limit = 32 - len(suffix) - 1
+	prefix = deployment_id[:prefix_limit].rstrip("-") or "pulse"
+	return f"{prefix}-{suffix}"
+
+
+def _ensure_listener_certificate(
+	listener_arn: str,
+	certificate_arn: str,
+	*,
+	region: str,
+	reporter: Reporter | None = None,
+) -> None:
+	"""Ensure the HTTPS listener presents only the requested certificate."""
+	reporter = _resolve_reporter(reporter)
+	elbv2 = boto3.client("elbv2", region_name=region)
+
+	try:
+		listener = elbv2.describe_listeners(ListenerArns=[listener_arn])["Listeners"][0]
+		current_default = listener.get("Certificates", [{}])[0].get("CertificateArn")
+
+		if current_default != certificate_arn:
+			modify_kwargs: dict[str, Any] = {
+				"ListenerArn": listener_arn,
+				"Certificates": [{"CertificateArn": certificate_arn}],
+				"DefaultActions": listener["DefaultActions"],
+			}
+			ssl_policy = listener.get("SslPolicy")
+			if ssl_policy:
+				modify_kwargs["SslPolicy"] = ssl_policy
+			elbv2.modify_listener(**modify_kwargs)
+			reporter.detail(
+				f"Set HTTPS listener default certificate to {certificate_arn}"
+			)
+
+		listener_certs = elbv2.describe_listener_certificates(ListenerArn=listener_arn)[
+			"Certificates"
+		]
+		stale_certs = [
+			{"CertificateArn": cert["CertificateArn"]}
+			for cert in listener_certs
+			if cert["CertificateArn"] != certificate_arn
+		]
+		if stale_certs:
+			elbv2.remove_listener_certificates(
+				ListenerArn=listener_arn,
+				Certificates=stale_certs,
+			)
+			reporter.detail(
+				f"Removed {len(stale_certs)} stale HTTPS listener certificate(s)"
+			)
+	except ClientError as exc:
+		msg = f"Failed to reconcile HTTPS listener certificate: {exc}"
+		raise DeploymentError(msg) from exc
 
 
 async def _wait_for_confirmation(
@@ -388,13 +450,10 @@ async def build_and_push_image(
 	try:
 		proc = await asyncio.create_subprocess_exec(
 			*build_cmd,
-			stdout=asyncio.subprocess.PIPE,
-			stderr=asyncio.subprocess.STDOUT,
 		)
-		stdout, _ = await proc.communicate()
-		if proc.returncode != 0:
-			output = stdout.decode() if stdout else ""
-			msg = f"Docker build failed:\n{output}"
+		returncode = await proc.wait()
+		if returncode != 0:
+			msg = "Docker build failed"
 			raise DeploymentError(msg)
 	except FileNotFoundError as exc:
 		msg = "Docker is not installed or not in PATH"
@@ -406,13 +465,10 @@ async def build_and_push_image(
 	try:
 		proc = await asyncio.create_subprocess_exec(
 			*push_cmd,
-			stdout=asyncio.subprocess.PIPE,
-			stderr=asyncio.subprocess.STDOUT,
 		)
-		stdout, _ = await proc.communicate()
-		if proc.returncode != 0:
-			output = stdout.decode() if stdout else ""
-			msg = f"Docker push failed:\n{output}"
+		returncode = await proc.wait()
+		if returncode != 0:
+			msg = "Docker push failed"
 			raise DeploymentError(msg)
 	except FileNotFoundError as exc:
 		msg = "Docker is not installed or not in PATH"
@@ -771,7 +827,7 @@ async def create_service_and_target_group(
 	elbv2 = boto3.client("elbv2", region_name=baseline.region)
 
 	service_name = deployment_id
-	tg_name = deployment_id[:32]  # ALB target group names limited to 32 chars
+	tg_name = _target_group_name(deployment_id)
 
 	# Check if service already exists
 	try:
@@ -811,6 +867,17 @@ async def create_service_and_target_group(
 			],
 		)
 		target_group_arn = tg_response["TargetGroups"][0]["TargetGroupArn"]
+		elbv2.modify_target_group_attributes(
+			TargetGroupArn=target_group_arn,
+			Attributes=[
+				{"Key": "stickiness.enabled", "Value": "true"},
+				{"Key": "stickiness.type", "Value": "lb_cookie"},
+				{
+					"Key": "stickiness.lb_cookie.duration_seconds",
+					"Value": str(TARGET_GROUP_STICKINESS_DURATION_SECONDS),
+				},
+			],
+		)
 		reporter.success(f"Target group created: {target_group_arn}")
 	except ClientError as exc:
 		if exc.response["Error"]["Code"] == "DuplicateTargetGroupName":
@@ -841,11 +908,8 @@ async def create_service_and_target_group(
 					pass
 		next_priority = max_priority + 1
 
-		# Create header-based routing rule for sticky sessions
-		elbv2.create_rule(
-			ListenerArn=baseline.listener_arn,
-			Priority=next_priority,
-			Conditions=[
+		rule_conditions = [
+			[
 				{
 					"Field": "http-header",
 					"HttpHeaderConfig": {
@@ -854,23 +918,49 @@ async def create_service_and_target_group(
 					},
 				}
 			],
-			Actions=[
+			[
 				{
-					"Type": "forward",
-					"TargetGroupArn": target_group_arn,
+					"Field": "http-header",
+					"HttpHeaderConfig": {
+						"HttpHeaderName": "Cookie",
+						"Values": [f"*{AFFINITY_COOKIE_NAME}={deployment_id}*"],
+					},
 				}
 			],
-			Tags=[
-				{"Key": "deployment-id", "Value": deployment_id},
-				{"Key": "deployment-name", "Value": deployment_name},
-			],
-		)
+		]
+
+		for priority_offset, conditions in enumerate(rule_conditions):
+			elbv2.create_rule(
+				ListenerArn=baseline.listener_arn,
+				Priority=next_priority + priority_offset,
+				Conditions=conditions,
+				Actions=[
+					{
+						"Type": "forward",
+						"TargetGroupArn": target_group_arn,
+					}
+				],
+				Tags=[
+					{"Key": "deployment-id", "Value": deployment_id},
+					{"Key": "deployment-name", "Value": deployment_name},
+				],
+			)
 		reporter.success(
-			f"Target group attached with routing rule (priority {next_priority})"
+			"Target group attached with routing rules "
+			f"(priorities {next_priority}-{next_priority + len(rule_conditions) - 1})"
 		)
 	except ClientError as exc:
-		# Clean up target group if listener rule creation fails
+		# Clean up any partially-created listener rules and target group if rule creation fails
 		try:
+			rules_response = elbv2.describe_rules(ListenerArn=baseline.listener_arn)
+			for rule in rules_response.get("Rules", []):
+				actions = rule.get("Actions", [])
+				for action in actions:
+					if action.get("TargetGroupArn") == target_group_arn:
+						try:
+							elbv2.delete_rule(RuleArn=rule["RuleArn"])
+						except ClientError:
+							pass
 			elbv2.delete_target_group(TargetGroupArn=target_group_arn)
 		except Exception:
 			pass
@@ -1172,13 +1262,13 @@ async def install_listener_rules_and_switch_traffic(
 ) -> None:
 	"""Wait for deployment health then switch default traffic to the new deployment.
 
-	The header-based routing rule (X-Pulse-Render-Affinity: <deployment_id>) is already
-	created in create_service_and_target_group(). This function waits for targets to
-	become healthy, then updates the listener default action to forward 100% of new
+	The deployment affinity rules are already created in
+	create_service_and_target_group(). This function waits for targets to become
+	healthy, then updates the listener default action to forward 100% of new
 	traffic to the new target group.
 
-	Existing header rules for prior deployments remain, ensuring sticky sessions continue
-	to work for old tabs while new tabs get the latest version.
+	Existing affinity rules for prior deployments remain, ensuring sticky sessions
+	continue to work for old tabs while new tabs get the latest version.
 
 	Args:
 	    deployment_name: The deployment environment name
@@ -1419,6 +1509,8 @@ async def deploy(
 	health_check: HealthCheckConfig | None = None,
 	reaper: ReaperConfig | None = None,
 	certificate_arn: str | None = None,
+	cdk_bin: str = "cdk",
+	cdk_workdir: Path | str | None = None,
 ) -> dict[str, str]:
 	"""Deploy an application to AWS ECS with full blue-green deployment workflow.
 
@@ -1429,7 +1521,7 @@ async def deploy(
 	4. Register ECS task definition with draining configuration
 	5. Create ECS service and ALB target group
 	6. Mark deployment as active in SSM
-	7. Install listener rules for header-based routing
+	7. Install listener rules for deployment-affinity routing
 	8. Switch default traffic to the new deployment
 	9. Mark previous deployments as draining in SSM and service tags
 
@@ -1445,6 +1537,8 @@ async def deploy(
 	    health_check: ALB health check configuration (uses defaults if None)
 	    reaper: Reaper Lambda configuration (uses defaults if None)
 	    certificate_arn: ACM certificate ARN (looked up if not provided)
+	    cdk_bin: CDK executable or wrapper path (default: "cdk")
+	    cdk_workdir: Optional CDK app directory override
 
 	Returns:
 	    Dictionary with deployment information:
@@ -1508,6 +1602,14 @@ async def deploy(
 		deployment_name,
 		certificate_arn=cert_arn,
 		reaper_config=reaper,
+		cdk_bin=cdk_bin,
+		workdir=cdk_workdir,
+	)
+	_ensure_listener_certificate(
+		baseline.listener_arn,
+		cert_arn,
+		region=baseline.region,
+		reporter=reporter,
 	)
 	reporter.success("Baseline stack ready")
 	reporter.detail(f"ALB DNS: {baseline.alb_dns_name}")
@@ -1624,10 +1726,16 @@ async def deploy(
 	reporter.detail(f"Target Group: {target_group_arn}")
 	reporter.detail(f"Image URI: {image_uri}")
 	if domain_proxied:
-		reporter.detail(
-			f"{domain} is served via Cloudflare proxy. "
-			+ "ALB reachability verified via HTTPS endpoint."
-		)
+		if domain_ready:
+			reporter.detail(
+				f"{domain} is served via Cloudflare proxy. "
+				+ "ALB reachability verified via HTTPS endpoint."
+			)
+		else:
+			reporter.detail(
+				f"{domain} is served via Cloudflare proxy. "
+				+ "ALB reachability could not be verified automatically."
+			)
 	if marked_draining:
 		reporter.detail(
 			f"Marked {len(marked_draining)} previous deployment(s) as draining"

@@ -321,11 +321,10 @@ class AWSECSDirectivesMiddleware(ps.PulseMiddleware):
 
 		# Only modify directives if we have an Ok result
 		if isinstance(res, ps.Ok):
-			session = PulseContext.get().session
-			app = self.plugin._app
-			if session is not None and app is not None:
-				cookie = app.cookie
-				session.set_cookie(
+			ctx = PulseContext.get()
+			if ctx.session is not None:
+				cookie = ctx.app.cookie
+				ctx.session.set_cookie(
 					name=AFFINITY_COOKIE_NAME,
 					value=self.plugin.deployment_id,
 					domain=cookie.domain,

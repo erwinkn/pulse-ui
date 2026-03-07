@@ -52,10 +52,26 @@ def _parse_kv_items(items: Iterable[str] | None, label: str) -> dict[str, str]:
 
 
 def _resolve_path(base: Path, raw: str) -> Path:
-	path = Path(raw)
+	path = Path(raw).expanduser()
 	if path.is_absolute():
 		return path
 	return (base / path).resolve()
+
+
+def _looks_like_path(raw: str) -> bool:
+	path = Path(raw).expanduser()
+	if path.is_absolute() or raw.startswith("~"):
+		return True
+	separators = {os.sep}
+	if os.altsep is not None:
+		separators.add(os.altsep)
+	return any(separator in raw for separator in separators)
+
+
+def _resolve_executable_path(base: Path, raw: str) -> str:
+	if not _looks_like_path(raw):
+		return raw
+	return str(_resolve_path(base, raw))
 
 
 def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
@@ -74,11 +90,6 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 		"--server-address",
 		default=_env("PULSE_SERVER_ADDRESS"),
 		help="Server address for Pulse (env: PULSE_SERVER_ADDRESS)",
-	)
-	parser.add_argument(
-		"--project-root",
-		default=_env("PULSE_AWS_PROJECT_ROOT"),
-		help="Project root for resolving Dockerfile/context (default: cwd)",
 	)
 	parser.add_argument(
 		"--app-file",
@@ -262,14 +273,13 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 	if not args.domain:
 		raise ValueError("domain is required (--domain)")
 
-	project_root = (
-		Path(args.project_root).resolve() if args.project_root else Path.cwd()
-	)
-	dockerfile_path = _resolve_path(project_root, args.dockerfile)
-	context_path = _resolve_path(project_root, args.context)
+	invocation_cwd = Path.cwd()
+	dockerfile_path = _resolve_path(invocation_cwd, args.dockerfile)
+	context_path = _resolve_path(invocation_cwd, args.context)
 	cdk_workdir = (
-		_resolve_path(project_root, args.cdk_workdir) if args.cdk_workdir else None
+		_resolve_path(invocation_cwd, args.cdk_workdir) if args.cdk_workdir else None
 	)
+	cdk_bin = _resolve_executable_path(invocation_cwd, args.cdk_bin)
 
 	if not dockerfile_path.exists():
 		raise ValueError(f"Dockerfile not found: {dockerfile_path}")
@@ -325,7 +335,7 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 	print(f"   Domain: {args.domain}")
 	print(f"   Dockerfile: {dockerfile_path}")
 	print(f"   Context: {context_path}")
-	print(f"   CDK bin: {args.cdk_bin}")
+	print(f"   CDK bin: {cdk_bin}")
 	if cdk_workdir is not None:
 		print(f"   CDK workdir: {cdk_workdir}")
 	print(f"   Server address: {server_address}")
@@ -337,7 +347,7 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 		docker=docker,
 		task=task_config,
 		health_check=health_check,
-		cdk_bin=args.cdk_bin,
+		cdk_bin=cdk_bin,
 		cdk_workdir=cdk_workdir,
 	)
 

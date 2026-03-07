@@ -12,7 +12,6 @@ from pulse_aws.baseline import (
 	DEFAULT_CDK_APP_DIR,
 	BaselineStackError,
 	BaselineStackOutputs,
-	_default_cdk_app_dir,
 	cdk_run,
 	ensure_baseline_stack,
 )
@@ -90,25 +89,11 @@ def test_default_cdk_app_dir_points_to_packaged_cdk():
 	assert DEFAULT_CDK_APP_DIR.exists()
 
 
-def test_default_cdk_app_dir_handles_installed_package_layout(tmp_path):
-	module_file = (
-		tmp_path / "lib" / "python3.12" / "site-packages" / "pulse_aws" / "baseline.py"
-	)
-	module_file.parent.mkdir(parents=True)
-	module_file.write_text("# fake baseline module\n")
-
-	assert _default_cdk_app_dir(module_file) == module_file.parent / "cdk"
-
-
 def test_cdk_run_prefers_explicit_workdir(monkeypatch, tmp_path):
 	cdk_dir = tmp_path / "custom-cdk"
 	cdk_dir.mkdir()
 	run = FakeRun()
 	monkeypatch.setattr("pulse_aws.baseline.subprocess.run", run)
-	monkeypatch.setattr(
-		"pulse_aws.baseline._default_cdk_app_dir",
-		lambda *_args, **_kwargs: Path("/should/not/be/used"),
-	)
 
 	cdk_run(
 		"custom-cdk",

@@ -44,13 +44,7 @@ class BaselineStackError(RuntimeError):
 	"""Raised when provisioning or describing the baseline stack fails."""
 
 
-def _default_cdk_app_dir(module_file: str | Path | None = None) -> Path:
-	"""Resolve the packaged CDK app directory."""
-	package_dir = Path(module_file or __file__).resolve().parent
-	return package_dir / "cdk"
-
-
-DEFAULT_CDK_APP_DIR = _default_cdk_app_dir()
+DEFAULT_CDK_APP_DIR = Path(__file__).resolve().parent / "cdk"
 
 
 @dataclass(slots=True)

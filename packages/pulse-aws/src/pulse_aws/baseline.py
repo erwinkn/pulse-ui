@@ -238,7 +238,7 @@ def cdk_run(
 		return
 
 	# Other commands need to run from the CDK app directory
-	cwd = Path(workdir) if workdir is not None else _default_cdk_app_dir()
+	cwd = Path(workdir) if workdir is not None else DEFAULT_CDK_APP_DIR
 	if not cwd.exists():
 		msg = f"CDK app directory '{cwd}' does not exist"
 		raise BaselineStackError(msg)

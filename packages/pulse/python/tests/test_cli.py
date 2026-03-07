@@ -159,10 +159,15 @@ def test_generate_ignores_stale_dev_server_lock(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
 	web_root = tmp_path / "web"
+
+	def process_is_dead(_pid: int) -> bool:
+		return False
+
+	monkeypatch.setattr("pulse.cli.lock.is_process_alive", process_is_dead)
 	write_lock_info(
 		lock_path_for_web_root(web_root),
 		LockInfo(
-			pid=999_999,
+			pid=123,
 			created_at=1,
 			hostname="host",
 			platform="test-platform",

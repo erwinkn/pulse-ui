@@ -23,6 +23,8 @@ from typing import Any, cast
 
 import boto3
 
+from pulse_aws.constants import AFFINITY_HEADER_NAME
+
 # Configuration from environment (only used by Lambda handler)
 CLUSTER = os.environ.get("PULSE_AWS_CLUSTER", "")
 DEPLOYMENT_NAME = os.environ.get("PULSE_AWS_DEPLOYMENT_NAME", "")
@@ -399,12 +401,11 @@ def cleanup_stuck_deploying_services(
 		# Delete listener rule and target group
 		rule_info = rules_map.get(deployment_id)
 		if rule_info:
-			for rule_arn in rule_info.get("rule_arns", []):
-				try:
-					elbv2.delete_rule(RuleArn=rule_arn)
-					print(f"    ✅ Deleted listener rule {rule_arn}")
-				except Exception as e:
-					print(f"    ⚠️  Failed to delete listener rule {rule_arn}: {e}")
+			try:
+				elbv2.delete_rule(RuleArn=rule_info["rule_arn"])
+				print(f"    ✅ Deleted listener rule {rule_info['rule_arn']}")
+			except Exception as e:
+				print(f"    ⚠️  Failed to delete listener rule: {e}")
 
 			# Delete target group
 			if rule_info.get("target_group_arn"):
@@ -499,12 +500,11 @@ def cleanup_inactive_services(
 		# Delete listener rule and target group
 		rule_info = rules_map.get(deployment_id)
 		if rule_info:
-			for rule_arn in rule_info.get("rule_arns", []):
-				try:
-					elbv2.delete_rule(RuleArn=rule_arn)
-					print(f"    ✅ Deleted listener rule {rule_arn}")
-				except Exception as e:
-					print(f"    ⚠️  Failed to delete listener rule {rule_arn}: {e}")
+			try:
+				elbv2.delete_rule(RuleArn=rule_info["rule_arn"])
+				print(f"    ✅ Deleted listener rule {rule_info['rule_arn']}")
+			except Exception as e:
+				print(f"    ⚠️  Failed to delete listener rule: {e}")
 
 			# Delete target group
 			if rule_info.get("target_group_arn"):
@@ -583,7 +583,7 @@ def cleanup_ssm_parameters(
 		print(f"      ⚠️  Failed to list/delete task parameters: {e}")
 
 
-def get_listener_rules_map(elbv2: Any, listener_arn: str) -> dict[str, dict[str, Any]]:
+def get_listener_rules_map(elbv2: Any, listener_arn: str) -> dict[str, dict[str, str]]:
 	"""Build a map of deployment_id -> listener rule/target group info.
 
 	Args:
@@ -591,7 +591,7 @@ def get_listener_rules_map(elbv2: Any, listener_arn: str) -> dict[str, dict[str,
 	    listener_arn: ALB listener ARN
 
 	Returns:
-	    Dictionary mapping deployment_id to rule ARNs and target group information
+	    Dictionary mapping deployment_id to rule/target group information
 	"""
 	rules_map = {}
 
@@ -610,7 +610,7 @@ def get_listener_rules_map(elbv2: Any, listener_arn: str) -> dict[str, dict[str,
 				header_config = condition.get("HttpHeaderConfig", {})
 				values = header_config.get("Values", [])
 				if (
-					header_config.get("HttpHeaderName") == "X-Pulse-Render-Affinity"
+					header_config.get("HttpHeaderName") == AFFINITY_HEADER_NAME
 					and values
 				):
 					deployment_id = cast(str, values[0])
@@ -621,16 +621,10 @@ def get_listener_rules_map(elbv2: Any, listener_arn: str) -> dict[str, dict[str,
 
 			actions = rule.get("Actions", [])
 			target_group_arn = actions[0].get("TargetGroupArn") if actions else None
-			entry = rules_map.setdefault(
-				deployment_id,
-				{
-					"rule_arns": [],
-					"target_group_arn": target_group_arn,
-				},
-			)
-			entry["rule_arns"].append(rule["RuleArn"])
-			if target_group_arn and not entry.get("target_group_arn"):
-				entry["target_group_arn"] = target_group_arn
+			rules_map[deployment_id] = {
+				"rule_arn": rule["RuleArn"],
+				"target_group_arn": target_group_arn,
+			}
 
 	except Exception as e:
 		print(f"  ⚠️  Failed to describe listener rules: {e}")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pulse_aws.constants import AFFINITY_HEADER_NAME
 from pulse_aws.reaper_lambda import get_listener_rules_map
 
 
@@ -21,7 +22,7 @@ class FakeElbv2Client:
 						{
 							"Field": "http-header",
 							"HttpHeaderConfig": {
-								"HttpHeaderName": "X-Pulse-Render-Affinity",
+								"HttpHeaderName": AFFINITY_HEADER_NAME,
 								"Values": ["test-20260306-151500Z"],
 							},
 						}
@@ -37,7 +38,7 @@ def test_get_listener_rules_map_collects_header_rules():
 
 	assert rules_map == {
 		"test-20260306-151500Z": {
-			"rule_arns": ["arn:header"],
+			"rule_arn": "arn:header",
 			"target_group_arn": "arn:target-group",
 		}
 	}

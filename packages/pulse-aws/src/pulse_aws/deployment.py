@@ -27,10 +27,7 @@ from pulse_aws.config import (
 	ReaperConfig,
 	TaskConfig,
 )
-from pulse_aws.constants import (
-	AFFINITY_COOKIE_NAME,
-	TARGET_GROUP_STICKINESS_DURATION_SECONDS,
-)
+from pulse_aws.constants import TARGET_GROUP_STICKINESS_DURATION_SECONDS
 from pulse_aws.reporting import DeploymentContext, Reporter, create_context
 
 
@@ -946,16 +943,7 @@ async def create_service_and_target_group(
 						"Values": [deployment_id],
 					},
 				}
-			],
-			[
-				{
-					"Field": "http-header",
-					"HttpHeaderConfig": {
-						"HttpHeaderName": "Cookie",
-						"Values": [f"*{AFFINITY_COOKIE_NAME}={deployment_id}*"],
-					},
-				}
-			],
+			]
 		]
 
 		for priority_offset, conditions in enumerate(rule_conditions):

@@ -5,7 +5,7 @@ This plugin provides:
 - ECS task ID discovery
 - SSM-based deployment state polling
 - Graceful draining with SSM task readiness state
-- Deployment affinity via prerender headers and a browser-visible cookie
+- Deployment affinity via prerender and Socket.IO directives
 """
 
 from __future__ import annotations
@@ -19,9 +19,6 @@ from typing import Any, override
 
 import pulse as ps
 import requests
-from pulse.context import PulseContext
-
-from pulse_aws.constants import AFFINITY_COOKIE_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -314,29 +311,18 @@ class AWSECSDirectivesMiddleware(ps.PulseMiddleware):
 		session: dict[str, Any],
 		next: Callable[[], Awaitable[ps.PrerenderResponse]],
 	) -> ps.PrerenderResponse:
-		"""Add AWS ECS deployment affinity to prerender directives and cookies."""
+		"""Add AWS ECS deployment affinity directives to prerender responses."""
 		if not self.plugin.enabled:
 			return await next()
 		res = await next()
 
 		# Only modify directives if we have an Ok result
 		if isinstance(res, ps.Ok):
-			ctx = PulseContext.get()
-			if ctx.session is not None:
-				cookie = ctx.app.cookie
-				ctx.session.set_cookie(
-					name=AFFINITY_COOKIE_NAME,
-					value=self.plugin.deployment_id,
-					domain=cookie.domain,
-					secure=bool(cookie.secure),
-					samesite=cookie.samesite,
-					max_age_seconds=cookie.max_age_seconds,
-				)
 			directives = res.payload["directives"]
 			# HTTP prerender requests can send custom headers, so keep using them.
 			directives["headers"]["X-Pulse-Render-Affinity"] = self.plugin.deployment_id
-			# Keep the Socket.IO header for non-browser clients. Browsers rely on the
-			# affinity cookie because websocket custom headers are not supported.
+			# Keep the Socket.IO header in directives so clients that support custom
+			# headers can route to the same deployment.
 			directives["socketio"]["headers"]["X-Pulse-Render-Affinity"] = (
 				self.plugin.deployment_id
 			)

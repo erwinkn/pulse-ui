@@ -163,9 +163,9 @@ await install_listener_rules_and_switch_traffic(...)  # Waits for health checks
 Each deployment gets a unique ID (e.g., `prod-20251027-122112Z`):
 
 1. **New deployment starts** - New tasks spin up alongside old tasks
-2. **Affinity routing** - ALB creates rules for `X-Pulse-Render-Affinity: <deployment-id>` and `pulse_affinity=<deployment-id>` → target group, then uses ALB cookie stickiness to keep that browser on the same ECS task within the deployment
+2. **Affinity routing** - ALB creates rules for `X-Pulse-Render-Affinity: <deployment-id>` → target group, then uses ALB cookie stickiness to keep that browser on the same ECS task within the deployment
 3. **Default action switches** - New users get new version
-4. **Old sessions continue** - Existing users stay pinned to the same deployment via prerender headers and an affinity cookie
+4. **Old sessions continue** - Existing users stay pinned to the same deployment via prerender and client directives
 5. **Drain old deployment** - When ready, call drain endpoint to shut down gracefully
 
 ```bash

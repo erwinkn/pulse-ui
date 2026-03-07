@@ -202,6 +202,8 @@ result = await deploy(
 - By default, `pulse-aws` uses the packaged CDK app that ships inside `pulse_aws/cdk`.
 - Use `cdk_bin` or `--cdk-bin` when you want to supply a wrapper script or alternate executable.
 - Use `cdk_workdir` or `--cdk-workdir` only when you want to point deploy at a custom CDK app directory.
+- Host paths like `--dockerfile`, `--context`, and `--cdk-workdir` resolve from the directory where you invoke `pulse-aws`.
+- `--app-file` and `--web-root` stay relative to the Docker build context.
 
 ## Security
 

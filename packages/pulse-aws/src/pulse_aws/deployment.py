@@ -70,6 +70,23 @@ def _target_group_name(deployment_id: str) -> str:
 	return f"{prefix}-{suffix}"
 
 
+def _delete_target_group_best_effort(
+	elbv2: Any,
+	target_group_arn: str,
+	*,
+	reporter: Reporter | None = None,
+	report_success: bool = False,
+) -> None:
+	"""Delete a target group without masking the original deployment failure."""
+	try:
+		elbv2.delete_target_group(TargetGroupArn=target_group_arn)
+		if reporter is not None and report_success:
+			reporter.detail(f"Deleted target group {target_group_arn}")
+	except Exception as exc:
+		if reporter is not None:
+			reporter.warning(f"Failed to delete target group {target_group_arn}: {exc}")
+
+
 def _ensure_listener_certificate(
 	listener_arn: str,
 	certificate_arn: str,
@@ -99,9 +116,12 @@ def _ensure_listener_certificate(
 				f"Set HTTPS listener default certificate to {certificate_arn}"
 			)
 
-		listener_certs = elbv2.describe_listener_certificates(ListenerArn=listener_arn)[
-			"Certificates"
-		]
+		listener_certs = cast(
+			list[dict[str, str]],
+			elbv2.describe_listener_certificates(ListenerArn=listener_arn)[
+				"Certificates"
+			],
+		)
 		stale_certs = [
 			{"CertificateArn": cert["CertificateArn"]}
 			for cert in listener_certs
@@ -866,7 +886,22 @@ async def create_service_and_target_group(
 				{"Key": "deployment-name", "Value": deployment_name},
 			],
 		)
-		target_group_arn = tg_response["TargetGroups"][0]["TargetGroupArn"]
+		target_group_arn = cast(str, tg_response["TargetGroups"][0]["TargetGroupArn"])
+	except ClientError as exc:
+		if exc.response["Error"]["Code"] == "DuplicateTargetGroupName":
+			msg = (
+				f"Target group {tg_name} already exists. "
+				f"This deployment_id may have been used before. "
+				f"Delete the old target group or use a new deployment_id."
+			)
+			raise DeploymentError(msg) from exc
+		msg = f"Failed to create target group: {exc}"
+		raise DeploymentError(msg) from exc
+	except Exception as exc:
+		msg = f"Failed to create target group: {exc}"
+		raise DeploymentError(msg) from exc
+
+	try:
 		elbv2.modify_target_group_attributes(
 			TargetGroupArn=target_group_arn,
 			Attributes=[
@@ -879,15 +914,9 @@ async def create_service_and_target_group(
 			],
 		)
 		reporter.success(f"Target group created: {target_group_arn}")
-	except ClientError as exc:
-		if exc.response["Error"]["Code"] == "DuplicateTargetGroupName":
-			msg = (
-				f"Target group {tg_name} already exists. "
-				f"This deployment_id may have been used before. "
-				f"Delete the old target group or use a new deployment_id."
-			)
-			raise DeploymentError(msg) from exc
-		msg = f"Failed to create target group: {exc}"
+	except Exception as exc:
+		_delete_target_group_best_effort(elbv2, target_group_arn, reporter=reporter)
+		msg = f"Failed to configure target group stickiness: {exc}"
 		raise DeploymentError(msg) from exc
 
 	# Attach target group to listener with a temporary rule
@@ -947,7 +976,7 @@ async def create_service_and_target_group(
 			)
 		reporter.success(
 			"Target group attached with routing rules "
-			f"(priorities {next_priority}-{next_priority + len(rule_conditions) - 1})"
+			+ f"(priorities {next_priority}-{next_priority + len(rule_conditions) - 1})"
 		)
 	except ClientError as exc:
 		# Clean up any partially-created listener rules and target group if rule creation fails
@@ -961,9 +990,9 @@ async def create_service_and_target_group(
 							elbv2.delete_rule(RuleArn=rule["RuleArn"])
 						except ClientError:
 							pass
-			elbv2.delete_target_group(TargetGroupArn=target_group_arn)
-		except Exception:
+		except ClientError:
 			pass
+		_delete_target_group_best_effort(elbv2, target_group_arn, reporter=reporter)
 		msg = f"Failed to create listener rule: {exc}"
 		raise DeploymentError(msg) from exc
 
@@ -999,13 +1028,10 @@ async def create_service_and_target_group(
 		)
 		service_arn = service_response["service"]["serviceArn"]
 		reporter.success(f"ECS service created: {service_arn}")
-		return cast(str, service_arn), cast(str, target_group_arn)
+		return cast(str, service_arn), target_group_arn
 	except ClientError as exc:
 		# Clean up the target group if service creation fails
-		try:
-			elbv2.delete_target_group(TargetGroupArn=target_group_arn)
-		except Exception:
-			pass  # Best effort cleanup
+		_delete_target_group_best_effort(elbv2, target_group_arn, reporter=reporter)
 		msg = f"Failed to create ECS service: {exc}"
 		raise DeploymentError(msg) from exc
 
@@ -1055,8 +1081,12 @@ async def _cleanup_failed_deployment(
 					except ClientError:
 						pass  # Best effort
 
-		elbv2.delete_target_group(TargetGroupArn=target_group_arn)
-		reporter.detail(f"Deleted target group {target_group_arn}")
+		_delete_target_group_best_effort(
+			elbv2,
+			target_group_arn,
+			reporter=reporter,
+			report_success=True,
+		)
 	except ClientError as exc:
 		reporter.warning(f"Failed to delete target group: {exc}")
 

@@ -24,13 +24,12 @@ pulse-aws teardown [options]
 | `--deployment-name` | `PULSE_AWS_DEPLOYMENT_NAME` | none | required |
 | `--domain` | `PULSE_AWS_DOMAIN` | none | required; used for ACM + default server address |
 | `--server-address` | `PULSE_SERVER_ADDRESS` | `https://<domain>` | overrides `PULSE_SERVER_ADDRESS` |
-| `--project-root` | `PULSE_AWS_PROJECT_ROOT` | `cwd` | base for `--dockerfile` + `--context` |
 | `--app-file` | `PULSE_AWS_APP_FILE` | `main.py` | relative to build context; sets `APP_FILE` |
 | `--web-root` | `PULSE_AWS_WEB_ROOT` | `web` | relative to build context; sets `WEB_ROOT` |
-| `--dockerfile` | `PULSE_AWS_DOCKERFILE` | `Dockerfile` | resolved from project root |
-| `--context` | `PULSE_AWS_CONTEXT` | `.` | resolved from project root |
-| `--cdk-bin` | `PULSE_AWS_CDK_BIN` | `cdk` | CDK executable or wrapper path |
-| `--cdk-workdir` | `PULSE_AWS_CDK_WORKDIR` | packaged `pulse_aws/cdk` app | advanced override for a custom CDK app |
+| `--dockerfile` | `PULSE_AWS_DOCKERFILE` | `Dockerfile` | host path; resolved from the directory where you run `pulse-aws` |
+| `--context` | `PULSE_AWS_CONTEXT` | `.` | host path; resolved from the directory where you run `pulse-aws` |
+| `--cdk-bin` | `PULSE_AWS_CDK_BIN` | `cdk` | bare names use `PATH`; path-like values resolve from the directory where you run `pulse-aws` |
+| `--cdk-workdir` | `PULSE_AWS_CDK_WORKDIR` | packaged `pulse_aws/cdk` app | host path; resolved from the directory where you run `pulse-aws` |
 | `--build-arg` | none | none | repeatable `KEY=VALUE` |
 | `--task-env` | none | none | repeatable `KEY=VALUE` |
 | `--task-cpu` | `PULSE_AWS_TASK_CPU` | `256` | ECS CPU units (string) |
@@ -50,6 +49,10 @@ Defaults applied even when omitted:
 - Docker build args always include `APP_FILE`, `WEB_ROOT`, `PULSE_SERVER_ADDRESS`.
 - ECS task env always includes `PULSE_SERVER_ADDRESS`.
 - CDK commands run against the packaged `pulse_aws/cdk` app unless `--cdk-workdir` is set.
+
+Path rules:
+- Host-path flags resolve from the directory where you run `pulse-aws`.
+- `--app-file` and `--web-root` are Docker-context paths, not host paths.
 
 ### verify
 

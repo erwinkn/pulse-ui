@@ -121,9 +121,13 @@ class FakeElbv2Client:
 
 
 class FakeCreateServiceElbv2Client:
-	def __init__(self) -> None:
+	def __init__(
+		self, *, modify_target_group_attributes_error: Exception | None = None
+	) -> None:
 		self.create_rule_calls: list[dict[str, Any]] = []
 		self.modify_target_group_attributes_calls: list[dict[str, Any]] = []
+		self.delete_target_group_calls: list[dict[str, Any]] = []
+		self.modify_target_group_attributes_error = modify_target_group_attributes_error
 
 	def create_target_group(self, **kwargs: Any) -> dict[str, Any]:
 		return {
@@ -145,12 +149,14 @@ class FakeCreateServiceElbv2Client:
 
 	def modify_target_group_attributes(self, **kwargs: Any) -> None:
 		self.modify_target_group_attributes_calls.append(kwargs)
+		if self.modify_target_group_attributes_error is not None:
+			raise self.modify_target_group_attributes_error
 
 	def delete_rule(self, **kwargs: Any) -> None:
 		return None
 
 	def delete_target_group(self, **kwargs: Any) -> None:
-		return None
+		self.delete_target_group_calls.append(kwargs)
 
 
 class FakeCreateServiceEcsClient:
@@ -373,6 +379,46 @@ async def test_create_service_and_target_group_adds_header_and_cookie_affinity_r
 			},
 		}
 	]
+
+
+@pytest.mark.asyncio
+async def test_create_service_and_target_group_cleans_up_target_group_when_stickiness_setup_fails(
+	monkeypatch,
+):
+	elbv2 = FakeCreateServiceElbv2Client(
+		modify_target_group_attributes_error=RuntimeError("connection dropped")
+	)
+	ecs = FakeCreateServiceEcsClient()
+
+	def fake_boto3_client(service_name: str, **_kwargs: Any) -> Any:
+		if service_name == "elbv2":
+			return elbv2
+		if service_name == "ecs":
+			return ecs
+		raise AssertionError(f"Unexpected boto3 client: {service_name}")
+
+	monkeypatch.setattr(
+		"pulse_aws.deployment.boto3.client",
+		fake_boto3_client,
+	)
+
+	with pytest.raises(
+		DeploymentError, match="Failed to configure target group stickiness"
+	):
+		await create_service_and_target_group(
+			deployment_name="test",
+			deployment_id="test-20260306-151500Z",
+			task_def_arn="arn:task-definition",
+			baseline=make_baseline(),
+			reporter=DummyReporter(),
+		)
+
+	assert elbv2.delete_target_group_calls == [
+		{
+			"TargetGroupArn": "arn:aws:elasticloadbalancing:target-group/test",
+		}
+	]
+	assert elbv2.create_rule_calls == []
 
 
 @pytest.mark.asyncio

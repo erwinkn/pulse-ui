@@ -28,30 +28,16 @@ class FakeElbv2Client:
 					],
 					"Actions": [{"TargetGroupArn": "arn:target-group"}],
 				},
-				{
-					"Priority": "141",
-					"RuleArn": "arn:cookie",
-					"Conditions": [
-						{
-							"Field": "http-header",
-							"HttpHeaderConfig": {
-								"HttpHeaderName": "Cookie",
-								"Values": ["*pulse_affinity=test-20260306-151500Z*"],
-							},
-						}
-					],
-					"Actions": [{"TargetGroupArn": "arn:target-group"}],
-				},
 			]
 		}
 
 
-def test_get_listener_rules_map_collects_header_and_cookie_rules():
+def test_get_listener_rules_map_collects_header_rules():
 	rules_map = get_listener_rules_map(FakeElbv2Client(), "arn:listener")
 
 	assert rules_map == {
 		"test-20260306-151500Z": {
-			"rule_arns": ["arn:header", "arn:cookie"],
+			"rule_arns": ["arn:header"],
 			"target_group_arn": "arn:target-group",
 		}
 	}

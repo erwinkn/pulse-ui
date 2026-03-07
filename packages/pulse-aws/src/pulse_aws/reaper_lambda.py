@@ -605,29 +605,15 @@ def get_listener_rules_map(elbv2: Any, listener_arn: str) -> dict[str, dict[str,
 
 			deployment_id: str | None = None
 			for condition in rule.get("Conditions", []):
-				if condition.get("Field") == "http-header":
-					header_config = condition.get("HttpHeaderConfig", {})
-					header_name = header_config.get("HttpHeaderName")
-					values = header_config.get("Values", [])
-					if not values:
-						continue
-					if header_name == "X-Pulse-Render-Affinity":
-						deployment_id = cast(str, values[0])
-						break
-					if header_name == "Cookie":
-						for value in values:
-							prefix = "*pulse_affinity="
-							suffix = "*"
-							if (
-								isinstance(value, str)
-								and value.startswith(prefix)
-								and value.endswith(suffix)
-							):
-								deployment_id = value.removeprefix(prefix).removesuffix(
-									suffix
-								)
-								break
-				if deployment_id is not None:
+				if condition.get("Field") != "http-header":
+					continue
+				header_config = condition.get("HttpHeaderConfig", {})
+				values = header_config.get("Values", [])
+				if (
+					header_config.get("HttpHeaderName") == "X-Pulse-Render-Affinity"
+					and values
+				):
+					deployment_id = cast(str, values[0])
 					break
 
 			if deployment_id is None:

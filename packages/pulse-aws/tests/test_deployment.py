@@ -6,10 +6,7 @@ from typing import Any
 import pytest
 from pulse_aws.baseline import BaselineStackOutputs
 from pulse_aws.config import DockerBuild
-from pulse_aws.constants import (
-	AFFINITY_COOKIE_NAME,
-	TARGET_GROUP_STICKINESS_DURATION_SECONDS,
-)
+from pulse_aws.constants import TARGET_GROUP_STICKINESS_DURATION_SECONDS
 from pulse_aws.deployment import (
 	DeploymentError,
 	_ensure_listener_certificate,
@@ -315,9 +312,7 @@ async def test_build_and_push_image_streams_push_output(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_service_and_target_group_adds_header_and_cookie_affinity_rules(
-	monkeypatch,
-):
+async def test_create_service_and_target_group_adds_header_affinity_rule(monkeypatch):
 	elbv2 = FakeCreateServiceElbv2Client()
 	ecs = FakeCreateServiceEcsClient()
 
@@ -356,9 +351,9 @@ async def test_create_service_and_target_group_adds_header_and_cookie_affinity_r
 			],
 		}
 	]
-	assert len(elbv2.create_rule_calls) == 2
+	assert len(elbv2.create_rule_calls) == 1
 
-	header_rule, cookie_rule = elbv2.create_rule_calls
+	header_rule = elbv2.create_rule_calls[0]
 	assert header_rule["Priority"] == 141
 	assert header_rule["Conditions"] == [
 		{
@@ -366,16 +361,6 @@ async def test_create_service_and_target_group_adds_header_and_cookie_affinity_r
 			"HttpHeaderConfig": {
 				"HttpHeaderName": "X-Pulse-Render-Affinity",
 				"Values": ["test-20260306-151500Z"],
-			},
-		}
-	]
-	assert cookie_rule["Priority"] == 142
-	assert cookie_rule["Conditions"] == [
-		{
-			"Field": "http-header",
-			"HttpHeaderConfig": {
-				"HttpHeaderName": "Cookie",
-				"Values": [f"*{AFFINITY_COOKIE_NAME}=test-20260306-151500Z*"],
 			},
 		}
 	]

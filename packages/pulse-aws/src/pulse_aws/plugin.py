@@ -20,6 +20,8 @@ from typing import Any, override
 import pulse as ps
 import requests
 
+from pulse_aws.constants import AFFINITY_HEADER_NAME
+
 logger = logging.getLogger(__name__)
 
 
@@ -320,10 +322,10 @@ class AWSECSDirectivesMiddleware(ps.PulseMiddleware):
 		if isinstance(res, ps.Ok):
 			directives = res.payload["directives"]
 			# HTTP prerender requests can send custom headers, so keep using them.
-			directives["headers"]["X-Pulse-Render-Affinity"] = self.plugin.deployment_id
+			directives["headers"][AFFINITY_HEADER_NAME] = self.plugin.deployment_id
 			# Keep the Socket.IO header in directives so clients that support custom
 			# headers can route to the same deployment.
-			directives["socketio"]["headers"]["X-Pulse-Render-Affinity"] = (
+			directives["socketio"]["headers"][AFFINITY_HEADER_NAME] = (
 				self.plugin.deployment_id
 			)
 		# For Redirect or NotFound, just pass through

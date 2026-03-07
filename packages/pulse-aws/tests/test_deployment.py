@@ -6,7 +6,10 @@ from typing import Any
 import pytest
 from pulse_aws.baseline import BaselineStackOutputs
 from pulse_aws.config import DockerBuild
-from pulse_aws.constants import TARGET_GROUP_STICKINESS_DURATION_SECONDS
+from pulse_aws.constants import (
+	AFFINITY_HEADER_NAME,
+	TARGET_GROUP_STICKINESS_DURATION_SECONDS,
+)
 from pulse_aws.deployment import (
 	DeploymentError,
 	_ensure_listener_certificate,
@@ -359,7 +362,7 @@ async def test_create_service_and_target_group_adds_header_affinity_rule(monkeyp
 		{
 			"Field": "http-header",
 			"HttpHeaderConfig": {
-				"HttpHeaderName": "X-Pulse-Render-Affinity",
+				"HttpHeaderName": AFFINITY_HEADER_NAME,
 				"Values": ["test-20260306-151500Z"],
 			},
 		}

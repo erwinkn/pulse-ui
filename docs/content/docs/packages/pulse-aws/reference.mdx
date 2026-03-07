@@ -193,7 +193,7 @@ Optional env vars:
 Behavior:
 - polls SSM for drain state
 - writes task readiness state to SSM
-- adds `X-Pulse-Render-Affinity` to prerender directives and relies on ALB target stickiness to keep requests on the same ECS task
+- adds `X-Pulse-Render-Affinity` to prerender headers and Socket.IO directives, then relies on ALB target stickiness to keep requests on the same ECS task
 
 In dev, missing required vars disables the plugin. In prod/ci, missing vars raise on startup.
 

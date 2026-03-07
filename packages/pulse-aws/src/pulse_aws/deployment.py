@@ -27,7 +27,10 @@ from pulse_aws.config import (
 	ReaperConfig,
 	TaskConfig,
 )
-from pulse_aws.constants import TARGET_GROUP_STICKINESS_DURATION_SECONDS
+from pulse_aws.constants import (
+	AFFINITY_HEADER_NAME,
+	TARGET_GROUP_STICKINESS_DURATION_SECONDS,
+)
 from pulse_aws.reporting import DeploymentContext, Reporter, create_context
 
 
@@ -934,37 +937,31 @@ async def create_service_and_target_group(
 					pass
 		next_priority = max_priority + 1
 
-		rule_conditions = [
-			[
+		elbv2.create_rule(
+			ListenerArn=baseline.listener_arn,
+			Priority=next_priority,
+			Conditions=[
 				{
 					"Field": "http-header",
 					"HttpHeaderConfig": {
-						"HttpHeaderName": "X-Pulse-Render-Affinity",
+						"HttpHeaderName": AFFINITY_HEADER_NAME,
 						"Values": [deployment_id],
 					},
 				}
-			]
-		]
-
-		for priority_offset, conditions in enumerate(rule_conditions):
-			elbv2.create_rule(
-				ListenerArn=baseline.listener_arn,
-				Priority=next_priority + priority_offset,
-				Conditions=conditions,
-				Actions=[
-					{
-						"Type": "forward",
-						"TargetGroupArn": target_group_arn,
-					}
-				],
-				Tags=[
-					{"Key": "deployment-id", "Value": deployment_id},
-					{"Key": "deployment-name", "Value": deployment_name},
-				],
-			)
+			],
+			Actions=[
+				{
+					"Type": "forward",
+					"TargetGroupArn": target_group_arn,
+				}
+			],
+			Tags=[
+				{"Key": "deployment-id", "Value": deployment_id},
+				{"Key": "deployment-name", "Value": deployment_name},
+			],
+		)
 		reporter.success(
-			"Target group attached with routing rules "
-			+ f"(priorities {next_priority}-{next_priority + len(rule_conditions) - 1})"
+			f"Target group attached with routing rule (priority {next_priority})"
 		)
 	except ClientError as exc:
 		# Clean up any partially-created listener rules and target group if rule creation fails
@@ -1419,7 +1416,7 @@ async def drain_previous_deployments(
 					f"{base_url}/drain",
 					headers={
 						"Authorization": f"Bearer {drain_secret}",
-						"X-Pulse-Render-Affinity": dep_id,
+						AFFINITY_HEADER_NAME: dep_id,
 					},
 				)
 

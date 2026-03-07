@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pulse as ps
 import pytest
+from pulse_aws.constants import AFFINITY_HEADER_NAME
 from pulse_aws.plugin import AWSECSDirectivesMiddleware, AWSECSPlugin
 
 
@@ -20,11 +21,11 @@ async def test_prerender_adds_affinity_headers():
 	)
 
 	assert isinstance(result, ps.Ok)
-	assert result.payload["directives"]["headers"]["X-Pulse-Render-Affinity"] == (
+	assert result.payload["directives"]["headers"][AFFINITY_HEADER_NAME] == (
 		"test-20260306-150000Z"
 	)
 	assert result.payload["directives"]["socketio"]["headers"] == {
-		"X-Pulse-Render-Affinity": "test-20260306-150000Z"
+		AFFINITY_HEADER_NAME: "test-20260306-150000Z"
 	}
 
 

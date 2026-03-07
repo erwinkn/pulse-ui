@@ -15,6 +15,7 @@ import httpx
 
 from pulse_aws.baseline import BaselineStackOutputs, describe_stack
 from pulse_aws.config import DockerBuild, HealthCheckConfig, TaskConfig
+from pulse_aws.constants import AFFINITY_HEADER_NAME
 from pulse_aws.deployment import deploy
 from pulse_aws.teardown import teardown_baseline_stack
 
@@ -487,7 +488,7 @@ async def _run_verify(args: argparse.Namespace) -> int:
 			response = await client.get(base_url)
 			if response.status_code == 200:
 				data = response.json()
-				affinity = response.headers.get("X-Pulse-Render-Affinity", "none")
+				affinity = response.headers.get(AFFINITY_HEADER_NAME, "none")
 				print(f"   ✓ Status: {response.status_code}")
 				print(f"   ✓ Response: {data}")
 				print(f"   ✓ Affinity header: {affinity}")
@@ -519,7 +520,7 @@ async def _run_verify(args: argparse.Namespace) -> int:
 				try:
 					response = await client.get(
 						base_url,
-						headers={"X-Pulse-Render-Affinity": deployment_id},
+						headers={AFFINITY_HEADER_NAME: deployment_id},
 					)
 					if response.status_code == 200:
 						data = response.json()
@@ -557,7 +558,7 @@ async def _run_verify(args: argparse.Namespace) -> int:
 		if len(running_deployment_ids) > 1:
 			print("To test affinity:")
 			for deployment_id in running_deployment_ids:
-				print(f"  curl -H 'X-Pulse-Render-Affinity: {deployment_id}' \\")
+				print(f"  curl -H '{AFFINITY_HEADER_NAME}: {deployment_id}' \\")
 				print(f"    https://{args.domain}/")
 	elif not running_deployment_ids:
 		print("⚠️  No deployments with running tasks found")

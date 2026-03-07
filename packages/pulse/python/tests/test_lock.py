@@ -18,7 +18,7 @@ def test_create_lock_round_trips_typed_info(tmp_path: Path):
 	info = create_lock(lock_path, address="localhost", port=8123)
 
 	assert read_lock_info(lock_path) == info
-	assert active_lock_info(lock_path) == info
+	assert active_lock_info(tmp_path) == info
 
 	remove_lock(lock_path)
 	assert read_lock_info(lock_path) is None
@@ -47,4 +47,4 @@ def test_active_lock_info_ignores_stale_lock(
 	write_lock_info(lock_path, stale)
 
 	assert read_lock_info(lock_path) == stale
-	assert active_lock_info(lock_path) is None
+	assert active_lock_info(tmp_path) is None

@@ -24,7 +24,7 @@ from pulse.cli.dependencies import (
 	prepare_web_dependencies,
 )
 from pulse.cli.helpers import load_app_from_target
-from pulse.cli.lock import FolderLock, active_lock_info, lock_path_for_web_root
+from pulse.cli.lock import FolderLock, active_lock_info
 from pulse.cli.logging import CLILogger
 from pulse.cli.models import AppLoadResult, CommandSpec
 from pulse.cli.processes import execute_commands
@@ -279,7 +279,7 @@ def generate(
 	_apply_app_context_to_env(app_ctx)
 	app = app_ctx.app
 	web_root = app.codegen.cfg.web_root
-	if info := active_lock_info(lock_path_for_web_root(web_root)):
+	if info := active_lock_info(web_root):
 		logger.error(
 			"Cannot run 'pulse generate' while a Pulse dev server is running at "
 			+ f"{info.url} (pid={info.pid}). Stop the dev server first."

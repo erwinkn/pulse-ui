@@ -136,8 +136,11 @@ def read_lock_info(lock_path: Path) -> LockInfo | None:
 		return None
 
 
-def active_lock_info(lock_path: Path) -> LockInfo | None:
-	"""Return lock info when it belongs to a live process."""
+def active_lock_info(
+	web_root: Path, *, filename: str = DEFAULT_LOCK_FILENAME
+) -> LockInfo | None:
+	"""Return lock info when it belongs to a live process for a web root."""
+	lock_path = lock_path_for_web_root(web_root, filename)
 	info = read_lock_info(lock_path)
 	if info is None:
 		return None
@@ -163,7 +166,7 @@ def write_lock_info(lock_path: Path, info: LockInfo) -> None:
 def create_lock(lock_path: Path, *, address: str, port: int) -> LockInfo:
 	"""Create a lock file with current process information."""
 	lock_path = Path(lock_path)
-	if info := active_lock_info(lock_path):
+	if info := active_lock_info(lock_path.parent, filename=lock_path.name):
 		raise RuntimeError(
 			f"Another Pulse dev instance is running at {info.url} (pid={info.pid})"
 		)

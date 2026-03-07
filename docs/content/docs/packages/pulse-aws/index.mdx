@@ -193,7 +193,9 @@ uv run pulse-aws verify \
   --domain app.example.com
 ```
 
-You should now see checks for the base URL, health endpoint, and (if multiple versions exist) affinity routing.
+You should now see checks for the base URL, health endpoint, and (if multiple versions exist) header-based affinity routing for existing sessions.
+
+`affinity` is enforced with the `X-Pulse-Render-Affinity` header from existing session directives, while new tabs/sessions without that header use the default listener action (latest deployment).
 
 ## What deploy does under the hood
 

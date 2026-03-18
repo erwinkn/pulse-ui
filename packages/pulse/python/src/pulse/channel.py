@@ -187,10 +187,22 @@ class ChannelsManager:
 				):
 					result = await channel.dispatch(event, payload, request_id)
 			except Exception as exc:
+				with PulseContext.update(
+					session=session,
+					render=render,
+					route=route_ctx,
+				):
+					PulseContext.get().errors.report(
+						exc,
+						code="channel",
+						details={
+							"channel": channel.id,
+							"event": event,
+							"request_id": request_id,
+						},
+					)
 				if request_id:
 					self._send_error_response(channel.id, request_id, str(exc))
-				else:
-					logger.exception("Unhandled error in channel handler")
 				return
 
 			if request_id:

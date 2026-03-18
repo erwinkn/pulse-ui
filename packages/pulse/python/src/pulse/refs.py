@@ -101,6 +101,10 @@ def _validate_prop_name(name: str, *, settable: bool) -> str:
 	return trimmed
 
 
+def _ref_error_code(label: str) -> Literal["ref.mount", "ref.unmount"]:
+	return "ref.mount" if label == "mount" else "ref.unmount"
+
+
 class RefNotMounted(RuntimeError):
 	"""Raised when a ref operation is attempted before mount."""
 
@@ -718,9 +722,13 @@ class RefHandle(Disposable, Generic[T]):
 		for handler in list(handlers):
 			try:
 				result = handler()
-			except Exception:
-				# Fail early: propagate on next render via error log if desired
-				raise
+			except Exception as exc:
+				PulseContext.get().errors.report(
+					exc,
+					code=_ref_error_code(label),
+					details={"ref_id": self.id, "handler": label},
+				)
+				return
 			if inspect.isawaitable(result):
 				task = create_task(result, name=f"ref:{self.id}:{label}")
 
@@ -732,13 +740,10 @@ class RefHandle(Disposable, Generic[T]):
 					except asyncio.CancelledError:
 						return
 					except Exception as exc:
-						loop = done_task.get_loop()
-						loop.call_exception_handler(
-							{
-								"message": f"Unhandled exception in ref {label} handler",
-								"exception": exc,
-								"context": {"ref_id": self.id, "handler": label},
-							}
+						PulseContext.get().errors.report(
+							exc,
+							code=_ref_error_code(label),
+							details={"ref_id": self.id, "handler": label},
 						)
 
 				task.add_done_callback(_on_done)

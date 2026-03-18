@@ -117,7 +117,7 @@ Without `on_error`, exceptions propagate to the reactive context's error handler
 - Effect remains active after error (can re-run on next trigger)
 - Use `effect.dispose()` to fully stop
 
-### Errors in Callbacks
+### Errors in callbacks
 
 Event handler errors are reported to the client:
 
@@ -147,8 +147,39 @@ def Broken():
 
 The error is:
 1. Logged with full traceback
-2. Sent to client with phase="render"
+2. Sent to client with code="render"
 3. Component tree may be partially rendered
+
+## Error transport
+
+Pulse runtime failures now use typed `error.code` values instead of `error.phase`.
+
+Common codes:
+- `render`
+- `render.loop`
+- `callback`
+- `navigate`
+- `ref.mount`
+- `ref.unmount`
+- `timer.later`
+- `timer.repeat`
+- `channel`
+- `form`
+- `api`
+- `middleware.prerender`
+- `middleware.connect`
+- `middleware.message`
+- `middleware.channel`
+- `setup`
+- `init`
+- `plugin.startup`
+- `plugin.setup`
+- `plugin.shutdown`
+- `query.handler`
+- `mutation.handler`
+- `system`
+
+When Pulse has both a render and a route in context, it forwards the error to the matching client view as `server_error`. Otherwise it logs only.
 
 ## Query Error Handling
 
@@ -362,7 +393,7 @@ def my_effect():
 Server errors sent to client include:
 - `message` - Error string
 - `stack` - Python traceback
-- `phase` - "render", "callback", "effect", "navigate", "unmount"
+- `code` - Typed error code like `render`, `callback`, `timer.later`, `api`
 - `details` - Additional context (callback name, effect name, etc.)
 
 ## Render Interrupts

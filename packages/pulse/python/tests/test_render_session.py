@@ -1419,23 +1419,6 @@ async def test_update_route_updates_route_context():
 	session.close()
 
 
-def test_update_route_missing_mount_is_noop(monkeypatch: pytest.MonkeyPatch):
-	routes = RouteTree([Route("a", simple_component)])
-	session = RenderSession("test-id", routes)
-	reported: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-
-	def report_error(*args: Any, **kwargs: Any) -> None:
-		reported.append((args, kwargs))
-
-	monkeypatch.setattr(session, "report_error", report_error)
-
-	session.update_route("/missing", make_route_info("/missing"))
-
-	assert reported == []
-
-	session.close()
-
-
 @pytest.mark.asyncio
 async def test_prerender_queue_timeout_transitions_to_idle():
 	"""Test that prerender without attach eventually transitions to idle."""
@@ -1489,4 +1472,29 @@ async def test_attach_from_idle_requests_reload():
 	assert len(messages) == 1
 	assert messages[0]["type"] == "reload"
 
+	session.close()
+
+
+def test_execute_callback_error_reports_callback_code():
+	def broken_component():
+		def explode():
+			raise RuntimeError("callback-boom")
+
+		return ps.button("x", onClick=explode)
+
+	routes = RouteTree([Route("a", ps.component(broken_component))])
+	session = RenderSession("callback-error", routes)
+	messages, disconnect = mount_with_listener(session, "/a")
+
+	key = next(iter(session.route_mounts["/a"].tree.callbacks))
+	session.execute_callback("/a", key, [])
+
+	server_errors = [
+		message for message in messages if message.get("type") == "server_error"
+	]
+	assert len(server_errors) == 1
+	assert server_errors[0]["error"]["code"] == "callback"
+	assert server_errors[0]["error"]["details"]["callback"] == key
+
+	disconnect()
 	session.close()

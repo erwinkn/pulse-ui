@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pulse_aws.constants import AFFINITY_HEADER_NAME
+from pulse_aws.constants import AFFINITY_QUERY_PARAM
 from pulse_aws.reaper_lambda import get_listener_rules_map
 
 
@@ -20,10 +20,14 @@ class FakeElbv2Client:
 					"RuleArn": "arn:header",
 					"Conditions": [
 						{
-							"Field": "http-header",
-							"HttpHeaderConfig": {
-								"HttpHeaderName": AFFINITY_HEADER_NAME,
-								"Values": ["test-20260306-151500Z"],
+							"Field": "query-string",
+							"QueryStringConfig": {
+								"Values": [
+									{
+										"Key": AFFINITY_QUERY_PARAM,
+										"Value": "test-20260306-151500Z",
+									}
+								],
 							},
 						}
 					],
@@ -33,7 +37,7 @@ class FakeElbv2Client:
 		}
 
 
-def test_get_listener_rules_map_collects_header_rules():
+def test_get_listener_rules_map_collects_query_rules():
 	rules_map = get_listener_rules_map(FakeElbv2Client(), "arn:listener")
 
 	assert rules_map == {

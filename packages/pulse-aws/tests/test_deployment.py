@@ -4,10 +4,11 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from botocore.exceptions import ClientError
 from pulse_aws.baseline import BaselineStackOutputs
 from pulse_aws.config import DockerBuild
 from pulse_aws.constants import (
-	AFFINITY_HEADER_NAME,
+	AFFINITY_QUERY_PARAM,
 	TARGET_GROUP_STICKINESS_DURATION_SECONDS,
 )
 from pulse_aws.deployment import (
@@ -125,6 +126,7 @@ class FakeCreateServiceElbv2Client:
 		self, *, modify_target_group_attributes_error: Exception | None = None
 	) -> None:
 		self.create_rule_calls: list[dict[str, Any]] = []
+		self.delete_rule_calls: list[dict[str, Any]] = []
 		self.modify_target_group_attributes_calls: list[dict[str, Any]] = []
 		self.delete_target_group_calls: list[dict[str, Any]] = []
 		self.modify_target_group_attributes_error = modify_target_group_attributes_error
@@ -137,10 +139,20 @@ class FakeCreateServiceElbv2Client:
 		}
 
 	def describe_rules(self, *, ListenerArn: str) -> dict[str, Any]:
+		created_rules = [
+			{
+				"Priority": str(rule["Priority"]),
+				"RuleArn": f"arn:rule/{index}",
+				"Conditions": rule["Conditions"],
+				"Actions": rule["Actions"],
+			}
+			for index, rule in enumerate(self.create_rule_calls, start=1)
+		]
 		return {
 			"Rules": [
-				{"Priority": "default", "Actions": []},
-				{"Priority": "140", "Actions": []},
+				{"Priority": "default", "RuleArn": "arn:default", "Actions": []},
+				{"Priority": "140", "RuleArn": "arn:existing", "Actions": []},
+				*created_rules,
 			]
 		}
 
@@ -153,17 +165,22 @@ class FakeCreateServiceElbv2Client:
 			raise self.modify_target_group_attributes_error
 
 	def delete_rule(self, **kwargs: Any) -> None:
-		return None
+		self.delete_rule_calls.append(kwargs)
 
 	def delete_target_group(self, **kwargs: Any) -> None:
 		self.delete_target_group_calls.append(kwargs)
 
 
 class FakeCreateServiceEcsClient:
+	def __init__(self, *, create_service_error: Exception | None = None) -> None:
+		self.create_service_error = create_service_error
+
 	def describe_services(self, **kwargs: Any) -> dict[str, Any]:
 		return {"services": []}
 
 	def create_service(self, **kwargs: Any) -> dict[str, Any]:
+		if self.create_service_error is not None:
+			raise self.create_service_error
 		return {
 			"service": {"serviceArn": "arn:aws:ecs:us-east-1:123456789012:service/test"}
 		}
@@ -315,7 +332,7 @@ async def test_build_and_push_image_streams_push_output(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_service_and_target_group_adds_header_affinity_rule(monkeypatch):
+async def test_create_service_and_target_group_adds_query_affinity_rule(monkeypatch):
 	elbv2 = FakeCreateServiceElbv2Client()
 	ecs = FakeCreateServiceEcsClient()
 
@@ -356,14 +373,18 @@ async def test_create_service_and_target_group_adds_header_affinity_rule(monkeyp
 	]
 	assert len(elbv2.create_rule_calls) == 1
 
-	header_rule = elbv2.create_rule_calls[0]
-	assert header_rule["Priority"] == 141
-	assert header_rule["Conditions"] == [
+	query_rule = elbv2.create_rule_calls[0]
+	assert query_rule["Priority"] == 141
+	assert query_rule["Conditions"] == [
 		{
-			"Field": "http-header",
-			"HttpHeaderConfig": {
-				"HttpHeaderName": AFFINITY_HEADER_NAME,
-				"Values": ["test-20260306-151500Z"],
+			"Field": "query-string",
+			"QueryStringConfig": {
+				"Values": [
+					{
+						"Key": AFFINITY_QUERY_PARAM,
+						"Value": "test-20260306-151500Z",
+					}
+				],
 			},
 		}
 	]
@@ -407,6 +428,47 @@ async def test_create_service_and_target_group_cleans_up_target_group_when_stick
 		}
 	]
 	assert elbv2.create_rule_calls == []
+
+
+@pytest.mark.asyncio
+async def test_create_service_and_target_group_cleans_up_rule_and_target_group_when_service_creation_fails(
+	monkeypatch,
+):
+	elbv2 = FakeCreateServiceElbv2Client()
+	ecs = FakeCreateServiceEcsClient(
+		create_service_error=ClientError(
+			{"Error": {"Code": "AccessDeniedException", "Message": "denied"}},
+			"CreateService",
+		)
+	)
+
+	def fake_boto3_client(service_name: str, **_kwargs: Any) -> Any:
+		if service_name == "elbv2":
+			return elbv2
+		if service_name == "ecs":
+			return ecs
+		raise AssertionError(f"Unexpected boto3 client: {service_name}")
+
+	monkeypatch.setattr(
+		"pulse_aws.deployment.boto3.client",
+		fake_boto3_client,
+	)
+
+	with pytest.raises(DeploymentError, match="Failed to create ECS service"):
+		await create_service_and_target_group(
+			deployment_name="test",
+			deployment_id="test-20260306-151500Z",
+			task_def_arn="arn:task-definition",
+			baseline=make_baseline(),
+			reporter=DummyReporter(),
+		)
+
+	assert elbv2.delete_rule_calls == [{"RuleArn": "arn:rule/1"}]
+	assert elbv2.delete_target_group_calls == [
+		{
+			"TargetGroupArn": "arn:aws:elasticloadbalancing:target-group/test",
+		}
+	]
 
 
 @pytest.mark.asyncio

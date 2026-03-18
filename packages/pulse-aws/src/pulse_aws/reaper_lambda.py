@@ -23,7 +23,7 @@ from typing import Any, cast
 
 import boto3
 
-from pulse_aws.constants import AFFINITY_HEADER_NAME
+from pulse_aws.constants import AFFINITY_QUERY_PARAM
 
 # Configuration from environment (only used by Lambda handler)
 CLUSTER = os.environ.get("PULSE_AWS_CLUSTER", "")
@@ -605,15 +605,14 @@ def get_listener_rules_map(elbv2: Any, listener_arn: str) -> dict[str, dict[str,
 
 			deployment_id: str | None = None
 			for condition in rule.get("Conditions", []):
-				if condition.get("Field") != "http-header":
+				if condition.get("Field") != "query-string":
 					continue
-				header_config = condition.get("HttpHeaderConfig", {})
-				values = header_config.get("Values", [])
-				if (
-					header_config.get("HttpHeaderName") == AFFINITY_HEADER_NAME
-					and values
-				):
-					deployment_id = cast(str, values[0])
+				query_config = condition.get("QueryStringConfig", {})
+				for entry in query_config.get("Values", []):
+					if entry.get("Key") == AFFINITY_QUERY_PARAM and entry.get("Value"):
+						deployment_id = cast(str, entry["Value"])
+						break
+				if deployment_id is not None:
 					break
 
 			if deployment_id is None:

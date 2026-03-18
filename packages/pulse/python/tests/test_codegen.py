@@ -258,6 +258,12 @@ class TestCodegen:
 		assert (
 			'const internalServerAddress = "http://localhost:8000";' in layout_content
 		)
+		assert (
+			"const prerenderUrl = new URL(`${config.serverAddress}${config.apiPrefix}/prerender`);"
+			in layout_content
+		)
+		assert "if (directives?.query) {" in layout_content
+		assert "prerenderUrl.searchParams.set(key, value as string);" in layout_content
 
 		routes_ts_content = (pulse_app_dir / "routes.ts").read_text()
 		# routes.ts should be built from runtime route tree now

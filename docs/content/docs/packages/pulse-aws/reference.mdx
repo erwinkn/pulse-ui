@@ -193,9 +193,9 @@ Optional env vars:
 Behavior:
 - polls SSM for drain state
 - writes task readiness state to SSM
-- adds `X-Pulse-Render-Affinity` to prerender headers and Socket.IO directives for existing render sessions. New tabs/sessions do not send this header unless they reuse those same directives.
+- adds `pulse_deployment` to prerender and Socket.IO query directives for existing render sessions. New tabs/sessions do not send this query unless they reuse those same directives.
 - Uses ALB target-group `lb_cookie` stickiness to keep requests on the same ECS task within a matched deployment.
-- New sessions without the affinity header follow the default listener action, which is the latest deployment.
+- New sessions without the affinity query follow the default listener action, which is the latest deployment.
 
 In dev, missing required vars disables the plugin. In prod/ci, missing vars raise on startup.
 

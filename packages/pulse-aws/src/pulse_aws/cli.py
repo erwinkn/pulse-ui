@@ -15,7 +15,7 @@ import httpx
 
 from pulse_aws.baseline import BaselineStackOutputs, describe_stack
 from pulse_aws.config import DockerBuild, HealthCheckConfig, TaskConfig
-from pulse_aws.constants import AFFINITY_HEADER_NAME
+from pulse_aws.constants import AFFINITY_QUERY_PARAM
 from pulse_aws.deployment import deploy
 from pulse_aws.teardown import teardown_baseline_stack
 
@@ -483,15 +483,13 @@ async def _run_verify(args: argparse.Namespace) -> int:
 	print()
 
 	async with httpx.AsyncClient(timeout=10.0, verify=args.verify_ssl) as client:
-		print("1️⃣  Testing default endpoint (no affinity header)...")
+		print("1️⃣  Testing default endpoint (no affinity query)...")
 		try:
 			response = await client.get(base_url)
 			if response.status_code == 200:
 				data = response.json()
-				affinity = response.headers.get(AFFINITY_HEADER_NAME, "none")
 				print(f"   ✓ Status: {response.status_code}")
 				print(f"   ✓ Response: {data}")
-				print(f"   ✓ Affinity header: {affinity}")
 			else:
 				print(f"   ❌ Status: {response.status_code}")
 				print(f"   ❌ Response: {response.text}")
@@ -514,13 +512,13 @@ async def _run_verify(args: argparse.Namespace) -> int:
 		print()
 
 		if len(running_deployment_ids) > 1:
-			print("3️⃣  Testing header-based affinity...")
+			print("3️⃣  Testing query-based affinity...")
 			for deployment_id in running_deployment_ids:
 				print(f"   Testing affinity to: {deployment_id}")
 				try:
 					response = await client.get(
 						base_url,
-						headers={AFFINITY_HEADER_NAME: deployment_id},
+						params={AFFINITY_QUERY_PARAM: deployment_id},
 					)
 					if response.status_code == 200:
 						data = response.json()
@@ -558,8 +556,9 @@ async def _run_verify(args: argparse.Namespace) -> int:
 		if len(running_deployment_ids) > 1:
 			print("To test affinity:")
 			for deployment_id in running_deployment_ids:
-				print(f"  curl -H '{AFFINITY_HEADER_NAME}: {deployment_id}' \\")
-				print(f"    https://{args.domain}/")
+				print(
+					f"  curl 'https://{args.domain}/?{AFFINITY_QUERY_PARAM}={deployment_id}'"
+				)
 	elif not running_deployment_ids:
 		print("⚠️  No deployments with running tasks found")
 	return 0

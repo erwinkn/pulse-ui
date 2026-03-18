@@ -28,7 +28,7 @@ from pulse_aws.config import (
 	TaskConfig,
 )
 from pulse_aws.constants import (
-	AFFINITY_HEADER_NAME,
+	AFFINITY_QUERY_PARAM,
 	TARGET_GROUP_STICKINESS_DURATION_SECONDS,
 )
 from pulse_aws.reporting import DeploymentContext, Reporter, create_context
@@ -85,6 +85,34 @@ def _delete_target_group_best_effort(
 	except Exception as exc:
 		if reporter is not None:
 			reporter.warning(f"Failed to delete target group {target_group_arn}: {exc}")
+
+
+def _delete_listener_rules_for_target_group_best_effort(
+	elbv2: Any,
+	listener_arn: str,
+	target_group_arn: str,
+	*,
+	reporter: Reporter | None = None,
+) -> None:
+	"""Delete any listener rules that forward to a target group."""
+	try:
+		rules_response = elbv2.describe_rules(ListenerArn=listener_arn)
+		for rule in rules_response.get("Rules", []):
+			for action in rule.get("Actions", []):
+				if action.get("TargetGroupArn") != target_group_arn:
+					continue
+				try:
+					elbv2.delete_rule(RuleArn=rule["RuleArn"])
+					if reporter is not None:
+						reporter.detail(f"Deleted listener rule {rule['RuleArn']}")
+				except ClientError as exc:
+					if reporter is not None:
+						reporter.warning(
+							f"Failed to delete listener rule {rule['RuleArn']}: {exc}"
+						)
+	except ClientError as exc:
+		if reporter is not None:
+			reporter.warning(f"Failed to describe listener rules for cleanup: {exc}")
 
 
 def _ensure_listener_certificate(
@@ -942,10 +970,14 @@ async def create_service_and_target_group(
 			Priority=next_priority,
 			Conditions=[
 				{
-					"Field": "http-header",
-					"HttpHeaderConfig": {
-						"HttpHeaderName": AFFINITY_HEADER_NAME,
-						"Values": [deployment_id],
+					"Field": "query-string",
+					"QueryStringConfig": {
+						"Values": [
+							{
+								"Key": AFFINITY_QUERY_PARAM,
+								"Value": deployment_id,
+							}
+						],
 					},
 				}
 			],
@@ -965,18 +997,12 @@ async def create_service_and_target_group(
 		)
 	except ClientError as exc:
 		# Clean up any partially-created listener rules and target group if rule creation fails
-		try:
-			rules_response = elbv2.describe_rules(ListenerArn=baseline.listener_arn)
-			for rule in rules_response.get("Rules", []):
-				actions = rule.get("Actions", [])
-				for action in actions:
-					if action.get("TargetGroupArn") == target_group_arn:
-						try:
-							elbv2.delete_rule(RuleArn=rule["RuleArn"])
-						except ClientError:
-							pass
-		except ClientError:
-			pass
+		_delete_listener_rules_for_target_group_best_effort(
+			elbv2,
+			baseline.listener_arn,
+			target_group_arn,
+			reporter=reporter,
+		)
 		_delete_target_group_best_effort(elbv2, target_group_arn, reporter=reporter)
 		msg = f"Failed to create listener rule: {exc}"
 		raise DeploymentError(msg) from exc
@@ -1015,7 +1041,13 @@ async def create_service_and_target_group(
 		reporter.success(f"ECS service created: {service_arn}")
 		return cast(str, service_arn), target_group_arn
 	except ClientError as exc:
-		# Clean up the target group if service creation fails
+		# Clean up the listener rule and target group if service creation fails
+		_delete_listener_rules_for_target_group_best_effort(
+			elbv2,
+			baseline.listener_arn,
+			target_group_arn,
+			reporter=reporter,
+		)
 		_delete_target_group_best_effort(elbv2, target_group_arn, reporter=reporter)
 		msg = f"Failed to create ECS service: {exc}"
 		raise DeploymentError(msg) from exc
@@ -1054,18 +1086,12 @@ async def _cleanup_failed_deployment(
 
 	# Delete target group
 	try:
-		# First, remove listener rules that reference this target group
-		rules_response = elbv2.describe_rules(ListenerArn=baseline.listener_arn)
-		for rule in rules_response.get("Rules", []):
-			actions = rule.get("Actions", [])
-			for action in actions:
-				if action.get("TargetGroupArn") == target_group_arn:
-					try:
-						elbv2.delete_rule(RuleArn=rule["RuleArn"])
-						reporter.detail(f"Deleted listener rule {rule['RuleArn']}")
-					except ClientError:
-						pass  # Best effort
-
+		_delete_listener_rules_for_target_group_best_effort(
+			elbv2,
+			baseline.listener_arn,
+			target_group_arn,
+			reporter=reporter,
+		)
 		_delete_target_group_best_effort(
 			elbv2,
 			target_group_arn,
@@ -1411,13 +1437,11 @@ async def drain_previous_deployments(
 		for dep_id in previous_deployments:
 			reporter.detail(f"Draining {dep_id}...")
 			try:
-				# Use affinity header to route to specific deployment
+				# Use the deployment affinity query to route to a specific deployment
 				response = await client.post(
 					f"{base_url}/drain",
-					headers={
-						"Authorization": f"Bearer {drain_secret}",
-						AFFINITY_HEADER_NAME: dep_id,
-					},
+					headers={"Authorization": f"Bearer {drain_secret}"},
+					params={AFFINITY_QUERY_PARAM: dep_id},
 				)
 
 				if response.status_code == 200:

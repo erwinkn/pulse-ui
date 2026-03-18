@@ -20,7 +20,7 @@ from typing import Any, override
 import pulse as ps
 import requests
 
-from pulse_aws.constants import AFFINITY_HEADER_NAME
+from pulse_aws.constants import AFFINITY_QUERY_PARAM
 
 logger = logging.getLogger(__name__)
 
@@ -321,11 +321,8 @@ class AWSECSDirectivesMiddleware(ps.PulseMiddleware):
 		# Only modify directives if we have an Ok result
 		if isinstance(res, ps.Ok):
 			directives = res.payload["directives"]
-			# HTTP prerender requests can send custom headers, so keep using them.
-			directives["headers"][AFFINITY_HEADER_NAME] = self.plugin.deployment_id
-			# Keep the Socket.IO header in directives so clients that support custom
-			# headers can route to the same deployment.
-			directives["socketio"]["headers"][AFFINITY_HEADER_NAME] = (
+			directives["query"][AFFINITY_QUERY_PARAM] = self.plugin.deployment_id
+			directives["socketio"]["query"][AFFINITY_QUERY_PARAM] = (
 				self.plugin.deployment_id
 			)
 		# For Redirect or NotFound, just pass through

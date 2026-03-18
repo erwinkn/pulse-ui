@@ -595,9 +595,11 @@ class App:
 						"views": {},
 						"directives": {
 							"headers": {"X-Pulse-Render-Id": render_id},
+							"query": {},
 							"socketio": {
 								"auth": {"render_id": render_id},
 								"headers": {},
+								"query": {},
 							},
 						},
 					}

@@ -1,4 +1,4 @@
 """Shared runtime constants for pulse-aws."""
 
-AFFINITY_HEADER_NAME = "X-Pulse-Render-Affinity"
+AFFINITY_QUERY_PARAM = "pulse_deployment"
 TARGET_GROUP_STICKINESS_DURATION_SECONDS = 86400

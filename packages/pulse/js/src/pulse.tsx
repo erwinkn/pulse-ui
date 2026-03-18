@@ -4,13 +4,19 @@ import {
 	useContext,
 	useEffect,
 	useMemo,
+	useReducer,
 	useRef,
 	useState,
 } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
+import {
+	getActiveServerErrorOverlayEntry,
+	INITIAL_SERVER_ERROR_OVERLAY_STATE,
+	reduceServerErrorOverlay,
+	ServerErrorOverlay,
+} from "./errorOverlay";
 import type { RouteInfo } from "./helpers";
-import type { ServerError } from "./messages";
 import { VDOMRenderer } from "./renderer";
 import type { VDOM } from "./vdom";
 
@@ -77,6 +83,7 @@ export interface PulseProviderProps {
 }
 
 const inBrowser = typeof window !== "undefined";
+const showDevServerErrorOverlay = process.env.NODE_ENV !== "production";
 
 export function PulseProvider({ children, config, prerender }: PulseProviderProps) {
 	const [status, setStatus] = useState<ConnectionStatus>("ok");
@@ -170,7 +177,10 @@ export function PulseView({ path, registry }: PulseViewProps) {
 		[client, path, registry],
 	);
 	const [tree, setTree] = useState<ReactNode>(() => renderer.init(initialView));
-	const [serverError, setServerError] = useState<ServerError | null>(null);
+	const [serverError, dispatchServerError] = useReducer(
+		reduceServerErrorOverlay,
+		INITIAL_SERVER_ERROR_OVERLAY_STATE,
+	);
 
 	const location = useLocation();
 	const params = useParams();
@@ -202,11 +212,11 @@ export function PulseView({ path, registry }: PulseViewProps) {
 				routeInfo,
 				onInit: (view) => {
 					setTree(renderer.init(view));
-					setServerError(null);
+					dispatchServerError({ type: "init" });
 				},
 				onUpdate: (ops) => {
 					setTree((prev) => (prev == null ? prev : renderer.applyUpdates(prev, ops)));
-					setServerError(null);
+					dispatchServerError({ type: "update" });
 				},
 				onJsExec: (msg) => {
 					let result: any;
@@ -218,7 +228,10 @@ export function PulseView({ path, registry }: PulseViewProps) {
 					}
 					client.sendJsResult(msg.id, result, error);
 				},
-				onServerError: setServerError,
+				onServerError: (error) => {
+					if (!showDevServerErrorOverlay) return;
+					dispatchServerError({ type: "error", error });
+				},
 			});
 			return () => {
 				renderer.clearPendingCallbacks();
@@ -244,40 +257,32 @@ export function PulseView({ path, registry }: PulseViewProps) {
 		// 2nd+ rendering pass. Happens when a route stays mounted on navigation.
 		else {
 			setTree(renderer.init(initialView));
+			dispatchServerError({ type: "init" });
 		}
 		// Note: Do NOT reset hasRendered in cleanup. The cleanup runs when effect 
 		// deps change and at least once on mount with strict mode,
 		// not just on unmount, which would cause subsequent runs to skip setTree.
 	}, [initialView, renderer]);
 
-	if (serverError) {
-		return <ServerErrorPopup error={serverError} />;
-	}
+	const activeEntry = getActiveServerErrorOverlayEntry(serverError);
+	const canGoPrevious = serverError.activeIndex > 0;
+	const canGoNext = serverError.activeIndex < serverError.entries.length - 1;
 
-	return tree;
-}
-
-function ServerErrorPopup({ error }: { error: ServerError }) {
 	return (
-		<div
-			style={{
-				padding: 16,
-				border: "1px solid #e00",
-				background: "#fff5f5",
-				color: "#900",
-				fontFamily:
-					'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-				whiteSpace: "pre-wrap",
-			}}
-		>
-			<div style={{ fontWeight: 700, marginBottom: 8 }}>Server Error during {error.phase}</div>
-			{error.message && <div>{error.message}</div>}
-			{error.stack && (
-				<details open style={{ marginTop: 8 }}>
-					<summary>Stack trace</summary>
-					<pre style={{ margin: 0 }}>{error.stack}</pre>
-				</details>
+		<>
+			{tree}
+			{showDevServerErrorOverlay && serverError.isOpen && activeEntry && (
+				<ServerErrorOverlay
+					entry={activeEntry}
+					activeIndex={serverError.activeIndex}
+					errorCount={serverError.entries.length}
+					onClose={() => dispatchServerError({ type: "dismiss" })}
+					onPrevious={
+						canGoPrevious ? () => dispatchServerError({ type: "previous" }) : undefined
+					}
+					onNext={canGoNext ? () => dispatchServerError({ type: "next" }) : undefined}
+				/>
 			)}
-		</div>
+		</>
 	);
 }

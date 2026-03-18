@@ -3476,3 +3476,53 @@ async def test_query_with_callable_list_key_updates_on_inplace_change():
 		return result._query().key == ("user", 2)  # pyright: ignore[reportPrivateUsage]
 
 	assert await wait_for(key_matches, timeout=0.2)
+
+
+@pytest.mark.asyncio
+async def test_query_on_success_handler_failure_reports_query_handler_code(
+	caplog: pytest.LogCaptureFixture,
+):
+	class S(ps.State):
+		@ps.query(retries=0)
+		async def value(self) -> int:
+			return 1
+
+		@value.on_success
+		def _on_success(self, _value: int):
+			raise RuntimeError("on_success_fail")
+
+	routes = RouteTree([])
+	session = RenderSession("test-session", routes)
+	with ps.PulseContext.update(render=session):
+		s = S()
+		with caplog.at_level("ERROR"):
+			await s.value.wait()
+			await asyncio.sleep(0)
+
+	assert s.value.is_success is True
+	assert any("code=query.handler" in rec.getMessage() for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_query_on_error_handler_failure_reports_query_handler_code(
+	caplog: pytest.LogCaptureFixture,
+):
+	class S(ps.State):
+		@ps.query(retries=0)
+		async def value(self) -> int:
+			raise RuntimeError("fetch_fail")
+
+		@value.on_error
+		def _on_error(self, _error: Exception):
+			raise RuntimeError("on_error_fail")
+
+	routes = RouteTree([])
+	session = RenderSession("test-session", routes)
+	with ps.PulseContext.update(render=session):
+		s = S()
+		with caplog.at_level("ERROR"):
+			await s.value.wait()
+			await asyncio.sleep(0)
+
+	assert s.value.is_error is True
+	assert any("code=query.handler" in rec.getMessage() for rec in caplog.records)

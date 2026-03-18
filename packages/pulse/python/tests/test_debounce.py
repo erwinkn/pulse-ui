@@ -2,6 +2,7 @@ from typing import Any, Callable, cast
 
 import pulse as ps
 import pytest
+from pulse.test_helpers import wait_for
 
 
 def test_debounced_marker():
@@ -36,3 +37,26 @@ def test_debounced_rejects_non_number_delay(delay: Any):
 
 	with pytest.raises(TypeError):
 		ps.debounced(handler, delay)
+
+
+@pytest.mark.asyncio
+async def test_debounced_error_reports_callback_code(caplog: pytest.LogCaptureFixture):
+	app = ps.App()
+
+	def explode() -> None:
+		raise RuntimeError("debounce-boom")
+
+	fn = ps.debounced(explode, 1)
+	with ps.PulseContext(app=app):
+		with caplog.at_level("ERROR"):
+			fn()
+			assert await wait_for(
+				lambda: any(
+					"code=callback" in rec.getMessage()
+					and "debounced" in rec.getMessage()
+					for rec in caplog.records
+				),
+				timeout=0.2,
+			)
+
+	await app.close()

@@ -1140,6 +1140,8 @@ from pulse.dom.tags import (
 from pulse.env import PulseEnv as PulseEnv
 from pulse.env import env as env
 from pulse.env import mode as mode
+from pulse.errors import ErrorCode as ErrorCode
+from pulse.errors import Errors as Errors
 
 # Forms
 from pulse.forms import (

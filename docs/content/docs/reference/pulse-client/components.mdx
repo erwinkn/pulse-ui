@@ -188,7 +188,21 @@ function AppRoutes() {
 
 ### Server Error Handling
 
-When the server throws an error during rendering or callback execution, PulseView displays an error panel with the stack trace (in development). This helps debug issues without checking server logs.
+In development (`NODE_ENV !== "production"`), `PulseView` shows a full-screen error overlay when it receives a `server_error` message.
+
+Overlay behavior:
+
+- Click outside the dialog to close
+- Press `Escape` to close
+- Click the close button to close
+- New incoming errors reopen the overlay
+- Errors are queued (latest selected), with previous/next navigation
+- Consecutive duplicate errors are deduped and counted
+- Long messages/stacks are collapsed with "Show more/less"
+- Internal stack frames are hidden by default and can be toggled
+- Copy button copies message, stack, and details payload
+
+The current view remains mounted behind the overlay, so you can keep reproducing and inspecting errors quickly.
 
 ---
 

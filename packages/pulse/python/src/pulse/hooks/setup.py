@@ -63,9 +63,15 @@ class SetupState(HookState):
 		key: str | None,
 	) -> Any:
 		self.dispose_effects()
-		with Scope() as scope:
-			self.value = init_func(*args, **kwargs)
-			self.effects = list(scope.effects)
+		try:
+			with Scope() as scope:
+				self.value = init_func(*args, **kwargs)
+				self.effects = list(scope.effects)
+		except Exception as exc:
+			from pulse.context import PulseContext
+
+			PulseContext.get().errors.report(exc, code="setup")
+			raise
 		self.args = [Signal(arg) for arg in args]
 		self.kwargs = {name: Signal(value) for name, value in kwargs.items()}
 		self.initialized = True

@@ -92,6 +92,46 @@ interface PulseFormProps extends ComponentPropsWithoutRef<"form"> {
 }
 ```
 
+### ServerErrorOverlayProps
+
+Props for the exported `ServerErrorOverlay` component.
+
+```ts
+interface ServerErrorOverlayProps {
+  entry: ServerErrorOverlayEntry;
+  activeIndex: number;
+  errorCount: number;
+  onClose: () => void;
+  onPrevious?: () => void;
+  onNext?: () => void;
+}
+```
+
+### ServerErrorOverlayEntry
+
+Queue entry for the dev error overlay.
+
+```ts
+interface ServerErrorOverlayEntry {
+  error: ServerError;
+  fingerprint: string;
+  repeatCount: number;
+  receivedAt: number;
+}
+```
+
+### ServerErrorOverlayState
+
+State shape used by `reduceServerErrorOverlay`.
+
+```ts
+interface ServerErrorOverlayState {
+  entries: ServerErrorOverlayEntry[];
+  activeIndex: number;
+  isOpen: boolean;
+}
+```
+
 ---
 
 ## Route Types
@@ -499,14 +539,14 @@ Server error information.
 ```ts
 interface ServerErrorMessage {
   type: "server_error";
-  path: string;
+  path?: string;
   error: ServerError;
 }
 
 interface ServerError {
   message: string;
   stack?: string;
-  phase: "render" | "callback" | "mount" | "unmount" | "navigate" | "server";
+  code: ErrorCode;
   details?: Record<string, any>;
 }
 ```

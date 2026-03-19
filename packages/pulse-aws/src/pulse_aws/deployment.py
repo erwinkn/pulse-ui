@@ -1085,21 +1085,18 @@ async def _cleanup_failed_deployment(
 		reporter.warning(f"Failed to delete service: {exc}")
 
 	# Delete target group
-	try:
-		_delete_listener_rules_for_target_group_best_effort(
-			elbv2,
-			baseline.listener_arn,
-			target_group_arn,
-			reporter=reporter,
-		)
-		_delete_target_group_best_effort(
-			elbv2,
-			target_group_arn,
-			reporter=reporter,
-			report_success=True,
-		)
-	except ClientError as exc:
-		reporter.warning(f"Failed to delete target group: {exc}")
+	_delete_listener_rules_for_target_group_best_effort(
+		elbv2,
+		baseline.listener_arn,
+		target_group_arn,
+		reporter=reporter,
+	)
+	_delete_target_group_best_effort(
+		elbv2,
+		target_group_arn,
+		reporter=reporter,
+		report_success=True,
+	)
 
 
 async def wait_for_healthy_targets(

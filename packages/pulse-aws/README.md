@@ -177,6 +177,8 @@ curl -X POST \
   https://api.example.com/drain
 ```
 
+`AWSECSPlugin` also exposes `/_pulse/deployment`, which returns deployment metadata for affinity verification. `pulse-aws verify` uses that endpoint instead of assuming your app's `/` route returns JSON.
+
 ## Configuration
 
 ### Environment Variables

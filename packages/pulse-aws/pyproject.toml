@@ -24,11 +24,13 @@ package = true
 source-exclude = [
 	"**/.DS_Store",
 	"src/pulse_aws/cdk/cdk.context.json",
+	"src/pulse_aws/cdk/cdk.out",
 	"src/pulse_aws/cdk/cdk.out/**",
 ]
 wheel-exclude = [
 	"**/.DS_Store",
 	"src/pulse_aws/cdk/cdk.context.json",
+	"src/pulse_aws/cdk/cdk.out",
 	"src/pulse_aws/cdk/cdk.out/**",
 ]
 

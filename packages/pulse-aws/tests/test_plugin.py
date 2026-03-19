@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import httpx
 import pulse as ps
 import pytest
 from pulse_aws.constants import AFFINITY_QUERY_PARAM
@@ -44,3 +45,27 @@ async def _ok_prerender() -> ps.Ok[ps.Prerender]:
 			},
 		}
 	)
+
+
+@pytest.mark.asyncio
+async def test_plugin_exposes_deployment_metadata_endpoint():
+	plugin = AWSECSPlugin()
+	plugin.enabled = True
+	plugin.deployment_name = "prod"
+	plugin.deployment_id = "prod-20260306-150000Z"
+
+	app = ps.App(routes=[], plugins=[plugin], mode="subdomains")
+	app.setup("https://app.example.com")
+
+	transport = httpx.ASGITransport(app=app.fastapi)
+	async with httpx.AsyncClient(
+		transport=transport, base_url="https://app.example.com"
+	) as client:
+		response = await client.get("/_pulse/deployment")
+
+	assert response.status_code == 200
+	assert response.json() == {
+		"status": "ok",
+		"deployment_name": "prod",
+		"deployment_id": "prod-20260306-150000Z",
+	}

@@ -471,7 +471,6 @@ async def test_create_service_and_target_group_cleans_up_rule_and_target_group_w
 	]
 
 
-@pytest.mark.asyncio
 def _patch_deploy_dependencies(
 	monkeypatch: pytest.MonkeyPatch,
 	reporter: DummyReporter,

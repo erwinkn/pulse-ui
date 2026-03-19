@@ -21,7 +21,7 @@ from pulse_aws.config import ReaperConfig
 
 STACK_NAME_TEMPLATE = "{env}-baseline"
 TOOLKIT_STACK_NAME = "CDKToolkit"
-BASELINE_STACK_VERSION = "0.0.12"  # Bump when baseline stack changes
+BASELINE_STACK_VERSION = "0.0.14"  # Bump when baseline stack changes
 STACK_SUCCEEDED = {
 	"CREATE_COMPLETE",
 	"UPDATE_COMPLETE",

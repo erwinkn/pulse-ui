@@ -19,6 +19,7 @@ from typing import Any, override
 
 import pulse as ps
 import requests
+from fastapi import HTTPException
 
 from pulse_aws.constants import AFFINITY_QUERY_PARAM
 
@@ -154,6 +155,22 @@ class AWSECSPlugin(ps.Plugin):
 	def middleware(self) -> list[ps.PulseMiddleware]:
 		"""Return middleware that blocks new RenderSession creation when draining and adds directives."""
 		return [AWSECSDirectivesMiddleware(self)]
+
+	@override
+	def on_setup(self, app: ps.App) -> None:
+		"""Expose deployment metadata for affinity verification."""
+
+		@app.fastapi.get(f"{app.api_prefix}/deployment")
+		def deployment_info():  # pyright: ignore[reportUnusedFunction]
+			if not self.enabled:
+				raise HTTPException(
+					status_code=503, detail="AWS ECS plugin is disabled"
+				)
+			return {
+				"status": "ok",
+				"deployment_name": self.deployment_name,
+				"deployment_id": self.deployment_id,
+			}
 
 	def _discover_task_id(self) -> str:
 		"""Discover ECS task ID from container metadata endpoint."""

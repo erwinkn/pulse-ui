@@ -193,7 +193,7 @@ uv run pulse-aws verify \
   --domain app.example.com
 ```
 
-You should now see checks for the base URL, health endpoint, and (if multiple versions exist) query-based affinity routing for existing sessions.
+You should now see checks for the base URL, health endpoint, and (if multiple versions exist) query-based affinity routing for existing sessions via `/_pulse/deployment`.
 
 `affinity` is enforced with the `pulse_deployment` query param from existing session directives, while new tabs/sessions without that query use the default listener action (latest deployment).
 

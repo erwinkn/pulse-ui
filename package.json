@@ -8,6 +8,7 @@
   "workspaces": [
     "packages/pulse/js/",
     "packages/pulse-mantine/js",
+    "examples/aws-ecs/web",
     "examples/web/",
     "examples/pulse-mantine/web",
     "tutorial/examples/web"

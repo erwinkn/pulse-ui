@@ -70,7 +70,13 @@ export async function clientLoader(args: ClientLoaderFunctionArgs) {
       headers[key] = value as string;
     }
   }
-  const res = await fetch(`$${"{"}config.serverAddress}$${"{"}config.apiPrefix}/prerender`, {
+  const prerenderUrl = new URL(`$${"{"}config.serverAddress}$${"{"}config.apiPrefix}/prerender`);
+  if (directives?.query) {
+    for (const [key, value] of Object.entries(directives.query)) {
+      prerenderUrl.searchParams.set(key, value as string);
+    }
+  }
+  const res = await fetch(prerenderUrl, {
     method: "POST",
     headers,
     credentials: "include",

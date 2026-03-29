@@ -9,6 +9,7 @@ Deploy a Pulse app to AWS ECS with a guided, beginner-friendly workflow.
 
 - AWS credentials available to boto3 (AWS CLI profile or env vars)
 - Docker (can build Linux images)
+- AWS CDK CLI on `PATH`, or a wrapper you will pass via `--cdk-bin`
 - `uv` (to install/run `pulse-aws`)
 - A domain you control (for HTTPS)
 
@@ -156,12 +157,19 @@ uv run pulse-aws deploy \
   --app-file src/app/main.py \
   --web-root web \
   --dockerfile Dockerfile \
-  --context .
+  --context . \
+  --cdk-bin cdk
 ```
 
 You should now see a step-by-step deploy log ending with:
 - `Deployment Complete!`
 - `Deployment is live and healthy!`
+
+Advanced overrides:
+- `--cdk-bin /path/to/wrapper` lets you use a wrapper or alternate CDK executable.
+- `--cdk-workdir /path/to/cdk-app` tells `pulse-aws` to use a custom CDK app instead of the packaged one under `pulse_aws/cdk`.
+- Host paths like `--dockerfile`, `--context`, and `--cdk-workdir` resolve from the directory where you run `pulse-aws`.
+- `--app-file` and `--web-root` stay relative to the Docker build context.
 
 ## Step 4: respond to prompts
 
@@ -185,7 +193,9 @@ uv run pulse-aws verify \
   --domain app.example.com
 ```
 
-You should now see checks for the base URL, health endpoint, and (if multiple versions exist) affinity routing.
+You should now see checks for the base URL, health endpoint, and (if multiple versions exist) query-based affinity routing for existing sessions via `/_pulse/meta`.
+
+`affinity` is enforced with the `pulse_deployment` query param from existing session directives, while new tabs/sessions without that query use the default listener action (latest deployment).
 
 ## What deploy does under the hood
 

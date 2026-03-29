@@ -148,7 +148,6 @@ def generate_all(
     self,
     server_address: str,
     internal_server_address: str | None = None,
-    api_prefix: str = "",
     connection_status: ConnectionStatusConfig | None = None,
 ) -> None
 ```
@@ -159,7 +158,6 @@ Generate all route files, layouts, and configuration.
 |-----------|------|-------------|
 | `server_address` | `str` | Public server URL for WebSocket connection |
 | `internal_server_address` | `str \| None` | Internal server URL (for SSR) |
-| `api_prefix` | `str` | API route prefix |
 | `connection_status` | `ConnectionStatusConfig \| None` | Connection indicator config |
 
 #### `generate_route`
@@ -177,12 +175,13 @@ def generate_layout_tsx(
     self,
     server_address: str,
     internal_server_address: str | None = None,
-    api_prefix: str = "",
     connection_status: ConnectionStatusConfig | None = None,
 ) -> Path
 ```
 
 Generate the root layout file with Pulse provider configuration.
+
+Generated framework requests always use the reserved `/_pulse/*` namespace.
 
 #### `generate_routes_ts`
 

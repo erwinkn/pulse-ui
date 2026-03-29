@@ -89,6 +89,7 @@ src/pulse/
 │
 ├── cli/                # Command-line interface
 │   ├── cmd.py          # pulse run, pulse build
+│   ├── lock.py         # Web-root lock state and helpers
 │   └── processes.py    # Dev server process management
 │
 └── js/                 # JS API stubs for transpilation

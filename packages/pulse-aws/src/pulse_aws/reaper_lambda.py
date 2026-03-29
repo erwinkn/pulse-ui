@@ -23,6 +23,8 @@ from typing import Any, cast
 
 import boto3
 
+from pulse_aws.constants import AFFINITY_QUERY_PARAM
+
 # Configuration from environment (only used by Lambda handler)
 CLUSTER = os.environ.get("PULSE_AWS_CLUSTER", "")
 DEPLOYMENT_NAME = os.environ.get("PULSE_AWS_DEPLOYMENT_NAME", "")
@@ -43,7 +45,9 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 	ssm = boto3.client("ssm")
 	drained_count = process_draining_services(
 		cluster=CLUSTER,
+		listener_arn=LISTENER_ARN,
 		ecs=ecs,
+		elbv2=elbv2,
 		ssm_client=ssm,
 		max_age_hr=MAX_AGE_HR,
 	)
@@ -80,7 +84,9 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
 def process_draining_services(
 	cluster: str,
+	listener_arn: str,
 	ecs: Any,
+	elbv2: Any,
 	ssm_client: Any,
 	max_age_hr: float = 1.0,
 ) -> int:
@@ -88,7 +94,9 @@ def process_draining_services(
 
 	Args:
 	    cluster: ECS cluster name
+	    listener_arn: ALB listener ARN for rule updates
 	    ecs: boto3 ECS client
+	    elbv2: boto3 ELBv2 client
 	    ssm_client: boto3 SSM client
 	    max_age_hr: Maximum service age in hours (force retire)
 
@@ -138,6 +146,8 @@ def process_draining_services(
 
 	print(f"  Found {len(draining_services)} draining service(s)")
 
+	rules_map = get_listener_rules_map(elbv2, listener_arn)
+
 	# Process each draining service
 	drained_count = 0
 	for item in draining_services:
@@ -169,7 +179,14 @@ def process_draining_services(
 			print(
 				f"  🚨 {deployment_id}: MAX_AGE exceeded ({age_seconds / 3600:.1f}h >= {max_age_hr}h), forcing retirement"
 			)
-			scale_service_to_zero(ecs, cluster, svc["serviceArn"], deployment_id)
+			retire_deployment(
+				cluster=cluster,
+				service_arn=svc["serviceArn"],
+				deployment_id=deployment_id,
+				ecs=ecs,
+				elbv2=elbv2,
+				rule_arn=rules_map.get(deployment_id, {}).get("rule_arn"),
+			)
 			drained_count += 1
 			continue
 
@@ -205,7 +222,14 @@ def process_draining_services(
 
 		if all_ready:
 			print(f"  ✅ {deployment_id}: all tasks draining, scaling to 0")
-			scale_service_to_zero(ecs, cluster, svc["serviceArn"], deployment_id)
+			retire_deployment(
+				cluster=cluster,
+				service_arn=svc["serviceArn"],
+				deployment_id=deployment_id,
+				ecs=ecs,
+				elbv2=elbv2,
+				rule_arn=rules_map.get(deployment_id, {}).get("rule_arn"),
+			)
 			drained_count += 1
 		else:
 			print(f"  ⏳ {deployment_id}: tasks not draining yet")
@@ -266,6 +290,84 @@ def scale_service_to_zero(
 		print(f"  ✅ {deployment_id}: set desiredCount=0")
 	except Exception as e:
 		print(f"  ❌ {deployment_id}: failed to scale to 0: {e}")
+
+
+def replace_listener_rule_with_404(
+	elbv2: Any,
+	rule_arn: str,
+	deployment_id: str,
+) -> None:
+	"""Replace a deployment affinity rule with a fixed 404 response."""
+	try:
+		elbv2.modify_rule(
+			RuleArn=rule_arn,
+			Actions=[
+				{
+					"Type": "fixed-response",
+					"FixedResponseConfig": {
+						"StatusCode": "404",
+						"ContentType": "text/plain",
+						"MessageBody": f"Deployment {deployment_id} is no longer available.",
+					},
+				}
+			],
+		)
+		print(f"  ✅ {deployment_id}: affinity rule now returns 404")
+	except Exception as e:
+		print(f"  ⚠️  {deployment_id}: failed to replace affinity rule with 404: {e}")
+
+
+def retire_deployment(
+	*,
+	cluster: str,
+	service_arn: str,
+	deployment_id: str,
+	ecs: Any,
+	elbv2: Any,
+	rule_arn: str | None,
+) -> None:
+	"""Retire a deployment by making affinity URLs fail clearly, then scaling down."""
+	if rule_arn is not None:
+		replace_listener_rule_with_404(elbv2, rule_arn, deployment_id)
+	scale_service_to_zero(ecs, cluster, service_arn, deployment_id)
+
+
+def _resolve_target_group_arn(
+	rule_info: dict[str, str] | None,
+	service: dict[str, Any],
+) -> str | None:
+	target_group_arn = None if rule_info is None else rule_info.get("target_group_arn")
+	if target_group_arn is not None:
+		return target_group_arn
+	load_balancers = service.get("loadBalancers", [])
+	if not load_balancers:
+		return None
+	return cast(str | None, load_balancers[0].get("targetGroupArn"))
+
+
+def _delete_rule_and_target_group(
+	*,
+	deployment_id: str,
+	service: dict[str, Any],
+	elbv2: Any,
+	rule_info: dict[str, str] | None,
+) -> None:
+	if rule_info:
+		try:
+			elbv2.delete_rule(RuleArn=rule_info["rule_arn"])
+			print(f"    ✅ Deleted listener rule {rule_info['rule_arn']}")
+		except Exception as e:
+			print(f"    ⚠️  Failed to delete listener rule: {e}")
+
+	target_group_arn = _resolve_target_group_arn(rule_info, service)
+	if target_group_arn is None:
+		return
+
+	try:
+		elbv2.delete_target_group(TargetGroupArn=target_group_arn)
+		print("    ✅ Deleted target group")
+	except Exception as e:
+		print(f"    ⚠️  Failed to delete target group: {e}")
 
 
 def is_service_draining(ecs: Any, service_arn: str) -> bool:
@@ -398,23 +500,12 @@ def cleanup_stuck_deploying_services(
 
 		# Delete listener rule and target group
 		rule_info = rules_map.get(deployment_id)
-		if rule_info:
-			# Delete rule first
-			try:
-				elbv2.delete_rule(RuleArn=rule_info["rule_arn"])
-				print("    ✅ Deleted listener rule")
-			except Exception as e:
-				print(f"    ⚠️  Failed to delete listener rule: {e}")
-
-			# Delete target group
-			if rule_info.get("target_group_arn"):
-				try:
-					elbv2.delete_target_group(
-						TargetGroupArn=rule_info["target_group_arn"]
-					)
-					print("    ✅ Deleted target group")
-				except Exception as e:
-					print(f"    ⚠️  Failed to delete target group: {e}")
+		_delete_rule_and_target_group(
+			deployment_id=deployment_id,
+			service=svc,
+			elbv2=elbv2,
+			rule_info=rule_info,
+		)
 
 		# Clean up SSM parameters
 		cleanup_ssm_parameters(ssm_client, deployment_id)
@@ -437,7 +528,7 @@ def cleanup_inactive_services(
 	elbv2: Any,
 	ssm_client: Any,
 ) -> int:
-	"""Clean up services with runningCount=0 that are marked as draining.
+	"""Clean up drained services with no running tasks.
 
 	Args:
 	    cluster: ECS cluster name
@@ -468,12 +559,12 @@ def cleanup_inactive_services(
 		response = ecs.describe_services(cluster=cluster, services=batch)
 		services.extend(response.get("services", []))
 
-	# Filter for ACTIVE services with runningCount=0 that are tagged as draining
-	# We ONLY clean up draining services, not active or deploying ones
+	# Filter for drained services with runningCount=0.
+	# ECS may report these as ACTIVE or DRAINING while cleanup is in progress.
 	inactive_services = [
 		svc
 		for svc in services
-		if svc.get("status") == "ACTIVE"
+		if svc.get("status") in {"ACTIVE", "DRAINING"}
 		and svc.get("runningCount", 0) == 0
 		and is_service_draining(ecs, svc["serviceArn"])
 		and not is_service_deploying(ecs, svc["serviceArn"])
@@ -498,23 +589,12 @@ def cleanup_inactive_services(
 
 		# Delete listener rule and target group
 		rule_info = rules_map.get(deployment_id)
-		if rule_info:
-			# Delete rule first
-			try:
-				elbv2.delete_rule(RuleArn=rule_info["rule_arn"])
-				print("    ✅ Deleted listener rule")
-			except Exception as e:
-				print(f"    ⚠️  Failed to delete listener rule: {e}")
-
-			# Delete target group
-			if rule_info.get("target_group_arn"):
-				try:
-					elbv2.delete_target_group(
-						TargetGroupArn=rule_info["target_group_arn"]
-					)
-					print("    ✅ Deleted target group")
-				except Exception as e:
-					print(f"    ⚠️  Failed to delete target group: {e}")
+		_delete_rule_and_target_group(
+			deployment_id=deployment_id,
+			service=svc,
+			elbv2=elbv2,
+			rule_info=rule_info,
+		)
 
 		# Clean up SSM parameters
 		cleanup_ssm_parameters(ssm_client, deployment_id)
@@ -584,7 +664,7 @@ def cleanup_ssm_parameters(
 
 
 def get_listener_rules_map(elbv2: Any, listener_arn: str) -> dict[str, dict[str, str]]:
-	"""Build a map of deployment_id -> rule/target group info.
+	"""Build a map of deployment_id -> listener rule/target group info.
 
 	Args:
 	    elbv2: boto3 ELBv2 client
@@ -603,22 +683,27 @@ def get_listener_rules_map(elbv2: Any, listener_arn: str) -> dict[str, dict[str,
 			if rule.get("Priority") == "default":
 				continue
 
-			# Check if this is a header-based affinity rule
+			deployment_id: str | None = None
 			for condition in rule.get("Conditions", []):
-				if condition.get("Field") == "http-header":
-					header_config = condition.get("HttpHeaderConfig", {})
-					if header_config.get("HttpHeaderName") == "X-Pulse-Render-Affinity":
-						values = header_config.get("Values", [])
-						if values:
-							dep_id = values[0]
-							actions = rule.get("Actions", [])
-							tg_arn = (
-								actions[0].get("TargetGroupArn") if actions else None
-							)
-							rules_map[dep_id] = {
-								"rule_arn": rule["RuleArn"],
-								"target_group_arn": tg_arn,
-							}
+				if condition.get("Field") != "query-string":
+					continue
+				query_config = condition.get("QueryStringConfig", {})
+				for entry in query_config.get("Values", []):
+					if entry.get("Key") == AFFINITY_QUERY_PARAM and entry.get("Value"):
+						deployment_id = cast(str, entry["Value"])
+						break
+				if deployment_id is not None:
+					break
+
+			if deployment_id is None:
+				continue
+
+			actions = rule.get("Actions", [])
+			target_group_arn = actions[0].get("TargetGroupArn") if actions else None
+			rules_map[deployment_id] = {
+				"rule_arn": rule["RuleArn"],
+				"target_group_arn": target_group_arn,
+			}
 
 	except Exception as e:
 		print(f"  ⚠️  Failed to describe listener rules: {e}")

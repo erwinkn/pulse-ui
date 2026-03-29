@@ -5,7 +5,7 @@ This plugin provides:
 - ECS task ID discovery
 - SSM-based deployment state polling
 - Graceful draining with SSM task readiness state
-- Header-based affinity via directives
+- Deployment affinity via prerender and Socket.IO directives
 """
 
 from __future__ import annotations
@@ -19,6 +19,9 @@ from typing import Any, override
 
 import pulse as ps
 import requests
+from fastapi import HTTPException
+
+from pulse_aws.constants import AFFINITY_QUERY_PARAM, DEPLOYMENT_META_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +155,23 @@ class AWSECSPlugin(ps.Plugin):
 	def middleware(self) -> list[ps.PulseMiddleware]:
 		"""Return middleware that blocks new RenderSession creation when draining and adds directives."""
 		return [AWSECSDirectivesMiddleware(self)]
+
+	@override
+	def on_setup(self, app: ps.App) -> None:
+		"""Expose deployment metadata for affinity verification."""
+
+		@app.fastapi.get(DEPLOYMENT_META_PATH)
+		def deployment_info():  # pyright: ignore[reportUnusedFunction]
+			if not self.enabled:
+				raise HTTPException(
+					status_code=503, detail="AWS ECS plugin is disabled"
+				)
+			return {
+				"status": "ok",
+				"deployment_name": self.deployment_name,
+				"deployment_id": self.deployment_id,
+				"api_prefix": app.api_prefix,
+			}
 
 	def _discover_task_id(self) -> str:
 		"""Discover ECS task ID from container metadata endpoint."""
@@ -311,7 +331,7 @@ class AWSECSDirectivesMiddleware(ps.PulseMiddleware):
 		session: dict[str, Any],
 		next: Callable[[], Awaitable[ps.PrerenderResponse]],
 	) -> ps.PrerenderResponse:
-		"""Add AWS ECS deployment affinity header to prerender directives."""
+		"""Add AWS ECS deployment affinity directives to prerender responses."""
 		if not self.plugin.enabled:
 			return await next()
 		res = await next()
@@ -319,10 +339,8 @@ class AWSECSDirectivesMiddleware(ps.PulseMiddleware):
 		# Only modify directives if we have an Ok result
 		if isinstance(res, ps.Ok):
 			directives = res.payload["directives"]
-			# Add deployment ID header for ALB affinity routing (HTTP requests)
-			directives["headers"]["X-Pulse-Render-Affinity"] = self.plugin.deployment_id
-			# Add deployment ID header for Socket.IO connections (WebSocket affinity)
-			directives["socketio"]["headers"]["X-Pulse-Render-Affinity"] = (
+			directives["query"][AFFINITY_QUERY_PARAM] = self.plugin.deployment_id
+			directives["socketio"]["query"][AFFINITY_QUERY_PARAM] = (
 				self.plugin.deployment_id
 			)
 		# For Redirect or NotFound, just pass through

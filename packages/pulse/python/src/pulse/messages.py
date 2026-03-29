@@ -190,10 +190,12 @@ class PrerenderPayload(TypedDict):
 class SocketIODirectives(TypedDict):
 	headers: dict[str, str]
 	auth: dict[str, str]
+	query: dict[str, str]
 
 
 class Directives(TypedDict):
 	headers: dict[str, str]
+	query: dict[str, str]
 	socketio: SocketIODirectives
 
 

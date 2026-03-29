@@ -43,7 +43,7 @@ graph TB
         Image1[🐳 Docker Image<br/>test:test-20251027-121827Z<br/>Purpose: App code + drain secret]
         TaskDef1[📝 Task Definition<br/>test-app:1<br/>Purpose: How to run container<br/>- CPU: 256, Memory: 512<br/>- Port: 8000<br/>- Env: DEPLOYMENT_ID]
         TG1[🎯 Target Group<br/>test-20251027-121827Z<br/>Purpose: Route to this deployment's tasks<br/>Health: /_pulse/health every 30s]
-        Rule1[📋 Listener Rule<br/>Priority: 100<br/>If: X-Pulse-Render-Affinity = test-20251027-121827Z<br/>Purpose: Sticky sessions for this version]
+        Rule1[📋 Listener Rule<br/>Priority: 100<br/>If: pulse_deployment = test-20251027-121827Z<br/>Purpose: Sticky sessions for this version]
         Service1[⚙️ ECS Service<br/>test-20251027-121827Z<br/>Purpose: Maintain 2 running tasks<br/>Launch Type: Fargate]
         Task1A[🏃 Task Instance 1]
         Task1B[🏃 Task Instance 2]
@@ -53,7 +53,7 @@ graph TB
         Image2[🐳 Docker Image<br/>test:test-20251027-122112Z]
         TaskDef2[📝 Task Definition<br/>test-app:2]
         TG2[🎯 Target Group<br/>test-20251027-122112Z]
-        Rule2[📋 Listener Rule<br/>Priority: 101<br/>If: X-Pulse-Render-Affinity = test-20251027-122112Z]
+        Rule2[📋 Listener Rule<br/>Priority: 101<br/>If: pulse_deployment = test-20251027-122112Z]
         Service2[⚙️ ECS Service<br/>test-20251027-122112Z]
         Task2A[🏃 Task Instance 1]
         Task2B[🏃 Task Instance 2]
@@ -145,35 +145,35 @@ sequenceDiagram
     participant Task1 as ECS Task<br/>(Old)
     participant Task2 as ECS Task<br/>(New)
 
-    Note over User,Task2: First Request (No Affinity Cookie)
+    Note over User,Task2: First Request (No Affinity Query)
     User->>ALB: GET / HTTPS
     ALB->>Listener: Forward
-    Listener->>Rules: Check Rule 100 (Header: deploy-1)?
+    Listener->>Rules: Check Rule 100 (Query: deploy-1)?
     Rules-->>Listener: No match
-    Listener->>Rules: Check Rule 101 (Header: deploy-2)?
+    Listener->>Rules: Check Rule 101 (Query: deploy-2)?
     Rules-->>Listener: No match
     Listener->>TG2: Use Default Action → TG2
     TG2->>Task2: Route to healthy task
     Task2-->>TG2: Response
     TG2-->>Listener: Response
-    Listener-->>ALB: Response + Set-Cookie:<br/>X-Pulse-Render-Affinity=deploy-2
+    Listener-->>ALB: Response
     ALB-->>User: Response
 
-    Note over User,Task2: Subsequent Request (Has Affinity)
-    User->>ALB: GET /api HTTPS<br/>Cookie: X-Pulse-Render-Affinity=deploy-2
-    ALB->>Listener: Forward with header
-    Listener->>Rules: Check Rule 100 (Header: deploy-1)?
+    Note over User,Task2: Subsequent Request (Has Affinity Query)
+    User->>ALB: GET /api?pulse_deployment=deploy-2 HTTPS
+    ALB->>Listener: Forward with query
+    Listener->>Rules: Check Rule 100 (Query: deploy-1)?
     Rules-->>Listener: No match
-    Listener->>Rules: Check Rule 101 (Header: deploy-2)?
+    Listener->>Rules: Check Rule 101 (Query: deploy-2)?
     Rules-->>Listener: MATCH! (Priority 101)
     Rules->>TG2: Forward to TG2
     TG2->>Task2: Route to same deployment
     Task2-->>User: Response (Sticky session maintained)
 
-    Note over User,Task1: Old Tab Still Works (Old Affinity)
-    User->>ALB: GET / HTTPS<br/>Cookie: X-Pulse-Render-Affinity=deploy-1
-    ALB->>Listener: Forward with header
-    Listener->>Rules: Check Rule 100 (Header: deploy-1)?
+    Note over User,Task1: Old Tab Still Works (Old Affinity Query)
+    User->>ALB: GET /?pulse_deployment=deploy-1 HTTPS
+    ALB->>Listener: Forward with query
+    Listener->>Rules: Check Rule 100 (Query: deploy-1)?
     Rules-->>Listener: MATCH! (Priority 100)
     Rules->>TG1: Forward to TG1
     TG1->>Task1: Route to old deployment
@@ -188,16 +188,16 @@ sequenceDiagram
 
 **Solution:** Create the listener rule (attaching TG to listener) immediately after creating the TG, before creating the ECS service.
 
-### 2. **Header-Based Sticky Sessions**
+### 2. **Query-Based Deployment Affinity**
 
 **Purpose:** Support multiple concurrent deployments with session affinity.
 
 **How it works:**
 
 - Each deployment gets a unique ID (e.g., `test-20251027-122112Z`)
-- ALB sets cookie `X-Pulse-Render-Affinity` with the deployment ID
-- Listener rules match on this header value
-- Users stick to the deployment they first landed on
+- Existing tabs reuse `pulse_deployment=<deployment-id>` from prerender and Socket.IO directives
+- Listener rules match on that query value
+- Users stay on the deployment they first landed on until the tab is reloaded or closed
 - New users get the default action (latest deployment)
 
 ### 3. **Zero-Downtime Deployments**
@@ -206,7 +206,7 @@ sequenceDiagram
 
 1. Deploy new version → New TG + Service + Tasks
 2. Switch default action → New users get new version
-3. Old users keep using old version (via header rules)
+3. Old users keep using old version (via query rules)
 4. Drain old deployment when ready (POST to `/drain` with secret)
 
 ### 4. **Fargate Launch Type**

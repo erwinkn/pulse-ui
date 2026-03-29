@@ -21,9 +21,11 @@ import type { VDOMUpdate } from "./vdom";
 export interface SocketIODirectives {
 	headers?: Record<string, string>;
 	auth?: Record<string, string>;
+	query?: Record<string, string>;
 }
 export interface Directives {
 	headers?: Record<string, string>;
+	query?: Record<string, string>;
 	socketio?: SocketIODirectives;
 }
 export interface MountedView {
@@ -147,7 +149,7 @@ export class PulseSocketIOClient {
 			const socket = io(this.#url, {
 				transports: ["websocket", "webtransport"],
 				auth: this.#directives.socketio?.auth,
-				extraHeaders: this.#directives.socketio?.headers,
+				query: this.#directives.socketio?.query,
 			});
 			this.#socket = socket;
 

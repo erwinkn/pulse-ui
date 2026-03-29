@@ -2,7 +2,13 @@
 Unit tests for single-server deployment mode.
 """
 
-from pulse import App
+import pytest
+from pulse import App, Route, component
+
+
+@component
+def DummyPage():
+	return None
 
 
 def test_api_prefix_in_single_server_mode():
@@ -17,16 +23,10 @@ def test_api_prefix_in_subdomains_mode():
 	assert app.api_prefix == "/_pulse"
 
 
-def test_custom_api_prefix():
-	"""Test that custom api_prefix overrides default."""
-	app = App(routes=[], mode="single-server", api_prefix="/custom/api")
-	assert app.api_prefix == "/custom/api"
-
-
-def test_custom_api_prefix_with_subdomains():
-	"""Test that custom api_prefix works with subdomains mode."""
-	app = App(routes=[], mode="subdomains", api_prefix="/api/v1")
-	assert app.api_prefix == "/api/v1"
+def test_framework_namespace_is_reserved():
+	"""User routes cannot overlap with framework-owned endpoints."""
+	with pytest.raises(ValueError, match=r"Routes under '/_pulse/\*' are reserved"):
+		App(routes=[Route("/_pulse/debug", render=DummyPage)])
 
 
 def test_deployment_mode_defaults_to_single_server():

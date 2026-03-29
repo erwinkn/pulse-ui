@@ -1,6 +1,6 @@
 [project]
 name = "pulse-aws"
-version = "0.1.9"
+version = "0.1.10"
 description = "Add your description here"
 readme = "README.md"
 authors = [{ name = "Erwin Kuhn", email = "erwin.kuhn@protonmail.com" }]
@@ -19,6 +19,20 @@ pulse-aws = "pulse_aws.cli:main"
 
 [tool.uv]
 package = true
+
+[tool.uv.build-backend]
+source-exclude = [
+	"**/.DS_Store",
+	"src/pulse_aws/cdk/cdk.context.json",
+	"src/pulse_aws/cdk/cdk.out",
+	"src/pulse_aws/cdk/cdk.out/**",
+]
+wheel-exclude = [
+	"**/.DS_Store",
+	"src/pulse_aws/cdk/cdk.context.json",
+	"src/pulse_aws/cdk/cdk.out",
+	"src/pulse_aws/cdk/cdk.out/**",
+]
 
 [build-system]
 requires = ["uv_build>=0.9.4,<0.10.0"]

@@ -2,7 +2,10 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
+import pulse.cli.cmd as cmd_mod
 import pytest
 from pulse.cli.dependencies import (
 	DependencyResolutionError,
@@ -10,7 +13,13 @@ from pulse.cli.dependencies import (
 	prepare_web_dependencies,
 )
 from pulse.cli.helpers import load_app_from_target, parse_app_target
-from pulse.cli.models import CommandSpec
+from pulse.cli.lock import (
+	LockInfo,
+	create_lock,
+	lock_path_for_web_root,
+	write_lock_info,
+)
+from pulse.cli.models import AppLoadResult, CommandSpec
 from pulse.cli.packages import (
 	is_alias_source,
 	is_relative_source,
@@ -23,6 +32,37 @@ from pulse.cli.processes import execute_commands
 from pulse.cli.secrets import resolve_dev_secret
 from pulse.env import env
 from pulse.transpiler.imports import Import, clear_import_registry
+from typer.testing import CliRunner
+
+runner = CliRunner()
+
+
+class _GenerateAppStub:
+	def __init__(self, web_root: Path):
+		self.codegen: Any = SimpleNamespace(cfg=SimpleNamespace(web_root=web_root))
+		self.server_address: str | None = None
+		self.routes: Any = SimpleNamespace(flat_tree=["/"])
+		self.codegen_calls: list[str] = []
+
+	def run_codegen(self, address: str) -> None:
+		self.codegen_calls.append(address)
+
+
+def _make_generate_app_ctx(
+	tmp_path: Path, web_root: Path
+) -> tuple[AppLoadResult, _GenerateAppStub]:
+	app = _GenerateAppStub(web_root)
+	app_ctx = AppLoadResult(
+		target="demo.py",
+		mode="path",
+		app=cast(Any, app),
+		module_name="demo",
+		app_var="app",
+		app_file=tmp_path / "demo.py",
+		app_dir=tmp_path,
+		server_cwd=tmp_path,
+	)
+	return app_ctx, app
 
 
 def test_parse_app_target_file_default(tmp_path: Path):
@@ -90,6 +130,66 @@ def test_load_app_from_target_returns_context(tmp_path: Path):
 		env.pulse_app_dir = original_dir
 		if result is not None:
 			sys.modules.pop(result.module_name, None)
+
+
+def test_generate_fails_when_dev_server_lock_is_live(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+	web_root = tmp_path / "web"
+	create_lock(lock_path_for_web_root(web_root), address="localhost", port=8123)
+
+	app_ctx, app = _make_generate_app_ctx(tmp_path, web_root)
+
+	def load_app(target: str, logger: object) -> AppLoadResult:
+		return app_ctx
+
+	monkeypatch.setattr(cmd_mod, "load_app_from_target", load_app)
+
+	result = runner.invoke(cmd_mod.cli, ["generate", "demo.py", "--plain"])
+
+	assert result.exit_code == 1
+	assert (
+		"Cannot run 'pulse generate' while a Pulse dev server is running at "
+		"http://localhost:8123"
+	) in result.output
+	assert app.codegen_calls == []
+
+
+def test_generate_ignores_stale_dev_server_lock(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+	web_root = tmp_path / "web"
+
+	def process_is_dead(_pid: int) -> bool:
+		return False
+
+	monkeypatch.setattr("pulse.cli.lock.is_process_alive", process_is_dead)
+	write_lock_info(
+		lock_path_for_web_root(web_root),
+		LockInfo(
+			pid=123,
+			created_at=1,
+			hostname="host",
+			platform="test-platform",
+			python="3.12.0",
+			cwd=str(tmp_path),
+			address="localhost",
+			port=8123,
+		),
+	)
+
+	app_ctx, app = _make_generate_app_ctx(tmp_path, web_root)
+
+	def load_app(target: str, logger: object) -> AppLoadResult:
+		return app_ctx
+
+	monkeypatch.setattr(cmd_mod, "load_app_from_target", load_app)
+
+	result = runner.invoke(cmd_mod.cli, ["generate", "demo.py", "--plain"])
+
+	assert result.exit_code == 0
+	assert "Generated 1 route" in result.output
+	assert app.codegen_calls == ["http://localhost:8000"]
 
 
 def test_resolve_dev_secret_creates_and_reuses_secret(tmp_path: Path):

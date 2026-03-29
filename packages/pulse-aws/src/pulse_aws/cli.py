@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-import posixpath
 import warnings
 from collections.abc import Iterable, Sequence
 from pathlib import Path
@@ -16,7 +15,7 @@ import httpx
 
 from pulse_aws.baseline import BaselineStackOutputs, describe_stack
 from pulse_aws.config import DockerBuild, HealthCheckConfig, TaskConfig
-from pulse_aws.constants import AFFINITY_QUERY_PARAM
+from pulse_aws.constants import AFFINITY_QUERY_PARAM, DEPLOYMENT_META_PATH
 from pulse_aws.deployment import deploy
 from pulse_aws.teardown import teardown_baseline_stack
 
@@ -74,16 +73,6 @@ def _resolve_executable_path(base: Path, raw: str) -> str:
 	if not _looks_like_path(raw):
 		return raw
 	return str(_resolve_path(base, raw))
-
-
-def _deployment_info_path(health_check_path: str) -> str:
-	normalized = (
-		health_check_path
-		if health_check_path.startswith("/")
-		else f"/{health_check_path}"
-	)
-	base = posixpath.dirname(normalized.rstrip("/")) or "/"
-	return posixpath.join(base, "deployment")
 
 
 def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
@@ -490,7 +479,6 @@ async def _run_verify(args: argparse.Namespace) -> int:
 	print()
 
 	base_url = f"https://{baseline.alb_dns_name}"
-	deployment_info_path = _deployment_info_path(args.health_check_path)
 	print(f"Base URL: {base_url}")
 	print()
 
@@ -529,7 +517,7 @@ async def _run_verify(args: argparse.Namespace) -> int:
 				print(f"   Testing affinity to: {deployment_id}")
 				try:
 					response = await client.get(
-						f"{base_url}{deployment_info_path}",
+						f"{base_url}{DEPLOYMENT_META_PATH}",
 						params={AFFINITY_QUERY_PARAM: deployment_id},
 					)
 					if response.status_code == 200:
@@ -569,7 +557,7 @@ async def _run_verify(args: argparse.Namespace) -> int:
 			print("To test affinity:")
 			for deployment_id in running_deployment_ids:
 				print(
-					f"  curl 'https://{args.domain}{deployment_info_path}?{AFFINITY_QUERY_PARAM}={deployment_id}'"
+					f"  curl 'https://{args.domain}{DEPLOYMENT_META_PATH}?{AFFINITY_QUERY_PARAM}={deployment_id}'"
 				)
 	elif not running_deployment_ids:
 		print("⚠️  No deployments with running tasks found")

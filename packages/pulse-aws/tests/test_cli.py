@@ -300,8 +300,8 @@ async def test_run_verify_checks_dedicated_deployment_endpoint(
 	assert [call["url"] for call in calls] == [
 		"https://alb.example.com",
 		"https://alb.example.com/_pulse/health",
-		"https://alb.example.com/_pulse/deployment",
-		"https://alb.example.com/_pulse/deployment",
+		"https://alb.example.com/_pulse/meta",
+		"https://alb.example.com/_pulse/meta",
 	]
 	assert calls[2]["params"] == {"pulse_deployment": "prod-old"}
 	assert calls[3]["params"] == {"pulse_deployment": "prod-new"}
@@ -313,7 +313,7 @@ async def test_run_verify_checks_dedicated_deployment_endpoint(
 
 
 @pytest.mark.asyncio
-async def test_run_verify_derives_deployment_endpoint_from_health_path(
+async def test_run_verify_uses_reserved_metadata_endpoint(
 	monkeypatch: pytest.MonkeyPatch,
 ):
 	monkeypatch.setattr(
@@ -379,4 +379,4 @@ async def test_run_verify_derives_deployment_endpoint_from_health_path(
 	)
 
 	assert result == 0
-	assert calls[2]["url"] == "https://alb.example.com/custom-prefix/deployment"
+	assert calls[2]["url"] == "https://alb.example.com/_pulse/meta"

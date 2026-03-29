@@ -194,7 +194,7 @@ Behavior:
 - polls SSM for drain state
 - writes task readiness state to SSM
 - adds `pulse_deployment` to prerender and Socket.IO query directives for existing render sessions. New tabs/sessions do not send this query unless they reuse those same directives.
-- exposes `/_pulse/deployment` by default (or `<api_prefix>/deployment` if you customize `api_prefix`) as a deployment-metadata endpoint used by `pulse-aws verify`
+- exposes `/_pulse/meta` as a deployment-metadata endpoint used by `pulse-aws verify`
 - Uses ALB target-group `lb_cookie` stickiness to keep requests on the same ECS task within a matched deployment.
 - New sessions without the affinity query follow the default listener action, which is the latest deployment.
 

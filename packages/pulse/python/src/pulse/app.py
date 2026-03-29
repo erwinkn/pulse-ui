@@ -83,6 +83,7 @@ from pulse.user_session import (
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+FRAMEWORK_API_PREFIX = "/_pulse"
 
 
 class AppStatus(IntEnum):
@@ -152,7 +153,8 @@ class App:
 			Falls back to server_address if not provided.
 		not_found: Path for 404 page. Defaults to "/not-found".
 		mode: Deployment mode - "single-server" (default) or "subdomains".
-		api_prefix: API route prefix. Defaults to "/_pulse".
+		Framework endpoints are always mounted under the reserved `/_pulse/*`
+			namespace.
 		cors: CORS configuration. Auto-configured based on mode if not provided.
 		fastapi: Additional FastAPI constructor options.
 		session_timeout: Session cleanup timeout in seconds. Defaults to 60.0.
@@ -234,7 +236,6 @@ class App:
 		# Deployment and integration options
 		mode: PulseMode = "single-server",
 		proxy: ProxyConfig | None = None,
-		api_prefix: str = "/_pulse",
 		cors: CORSOptions | None = None,
 		fastapi: dict[str, Any] | None = None,
 		session_timeout: float = 60.0,
@@ -256,7 +257,7 @@ class App:
 		# Optional internal address used by server-side loader fetches
 		self.internal_server_address = internal_server_address
 
-		self.api_prefix = api_prefix
+		self.api_prefix = FRAMEWORK_API_PREFIX
 
 		# Resolve and store plugins (sorted by priority, highest first)
 		self.plugins = []
@@ -270,6 +271,7 @@ class App:
 		# Add plugin routes after user-defined routes
 		for plugin in self.plugins:
 			all_routes.extend(plugin.routes())
+		self._validate_reserved_routes(all_routes)
 
 		# RouteTree filters routes based on dev flag and environment during construction
 		self.routes = RouteTree(all_routes)
@@ -323,6 +325,27 @@ class App:
 			mw_stack.extend(plugin.middleware())
 
 		self.middleware = MiddlewareStack(mw_stack)
+
+	def _validate_reserved_routes(self, routes: Sequence[Route | Layout]) -> None:
+		def _walk(
+			nodes: Sequence[Route | Layout],
+			ancestors: list[str] | None = None,
+		) -> None:
+			ancestors = [] if ancestors is None else ancestors
+			for node in nodes:
+				segments = (
+					[*ancestors, node.path] if isinstance(node, Route) else [*ancestors]
+				)
+				path = ensure_absolute_path("/".join(part for part in segments if part))
+				if path == FRAMEWORK_API_PREFIX or path.startswith(
+					f"{FRAMEWORK_API_PREFIX}/"
+				):
+					raise ValueError(
+						f"Routes under '{FRAMEWORK_API_PREFIX}/*' are reserved for Pulse framework endpoints."
+					)
+				_walk(node.children, segments)
+
+		_walk(routes)
 
 	@asynccontextmanager
 	async def fastapi_lifespan(self, _: FastAPI):
@@ -388,7 +411,6 @@ class App:
 		self.codegen.generate_all(
 			self.server_address,
 			self.internal_server_address or self.server_address,
-			self.api_prefix,
 			connection_status=self.connection_status,
 		)
 

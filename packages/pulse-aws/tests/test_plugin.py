@@ -61,11 +61,12 @@ async def test_plugin_exposes_deployment_metadata_endpoint():
 	async with httpx.AsyncClient(
 		transport=transport, base_url="https://app.example.com"
 	) as client:
-		response = await client.get("/_pulse/deployment")
+		response = await client.get("/_pulse/meta")
 
 	assert response.status_code == 200
 	assert response.json() == {
 		"status": "ok",
 		"deployment_name": "prod",
 		"deployment_id": "prod-20260306-150000Z",
+		"api_prefix": "/_pulse",
 	}

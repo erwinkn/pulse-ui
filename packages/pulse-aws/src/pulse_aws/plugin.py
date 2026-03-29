@@ -21,7 +21,7 @@ import pulse as ps
 import requests
 from fastapi import HTTPException
 
-from pulse_aws.constants import AFFINITY_QUERY_PARAM
+from pulse_aws.constants import AFFINITY_QUERY_PARAM, DEPLOYMENT_META_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +160,7 @@ class AWSECSPlugin(ps.Plugin):
 	def on_setup(self, app: ps.App) -> None:
 		"""Expose deployment metadata for affinity verification."""
 
-		@app.fastapi.get(f"{app.api_prefix}/deployment")
+		@app.fastapi.get(DEPLOYMENT_META_PATH)
 		def deployment_info():  # pyright: ignore[reportUnusedFunction]
 			if not self.enabled:
 				raise HTTPException(
@@ -170,6 +170,7 @@ class AWSECSPlugin(ps.Plugin):
 				"status": "ok",
 				"deployment_name": self.deployment_name,
 				"deployment_id": self.deployment_id,
+				"api_prefix": app.api_prefix,
 			}
 
 	def _discover_task_id(self) -> str:

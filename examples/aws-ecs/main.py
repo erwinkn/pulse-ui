@@ -605,6 +605,7 @@ app = ps.App(
 	plugins=[AWSECSPlugin()],
 	session_store=InMemorySessionStore() if ps.mode() == "prod" else None,
 	server_address=os.environ.get("PULSE_SERVER_ADDRESS"),
+	internal_server_address=os.environ.get("PULSE_INTERNAL_SERVER_ADDRESS"),
 )
 
 

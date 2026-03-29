@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 	from pulse.app import ConnectionStatusConfig
 
 logger = logging.getLogger(__file__)
+FRAMEWORK_API_PREFIX = "/_pulse"
 
 
 @dataclass
@@ -150,7 +151,6 @@ class Codegen:
 		self,
 		server_address: str,
 		internal_server_address: str | None = None,
-		api_prefix: str = "",
 		connection_status: "ConnectionStatusConfig | None" = None,
 	):
 		# Ensure generated files are gitignored
@@ -167,7 +167,6 @@ class Codegen:
 				self.generate_layout_tsx(
 					server_address,
 					internal_server_address,
-					api_prefix,
 					connection_status,
 				),
 				self.generate_routes_ts(),
@@ -223,7 +222,6 @@ class Codegen:
 		self,
 		server_address: str,
 		internal_server_address: str | None = None,
-		api_prefix: str = "",
 		connection_status: "ConnectionStatusConfig | None" = None,
 	):
 		"""Generates the content of _layout.tsx"""
@@ -234,7 +232,7 @@ class Codegen:
 			LAYOUT_TEMPLATE.render_unicode(
 				server_address=server_address,
 				internal_server_address=internal_server_address or server_address,
-				api_prefix=api_prefix,
+				api_prefix=FRAMEWORK_API_PREFIX,
 				connection_status=connection_status,
 			)
 		)

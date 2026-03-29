@@ -22,7 +22,6 @@ class App:
         internal_server_address: str | None = None,
         not_found: str = "/not-found",
         mode: PulseMode = "single-server",
-        api_prefix: str = "/_pulse",
         cors: CORSOptions | None = None,
         fastapi: dict[str, Any] | None = None,
         session_timeout: float = 60.0,
@@ -45,11 +44,12 @@ class App:
 | `internal_server_address` | `str` | `None` | Internal URL for server-side fetches |
 | `not_found` | `str` | `"/not-found"` | Path for 404 page |
 | `mode` | `PulseMode` | `"single-server"` | Deployment mode |
-| `api_prefix` | `str` | `"/_pulse"` | API route prefix |
 | `cors` | `CORSOptions` | `None` | CORS configuration |
 | `fastapi` | `dict` | `None` | Additional FastAPI options |
 | `session_timeout` | `float` | `60.0` | Session cleanup timeout (seconds) |
 | `connection_status` | `ConnectionStatusConfig` | `None` | Connection status UI timing |
+
+Framework routes live under the reserved `/_pulse/*` namespace and are not configurable.
 
 ### Attributes
 

@@ -254,6 +254,7 @@ class BaselineStack(Stack):
 				effect=iam.Effect.ALLOW,
 				actions=[
 					"elasticloadbalancing:Describe*",
+					"elasticloadbalancing:ModifyRule",
 					"elasticloadbalancing:DeleteRule",
 					"elasticloadbalancing:DeleteTargetGroup",
 					"elasticloadbalancing:DeregisterTargets",

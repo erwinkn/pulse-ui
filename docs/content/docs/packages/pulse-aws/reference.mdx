@@ -24,11 +24,12 @@ pulse-aws teardown [options]
 | `--deployment-name` | `PULSE_AWS_DEPLOYMENT_NAME` | none | required |
 | `--domain` | `PULSE_AWS_DOMAIN` | none | required; used for ACM + default server address |
 | `--server-address` | `PULSE_SERVER_ADDRESS` | `https://<domain>` | overrides `PULSE_SERVER_ADDRESS` |
-| `--project-root` | `PULSE_AWS_PROJECT_ROOT` | `cwd` | base for `--dockerfile` + `--context` |
 | `--app-file` | `PULSE_AWS_APP_FILE` | `main.py` | relative to build context; sets `APP_FILE` |
 | `--web-root` | `PULSE_AWS_WEB_ROOT` | `web` | relative to build context; sets `WEB_ROOT` |
-| `--dockerfile` | `PULSE_AWS_DOCKERFILE` | `Dockerfile` | resolved from project root |
-| `--context` | `PULSE_AWS_CONTEXT` | `.` | resolved from project root |
+| `--dockerfile` | `PULSE_AWS_DOCKERFILE` | `Dockerfile` | host path; resolved from the directory where you run `pulse-aws` |
+| `--context` | `PULSE_AWS_CONTEXT` | `.` | host path; resolved from the directory where you run `pulse-aws` |
+| `--cdk-bin` | `PULSE_AWS_CDK_BIN` | `cdk` | bare names use `PATH`; path-like values resolve from the directory where you run `pulse-aws` |
+| `--cdk-workdir` | `PULSE_AWS_CDK_WORKDIR` | packaged `pulse_aws/cdk` app | host path; resolved from the directory where you run `pulse-aws` |
 | `--build-arg` | none | none | repeatable `KEY=VALUE` |
 | `--task-env` | none | none | repeatable `KEY=VALUE` |
 | `--task-cpu` | `PULSE_AWS_TASK_CPU` | `256` | ECS CPU units (string) |
@@ -47,6 +48,11 @@ pulse-aws teardown [options]
 Defaults applied even when omitted:
 - Docker build args always include `APP_FILE`, `WEB_ROOT`, `PULSE_SERVER_ADDRESS`.
 - ECS task env always includes `PULSE_SERVER_ADDRESS`.
+- CDK commands run against the packaged `pulse_aws/cdk` app unless `--cdk-workdir` is set.
+
+Path rules:
+- Host-path flags resolve from the directory where you run `pulse-aws`.
+- `--app-file` and `--web-root` are Docker-context paths, not host paths.
 
 ### verify
 
@@ -145,9 +151,15 @@ async def deploy(
     health_check: HealthCheckConfig | None = None,
     reaper: ReaperConfig | None = None,
     certificate_arn: str | None = None,
+    cdk_bin: str = "cdk",
+    cdk_workdir: Path | str | None = None,
 ) -> dict[str, str]:
     ...
 ```
+
+`cdk_bin` points to the CDK executable or wrapper script.
+
+`cdk_workdir` is an advanced override that points deploy at a custom CDK app directory. If omitted, `pulse-aws` uses the packaged CDK app that ships inside `pulse_aws/cdk`.
 
 Return keys:
 - `deployment_id`
@@ -181,7 +193,10 @@ Optional env vars:
 Behavior:
 - polls SSM for drain state
 - writes task readiness state to SSM
-- adds `X-Pulse-Render-Affinity` to HTTP + Socket.IO directives
+- adds `pulse_deployment` to prerender and Socket.IO query directives for existing render sessions. New tabs/sessions do not send this query unless they reuse those same directives.
+- exposes `/_pulse/meta` as a deployment-metadata endpoint used by `pulse-aws verify`
+- Uses ALB target-group `lb_cookie` stickiness to keep requests on the same ECS task within a matched deployment.
+- New sessions without the affinity query follow the default listener action, which is the latest deployment.
 
 In dev, missing required vars disables the plugin. In prod/ci, missing vars raise on startup.
 

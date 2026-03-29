@@ -1419,6 +1419,23 @@ async def test_update_route_updates_route_context():
 	session.close()
 
 
+def test_update_route_missing_mount_is_noop(monkeypatch: pytest.MonkeyPatch):
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+	reported: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+	def report_error(*args: Any, **kwargs: Any) -> None:
+		reported.append((args, kwargs))
+
+	monkeypatch.setattr(session, "report_error", report_error)
+
+	session.update_route("/missing", make_route_info("/missing"))
+
+	assert reported == []
+
+	session.close()
+
+
 @pytest.mark.asyncio
 async def test_prerender_queue_timeout_transitions_to_idle():
 	"""Test that prerender without attach eventually transitions to idle."""

@@ -15,6 +15,7 @@ import httpx
 
 from pulse_aws.baseline import BaselineStackOutputs, describe_stack
 from pulse_aws.config import DockerBuild, HealthCheckConfig, TaskConfig
+from pulse_aws.constants import AFFINITY_QUERY_PARAM, DEPLOYMENT_META_PATH
 from pulse_aws.deployment import deploy
 from pulse_aws.teardown import teardown_baseline_stack
 
@@ -52,10 +53,26 @@ def _parse_kv_items(items: Iterable[str] | None, label: str) -> dict[str, str]:
 
 
 def _resolve_path(base: Path, raw: str) -> Path:
-	path = Path(raw)
+	path = Path(raw).expanduser()
 	if path.is_absolute():
 		return path
 	return (base / path).resolve()
+
+
+def _looks_like_path(raw: str) -> bool:
+	path = Path(raw).expanduser()
+	if path.is_absolute() or raw.startswith("~"):
+		return True
+	separators = {os.sep}
+	if os.altsep is not None:
+		separators.add(os.altsep)
+	return any(separator in raw for separator in separators)
+
+
+def _resolve_executable_path(base: Path, raw: str) -> str:
+	if not _looks_like_path(raw):
+		return raw
+	return str(_resolve_path(base, raw))
 
 
 def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
@@ -76,11 +93,6 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 		help="Server address for Pulse (env: PULSE_SERVER_ADDRESS)",
 	)
 	parser.add_argument(
-		"--project-root",
-		default=_env("PULSE_AWS_PROJECT_ROOT"),
-		help="Project root for resolving Dockerfile/context (default: cwd)",
-	)
-	parser.add_argument(
 		"--app-file",
 		default=_env("PULSE_AWS_APP_FILE") or "main.py",
 		help="App entry file for Dockerfile build args (env: PULSE_AWS_APP_FILE)",
@@ -99,6 +111,16 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 		"--context",
 		default=_env("PULSE_AWS_CONTEXT") or ".",
 		help="Docker build context (env: PULSE_AWS_CONTEXT)",
+	)
+	parser.add_argument(
+		"--cdk-bin",
+		default=_env("PULSE_AWS_CDK_BIN") or "cdk",
+		help="CDK executable or wrapper path (env: PULSE_AWS_CDK_BIN)",
+	)
+	parser.add_argument(
+		"--cdk-workdir",
+		default=_env("PULSE_AWS_CDK_WORKDIR"),
+		help="CDK app directory override (env: PULSE_AWS_CDK_WORKDIR)",
 	)
 	parser.add_argument(
 		"--build-arg",
@@ -252,16 +274,20 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 	if not args.domain:
 		raise ValueError("domain is required (--domain)")
 
-	project_root = (
-		Path(args.project_root).resolve() if args.project_root else Path.cwd()
+	invocation_cwd = Path.cwd()
+	dockerfile_path = _resolve_path(invocation_cwd, args.dockerfile)
+	context_path = _resolve_path(invocation_cwd, args.context)
+	cdk_workdir = (
+		_resolve_path(invocation_cwd, args.cdk_workdir) if args.cdk_workdir else None
 	)
-	dockerfile_path = _resolve_path(project_root, args.dockerfile)
-	context_path = _resolve_path(project_root, args.context)
+	cdk_bin = _resolve_executable_path(invocation_cwd, args.cdk_bin)
 
 	if not dockerfile_path.exists():
 		raise ValueError(f"Dockerfile not found: {dockerfile_path}")
 	if not context_path.exists():
 		raise ValueError(f"Context path not found: {context_path}")
+	if cdk_workdir is not None and not cdk_workdir.exists():
+		raise ValueError(f"CDK workdir not found: {cdk_workdir}")
 	if Path(args.app_file).is_absolute():
 		raise ValueError("app-file must be relative to the Docker build context")
 	if Path(args.web_root).is_absolute():
@@ -310,6 +336,9 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 	print(f"   Domain: {args.domain}")
 	print(f"   Dockerfile: {dockerfile_path}")
 	print(f"   Context: {context_path}")
+	print(f"   CDK bin: {cdk_bin}")
+	if cdk_workdir is not None:
+		print(f"   CDK workdir: {cdk_workdir}")
 	print(f"   Server address: {server_address}")
 	print()
 
@@ -319,6 +348,8 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 		docker=docker,
 		task=task_config,
 		health_check=health_check,
+		cdk_bin=cdk_bin,
+		cdk_workdir=cdk_workdir,
 	)
 
 	print()
@@ -452,15 +483,13 @@ async def _run_verify(args: argparse.Namespace) -> int:
 	print()
 
 	async with httpx.AsyncClient(timeout=10.0, verify=args.verify_ssl) as client:
-		print("1️⃣  Testing default endpoint (no affinity header)...")
+		print("1️⃣  Testing default endpoint (no affinity query)...")
 		try:
 			response = await client.get(base_url)
 			if response.status_code == 200:
-				data = response.json()
-				affinity = response.headers.get("X-Pulse-Render-Affinity", "none")
+				content_type = response.headers.get("content-type", "unknown")
 				print(f"   ✓ Status: {response.status_code}")
-				print(f"   ✓ Response: {data}")
-				print(f"   ✓ Affinity header: {affinity}")
+				print(f"   ✓ Content-Type: {content_type}")
 			else:
 				print(f"   ❌ Status: {response.status_code}")
 				print(f"   ❌ Response: {response.text}")
@@ -483,13 +512,13 @@ async def _run_verify(args: argparse.Namespace) -> int:
 		print()
 
 		if len(running_deployment_ids) > 1:
-			print("3️⃣  Testing header-based affinity...")
+			print("3️⃣  Testing query-based affinity...")
 			for deployment_id in running_deployment_ids:
 				print(f"   Testing affinity to: {deployment_id}")
 				try:
 					response = await client.get(
-						base_url,
-						headers={"X-Pulse-Render-Affinity": deployment_id},
+						f"{base_url}{DEPLOYMENT_META_PATH}",
+						params={AFFINITY_QUERY_PARAM: deployment_id},
 					)
 					if response.status_code == 200:
 						data = response.json()
@@ -527,8 +556,9 @@ async def _run_verify(args: argparse.Namespace) -> int:
 		if len(running_deployment_ids) > 1:
 			print("To test affinity:")
 			for deployment_id in running_deployment_ids:
-				print(f"  curl -H 'X-Pulse-Render-Affinity: {deployment_id}' \\")
-				print(f"    https://{args.domain}/")
+				print(
+					f"  curl 'https://{args.domain}{DEPLOYMENT_META_PATH}?{AFFINITY_QUERY_PARAM}={deployment_id}'"
+				)
 	elif not running_deployment_ids:
 		print("⚠️  No deployments with running tasks found")
 	return 0

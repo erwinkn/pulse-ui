@@ -21,9 +21,7 @@ from pulse_aws.config import ReaperConfig
 
 STACK_NAME_TEMPLATE = "{env}-baseline"
 TOOLKIT_STACK_NAME = "CDKToolkit"
-BASELINE_STACK_VERSION = "0.0.12"  # Bump when baseline stack changes
-PACKAGE_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CDK_APP_DIR = PACKAGE_ROOT / "src" / "pulse_aws" / "cdk"
+BASELINE_STACK_VERSION = "0.0.14"  # Bump when baseline stack changes
 STACK_SUCCEEDED = {
 	"CREATE_COMPLETE",
 	"UPDATE_COMPLETE",
@@ -44,6 +42,9 @@ STACK_DELETE_COMPLETE = "DELETE_COMPLETE"
 
 class BaselineStackError(RuntimeError):
 	"""Raised when provisioning or describing the baseline stack fails."""
+
+
+DEFAULT_CDK_APP_DIR = Path(__file__).resolve().parent / "cdk"
 
 
 @dataclass(slots=True)

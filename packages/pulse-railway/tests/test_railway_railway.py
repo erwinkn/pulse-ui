@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+
+import httpx
 import pytest
 from pulse_railway.railway import RailwayGraphQLClient
 
@@ -44,3 +47,16 @@ async def test_update_service_instance_includes_cron_schedule(monkeypatch) -> No
 		"cronSchedule": "*/5 * * * *",
 		"restartPolicyType": "NEVER",
 	}
+
+
+def test_graphql_client_uses_longer_read_timeout() -> None:
+	client = RailwayGraphQLClient(token="token")
+	try:
+		timeout = client._client.timeout
+		assert isinstance(timeout, httpx.Timeout)
+		assert timeout.connect == 30.0
+		assert timeout.read == 120.0
+		assert timeout.write == 120.0
+		assert timeout.pool == 120.0
+	finally:
+		asyncio.run(client.aclose())

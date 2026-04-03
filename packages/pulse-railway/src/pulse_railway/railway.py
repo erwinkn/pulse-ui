@@ -15,6 +15,8 @@ from pulse_railway.constants import (
 )
 
 DEPLOYMENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,23}$")
+DEFAULT_RAILWAY_GRAPHQL_TIMEOUT = 120.0
+DEFAULT_RAILWAY_GRAPHQL_CONNECT_TIMEOUT = 30.0
 
 
 class RailwayGraphQLError(RuntimeError):
@@ -89,7 +91,7 @@ class RailwayGraphQLClient:
 		*,
 		token: str,
 		endpoint: str = RAILWAY_API_ENDPOINT,
-		timeout: float = 30.0,
+		timeout: float = DEFAULT_RAILWAY_GRAPHQL_TIMEOUT,
 	) -> None:
 		self.endpoint = endpoint
 		self._client = httpx.AsyncClient(
@@ -98,7 +100,10 @@ class RailwayGraphQLClient:
 				"Content-Type": "application/json",
 				"Project-Access-Token": token,
 			},
-			timeout=timeout,
+			timeout=httpx.Timeout(
+				timeout,
+				connect=min(timeout, DEFAULT_RAILWAY_GRAPHQL_CONNECT_TIMEOUT),
+			),
 		)
 
 	async def aclose(self) -> None:

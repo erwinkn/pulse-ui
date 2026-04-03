@@ -10,6 +10,7 @@ import socketio
 import uvicorn
 from aiohttp import web
 from httpx import ASGITransport, AsyncClient
+from pulse_railway.constants import INTERNAL_TOKEN_HEADER, INTERNAL_TRACKER_SYNC_PATH
 from pulse_railway.router import StaticResolver, build_app
 from pulse_railway.tracker import MemoryDeploymentTracker
 
@@ -97,6 +98,76 @@ async def test_router_blocks_internal_paths(backend_servers: dict[str, str]) -> 
 	await app.state.router.close()
 
 	assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_router_syncs_tracker_via_internal_endpoint(
+	backend_servers: dict[str, str],
+) -> None:
+	tracker = MemoryDeploymentTracker()
+	app = build_app(
+		StaticResolver(backends=backend_servers, active_deployment="v2"),
+		tracker=tracker,
+		internal_token="secret-token",
+	)
+	async with AsyncClient(
+		transport=ASGITransport(app=app),
+		base_url="http://testserver",
+	) as client:
+		response = await client.post(
+			INTERNAL_TRACKER_SYNC_PATH,
+			headers={INTERNAL_TOKEN_HEADER: "secret-token"},
+			json={
+				"active": {
+					"deployment_id": "v2",
+					"service_name": "pulse-v2",
+				},
+				"draining": [
+					{
+						"deployment_id": "v1",
+						"service_name": "pulse-v1",
+					}
+				],
+			},
+		)
+	await app.state.router.close()
+
+	assert response.status_code == 200
+	assert response.json() == {
+		"ok": True,
+		"active_deployment_id": "v2",
+		"draining_count": 1,
+	}
+	draining = await tracker.list_draining_deployments()
+	assert [deployment.deployment_id for deployment in draining] == ["v1"]
+
+
+@pytest.mark.asyncio
+async def test_router_rejects_tracker_sync_without_valid_token(
+	backend_servers: dict[str, str],
+) -> None:
+	app = build_app(
+		StaticResolver(backends=backend_servers, active_deployment="v2"),
+		tracker=MemoryDeploymentTracker(),
+		internal_token="secret-token",
+	)
+	async with AsyncClient(
+		transport=ASGITransport(app=app),
+		base_url="http://testserver",
+	) as client:
+		response = await client.post(
+			INTERNAL_TRACKER_SYNC_PATH,
+			headers={INTERNAL_TOKEN_HEADER: "wrong-token"},
+			json={
+				"active": {
+					"deployment_id": "v2",
+					"service_name": "pulse-v2",
+				}
+			},
+		)
+	await app.state.router.close()
+
+	assert response.status_code == 403
 
 
 @pytest.mark.asyncio

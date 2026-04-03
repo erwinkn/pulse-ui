@@ -199,3 +199,35 @@ async def test_run_janitor_run_invokes_janitor(monkeypatch) -> None:
 
 	assert result == 0
 	assert janitor_call["project"].redis_service_name == "pulse-router-redis"
+
+
+def test_print_janitor_result_lock_not_acquired(
+	capsys: pytest.CaptureFixture[str],
+) -> None:
+	from pulse_railway.cli import _print_janitor_result
+
+	_print_janitor_result(JanitorResult(lock_acquired=False))
+
+	assert capsys.readouterr().out == "skipped; lock already held\n"
+
+
+def test_print_janitor_result_timeline(capsys: pytest.CaptureFixture[str]) -> None:
+	from pulse_railway.cli import _print_janitor_result
+
+	_print_janitor_result(
+		JanitorResult(
+			lock_acquired=True,
+			scanned_count=3,
+			deleted_deployments=["deploy9", "deploy8"],
+			force_deleted_deployments=["deploy8"],
+			skipped_deployments=["deploy7"],
+		)
+	)
+
+	assert capsys.readouterr().out == (
+		"scan start; draining=3\n"
+		"delete deploy9; reason=drainable\n"
+		"delete deploy8; reason=max_drain_age\n"
+		"keep deploy7; reason=still_active\n"
+		"scan complete; deleted=2 skipped=1\n"
+	)

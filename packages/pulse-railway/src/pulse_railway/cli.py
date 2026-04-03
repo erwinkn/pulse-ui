@@ -17,7 +17,7 @@ from pulse_railway.deployment import (
 	delete_deployment,
 	deploy,
 )
-from pulse_railway.janitor import run_janitor
+from pulse_railway.janitor import JanitorResult, run_janitor
 from pulse_railway.railway import normalize_service_prefix, validate_deployment_id
 
 
@@ -52,6 +52,26 @@ def _resolve_path(base: Path, raw: str) -> Path:
 	if path.is_absolute():
 		return path
 	return (base / path).resolve()
+
+
+def _print_janitor_result(result: JanitorResult) -> None:
+	if not result.lock_acquired:
+		print("skipped; lock already held")
+		return
+
+	print(f"scan start; draining={result.scanned_count}")
+	for deployment_id in result.deleted_deployments:
+		if deployment_id in result.force_deleted_deployments:
+			print(f"delete {deployment_id}; reason=max_drain_age")
+			continue
+		print(f"delete {deployment_id}; reason=drainable")
+	for deployment_id in result.skipped_deployments:
+		print(f"keep {deployment_id}; reason=still_active")
+	print(
+		"scan complete; "
+		f"deleted={len(result.deleted_deployments)} "
+		f"skipped={len(result.skipped_deployments)}"
+	)
 
 
 def _railway_project(
@@ -379,7 +399,7 @@ async def _run_janitor_run(args: argparse.Namespace) -> int:
 			max_drain_age_seconds=args.max_drain_age_seconds,
 		)
 	)
-	print(json.dumps(asdict(result), indent=2, sort_keys=True))
+	_print_janitor_result(result)
 	return 0
 
 

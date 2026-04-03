@@ -8,6 +8,8 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
+
 from pulse_railway.config import (
 	DEFAULT_BACKEND_INSTANCE,
 	DEFAULT_ROUTER_INSTANCE,
@@ -20,6 +22,8 @@ from pulse_railway.constants import (
 	ACTIVE_DEPLOYMENT_VARIABLE,
 	DEFAULT_REDIS_TEMPLATE_CODE,
 	DEFAULT_ROUTER_PORT,
+	INTERNAL_TOKEN_HEADER,
+	INTERNAL_TRACKER_SYNC_PATH,
 	RAILWAY_DEPLOYMENT_ID_ENV,
 	RAILWAY_ENVIRONMENT_ID_ENV,
 	RAILWAY_INTERNAL_TOKEN_ENV,
@@ -150,6 +154,58 @@ async def _run_command(*args: str, cwd: Path | None = None) -> None:
 		raise DeploymentError(
 			f"command failed ({' '.join(args)}):\n{stdout.decode()}{stderr.decode()}"
 		)
+
+
+async def _sync_tracker_via_router(
+	*,
+	server_address: str,
+	internal_token: str,
+	deployment_id: str,
+	service_name: str,
+	draining_deployments: list[tuple[str, str]],
+	timeout: float = 30.0,
+) -> None:
+	url = f"{server_address.rstrip('/')}{INTERNAL_TRACKER_SYNC_PATH}"
+	deadline = asyncio.get_running_loop().time() + timeout
+	last_error: Exception | None = None
+	payload = {
+		"active": {
+			"deployment_id": deployment_id,
+			"service_name": service_name,
+		},
+		"draining": [
+			{
+				"deployment_id": draining_deployment_id,
+				"service_name": draining_service_name,
+			}
+			for draining_deployment_id, draining_service_name in draining_deployments
+		],
+	}
+	timeout_config = httpx.Timeout(timeout, connect=min(timeout, 30.0))
+	async with httpx.AsyncClient(timeout=timeout_config) as client:
+		while True:
+			try:
+				response = await client.post(
+					url,
+					headers={INTERNAL_TOKEN_HEADER: internal_token},
+					json=payload,
+				)
+				response.raise_for_status()
+				return
+			except (
+				httpx.HTTPStatusError,
+				httpx.ReadError,
+				httpx.ReadTimeout,
+				httpx.ConnectError,
+				httpx.ConnectTimeout,
+			) as exc:
+				last_error = exc
+				if asyncio.get_running_loop().time() >= deadline:
+					break
+				await asyncio.sleep(1)
+	if last_error is None:
+		raise DeploymentError(f"failed to sync tracker via router at {url}")
+	raise DeploymentError(f"failed to sync tracker via router at {url}: {last_error}")
 
 
 async def build_and_push_image(
@@ -334,6 +390,34 @@ async def _ensure_router_service(
 			target_port=project.router_port,
 		)
 	return service, domain, router_deployment_id
+
+
+async def _resolve_router_server_address(
+	client: RailwayGraphQLClient,
+	*,
+	project_id: str,
+	environment_id: str,
+	service_id: str,
+	fallback_domain: str,
+	timeout: float = 30.0,
+	poll_interval: float = 2.0,
+) -> str:
+	loop = asyncio.get_running_loop()
+	deadline = loop.time() + timeout
+	while True:
+		variables = await client.get_service_variables_for_deployment(
+			project_id=project_id,
+			environment_id=environment_id,
+			service_id=service_id,
+		)
+		public_domain = variables.get("RAILWAY_PUBLIC_DOMAIN") or variables.get(
+			"RAILWAY_STATIC_URL"
+		)
+		if public_domain:
+			return f"https://{public_domain}"
+		if loop.time() >= deadline:
+			return f"https://{fallback_domain}"
+		await asyncio.sleep(poll_interval)
 
 
 async def _ensure_janitor_service(
@@ -534,6 +618,9 @@ async def resolve_project_internals(
 		resolved_redis = await resolve_or_create_redis(client, project=project)
 		redis_url = resolved_redis.internal_url
 		redis_public_url = resolved_redis.public_url
+	elif ".railway.internal" in redis_url:
+		resolved_redis = await resolve_or_create_redis(client, project=project)
+		redis_public_url = resolved_redis.public_url
 	return RailwayInternals(
 		service_prefix=normalize_service_prefix(project.service_prefix),
 		internal_token=await resolve_or_create_internal_token(
@@ -616,13 +703,20 @@ async def deploy(
 					f"service already exists for deployment {deployment_id}"
 				)
 			internals = await resolve_project_internals(client, project=project)
-			if internals.tracker_url is None:
+			if internals.redis_url is None:
 				raise DeploymentError("redis_url is required for deployment tracking")
-			tracker = RedisDeploymentTracker.from_url(
-				url=internals.tracker_url,
-				prefix=project.redis_prefix,
-				websocket_ttl_seconds=project.websocket_ttl_seconds,
+			tracker_url = (
+				project.redis_url
+				if project.redis_url is not None
+				and ".railway.internal" not in project.redis_url
+				else internals.redis_public_url
 			)
+			if tracker_url is not None:
+				tracker = RedisDeploymentTracker.from_url(
+					url=tracker_url,
+					prefix=project.redis_prefix,
+					websocket_ttl_seconds=project.websocket_ttl_seconds,
+				)
 
 			if project.router_image is None:
 				router_image = await build_router_image(image_ref=router_image)
@@ -645,7 +739,16 @@ async def deploy(
 				janitor_image=janitor_image,
 			)
 
-			server_address = project.server_address or f"https://{router_domain}"
+			server_address = (
+				project.server_address
+				or await _resolve_router_server_address(
+					client,
+					project_id=project.project_id,
+					environment_id=project.environment_id,
+					service_id=router_service.id,
+					fallback_domain=router_domain,
+				)
+			)
 			build_args.setdefault("APP_FILE", app_file)
 			build_args.setdefault("WEB_ROOT", web_root)
 			build_args.setdefault("PULSE_SERVER_ADDRESS", server_address)
@@ -703,10 +806,6 @@ async def deploy(
 				value=deployment_id,
 				skip_deploys=True,
 			)
-			await tracker.mark_active(
-				deployment_id=deployment_id,
-				service_name=backend_service_name,
-			)
 			draining_deployments = [
 				(tracked_deployment_id, tracked_service_name)
 				for tracked_deployment_id, tracked_service_name in await _list_deployment_services(
@@ -714,15 +813,28 @@ async def deploy(
 				)
 				if tracked_deployment_id != deployment_id
 			]
-			await asyncio.gather(
-				*[
-					tracker.mark_draining(
-						deployment_id=tracked_deployment_id,
-						service_name=tracked_service_name,
-					)
-					for tracked_deployment_id, tracked_service_name in draining_deployments
-				]
-			)
+			if tracker is not None:
+				await tracker.mark_active(
+					deployment_id=deployment_id,
+					service_name=backend_service_name,
+				)
+				await asyncio.gather(
+					*[
+						tracker.mark_draining(
+							deployment_id=tracked_deployment_id,
+							service_name=tracked_service_name,
+						)
+						for tracked_deployment_id, tracked_service_name in draining_deployments
+					]
+				)
+			else:
+				await _sync_tracker_via_router(
+					server_address=server_address,
+					internal_token=internals.internal_token,
+					deployment_id=deployment_id,
+					service_name=backend_service_name,
+					draining_deployments=draining_deployments,
+				)
 			return DeployResult(
 				deployment_id=deployment_id,
 				backend_service_id=backend_service_id,

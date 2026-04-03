@@ -128,7 +128,7 @@ class LayoutState(ps.State):
 	shared_count: int = 0
 
 	def increment(self):
-		self.shared_count += 1
+		self.shared_count += 5
 
 
 # Nested Components Demo State
@@ -543,11 +543,11 @@ def app_layout():
 	return ps.div(
 		ps.header(
 			ps.div(
-				ps.h1("Pulse Demo 5.0", className="text-2xl font-bold"),
+				ps.h1("Pulse Demo 5.1", className="text-2xl font-bold"),
 				ps.div(
 					ps.span(f"Shared Counter: {state.shared_count}", className="mr-4"),
 					ps.button(
-						"Increment Shared",
+						"Increment Shared (+5)",
 						onClick=state.increment,
 						className="btn-secondary",
 					),

@@ -32,3 +32,21 @@ AWS_PROFILE=brimstone-production AWS_REGION=us-east-2 uv run pulse-aws deploy \
 ```
 
 The deploy command sets `PULSE_SERVER_ADDRESS` for the ECS task automatically.
+
+## Railway Deploy
+
+Deploy from the repository root so the Docker build uses the local workspace versions of `pulse-railway` and `pulse-framework`.
+
+```bash
+set -a; source .env; set +a
+
+uv run pulse-railway deploy \
+  --service pulse-router \
+  --deployment-name prod \
+  --app-file examples/aws-ecs/main.py \
+  --web-root examples/aws-ecs/web \
+  --dockerfile examples/aws-ecs/Dockerfile \
+  --context .
+```
+
+`pulse-railway` turns `pulse-router` into the stable public router service, creates one backend Railway service per deployment, and injects deployment affinity through `RailwayPlugin`.

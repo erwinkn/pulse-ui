@@ -15,6 +15,7 @@ dev = [
     "pulse-msal",
     "pulse-recharts",
     "pulse-aws",
+    "pulse-railway",
     "ipykernel>=6.30.1",
     "msal>=1.32.0,<1.33.0",
     "mypy>=1.17.0",
@@ -34,6 +35,7 @@ pulse-mantine = { workspace = true }
 pulse-msal = { workspace = true }
 pulse-recharts = { workspace = true }
 pulse-aws = { workspace = true }
+pulse-railway = { workspace = true }
 
 
 [tool.uv.workspace]
@@ -45,6 +47,7 @@ members = [
 	"packages/pulse-msal",
 	"packages/pulse-recharts",
     "packages/pulse-aws",
+    "packages/pulse-railway",
 ]
 
 

@@ -20,6 +20,23 @@ from pulse_railway.deployment import (
 from pulse_railway.janitor import JanitorResult, run_janitor
 from pulse_railway.railway import normalize_service_prefix, validate_deployment_id
 
+RAILWAY_RUNTIME_ENV_VARS = (
+	"RAILWAY_SERVICE_ID",
+	"RAILWAY_REPLICA_ID",
+	"RAILWAY_PRIVATE_DOMAIN",
+)
+JANITOR_RUN_DESCRIPTION = (
+	"Run janitor cleanup inside a Railway service runtime. "
+	"This command probes private Railway hostnames and fails immediately "
+	"outside Railway."
+)
+JANITOR_RUN_RUNTIME_ERROR = (
+	"pulse-railway janitor run must execute inside Railway. "
+	"Expected at least one Railway runtime variable: "
+	"RAILWAY_SERVICE_ID, RAILWAY_REPLICA_ID, or RAILWAY_PRIVATE_DOMAIN. "
+	"Run it from the deployed janitor cron service, not a local shell."
+)
+
 
 def _env(name: str) -> str | None:
 	return os.environ.get(name)
@@ -52,6 +69,16 @@ def _resolve_path(base: Path, raw: str) -> Path:
 	if path.is_absolute():
 		return path
 	return (base / path).resolve()
+
+
+def _running_on_railway() -> bool:
+	return any(_env(name) for name in RAILWAY_RUNTIME_ENV_VARS)
+
+
+def _require_railway_runtime() -> None:
+	if _running_on_railway():
+		return
+	raise SystemExit(JANITOR_RUN_RUNTIME_ERROR)
 
 
 def _print_janitor_result(result: JanitorResult) -> None:
@@ -276,10 +303,11 @@ def _add_delete_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_janitor_run_args(parser: argparse.ArgumentParser) -> None:
+	parser.description = JANITOR_RUN_DESCRIPTION
 	parser.add_argument(
 		"--service",
 		default=_env("PULSE_RAILWAY_SERVICE") or "pulse-router",
-		help="Stable public Railway router service name",
+		help="Stable public Railway router service name for the deployed janitor.",
 	)
 	parser.add_argument(
 		"--project-id",
@@ -300,7 +328,7 @@ def _add_janitor_run_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
 		"--redis-url",
 		default=_env("PULSE_RAILWAY_REDIS_URL"),
-		help="Redis URL used for draining state and janitor cleanup.",
+		help="Redis URL used for draining state and janitor cleanup inside Railway.",
 	)
 	parser.add_argument(
 		"--redis-service",
@@ -390,6 +418,7 @@ async def _run_delete(args: argparse.Namespace) -> int:
 
 
 async def _run_janitor_run(args: argparse.Namespace) -> int:
+	_require_railway_runtime()
 	if not args.project_id or not args.environment_id or not args.token:
 		raise ValueError("project id, environment id, and token are required")
 	result = await run_janitor(
@@ -413,11 +442,18 @@ def main() -> None:
 	delete_parser = subparsers.add_parser("delete")
 	_add_delete_args(delete_parser)
 
-	janitor_parser = subparsers.add_parser("janitor")
+	janitor_parser = subparsers.add_parser(
+		"janitor",
+		help="Janitor commands intended for the deployed Railway janitor service.",
+	)
 	janitor_subparsers = janitor_parser.add_subparsers(
 		dest="janitor_command", required=True
 	)
-	janitor_run_parser = janitor_subparsers.add_parser("run")
+	janitor_run_parser = janitor_subparsers.add_parser(
+		"run",
+		help="Run janitor cleanup inside Railway. Fails outside Railway.",
+		description=JANITOR_RUN_DESCRIPTION,
+	)
 	_add_janitor_run_args(janitor_run_parser)
 
 	args = parser.parse_args()

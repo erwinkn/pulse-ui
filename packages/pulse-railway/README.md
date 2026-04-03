@@ -46,15 +46,12 @@ When `PULSE_RAILWAY_REDIS_URL` is set:
 
 The janitor job runs as a Railway cron service, not a permanent always-on process. Use a cadence of 5 minutes or slower; Railway does not run cron jobs more frequently than that.
 
-You can run cleanup manually with:
+`pulse-railway janitor run` is for the deployed janitor service only. It probes `*.railway.internal` backends and now fails fast outside Railway.
+
+If you need to trigger cleanup manually, run the command from inside the deployed janitor service:
 
 ```bash
-uv run pulse-railway janitor run \
-  --service pulse-router \
-  --project-id "$RAILWAY_PROJECT_ID" \
-  --environment-id "$RAILWAY_ENVIRONMENT_ID" \
-  --token "$RAILWAY_TOKEN" \
-  --redis-url "$PULSE_RAILWAY_REDIS_URL"
+pulse-railway janitor run
 ```
 
 ## Notes

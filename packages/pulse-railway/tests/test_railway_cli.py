@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 from pulse_railway.cli import (
+	JANITOR_RUN_RUNTIME_ERROR,
 	_add_deploy_args,
 	_add_janitor_run_args,
 	_run_delete,
 	_run_deploy,
 	_run_janitor_run,
+	main,
 )
 from pulse_railway.deployment import DeployResult
 from pulse_railway.janitor import JanitorResult
@@ -181,6 +184,7 @@ async def test_run_janitor_run_invokes_janitor(monkeypatch) -> None:
 		return JanitorResult(lock_acquired=True, scanned_count=1)
 
 	monkeypatch.setattr("pulse_railway.cli.run_janitor", fake_run_janitor)
+	monkeypatch.setenv("RAILWAY_SERVICE_ID", "svc-janitor")
 
 	result = await _run_janitor_run(
 		argparse.Namespace(
@@ -199,6 +203,50 @@ async def test_run_janitor_run_invokes_janitor(monkeypatch) -> None:
 
 	assert result == 0
 	assert janitor_call["project"].redis_service_name == "pulse-router-redis"
+
+
+@pytest.mark.asyncio
+async def test_run_janitor_run_fails_outside_railway(monkeypatch) -> None:
+	for name in ("RAILWAY_SERVICE_ID", "RAILWAY_REPLICA_ID", "RAILWAY_PRIVATE_DOMAIN"):
+		monkeypatch.delenv(name, raising=False)
+
+	with pytest.raises(SystemExit, match="must execute inside Railway"):
+		await _run_janitor_run(
+			argparse.Namespace(
+				service="pulse-router",
+				project_id="project",
+				environment_id="env",
+				token="token",
+				service_prefix=None,
+				redis_url=None,
+				redis_service=None,
+				redis_prefix="pulse:railway",
+				drain_grace_seconds=60,
+				max_drain_age_seconds=86400,
+			)
+		)
+
+
+def test_main_janitor_help_mentions_railway_runtime(
+	monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+	monkeypatch.setattr(
+		sys,
+		"argv",
+		["pulse-railway", "janitor", "run", "--help"],
+	)
+
+	with pytest.raises(SystemExit) as excinfo:
+		main()
+	assert excinfo.value.code == 0
+
+	help_text = capsys.readouterr().out
+	assert "Run janitor cleanup inside a Railway service runtime." in help_text
+	assert "fails immediately outside Railway." in help_text
+
+
+def test_janitor_runtime_error_message_is_actionable() -> None:
+	assert "not a local shell" in JANITOR_RUN_RUNTIME_ERROR
 
 
 def test_print_janitor_result_lock_not_acquired(

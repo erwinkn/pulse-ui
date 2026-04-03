@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -13,6 +14,7 @@ from pulse_railway.constants import (
 )
 from pulse_railway.deployment import (
 	DeploymentError,
+	_list_deployment_services,
 	default_service_prefix,
 	deploy,
 	generate_deployment_id,
@@ -26,6 +28,55 @@ def test_generate_deployment_id_and_prefix() -> None:
 	assert deployment_id.startswith("production-")
 	assert len(deployment_id) <= 24
 	assert default_service_prefix("pulse-router") == "pulse-"
+
+
+@pytest.mark.asyncio
+async def test_list_deployment_services_fetches_variables_concurrently() -> None:
+	services = [
+		ServiceRecord(id="svc-1", name="pulse-prod-1"),
+		ServiceRecord(id="svc-2", name="pulse-prod-2"),
+		ServiceRecord(id="svc-3", name="pulse-prod-3"),
+	]
+	in_flight = 0
+	max_in_flight = 0
+
+	class _FakeClient:
+		async def list_services(
+			self, *, project_id: str, environment_id: str
+		) -> list[ServiceRecord]:
+			assert project_id == "project"
+			assert environment_id == "env"
+			return services
+
+		async def get_service_variables_for_deployment(
+			self, *, project_id: str, environment_id: str, service_id: str
+		) -> dict[str, str]:
+			nonlocal in_flight, max_in_flight
+			assert project_id == "project"
+			assert environment_id == "env"
+			in_flight += 1
+			max_in_flight = max(max_in_flight, in_flight)
+			await asyncio.sleep(0)
+			in_flight -= 1
+			if service_id == "svc-2":
+				return {}
+			return {RAILWAY_DEPLOYMENT_ID_ENV: f"dep-{service_id}"}
+
+	deployments = await _list_deployment_services(
+		_FakeClient(),
+		project=RailwayProject(
+			project_id="project",
+			environment_id="env",
+			token="token",
+			service_name="pulse-router",
+		),
+	)
+
+	assert deployments == [
+		("dep-svc-1", "pulse-prod-1"),
+		("dep-svc-3", "pulse-prod-3"),
+	]
+	assert max_in_flight > 1
 
 
 @pytest.mark.asyncio
@@ -424,20 +475,28 @@ async def test_deploy_provisions_redis_when_missing(monkeypatch, tmp_path) -> No
 		fake_build_and_push_image,
 	)
 
+	project = RailwayProject(
+		project_id="project",
+		environment_id="env",
+		token="token",
+		service_name="pulse-router",
+		service_prefix="Pulse",
+	)
+	docker = DockerBuild(
+		dockerfile_path=dockerfile,
+		context_path=tmp_path,
+		build_args={"KEEP": "1"},
+	)
+
 	result = await deploy(
-		project=RailwayProject(
-			project_id="project",
-			environment_id="env",
-			token="token",
-			service_name="pulse-router",
-		),
-		docker=DockerBuild(
-			dockerfile_path=dockerfile,
-			context_path=tmp_path,
-		),
+		project=project,
+		docker=docker,
 		deployment_id="prod-260402-120000",
 	)
 
 	assert result.janitor_service_name == "pulse-router-janitor"
 	assert "pulse-router-redis" in template_deploys
 	assert tracker_urls == ["redis://public-host:6379"]
+	assert project.service_prefix == "Pulse"
+	assert project.redis_url is None
+	assert docker.build_args == {"KEEP": "1"}

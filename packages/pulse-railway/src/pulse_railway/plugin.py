@@ -72,12 +72,13 @@ class RailwayPlugin(ps.Plugin):
 				raise HTTPException(status_code=403, detail="forbidden")
 			if not hmac.compare_digest(x_internal_token, self.internal_token):
 				raise HTTPException(status_code=403, detail="forbidden")
-			connected_render_count = sum(
-				1 for render in app.render_sessions.values() if render.connected
-			)
-			resumable_render_count = sum(
-				1 for render in app.render_sessions.values() if not render.connected
-			)
+			connected_render_count = 0
+			resumable_render_count = 0
+			for render in app.render_sessions.values():
+				if render.connected:
+					connected_render_count += 1
+				else:
+					resumable_render_count += 1
 			return {
 				"deployment_id": self.deployment_id,
 				"connected_render_count": connected_render_count,

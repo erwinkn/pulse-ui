@@ -13,6 +13,16 @@ from pulse_railway.constants import (
 from pulse_railway.plugin import RailwayDirectivesMiddleware, RailwayPlugin
 
 
+class _TrackedRenderSessions(dict[str, object]):
+	def __init__(self) -> None:
+		super().__init__()
+		self.values_calls = 0
+
+	def values(self):
+		self.values_calls += 1
+		return super().values()
+
+
 @pytest.mark.asyncio
 async def test_prerender_adds_affinity_query_directives(monkeypatch) -> None:
 	monkeypatch.setenv(RAILWAY_DEPLOYMENT_ID_ENV, "prod-260402-120000")
@@ -88,7 +98,11 @@ async def test_plugin_exposes_internal_session_endpoint(monkeypatch) -> None:
 	session = await app.get_or_create_session(None)
 	connected = app.create_render("connected", session)
 	connected.connect(lambda _message: None)
-	app.create_render("resumable", session)
+	resumable = app.create_render("resumable", session)
+	render_sessions = _TrackedRenderSessions()
+	render_sessions[connected.id] = connected
+	render_sessions[resumable.id] = resumable
+	app.render_sessions = render_sessions
 
 	transport = httpx.ASGITransport(app=app.fastapi)
 	async with httpx.AsyncClient(
@@ -102,6 +116,7 @@ async def test_plugin_exposes_internal_session_endpoint(monkeypatch) -> None:
 
 	assert forbidden.status_code == 403
 	assert response.status_code == 200
+	assert app.render_sessions.values_calls == 1
 	assert response.json() == {
 		"deployment_id": "prod-260402-120000",
 		"connected_render_count": 1,

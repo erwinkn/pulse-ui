@@ -54,6 +54,25 @@ def _resolve_path(base: Path, raw: str) -> Path:
 	return (base / path).resolve()
 
 
+def _railway_project(
+	args: argparse.Namespace,
+	**overrides: object,
+) -> RailwayProject:
+	service_prefix = args.service_prefix or default_service_prefix(args.service)
+	return RailwayProject(
+		project_id=args.project_id,
+		environment_id=args.environment_id,
+		token=args.token,
+		service_name=args.service,
+		service_prefix=normalize_service_prefix(service_prefix),
+		redis_url=args.redis_url,
+		redis_service_name=args.redis_service
+		or default_redis_service_name(args.service),
+		redis_prefix=args.redis_prefix,
+		**overrides,
+	)
+
+
 def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
 		"--service",
@@ -307,22 +326,13 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 	if not web_root_path.exists():
 		raise ValueError(f"Web root not found: {web_root_path}")
 
-	service_prefix = args.service_prefix or default_service_prefix(args.service)
-	project = RailwayProject(
-		project_id=args.project_id,
-		environment_id=args.environment_id,
-		token=args.token,
-		service_name=args.service,
-		service_prefix=normalize_service_prefix(service_prefix),
+	project = _railway_project(
+		args,
 		backend_port=args.backend_port,
 		backend_replicas=args.backend_replicas,
 		router_replicas=args.router_replicas,
 		router_image=args.router_image,
 		server_address=args.server_address,
-		redis_url=args.redis_url,
-		redis_service_name=args.redis_service
-		or default_redis_service_name(args.service),
-		redis_prefix=args.redis_prefix,
 		janitor_service_name=args.janitor_service
 		or default_janitor_service_name(args.service),
 		janitor_image=args.janitor_image,
@@ -352,19 +362,8 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 async def _run_delete(args: argparse.Namespace) -> int:
 	if not args.project_id or not args.environment_id or not args.token:
 		raise ValueError("project id, environment id, and token are required")
-	service_prefix = args.service_prefix or default_service_prefix(args.service)
 	await delete_deployment(
-		project=RailwayProject(
-			project_id=args.project_id,
-			environment_id=args.environment_id,
-			token=args.token,
-			service_name=args.service,
-			service_prefix=normalize_service_prefix(service_prefix),
-			redis_url=args.redis_url,
-			redis_service_name=args.redis_service
-			or default_redis_service_name(args.service),
-			redis_prefix=args.redis_prefix,
-		),
+		project=_railway_project(args),
 		deployment_id=validate_deployment_id(args.deployment_id),
 		clear_active=not args.keep_active_variable,
 	)
@@ -374,18 +373,9 @@ async def _run_delete(args: argparse.Namespace) -> int:
 async def _run_janitor_run(args: argparse.Namespace) -> int:
 	if not args.project_id or not args.environment_id or not args.token:
 		raise ValueError("project id, environment id, and token are required")
-	service_prefix = args.service_prefix or default_service_prefix(args.service)
 	result = await run_janitor(
-		project=RailwayProject(
-			project_id=args.project_id,
-			environment_id=args.environment_id,
-			token=args.token,
-			service_name=args.service,
-			service_prefix=normalize_service_prefix(service_prefix),
-			redis_url=args.redis_url,
-			redis_service_name=args.redis_service
-			or default_redis_service_name(args.service),
-			redis_prefix=args.redis_prefix,
+		project=_railway_project(
+			args,
 			drain_grace_seconds=args.drain_grace_seconds,
 			max_drain_age_seconds=args.max_drain_age_seconds,
 		)

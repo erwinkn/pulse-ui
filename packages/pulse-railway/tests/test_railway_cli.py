@@ -8,6 +8,7 @@ import pytest
 from pulse_railway.cli import (
 	_add_deploy_args,
 	_add_janitor_run_args,
+	_run_delete,
 	_run_deploy,
 	_run_janitor_run,
 )
@@ -136,6 +137,36 @@ async def test_run_deploy_requires_context_relative_app_paths(
 
 	with pytest.raises(ValueError, match="app-file must be relative"):
 		await _run_deploy(_make_deploy_args(app_file=str(project_root / "main.py")))
+
+
+@pytest.mark.asyncio
+async def test_run_delete_builds_shared_project_defaults(monkeypatch) -> None:
+	delete_call: dict[str, Any] = {}
+
+	async def fake_delete_deployment(**kwargs: Any) -> None:
+		delete_call.update(kwargs)
+
+	monkeypatch.setattr("pulse_railway.cli.delete_deployment", fake_delete_deployment)
+
+	result = await _run_delete(
+		argparse.Namespace(
+			service="pulse-router",
+			deployment_id="prod-260402-120000",
+			project_id="project",
+			environment_id="env",
+			token="token",
+			service_prefix="Custom",
+			keep_active_variable=False,
+			redis_url=None,
+			redis_service=None,
+			redis_prefix="pulse:railway",
+		)
+	)
+
+	assert result == 0
+	assert delete_call["project"].service_prefix == "custom-"
+	assert delete_call["project"].redis_service_name == "pulse-router-redis"
+	assert delete_call["clear_active"] is True
 
 
 @pytest.mark.asyncio

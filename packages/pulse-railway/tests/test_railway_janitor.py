@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+
+import pulse_railway.janitor as janitor_module
 import pytest
-from pulse_railway.config import RailwayProject
+from pulse_railway.config import RailwayInternals, RailwayProject
 from pulse_railway.janitor import DeploymentSessionStatus, run_janitor
 from pulse_railway.railway import ServiceRecord, TemplateRecord
 from pulse_railway.tracker import MemoryDeploymentTracker
@@ -20,6 +23,13 @@ class _FakeClient:
 	async def __aexit__(self, *_: object) -> None:
 		return None
 
+	async def get_project_variables(
+		self, *, project_id: str, environment_id: str
+	) -> dict[str, str]:
+		assert project_id == "project"
+		assert environment_id == "env"
+		return {}
+
 	async def find_service_by_name(
 		self, *, project_id: str, environment_id: str, name: str
 	) -> ServiceRecord | None:
@@ -27,9 +37,39 @@ class _FakeClient:
 		assert environment_id == "env"
 		return self.services.get(name)
 
+	async def list_services(
+		self, *, project_id: str, environment_id: str
+	) -> list[ServiceRecord]:
+		assert project_id == "project"
+		assert environment_id == "env"
+		return list(self.services.values())
+
 	async def delete_service(self, *, service_id: str, environment_id: str) -> None:
 		assert environment_id == "env"
 		self.deleted_service_ids.append(service_id)
+
+
+def _internals(**overrides: object) -> RailwayInternals:
+	values = {
+		"service_prefix": "pulse-",
+		"internal_token": "secret-token",
+		"redis_url": "redis://test",
+		"redis_public_url": None,
+	}
+	values.update(overrides)
+	return RailwayInternals(**values)
+
+
+def _install_internals(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> None:
+	async def fake_resolve_project_internals(
+		*_args: object, **_kwargs: object
+	) -> RailwayInternals:
+		return _internals(**overrides)
+
+	monkeypatch.setattr(
+		"pulse_railway.janitor.resolve_project_internals",
+		fake_resolve_project_internals,
+	)
 
 
 @pytest.mark.asyncio
@@ -53,6 +93,7 @@ async def test_janitor_deletes_idle_draining_deployments(monkeypatch) -> None:
 		return client
 
 	monkeypatch.setattr("pulse_railway.janitor.RailwayGraphQLClient", fake_client)
+	_install_internals(monkeypatch)
 
 	async def fake_status(*args: object, **kwargs: object) -> DeploymentSessionStatus:
 		return DeploymentSessionStatus(
@@ -73,7 +114,6 @@ async def test_janitor_deletes_idle_draining_deployments(monkeypatch) -> None:
 			token="token",
 			service_name="pulse-router",
 			service_prefix="pulse-",
-			internal_token="secret-token",
 			drain_grace_seconds=60,
 			max_drain_age_seconds=600,
 		),
@@ -106,6 +146,7 @@ async def test_janitor_keeps_draining_deployments_with_live_websockets(
 		return _FakeClient()
 
 	monkeypatch.setattr("pulse_railway.janitor.RailwayGraphQLClient", fake_client)
+	_install_internals(monkeypatch)
 
 	async def fake_status(*args: object, **kwargs: object) -> DeploymentSessionStatus:
 		return DeploymentSessionStatus(
@@ -126,7 +167,6 @@ async def test_janitor_keeps_draining_deployments_with_live_websockets(
 			token="token",
 			service_name="pulse-router",
 			service_prefix="pulse-",
-			internal_token="secret-token",
 			drain_grace_seconds=60,
 			max_drain_age_seconds=600,
 		),
@@ -136,6 +176,121 @@ async def test_janitor_keeps_draining_deployments_with_live_websockets(
 
 	assert result.deleted_deployments == []
 	assert result.skipped_deployments == ["deploy1"]
+
+
+@pytest.mark.asyncio
+async def test_janitor_lists_services_once_and_probes_concurrently(
+	monkeypatch,
+) -> None:
+	tracker = MemoryDeploymentTracker()
+	deployment_ids = [
+		f"deploy{index}"
+		for index in range(janitor_module.JANITOR_STATUS_CONCURRENCY + 2)
+	]
+	for deployment_id in deployment_ids:
+		service_name = f"pulse-{deployment_id}"
+		await tracker.mark_active(
+			deployment_id=deployment_id,
+			service_name=service_name,
+			now=0,
+		)
+		await tracker.mark_draining(
+			deployment_id=deployment_id,
+			service_name=service_name,
+			now=0,
+		)
+
+	class _CountingClient(_FakeClient):
+		def __init__(self, **kwargs: object) -> None:
+			super().__init__(**kwargs)
+			self.deleted_service_ids = []
+			self.list_services_calls = 0
+			self.find_service_by_name_calls = 0
+			self.services = {
+				f"pulse-{deployment_id}": ServiceRecord(
+					id=f"svc-{deployment_id}",
+					name=f"pulse-{deployment_id}",
+				)
+				for deployment_id in deployment_ids
+			}
+
+		async def list_services(
+			self, *, project_id: str, environment_id: str
+		) -> list[ServiceRecord]:
+			assert project_id == "project"
+			assert environment_id == "env"
+			self.list_services_calls += 1
+			return list(self.services.values())
+
+		async def find_service_by_name(
+			self, *, project_id: str, environment_id: str, name: str
+		) -> ServiceRecord | None:
+			self.find_service_by_name_calls += 1
+			raise AssertionError(
+				f"unexpected service scan for {name}; janitor should reuse list_services"
+			)
+
+	created_clients: list[_CountingClient] = []
+
+	def fake_client(**_: object) -> _CountingClient:
+		client = _CountingClient()
+		created_clients.append(client)
+		return client
+
+	monkeypatch.setattr("pulse_railway.janitor.RailwayGraphQLClient", fake_client)
+	_install_internals(monkeypatch)
+
+	started = 0
+	in_flight = 0
+	max_in_flight = 0
+	release = asyncio.Event()
+	skipped_deployment = deployment_ids[-1]
+
+	async def fake_status(*args: object, **kwargs: object) -> DeploymentSessionStatus:
+		nonlocal started, in_flight, max_in_flight
+		deployment_id = kwargs["deployment_id"]
+		started += 1
+		in_flight += 1
+		max_in_flight = max(max_in_flight, in_flight)
+		if started >= janitor_module.JANITOR_STATUS_CONCURRENCY:
+			release.set()
+		await release.wait()
+		await asyncio.sleep(0)
+		in_flight -= 1
+		return DeploymentSessionStatus(
+			deployment_id=deployment_id,
+			connected_render_count=0,
+			resumable_render_count=0,
+			drainable=deployment_id != skipped_deployment,
+		)
+
+	monkeypatch.setattr(
+		"pulse_railway.janitor._fetch_deployment_session_status", fake_status
+	)
+
+	result = await run_janitor(
+		project=RailwayProject(
+			project_id="project",
+			environment_id="env",
+			token="token",
+			service_name="pulse-router",
+			service_prefix="pulse-",
+			drain_grace_seconds=60,
+			max_drain_age_seconds=600,
+		),
+		tracker=tracker,
+		now=120,
+	)
+
+	assert result.deleted_deployments == deployment_ids[:-1]
+	assert result.skipped_deployments == [skipped_deployment]
+	assert created_clients[0].list_services_calls == 1
+	assert created_clients[0].find_service_by_name_calls == 0
+	assert max_in_flight == janitor_module.JANITOR_STATUS_CONCURRENCY
+	remaining = await tracker.list_draining_deployments()
+	assert [deployment.deployment_id for deployment in remaining] == [
+		skipped_deployment
+	]
 
 
 @pytest.mark.asyncio
@@ -197,22 +352,24 @@ async def test_janitor_resolves_project_redis_when_url_missing(monkeypatch) -> N
 		return "secret-token"
 
 	monkeypatch.setattr(
-		"pulse_railway.janitor.resolve_or_create_internal_token",
+		"pulse_railway.deployment.resolve_or_create_internal_token",
 		fake_internal_token,
 	)
 
+	project = RailwayProject(
+		project_id="project",
+		environment_id="env",
+		token="token",
+		service_name="pulse-router",
+		service_prefix="pulse-",
+		redis_service_name="pulse-router-redis",
+	)
 	result = await run_janitor(
-		project=RailwayProject(
-			project_id="project",
-			environment_id="env",
-			token="token",
-			service_name="pulse-router",
-			service_prefix="pulse-",
-			redis_service_name="pulse-router-redis",
-		),
+		project=project,
 		now=120,
 	)
 
 	assert result.lock_acquired is True
 	assert fake_tracker.closed is True
 	assert tracker_urls == ["redis://public-host:6379"]
+	assert project.redis_url is None

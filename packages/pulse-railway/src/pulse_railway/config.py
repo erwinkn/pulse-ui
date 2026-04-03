@@ -47,9 +47,7 @@ class RailwayProject:
 	router_replicas: int = 1
 	router_image: str | None = None
 	server_address: str | None = None
-	internal_token: str | None = None
 	redis_url: str | None = None
-	redis_public_url: str | None = None
 	redis_prefix: str = DEFAULT_REDIS_PREFIX
 	redis_service_name: str | None = None
 	redis_template_code: str = DEFAULT_REDIS_TEMPLATE_CODE
@@ -62,6 +60,20 @@ class RailwayProject:
 	websocket_heartbeat_seconds: int = DEFAULT_WEBSOCKET_HEARTBEAT_SECONDS
 	websocket_ttl_seconds: int = DEFAULT_WEBSOCKET_TTL_SECONDS
 	env_vars: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class RailwayInternals:
+	"""Resolved runtime state derived from RailwayProject."""
+
+	service_prefix: str
+	internal_token: str
+	redis_url: str | None = None
+	redis_public_url: str | None = None
+
+	@property
+	def tracker_url(self) -> str | None:
+		return self.redis_public_url or self.redis_url
 
 
 @dataclass
@@ -85,6 +97,7 @@ __all__ = [
 	"DEFAULT_BACKEND_INSTANCE",
 	"DEFAULT_ROUTER_INSTANCE",
 	"DockerBuild",
+	"RailwayInternals",
 	"RailwayProject",
 	"ServiceInstanceConfig",
 ]

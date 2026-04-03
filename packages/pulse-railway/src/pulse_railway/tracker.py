@@ -408,9 +408,16 @@ class RedisDeploymentTracker:
 		return count
 
 	async def list_draining_deployments(self) -> list[TrackedDeployment]:
+		deployment_ids = list(await self.client.smembers(self._deployments_key()))
+		if not deployment_ids:
+			return []
+		pipe = self.client.pipeline()
+		for deployment_id in deployment_ids:
+			pipe.hgetall(self._deployment_key(deployment_id))
+		records = await pipe.execute()
+
 		deployments: list[TrackedDeployment] = []
-		for deployment_id in await self.client.smembers(self._deployments_key()):
-			record = await self.client.hgetall(self._deployment_key(deployment_id))
+		for deployment_id, record in zip(deployment_ids, records, strict=True):
 			if record.get("state") != "draining":
 				continue
 			deployments.append(

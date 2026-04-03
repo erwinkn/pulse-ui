@@ -525,8 +525,23 @@ class RailwayResolver:
 		self.service_prefix = normalize_service_prefix(service_prefix)
 		self.backend_port = backend_port
 		self.cache_ttl_seconds = cache_ttl_seconds
+		self._cached_active_deployment_id: str | None = None
+		self._active_cached_at = 0.0
+		self._resolved_active_deployment_id: str | None = None
+		self._cached_active_target: RouteTarget | None = None
 		self._cached_service_names: set[str] = set()
 		self._cached_at = 0.0
+
+	async def _refresh_active_deployment(self) -> str | None:
+		if time.monotonic() - self._active_cached_at < self.cache_ttl_seconds:
+			return self._cached_active_deployment_id
+		variables = await self.client.get_project_variables(
+			project_id=self.project_id,
+			environment_id=self.environment_id,
+		)
+		self._cached_active_deployment_id = variables.get(ACTIVE_DEPLOYMENT_VARIABLE)
+		self._active_cached_at = time.monotonic()
+		return self._cached_active_deployment_id
 
 	async def _refresh_services(self) -> None:
 		if time.monotonic() - self._cached_at < self.cache_ttl_seconds:
@@ -549,14 +564,20 @@ class RailwayResolver:
 		)
 
 	async def resolve_active(self) -> RouteTarget | None:
-		variables = await self.client.get_project_variables(
-			project_id=self.project_id,
-			environment_id=self.environment_id,
-		)
-		deployment_id = variables.get(ACTIVE_DEPLOYMENT_VARIABLE)
+		deployment_id = await self._refresh_active_deployment()
 		if not deployment_id:
+			self._resolved_active_deployment_id = None
+			self._cached_active_target = None
 			return None
-		return await self.resolve(deployment_id)
+		if (
+			deployment_id == self._resolved_active_deployment_id
+			and self._cached_active_target is not None
+		):
+			return self._cached_active_target
+		target = await self.resolve(deployment_id)
+		self._resolved_active_deployment_id = deployment_id
+		self._cached_active_target = target
+		return target
 
 
 __all__ = [

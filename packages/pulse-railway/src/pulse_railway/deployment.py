@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import secrets
 import tempfile
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from pulse_railway.config import (
 	DEFAULT_BACKEND_INSTANCE,
 	DEFAULT_ROUTER_INSTANCE,
 	DockerBuild,
+	RailwayInternals,
 	RailwayProject,
 	ServiceInstanceConfig,
 )
@@ -265,6 +267,7 @@ async def _ensure_router_service(
 	client: RailwayGraphQLClient,
 	*,
 	project: RailwayProject,
+	internals: RailwayInternals,
 	router_image: str,
 	router_instance: ServiceInstanceConfig,
 ) -> tuple[ServiceRecord, str, str]:
@@ -279,12 +282,12 @@ async def _ensure_router_service(
 		RAILWAY_TOKEN_ENV: project.token,
 		RAILWAY_PROJECT_ID_ENV: project.project_id,
 		RAILWAY_ENVIRONMENT_ID_ENV: project.environment_id,
-		RAILWAY_SERVICE_PREFIX_ENV: project.service_prefix,
+		RAILWAY_SERVICE_PREFIX_ENV: internals.service_prefix,
 		"PULSE_RAILWAY_BACKEND_PORT": str(project.backend_port),
 		"PORT": str(project.router_port),
 	}
-	if project.redis_url:
-		router_variables[RAILWAY_REDIS_URL_ENV] = project.redis_url
+	if internals.redis_url:
+		router_variables[RAILWAY_REDIS_URL_ENV] = internals.redis_url
 		router_variables[RAILWAY_REDIS_PREFIX_ENV] = project.redis_prefix
 		router_variables[RAILWAY_WEBSOCKET_HEARTBEAT_SECONDS_ENV] = str(
 			project.websocket_heartbeat_seconds
@@ -341,6 +344,7 @@ async def _ensure_janitor_service(
 	client: RailwayGraphQLClient,
 	*,
 	project: RailwayProject,
+	internals: RailwayInternals,
 	janitor_image: str,
 ) -> tuple[ServiceRecord, str]:
 	service_name = project.janitor_service_name or default_janitor_service_name(
@@ -353,15 +357,15 @@ async def _ensure_janitor_service(
 		name=service_name,
 		image=janitor_image,
 	)
-	if not project.redis_url:
+	if not internals.redis_url:
 		raise DeploymentError("redis_url is required for janitor service creation")
 	for key, value in {
 		RAILWAY_TOKEN_ENV: project.token,
 		RAILWAY_PROJECT_ID_ENV: project.project_id,
 		RAILWAY_ENVIRONMENT_ID_ENV: project.environment_id,
-		RAILWAY_SERVICE_PREFIX_ENV: project.service_prefix,
-		RAILWAY_INTERNAL_TOKEN_ENV: project.internal_token or "",
-		RAILWAY_REDIS_URL_ENV: project.redis_url,
+		RAILWAY_SERVICE_PREFIX_ENV: internals.service_prefix,
+		RAILWAY_INTERNAL_TOKEN_ENV: internals.internal_token,
+		RAILWAY_REDIS_URL_ENV: internals.redis_url,
 		RAILWAY_REDIS_PREFIX_ENV: project.redis_prefix,
 		RAILWAY_JANITOR_INTERVAL_SECONDS_ENV: str(project.janitor_interval_seconds),
 		RAILWAY_JANITOR_DRAIN_GRACE_SECONDS_ENV: str(project.drain_grace_seconds),
@@ -465,7 +469,7 @@ async def resolve_or_create_redis(
 		template = await client.get_template_by_code(
 			code=project.redis_template_code or DEFAULT_REDIS_TEMPLATE_CODE
 		)
-		config = template.serialized_config
+		config = deepcopy(template.serialized_config)
 		template_service_id = next(iter(config["services"]))
 		config["services"][template_service_id]["name"] = service_name
 		await client.deploy_template(
@@ -504,15 +508,12 @@ async def resolve_or_create_internal_token(
 	*,
 	project: RailwayProject,
 ) -> str:
-	if project.internal_token:
-		return project.internal_token
 	variables = await client.get_project_variables(
 		project_id=project.project_id,
 		environment_id=project.environment_id,
 	)
 	internal_token = variables.get(RAILWAY_INTERNAL_TOKEN_ENV)
 	if internal_token:
-		project.internal_token = internal_token
 		return internal_token
 	internal_token = secrets.token_urlsafe(32)
 	await client.upsert_variable(
@@ -522,8 +523,29 @@ async def resolve_or_create_internal_token(
 		value=internal_token,
 		skip_deploys=True,
 	)
-	project.internal_token = internal_token
 	return internal_token
+
+
+async def resolve_project_internals(
+	client: RailwayGraphQLClient,
+	*,
+	project: RailwayProject,
+) -> RailwayInternals:
+	redis_url = project.redis_url
+	redis_public_url: str | None = None
+	if redis_url is None:
+		resolved_redis = await resolve_or_create_redis(client, project=project)
+		redis_url = resolved_redis.internal_url
+		redis_public_url = resolved_redis.public_url
+	return RailwayInternals(
+		service_prefix=normalize_service_prefix(project.service_prefix),
+		internal_token=await resolve_or_create_internal_token(
+			client,
+			project=project,
+		),
+		redis_url=redis_url,
+		redis_public_url=redis_public_url,
+	)
 
 
 async def _list_deployment_services(
@@ -535,13 +557,18 @@ async def _list_deployment_services(
 		project_id=project.project_id,
 		environment_id=project.environment_id,
 	)
+	variable_sets = await asyncio.gather(
+		*[
+			client.get_service_variables_for_deployment(
+				project_id=project.project_id,
+				environment_id=project.environment_id,
+				service_id=service.id,
+			)
+			for service in services
+		]
+	)
 	deployments: list[tuple[str, str]] = []
-	for service in services:
-		variables = await client.get_service_variables_for_deployment(
-			project_id=project.project_id,
-			environment_id=project.environment_id,
-			service_id=service.id,
-		)
+	for service, variables in zip(services, variable_sets, strict=True):
 		deployment_id = variables.get(RAILWAY_DEPLOYMENT_ID_ENV)
 		if deployment_id:
 			deployments.append((deployment_id, service.name))
@@ -559,14 +586,15 @@ async def deploy(
 	backend_instance: ServiceInstanceConfig = DEFAULT_BACKEND_INSTANCE,
 	router_instance: ServiceInstanceConfig = DEFAULT_ROUTER_INSTANCE,
 ) -> DeployResult:
-	project.service_prefix = normalize_service_prefix(project.service_prefix)
+	docker = replace(docker, build_args=dict(docker.build_args))
+	build_args = dict(docker.build_args)
 	deployment_id = (
 		validate_deployment_id(deployment_id)
 		if deployment_id is not None
 		else generate_deployment_id(deployment_name)
 	)
 	backend_service_name = service_name_for_deployment(
-		project.service_prefix, deployment_id
+		normalize_service_prefix(project.service_prefix), deployment_id
 	)
 	router_image = project.router_image or default_image_ref(
 		image_repository=docker.image_repository,
@@ -590,20 +618,11 @@ async def deploy(
 				raise DeploymentError(
 					f"service already exists for deployment {deployment_id}"
 				)
-			if not project.redis_url:
-				resolved_redis = await resolve_or_create_redis(
-					client,
-					project=project,
-				)
-				project.redis_url = resolved_redis.internal_url
-				project.redis_public_url = resolved_redis.public_url
-				project.redis_service_name = resolved_redis.service.name
-			project.internal_token = await resolve_or_create_internal_token(
-				client,
-				project=project,
-			)
+			internals = await resolve_project_internals(client, project=project)
+			if internals.tracker_url is None:
+				raise DeploymentError("redis_url is required for deployment tracking")
 			tracker = RedisDeploymentTracker.from_url(
-				url=project.redis_public_url or project.redis_url,
+				url=internals.tracker_url,
 				prefix=project.redis_prefix,
 				websocket_ttl_seconds=project.websocket_ttl_seconds,
 			)
@@ -618,21 +637,24 @@ async def deploy(
 			) = await _ensure_router_service(
 				client,
 				project=project,
+				internals=internals,
 				router_image=router_image,
 				router_instance=router_instance,
 			)
 			janitor_service, janitor_deployment_id = await _ensure_janitor_service(
 				client,
 				project=project,
+				internals=internals,
 				janitor_image=janitor_image,
 			)
 
 			server_address = project.server_address or f"https://{router_domain}"
-			docker.build_args.setdefault("APP_FILE", app_file)
-			docker.build_args.setdefault("WEB_ROOT", web_root)
-			docker.build_args.setdefault("PULSE_SERVER_ADDRESS", server_address)
+			build_args.setdefault("APP_FILE", app_file)
+			build_args.setdefault("WEB_ROOT", web_root)
+			build_args.setdefault("PULSE_SERVER_ADDRESS", server_address)
 			backend_image = await build_and_push_image(
-				docker=docker, image_ref=backend_image
+				docker=replace(docker, build_args=build_args),
+				image_ref=backend_image,
 			)
 
 			backend_service_id = await client.create_service(
@@ -643,7 +665,7 @@ async def deploy(
 			)
 			for key, value in {
 				RAILWAY_DEPLOYMENT_ID_ENV: deployment_id,
-				RAILWAY_INTERNAL_TOKEN_ENV: project.internal_token or "",
+				RAILWAY_INTERNAL_TOKEN_ENV: internals.internal_token,
 				"PULSE_APP_FILE": app_file,
 				"PULSE_SERVER_ADDRESS": server_address,
 				"PORT": str(project.backend_port),
@@ -688,16 +710,22 @@ async def deploy(
 				deployment_id=deployment_id,
 				service_name=backend_service_name,
 			)
-			for (
-				tracked_deployment_id,
-				tracked_service_name,
-			) in await _list_deployment_services(client, project=project):
-				if tracked_deployment_id == deployment_id:
-					continue
-				await tracker.mark_draining(
-					deployment_id=tracked_deployment_id,
-					service_name=tracked_service_name,
+			draining_deployments = [
+				(tracked_deployment_id, tracked_service_name)
+				for tracked_deployment_id, tracked_service_name in await _list_deployment_services(
+					client, project=project
 				)
+				if tracked_deployment_id != deployment_id
+			]
+			await asyncio.gather(
+				*[
+					tracker.mark_draining(
+						deployment_id=tracked_deployment_id,
+						service_name=tracked_service_name,
+					)
+					for tracked_deployment_id, tracked_service_name in draining_deployments
+				]
+			)
 			return DeployResult(
 				deployment_id=deployment_id,
 				backend_service_id=backend_service_id,
@@ -729,7 +757,10 @@ async def delete_deployment(
 	deployment_id: str,
 	clear_active: bool = True,
 ) -> None:
-	service_name = service_name_for_deployment(project.service_prefix, deployment_id)
+	service_name = service_name_for_deployment(
+		normalize_service_prefix(project.service_prefix),
+		deployment_id,
+	)
 	tracker = (
 		RedisDeploymentTracker.from_url(
 			url=project.redis_url,
@@ -783,4 +814,5 @@ __all__ = [
 	"generate_deployment_id",
 	"ResolvedRedis",
 	"resolve_or_create_redis",
+	"resolve_project_internals",
 ]

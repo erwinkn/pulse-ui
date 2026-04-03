@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from pulse_railway.config import RailwayProject
-from pulse_railway.janitor import run_janitor
+from pulse_railway.janitor import DeploymentSessionStatus, run_janitor
 from pulse_railway.railway import ServiceRecord, TemplateRecord
 from pulse_railway.tracker import MemoryDeploymentTracker
 
@@ -54,6 +54,18 @@ async def test_janitor_deletes_idle_draining_deployments(monkeypatch) -> None:
 
 	monkeypatch.setattr("pulse_railway.janitor.RailwayGraphQLClient", fake_client)
 
+	async def fake_status(*args: object, **kwargs: object) -> DeploymentSessionStatus:
+		return DeploymentSessionStatus(
+			deployment_id="deploy1",
+			connected_render_count=0,
+			resumable_render_count=0,
+			drainable=True,
+		)
+
+	monkeypatch.setattr(
+		"pulse_railway.janitor._fetch_deployment_session_status", fake_status
+	)
+
 	result = await run_janitor(
 		project=RailwayProject(
 			project_id="project",
@@ -61,6 +73,7 @@ async def test_janitor_deletes_idle_draining_deployments(monkeypatch) -> None:
 			token="token",
 			service_name="pulse-router",
 			service_prefix="pulse-",
+			internal_token="secret-token",
 			drain_grace_seconds=60,
 			max_drain_age_seconds=600,
 		),
@@ -88,16 +101,23 @@ async def test_janitor_keeps_draining_deployments_with_live_websockets(
 		service_name="pulse-deploy1",
 		now=0,
 	)
-	await tracker.create_websocket_lease(
-		deployment_id="deploy1",
-		service_name="pulse-deploy1",
-		now=0,
-	)
 
 	def fake_client(**_: object) -> _FakeClient:
 		return _FakeClient()
 
 	monkeypatch.setattr("pulse_railway.janitor.RailwayGraphQLClient", fake_client)
+
+	async def fake_status(*args: object, **kwargs: object) -> DeploymentSessionStatus:
+		return DeploymentSessionStatus(
+			deployment_id="deploy1",
+			connected_render_count=0,
+			resumable_render_count=1,
+			drainable=False,
+		)
+
+	monkeypatch.setattr(
+		"pulse_railway.janitor._fetch_deployment_session_status", fake_status
+	)
 
 	result = await run_janitor(
 		project=RailwayProject(
@@ -106,6 +126,7 @@ async def test_janitor_keeps_draining_deployments_with_live_websockets(
 			token="token",
 			service_name="pulse-router",
 			service_prefix="pulse-",
+			internal_token="secret-token",
 			drain_grace_seconds=60,
 			max_drain_age_seconds=600,
 		),
@@ -170,6 +191,14 @@ async def test_janitor_resolves_project_redis_when_url_missing(monkeypatch) -> N
 	monkeypatch.setattr(
 		"pulse_railway.janitor.RedisDeploymentTracker.from_url",
 		lambda **kwargs: tracker_urls.append(kwargs["url"]) or fake_tracker,
+	)
+
+	async def fake_internal_token(*args: object, **kwargs: object) -> str:
+		return "secret-token"
+
+	monkeypatch.setattr(
+		"pulse_railway.janitor.resolve_or_create_internal_token",
+		fake_internal_token,
 	)
 
 	result = await run_janitor(

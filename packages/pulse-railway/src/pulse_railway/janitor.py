@@ -4,9 +4,19 @@ import secrets
 import time
 from dataclasses import dataclass, field
 
+import aiohttp
+
 from pulse_railway.config import RailwayProject
-from pulse_railway.constants import DEFAULT_JANITOR_LOCK_TTL_SECONDS
-from pulse_railway.deployment import resolve_or_create_redis
+from pulse_railway.constants import (
+	DEFAULT_JANITOR_LOCK_TTL_SECONDS,
+	INTERNAL_SESSIONS_PATH,
+	INTERNAL_TOKEN_HEADER,
+	RAILWAY_INTERNAL_TOKEN_ENV,
+)
+from pulse_railway.deployment import (
+	resolve_or_create_internal_token,
+	resolve_or_create_redis,
+)
 from pulse_railway.railway import RailwayGraphQLClient, service_name_for_deployment
 from pulse_railway.tracker import DeploymentTracker, RedisDeploymentTracker
 
@@ -18,6 +28,41 @@ class JanitorResult:
 	deleted_deployments: list[str] = field(default_factory=list)
 	force_deleted_deployments: list[str] = field(default_factory=list)
 	skipped_deployments: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class DeploymentSessionStatus:
+	deployment_id: str
+	connected_render_count: int
+	resumable_render_count: int
+	drainable: bool
+
+
+async def _fetch_deployment_session_status(
+	session: aiohttp.ClientSession,
+	*,
+	deployment_id: str,
+	service_name: str,
+	project: RailwayProject,
+) -> DeploymentSessionStatus:
+	if not project.internal_token:
+		raise RuntimeError(f"missing required env var: {RAILWAY_INTERNAL_TOKEN_ENV}")
+	url = (
+		f"http://{service_name}.railway.internal:{project.backend_port}"
+		f"{INTERNAL_SESSIONS_PATH}"
+	)
+	async with session.get(
+		url,
+		headers={INTERNAL_TOKEN_HEADER: project.internal_token},
+	) as response:
+		response.raise_for_status()
+		payload = await response.json()
+	return DeploymentSessionStatus(
+		deployment_id=payload["deployment_id"],
+		connected_render_count=int(payload["connected_render_count"]),
+		resumable_render_count=int(payload["resumable_render_count"]),
+		drainable=bool(payload["drainable"]),
+	)
 
 
 async def run_janitor(
@@ -46,6 +91,10 @@ async def run_janitor(
 					websocket_ttl_seconds=project.websocket_ttl_seconds,
 				)
 				created_tracker = True
+			project.internal_token = await resolve_or_create_internal_token(
+				client,
+				project=project,
+			)
 
 			lock_acquired = await tracker.acquire_janitor_lock(
 				token=lock_token,
@@ -57,46 +106,54 @@ async def run_janitor(
 			timestamp = time.time() if now is None else now
 			draining = await tracker.list_draining_deployments()
 			result = JanitorResult(lock_acquired=True, scanned_count=len(draining))
-			for deployment in draining:
-				service_name = deployment.service_name or service_name_for_deployment(
-					project.service_prefix, deployment.deployment_id
-				)
-				websocket_count = await tracker.count_websocket_leases(
-					deployment_id=deployment.deployment_id
-				)
-				draining_for = (
-					timestamp - deployment.drain_started_at
-					if deployment.drain_started_at is not None
-					else 0.0
-				)
-				idle_for = (
-					timestamp - deployment.last_seen_at
-					if deployment.last_seen_at is not None
-					else timestamp
-				)
-				force_delete = draining_for >= project.max_drain_age_seconds
-				ready = (
-					websocket_count == 0
-					and idle_for >= project.drain_grace_seconds
-					and draining_for >= project.drain_grace_seconds
-				)
-				if not force_delete and not ready:
-					result.skipped_deployments.append(deployment.deployment_id)
-					continue
-				service = await client.find_service_by_name(
-					project_id=project.project_id,
-					environment_id=project.environment_id,
-					name=service_name,
-				)
-				if service is not None:
-					await client.delete_service(
-						service_id=service.id,
-						environment_id=project.environment_id,
+			async with aiohttp.ClientSession(
+				timeout=aiohttp.ClientTimeout(total=10, sock_connect=5)
+			) as session:
+				for deployment in draining:
+					service_name = (
+						deployment.service_name
+						or service_name_for_deployment(
+							project.service_prefix, deployment.deployment_id
+						)
 					)
-				await tracker.clear_deployment(deployment_id=deployment.deployment_id)
-				result.deleted_deployments.append(deployment.deployment_id)
-				if force_delete:
-					result.force_deleted_deployments.append(deployment.deployment_id)
+					draining_for = (
+						timestamp - deployment.drain_started_at
+						if deployment.drain_started_at is not None
+						else 0.0
+					)
+					force_delete = draining_for >= project.max_drain_age_seconds
+					if not force_delete:
+						try:
+							session_status = await _fetch_deployment_session_status(
+								session,
+								deployment_id=deployment.deployment_id,
+								service_name=service_name,
+								project=project,
+							)
+						except Exception:
+							result.skipped_deployments.append(deployment.deployment_id)
+							continue
+						if not session_status.drainable:
+							result.skipped_deployments.append(deployment.deployment_id)
+							continue
+					service = await client.find_service_by_name(
+						project_id=project.project_id,
+						environment_id=project.environment_id,
+						name=service_name,
+					)
+					if service is not None:
+						await client.delete_service(
+							service_id=service.id,
+							environment_id=project.environment_id,
+						)
+					await tracker.clear_deployment(
+						deployment_id=deployment.deployment_id
+					)
+					result.deleted_deployments.append(deployment.deployment_id)
+					if force_delete:
+						result.force_deleted_deployments.append(
+							deployment.deployment_id
+						)
 		return result
 	finally:
 		if lock_acquired:

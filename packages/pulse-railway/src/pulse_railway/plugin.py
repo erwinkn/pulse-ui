@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import hmac
 import os
 from collections.abc import Awaitable, Callable
 from typing import Any, override
 
 import pulse as ps
-from fastapi import HTTPException
+from fastapi import Header, HTTPException
 
 from pulse_railway.constants import (
 	AFFINITY_QUERY_PARAM,
 	DEPLOYMENT_META_PATH,
+	INTERNAL_SESSIONS_PATH,
+	INTERNAL_TOKEN_HEADER,
 	RAILWAY_DEPLOYMENT_ID_ENV,
+	RAILWAY_INTERNAL_TOKEN_ENV,
 )
 
 
@@ -19,10 +23,12 @@ class RailwayPlugin(ps.Plugin):
 
 	priority: int = 100
 	deployment_id: str
+	internal_token: str
 	enabled: bool
 
 	def __init__(self) -> None:
 		self.deployment_id = ""
+		self.internal_token = ""
 		self.enabled = False
 
 	@override
@@ -31,6 +37,7 @@ class RailwayPlugin(ps.Plugin):
 		if not deployment_id:
 			return
 		self.deployment_id = deployment_id
+		self.internal_token = os.environ.get(RAILWAY_INTERNAL_TOKEN_ENV, "")
 		self.enabled = True
 
 	@override
@@ -49,6 +56,35 @@ class RailwayPlugin(ps.Plugin):
 				"status": "ok",
 				"deployment_id": self.deployment_id,
 				"api_prefix": app.api_prefix,
+			}
+
+		@app.fastapi.get(INTERNAL_SESSIONS_PATH)
+		def deployment_sessions(
+			x_internal_token: str | None = Header(
+				default=None, alias=INTERNAL_TOKEN_HEADER
+			),
+		):  # pyright: ignore[reportUnusedFunction]
+			if not self.enabled:
+				raise HTTPException(
+					status_code=503, detail="Railway plugin is disabled"
+				)
+			if not self.internal_token or x_internal_token is None:
+				raise HTTPException(status_code=403, detail="forbidden")
+			if not hmac.compare_digest(x_internal_token, self.internal_token):
+				raise HTTPException(status_code=403, detail="forbidden")
+			connected_render_count = sum(
+				1 for render in app.render_sessions.values() if render.connected
+			)
+			resumable_render_count = sum(
+				1 for render in app.render_sessions.values() if not render.connected
+			)
+			return {
+				"deployment_id": self.deployment_id,
+				"connected_render_count": connected_render_count,
+				"resumable_render_count": resumable_render_count,
+				"drainable": connected_render_count == 0
+				and resumable_render_count == 0,
+				"session_timeout_seconds": app.session_timeout,
 			}
 
 

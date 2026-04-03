@@ -47,6 +47,7 @@ class RailwayProject:
 	router_replicas: int = 1
 	router_image: str | None = None
 	server_address: str | None = None
+	internal_token: str | None = None
 	redis_url: str | None = None
 	redis_public_url: str | None = None
 	redis_prefix: str = DEFAULT_REDIS_PREFIX

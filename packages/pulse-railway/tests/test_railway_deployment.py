@@ -7,6 +7,7 @@ from pulse_railway.config import DockerBuild, RailwayProject
 from pulse_railway.constants import (
 	ACTIVE_DEPLOYMENT_VARIABLE,
 	RAILWAY_DEPLOYMENT_ID_ENV,
+	RAILWAY_INTERNAL_TOKEN_ENV,
 	RAILWAY_REDIS_PREFIX_ENV,
 	RAILWAY_REDIS_URL_ENV,
 )
@@ -59,6 +60,17 @@ async def test_deploy_happy_path(monkeypatch, tmp_path) -> None:
 			assert project_id == "project"
 			assert environment_id == "env"
 			return service_state.get(name)
+
+		async def get_project_variables(
+			self, *, project_id: str, environment_id: str, service_id: str | None = None
+		) -> dict[str, str]:
+			assert project_id == "project"
+			assert environment_id == "env"
+			assert service_id is None
+			return {
+				ACTIVE_DEPLOYMENT_VARIABLE: "prod-prev",
+				RAILWAY_INTERNAL_TOKEN_ENV: "secret-token",
+			}
 
 		async def list_services(
 			self, *, project_id: str, environment_id: str
@@ -191,6 +203,11 @@ async def test_deploy_happy_path(monkeypatch, tmp_path) -> None:
 		result.router_service_id,
 		RAILWAY_REDIS_PREFIX_ENV,
 		"pulse:railway",
+	) in variables
+	assert (
+		result.janitor_service_id,
+		RAILWAY_INTERNAL_TOKEN_ENV,
+		"secret-token",
 	) in variables
 	draining = await memory_tracker.list_draining_deployments()
 	assert {deployment.deployment_id for deployment in draining} == {

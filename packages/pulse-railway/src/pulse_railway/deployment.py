@@ -20,6 +20,7 @@ from pulse_railway.constants import (
 	DEFAULT_ROUTER_PORT,
 	RAILWAY_DEPLOYMENT_ID_ENV,
 	RAILWAY_ENVIRONMENT_ID_ENV,
+	RAILWAY_INTERNAL_TOKEN_ENV,
 	RAILWAY_JANITOR_DRAIN_GRACE_SECONDS_ENV,
 	RAILWAY_JANITOR_INTERVAL_SECONDS_ENV,
 	RAILWAY_JANITOR_MAX_DRAIN_AGE_SECONDS_ENV,
@@ -359,6 +360,7 @@ async def _ensure_janitor_service(
 		RAILWAY_PROJECT_ID_ENV: project.project_id,
 		RAILWAY_ENVIRONMENT_ID_ENV: project.environment_id,
 		RAILWAY_SERVICE_PREFIX_ENV: project.service_prefix,
+		RAILWAY_INTERNAL_TOKEN_ENV: project.internal_token or "",
 		RAILWAY_REDIS_URL_ENV: project.redis_url,
 		RAILWAY_REDIS_PREFIX_ENV: project.redis_prefix,
 		RAILWAY_JANITOR_INTERVAL_SECONDS_ENV: str(project.janitor_interval_seconds),
@@ -497,6 +499,33 @@ async def resolve_or_create_redis(
 	)
 
 
+async def resolve_or_create_internal_token(
+	client: RailwayGraphQLClient,
+	*,
+	project: RailwayProject,
+) -> str:
+	if project.internal_token:
+		return project.internal_token
+	variables = await client.get_project_variables(
+		project_id=project.project_id,
+		environment_id=project.environment_id,
+	)
+	internal_token = variables.get(RAILWAY_INTERNAL_TOKEN_ENV)
+	if internal_token:
+		project.internal_token = internal_token
+		return internal_token
+	internal_token = secrets.token_urlsafe(32)
+	await client.upsert_variable(
+		project_id=project.project_id,
+		environment_id=project.environment_id,
+		name=RAILWAY_INTERNAL_TOKEN_ENV,
+		value=internal_token,
+		skip_deploys=True,
+	)
+	project.internal_token = internal_token
+	return internal_token
+
+
 async def _list_deployment_services(
 	client: RailwayGraphQLClient,
 	*,
@@ -552,19 +581,6 @@ async def deploy(
 
 	try:
 		async with RailwayGraphQLClient(token=project.token) as client:
-			if not project.redis_url:
-				resolved_redis = await resolve_or_create_redis(
-					client,
-					project=project,
-				)
-				project.redis_url = resolved_redis.internal_url
-				project.redis_public_url = resolved_redis.public_url
-				project.redis_service_name = resolved_redis.service.name
-			tracker = RedisDeploymentTracker.from_url(
-				url=project.redis_public_url or project.redis_url,
-				prefix=project.redis_prefix,
-				websocket_ttl_seconds=project.websocket_ttl_seconds,
-			)
 			existing_backend = await client.find_service_by_name(
 				project_id=project.project_id,
 				environment_id=project.environment_id,
@@ -574,6 +590,23 @@ async def deploy(
 				raise DeploymentError(
 					f"service already exists for deployment {deployment_id}"
 				)
+			if not project.redis_url:
+				resolved_redis = await resolve_or_create_redis(
+					client,
+					project=project,
+				)
+				project.redis_url = resolved_redis.internal_url
+				project.redis_public_url = resolved_redis.public_url
+				project.redis_service_name = resolved_redis.service.name
+			project.internal_token = await resolve_or_create_internal_token(
+				client,
+				project=project,
+			)
+			tracker = RedisDeploymentTracker.from_url(
+				url=project.redis_public_url or project.redis_url,
+				prefix=project.redis_prefix,
+				websocket_ttl_seconds=project.websocket_ttl_seconds,
+			)
 
 			if project.router_image is None:
 				router_image = await build_router_image(image_ref=router_image)
@@ -610,6 +643,7 @@ async def deploy(
 			)
 			for key, value in {
 				RAILWAY_DEPLOYMENT_ID_ENV: deployment_id,
+				RAILWAY_INTERNAL_TOKEN_ENV: project.internal_token or "",
 				"PULSE_APP_FILE": app_file,
 				"PULSE_SERVER_ADDRESS": server_address,
 				"PORT": str(project.backend_port),

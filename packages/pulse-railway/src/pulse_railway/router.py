@@ -19,6 +19,7 @@ from pulse_railway.constants import (
 	DEFAULT_REDIS_PREFIX,
 	DEFAULT_ROUTER_HEALTH_PATH,
 	DEFAULT_SERVICE_PREFIX,
+	INTERNAL_API_PREFIX,
 	RAILWAY_ENVIRONMENT_ID_ENV,
 	RAILWAY_PROJECT_ID_ENV,
 	RAILWAY_REDIS_PREFIX_ENV,
@@ -156,7 +157,14 @@ class AffinityRouter:
 	async def health(self) -> JSONResponse:
 		return JSONResponse({"ok": True})
 
+	@staticmethod
+	def _is_internal_path(path: str) -> bool:
+		internal_prefix = INTERNAL_API_PREFIX.lstrip("/")
+		return path == internal_prefix or path.startswith(f"{internal_prefix}/")
+
 	async def proxy_http(self, request: Request, path: str) -> Response:
+		if self._is_internal_path(path):
+			raise HTTPException(status_code=404, detail="not found")
 		target = await self._resolve_from_http(request)
 		if self.tracker is not None:
 			await self.tracker.record_request(deployment_id=target.deployment_id)
@@ -199,6 +207,8 @@ class AffinityRouter:
 			)
 
 	async def proxy_websocket(self, websocket: WebSocket, path: str) -> None:
+		if self._is_internal_path(path):
+			raise HTTPException(status_code=404, detail="not found")
 		target = await self._resolve_from_websocket(websocket)
 		backend_url = _http_to_ws_url(target.base_url.rstrip("/"))
 		if path:

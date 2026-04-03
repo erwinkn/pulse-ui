@@ -87,6 +87,19 @@ async def test_router_prefers_query_param(backend_servers: dict[str, str]) -> No
 
 
 @pytest.mark.asyncio
+async def test_router_blocks_internal_paths(backend_servers: dict[str, str]) -> None:
+	app = build_app(StaticResolver(backends=backend_servers, active_deployment="v2"))
+	async with AsyncClient(
+		transport=ASGITransport(app=app),
+		base_url="http://testserver",
+	) as client:
+		response = await client.get("/_pulse/internal/railway/sessions")
+	await app.state.router.close()
+
+	assert response.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_router_returns_404_for_unknown_backend(
 	backend_servers: dict[str, str],
 ) -> None:

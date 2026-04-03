@@ -9,7 +9,7 @@ from pulse_railway.constants import (
 	DEFAULT_BACKEND_HEALTH_PATH,
 	DEFAULT_BACKEND_PORT,
 	DEFAULT_DRAIN_GRACE_SECONDS,
-	DEFAULT_JANITOR_INTERVAL_SECONDS,
+	DEFAULT_JANITOR_CRON_SCHEDULE,
 	DEFAULT_MAX_DRAIN_AGE_SECONDS,
 	DEFAULT_REDIS_PREFIX,
 	DEFAULT_REDIS_TEMPLATE_CODE,
@@ -54,7 +54,7 @@ class RailwayProject:
 	janitor_service_name: str | None = None
 	janitor_image: str | None = None
 	janitor_replicas: int = 1
-	janitor_interval_seconds: int = DEFAULT_JANITOR_INTERVAL_SECONDS
+	janitor_cron_schedule: str = DEFAULT_JANITOR_CRON_SCHEDULE
 	drain_grace_seconds: int = DEFAULT_DRAIN_GRACE_SECONDS
 	max_drain_age_seconds: int = DEFAULT_MAX_DRAIN_AGE_SECONDS
 	websocket_heartbeat_seconds: int = DEFAULT_WEBSOCKET_HEARTBEAT_SECONDS

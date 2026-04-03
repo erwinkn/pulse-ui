@@ -24,7 +24,6 @@ from pulse_railway.constants import (
 	RAILWAY_ENVIRONMENT_ID_ENV,
 	RAILWAY_INTERNAL_TOKEN_ENV,
 	RAILWAY_JANITOR_DRAIN_GRACE_SECONDS_ENV,
-	RAILWAY_JANITOR_INTERVAL_SECONDS_ENV,
 	RAILWAY_JANITOR_MAX_DRAIN_AGE_SECONDS_ENV,
 	RAILWAY_PROJECT_ID_ENV,
 	RAILWAY_REDIS_PREFIX_ENV,
@@ -81,10 +80,7 @@ ROUTER_START_COMMAND = (
 	"sh -c 'uvicorn pulse_railway.router:build_app_from_env --factory "
 	'--host 0.0.0.0 --port "${PORT:-8000}"\''
 )
-JANITOR_START_COMMAND = (
-	"sh -c 'while true; do pulse-railway janitor run; "
-	'sleep "${PULSE_RAILWAY_JANITOR_INTERVAL_SECONDS:-60}"; done\''
-)
+JANITOR_START_COMMAND = "sh -c 'pulse-railway janitor run'"
 
 
 def pulse_start_command() -> str:
@@ -367,7 +363,6 @@ async def _ensure_janitor_service(
 		RAILWAY_INTERNAL_TOKEN_ENV: internals.internal_token,
 		RAILWAY_REDIS_URL_ENV: internals.redis_url,
 		RAILWAY_REDIS_PREFIX_ENV: project.redis_prefix,
-		RAILWAY_JANITOR_INTERVAL_SECONDS_ENV: str(project.janitor_interval_seconds),
 		RAILWAY_JANITOR_DRAIN_GRACE_SECONDS_ENV: str(project.drain_grace_seconds),
 		RAILWAY_JANITOR_MAX_DRAIN_AGE_SECONDS_ENV: str(project.max_drain_age_seconds),
 		RAILWAY_WEBSOCKET_HEARTBEAT_SECONDS_ENV: str(
@@ -389,6 +384,8 @@ async def _ensure_janitor_service(
 		source_image=janitor_image,
 		num_replicas=project.janitor_replicas,
 		start_command=JANITOR_START_COMMAND,
+		cron_schedule=project.janitor_cron_schedule,
+		restart_policy_type="NEVER",
 	)
 	deployment_id = await client.deploy_service(
 		service_id=service.id,

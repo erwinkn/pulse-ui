@@ -31,7 +31,7 @@ def _make_deploy_args(**overrides: Any) -> argparse.Namespace:
 		"redis_prefix": "pulse:railway",
 		"janitor_service": None,
 		"janitor_image": None,
-		"janitor_interval_seconds": 60,
+		"janitor_cron_schedule": "*/5 * * * *",
 		"drain_grace_seconds": 60,
 		"max_drain_age_seconds": 86400,
 		"app_file": "main.py",
@@ -84,6 +84,7 @@ def _write_deploy_fixture(root: Path) -> None:
 def test_deploy_parser_reads_env_overrides(monkeypatch) -> None:
 	monkeypatch.setenv("PULSE_RAILWAY_SERVICE", "router")
 	monkeypatch.setenv("PULSE_RAILWAY_APP_FILE", "examples/aws-ecs/main.py")
+	monkeypatch.setenv("PULSE_RAILWAY_JANITOR_CRON_SCHEDULE", "0 */6 * * *")
 	parser = argparse.ArgumentParser()
 
 	_add_deploy_args(parser)
@@ -91,6 +92,7 @@ def test_deploy_parser_reads_env_overrides(monkeypatch) -> None:
 
 	assert args.service == "router"
 	assert args.app_file == "examples/aws-ecs/main.py"
+	assert args.janitor_cron_schedule == "0 */6 * * *"
 
 
 def test_janitor_parser_reads_service_env_defaults(monkeypatch) -> None:
@@ -121,6 +123,7 @@ async def test_run_deploy_resolves_paths_and_defaults(monkeypatch, tmp_path) -> 
 	assert deploy_call["project"].service_prefix == "pulse-"
 	assert deploy_call["project"].redis_service_name == "pulse-router-redis"
 	assert deploy_call["project"].janitor_service_name == "pulse-router-janitor"
+	assert deploy_call["project"].janitor_cron_schedule == "*/5 * * * *"
 	assert deploy_call["docker"].dockerfile_path == (project_root / "Dockerfile")
 	assert deploy_call["docker"].context_path == project_root
 

@@ -140,10 +140,9 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 		help="Prebuilt janitor image. Defaults to the router image.",
 	)
 	parser.add_argument(
-		"--janitor-interval-seconds",
-		type=int,
-		default=int(_env("PULSE_RAILWAY_JANITOR_INTERVAL_SECONDS") or "60"),
-		help="Janitor service polling interval in seconds.",
+		"--janitor-cron-schedule",
+		default=_env("PULSE_RAILWAY_JANITOR_CRON_SCHEDULE") or "*/5 * * * *",
+		help="Railway cron schedule for the janitor service. Defaults to every 5 minutes.",
 	)
 	parser.add_argument(
 		"--drain-grace-seconds",
@@ -336,7 +335,7 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 		janitor_service_name=args.janitor_service
 		or default_janitor_service_name(args.service),
 		janitor_image=args.janitor_image,
-		janitor_interval_seconds=args.janitor_interval_seconds,
+		janitor_cron_schedule=args.janitor_cron_schedule,
 		drain_grace_seconds=args.drain_grace_seconds,
 		max_drain_age_seconds=args.max_drain_age_seconds,
 		env_vars=_parse_kv_items(args.env, "--env"),

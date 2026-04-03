@@ -27,7 +27,7 @@ By default, the package builds and pushes both images to `ttl.sh` for a zero-con
 - Stable Railway router service
 - One Railway backend service per deployment
 - Stable Railway Redis service unless you pass `--redis-url`
-- Optional stable Railway janitor service
+- Optional Railway cron job for janitor cleanup
 - Active deployment stored in `PULSE_ACTIVE_DEPLOYMENT`
 - Explicit affinity via `pulse_deployment` query param or `x-pulse-deployment` header
 - Websockets proxied through the router to the selected backend service
@@ -42,7 +42,9 @@ When `PULSE_RAILWAY_REDIS_URL` is set:
 - deploy marks the new deployment `active`
 - previous active deployments become `draining`
 - the router records HTTP activity and websocket leases in Redis
-- the janitor deletes drained deployments after they are idle
+- the janitor cron job deletes drained deployments after they are idle
+
+The janitor job runs as a Railway cron service, not a permanent always-on process. Use a cadence of 5 minutes or slower; Railway does not run cron jobs more frequently than that.
 
 You can run cleanup manually with:
 
@@ -59,4 +61,4 @@ uv run pulse-railway janitor run \
 
 - Backend services should run with `1` replica. Railway does not provide replica-level sticky routing, so deployment affinity alone is only safe with a single backend replica when sessions are stored in memory.
 - The router can run with multiple replicas because routing state lives in the request query/header plus the active deployment variable.
-- Healthchecks remain for crash recovery only. Deployment cleanup is handled by the janitor, not by failing healthchecks on drained services.
+- Healthchecks remain for crash recovery only. Deployment cleanup is handled by the janitor cron job, not by failing healthchecks on drained services.

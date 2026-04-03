@@ -377,6 +377,9 @@ class RailwayGraphQLClient:
 		healthcheck_timeout: int | None = None,
 		overlap_seconds: int | None = None,
 		start_command: str | None = None,
+		cron_schedule: str | None = None,
+		restart_policy_type: str | None = None,
+		restart_policy_max_retries: int | None = None,
 	) -> None:
 		input_payload: dict[str, Any] = {}
 		if source_image is not None:
@@ -391,6 +394,12 @@ class RailwayGraphQLClient:
 			input_payload["overlapSeconds"] = overlap_seconds
 		if start_command is not None:
 			input_payload["startCommand"] = start_command
+		if cron_schedule is not None:
+			input_payload["cronSchedule"] = cron_schedule
+		if restart_policy_type is not None:
+			input_payload["restartPolicyType"] = restart_policy_type
+		if restart_policy_max_retries is not None:
+			input_payload["restartPolicyMaxRetries"] = restart_policy_max_retries
 		if not input_payload:
 			return
 		await self.graphql(

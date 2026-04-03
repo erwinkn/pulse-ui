@@ -7,12 +7,14 @@ import pytest
 from pulse_railway.config import DockerBuild, RailwayProject
 from pulse_railway.constants import (
 	ACTIVE_DEPLOYMENT_VARIABLE,
+	DEFAULT_JANITOR_CRON_SCHEDULE,
 	RAILWAY_DEPLOYMENT_ID_ENV,
 	RAILWAY_INTERNAL_TOKEN_ENV,
 	RAILWAY_REDIS_PREFIX_ENV,
 	RAILWAY_REDIS_URL_ENV,
 )
 from pulse_railway.deployment import (
+	JANITOR_START_COMMAND,
 	DeploymentError,
 	_list_deployment_services,
 	default_service_prefix,
@@ -93,6 +95,7 @@ async def test_deploy_happy_path(monkeypatch, tmp_path) -> None:
 		"svc-old-2": {RAILWAY_DEPLOYMENT_ID_ENV: "prod-old"},
 	}
 	variables: list[tuple[str | None, str, str]] = []
+	service_instance_updates: list[dict[str, Any]] = []
 	memory_tracker = MemoryDeploymentTracker()
 
 	class _FakeClient:
@@ -168,8 +171,8 @@ async def test_deploy_happy_path(monkeypatch, tmp_path) -> None:
 			if service_id is not None:
 				service_variables.setdefault(service_id, {})[name] = value
 
-		async def update_service_instance(self, **_: Any) -> None:
-			return None
+		async def update_service_instance(self, **kwargs: Any) -> None:
+			service_instance_updates.append(kwargs)
 
 		async def deploy_service(self, *, service_id: str, environment_id: str) -> str:
 			assert environment_id == "env"
@@ -260,6 +263,14 @@ async def test_deploy_happy_path(monkeypatch, tmp_path) -> None:
 		RAILWAY_INTERNAL_TOKEN_ENV,
 		"secret-token",
 	) in variables
+	janitor_update = next(
+		update
+		for update in service_instance_updates
+		if update["service_id"] == result.janitor_service_id
+	)
+	assert janitor_update["cron_schedule"] == DEFAULT_JANITOR_CRON_SCHEDULE
+	assert janitor_update["restart_policy_type"] == "NEVER"
+	assert janitor_update["start_command"] == JANITOR_START_COMMAND
 	draining = await memory_tracker.list_draining_deployments()
 	assert {deployment.deployment_id for deployment in draining} == {
 		"prod-prev",
@@ -323,6 +334,7 @@ async def test_deploy_provisions_redis_when_missing(monkeypatch, tmp_path) -> No
 	memory_tracker = MemoryDeploymentTracker()
 	template_deploys: list[str] = []
 	tracker_urls: list[str] = []
+	service_instance_updates: list[dict[str, Any]] = []
 
 	class _FakeClient:
 		def __init__(self, **_: object) -> None:
@@ -422,8 +434,8 @@ async def test_deploy_provisions_redis_when_missing(monkeypatch, tmp_path) -> No
 					"value"
 				]
 
-		async def update_service_instance(self, **_: Any) -> None:
-			return None
+		async def update_service_instance(self, **kwargs: Any) -> None:
+			service_instance_updates.append(kwargs)
 
 		async def deploy_service(self, *, service_id: str, environment_id: str) -> str:
 			assert environment_id == "env"
@@ -500,3 +512,11 @@ async def test_deploy_provisions_redis_when_missing(monkeypatch, tmp_path) -> No
 	assert project.service_prefix == "Pulse"
 	assert project.redis_url is None
 	assert docker.build_args == {"KEEP": "1"}
+	janitor_update = next(
+		update
+		for update in service_instance_updates
+		if update["service_id"] == result.janitor_service_id
+	)
+	assert janitor_update["cron_schedule"] == DEFAULT_JANITOR_CRON_SCHEDULE
+	assert janitor_update["restart_policy_type"] == "NEVER"
+	assert janitor_update["start_command"] == JANITOR_START_COMMAND

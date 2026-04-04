@@ -17,7 +17,7 @@ from pulse_railway.deployment import (
 	resolve_project_internals,
 )
 from pulse_railway.railway import RailwayGraphQLClient, service_name_for_deployment
-from pulse_railway.tracker import DeploymentTracker, RedisDeploymentTracker
+from pulse_railway.store import DeploymentStore, RedisDeploymentStore
 
 JANITOR_STATUS_CONCURRENCY = 4
 
@@ -120,26 +120,26 @@ async def _fetch_deployment_session_status(
 async def run_janitor(
 	*,
 	project: RailwayProject,
-	tracker: DeploymentTracker | None = None,
+	store: DeploymentStore | None = None,
 	now: float | None = None,
 ) -> JanitorResult:
-	created_tracker = False
+	created_store = False
 	lock_acquired = False
 	lock_token = secrets.token_hex(8)
 	try:
 		async with RailwayGraphQLClient(token=project.token) as client:
 			internals = await resolve_project_internals(client, project=project)
-			if tracker is None:
-				if internals.tracker_url is None:
+			if store is None:
+				if internals.store_url is None:
 					raise RuntimeError("redis_url is required for janitor tracking")
-				tracker = RedisDeploymentTracker.from_url(
-					url=internals.tracker_url,
+				store = RedisDeploymentStore.from_url(
+					url=internals.store_url,
 					prefix=project.redis_prefix,
 					websocket_ttl_seconds=project.websocket_ttl_seconds,
 				)
-				created_tracker = True
+				created_store = True
 
-			lock_acquired = await tracker.acquire_janitor_lock(
+			lock_acquired = await store.acquire_janitor_lock(
 				token=lock_token,
 				ttl_seconds=DEFAULT_JANITOR_LOCK_TTL_SECONDS,
 			)
@@ -147,7 +147,7 @@ async def run_janitor(
 				return JanitorResult(lock_acquired=False)
 
 			timestamp = time.time() if now is None else now
-			draining = await tracker.list_draining_deployments()
+			draining = await store.list_draining_deployments()
 			result = JanitorResult(lock_acquired=True, scanned_count=len(draining))
 			services_by_name = {
 				service.name: service
@@ -188,18 +188,18 @@ async def run_janitor(
 							service_id=service.id,
 							environment_id=project.environment_id,
 						)
-					await tracker.clear_deployment(deployment_id=decision.deployment_id)
+					await store.clear_deployment(deployment_id=decision.deployment_id)
 					result.deleted_deployments.append(decision.deployment_id)
 					if decision.force_delete:
 						result.force_deleted_deployments.append(decision.deployment_id)
 		return result
 	finally:
 		if lock_acquired:
-			assert tracker is not None
-			await tracker.release_janitor_lock(token=lock_token)
-		if created_tracker:
-			assert tracker is not None
-			await tracker.close()
+			assert store is not None
+			await store.release_janitor_lock(token=lock_token)
+		if created_store:
+			assert store is not None
+			await store.close()
 
 
 __all__ = ["JanitorResult", "run_janitor"]

@@ -7,7 +7,7 @@ import pytest
 from pulse_railway.config import RailwayInternals, RailwayProject
 from pulse_railway.janitor import DeploymentSessionStatus, run_janitor
 from pulse_railway.railway import ServiceRecord, TemplateRecord
-from pulse_railway.tracker import MemoryDeploymentTracker
+from pulse_railway.store import MemoryDeploymentStore
 
 
 class _FakeClient:
@@ -74,13 +74,13 @@ def _install_internals(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> 
 
 @pytest.mark.asyncio
 async def test_janitor_deletes_idle_draining_deployments(monkeypatch) -> None:
-	tracker = MemoryDeploymentTracker()
-	await tracker.mark_active(
+	store = MemoryDeploymentStore()
+	await store.mark_active(
 		deployment_id="deploy1",
 		service_name="pulse-deploy1",
 		now=0,
 	)
-	await tracker.mark_draining(
+	await store.mark_draining(
 		deployment_id="deploy1",
 		service_name="pulse-deploy1",
 		now=0,
@@ -117,26 +117,26 @@ async def test_janitor_deletes_idle_draining_deployments(monkeypatch) -> None:
 			drain_grace_seconds=60,
 			max_drain_age_seconds=600,
 		),
-		tracker=tracker,
+		store=store,
 		now=120,
 	)
 
 	assert result.deleted_deployments == ["deploy1"]
 	assert created_clients[0].deleted_service_ids == ["svc-1"]
-	assert await tracker.list_draining_deployments() == []
+	assert await store.list_draining_deployments() == []
 
 
 @pytest.mark.asyncio
 async def test_janitor_keeps_draining_deployments_with_live_websockets(
 	monkeypatch,
 ) -> None:
-	tracker = MemoryDeploymentTracker()
-	await tracker.mark_active(
+	store = MemoryDeploymentStore()
+	await store.mark_active(
 		deployment_id="deploy1",
 		service_name="pulse-deploy1",
 		now=0,
 	)
-	await tracker.mark_draining(
+	await store.mark_draining(
 		deployment_id="deploy1",
 		service_name="pulse-deploy1",
 		now=0,
@@ -170,7 +170,7 @@ async def test_janitor_keeps_draining_deployments_with_live_websockets(
 			drain_grace_seconds=60,
 			max_drain_age_seconds=600,
 		),
-		tracker=tracker,
+		store=store,
 		now=120,
 	)
 
@@ -182,19 +182,19 @@ async def test_janitor_keeps_draining_deployments_with_live_websockets(
 async def test_janitor_lists_services_once_and_probes_concurrently(
 	monkeypatch,
 ) -> None:
-	tracker = MemoryDeploymentTracker()
+	store = MemoryDeploymentStore()
 	deployment_ids = [
 		f"deploy{index}"
 		for index in range(janitor_module.JANITOR_STATUS_CONCURRENCY + 2)
 	]
 	for deployment_id in deployment_ids:
 		service_name = f"pulse-{deployment_id}"
-		await tracker.mark_active(
+		await store.mark_active(
 			deployment_id=deployment_id,
 			service_name=service_name,
 			now=0,
 		)
-		await tracker.mark_draining(
+		await store.mark_draining(
 			deployment_id=deployment_id,
 			service_name=service_name,
 			now=0,
@@ -278,7 +278,7 @@ async def test_janitor_lists_services_once_and_probes_concurrently(
 			drain_grace_seconds=60,
 			max_drain_age_seconds=600,
 		),
-		tracker=tracker,
+		store=store,
 		now=120,
 	)
 
@@ -287,7 +287,7 @@ async def test_janitor_lists_services_once_and_probes_concurrently(
 	assert created_clients[0].list_services_calls == 1
 	assert created_clients[0].find_service_by_name_calls == 0
 	assert max_in_flight == janitor_module.JANITOR_STATUS_CONCURRENCY
-	remaining = await tracker.list_draining_deployments()
+	remaining = await store.list_draining_deployments()
 	assert [deployment.deployment_id for deployment in remaining] == [
 		skipped_deployment
 	]
@@ -295,7 +295,7 @@ async def test_janitor_lists_services_once_and_probes_concurrently(
 
 @pytest.mark.asyncio
 async def test_janitor_resolves_project_redis_when_url_missing(monkeypatch) -> None:
-	class _FakeRedisTracker(MemoryDeploymentTracker):
+	class _FakeRedisStore(MemoryDeploymentStore):
 		def __init__(self) -> None:
 			super().__init__()
 			self.closed = False
@@ -303,8 +303,8 @@ async def test_janitor_resolves_project_redis_when_url_missing(monkeypatch) -> N
 		async def close(self) -> None:
 			self.closed = True
 
-	fake_tracker = _FakeRedisTracker()
-	tracker_urls: list[str] = []
+	fake_store = _FakeRedisStore()
+	store_urls: list[str] = []
 	service_state = {
 		"pulse-router-redis": ServiceRecord(
 			id="svc-redis",
@@ -344,8 +344,8 @@ async def test_janitor_resolves_project_redis_when_url_missing(monkeypatch) -> N
 
 	monkeypatch.setattr("pulse_railway.janitor.RailwayGraphQLClient", _RedisClient)
 	monkeypatch.setattr(
-		"pulse_railway.janitor.RedisDeploymentTracker.from_url",
-		lambda **kwargs: tracker_urls.append(kwargs["url"]) or fake_tracker,
+		"pulse_railway.janitor.RedisDeploymentStore.from_url",
+		lambda **kwargs: store_urls.append(kwargs["url"]) or fake_store,
 	)
 
 	async def fake_internal_token(*args: object, **kwargs: object) -> str:
@@ -370,6 +370,6 @@ async def test_janitor_resolves_project_redis_when_url_missing(monkeypatch) -> N
 	)
 
 	assert result.lock_acquired is True
-	assert fake_tracker.closed is True
-	assert tracker_urls == ["redis://public-host:6379"]
+	assert fake_store.closed is True
+	assert store_urls == ["redis://public-host:6379"]
 	assert project.redis_url is None

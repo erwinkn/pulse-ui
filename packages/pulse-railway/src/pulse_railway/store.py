@@ -14,7 +14,7 @@ except Exception:
 
 
 @dataclass(slots=True)
-class TrackedDeployment:
+class StoredDeployment:
 	deployment_id: str
 	state: str | None
 	service_name: str | None
@@ -22,7 +22,7 @@ class TrackedDeployment:
 	drain_started_at: float | None
 
 
-class DeploymentTracker(Protocol):
+class DeploymentStore(Protocol):
 	async def close(self) -> None: ...
 
 	async def mark_active(
@@ -75,7 +75,7 @@ class DeploymentTracker(Protocol):
 
 	async def count_websocket_leases(self, *, deployment_id: str) -> int: ...
 
-	async def list_draining_deployments(self) -> list[TrackedDeployment]: ...
+	async def list_draining_deployments(self) -> list[StoredDeployment]: ...
 
 	async def clear_deployment(self, *, deployment_id: str) -> None: ...
 
@@ -84,9 +84,9 @@ class DeploymentTracker(Protocol):
 	async def release_janitor_lock(self, *, token: str) -> None: ...
 
 
-class MemoryDeploymentTracker:
+class MemoryDeploymentStore:
 	def __init__(self) -> None:
-		self._deployments: dict[str, TrackedDeployment] = {}
+		self._deployments: dict[str, StoredDeployment] = {}
 		self._leases: dict[str, dict[str, float]] = {}
 		self._lock_token: str | None = None
 
@@ -101,7 +101,7 @@ class MemoryDeploymentTracker:
 		now: float | None = None,
 	) -> None:
 		timestamp = _now(now)
-		self._deployments[deployment_id] = TrackedDeployment(
+		self._deployments[deployment_id] = StoredDeployment(
 			deployment_id=deployment_id,
 			state="active",
 			service_name=service_name,
@@ -119,7 +119,7 @@ class MemoryDeploymentTracker:
 		timestamp = _now(now)
 		current = self._deployments.get(
 			deployment_id,
-			TrackedDeployment(
+			StoredDeployment(
 				deployment_id=deployment_id,
 				state=None,
 				service_name=service_name,
@@ -127,7 +127,7 @@ class MemoryDeploymentTracker:
 				drain_started_at=None,
 			),
 		)
-		self._deployments[deployment_id] = TrackedDeployment(
+		self._deployments[deployment_id] = StoredDeployment(
 			deployment_id=deployment_id,
 			state="draining",
 			service_name=service_name or current.service_name,
@@ -145,7 +145,7 @@ class MemoryDeploymentTracker:
 		timestamp = _now(now)
 		current = self._deployments.get(
 			deployment_id,
-			TrackedDeployment(
+			StoredDeployment(
 				deployment_id=deployment_id,
 				state="active",
 				service_name=service_name,
@@ -153,7 +153,7 @@ class MemoryDeploymentTracker:
 				drain_started_at=None,
 			),
 		)
-		self._deployments[deployment_id] = TrackedDeployment(
+		self._deployments[deployment_id] = StoredDeployment(
 			deployment_id=deployment_id,
 			state=current.state or "active",
 			service_name=service_name or current.service_name,
@@ -207,7 +207,7 @@ class MemoryDeploymentTracker:
 	async def count_websocket_leases(self, *, deployment_id: str) -> int:
 		return len(self._leases.get(deployment_id, {}))
 
-	async def list_draining_deployments(self) -> list[TrackedDeployment]:
+	async def list_draining_deployments(self) -> list[StoredDeployment]:
 		return [
 			deployment
 			for deployment in self._deployments.values()
@@ -230,7 +230,7 @@ class MemoryDeploymentTracker:
 			self._lock_token = None
 
 
-class RedisDeploymentTracker:
+class RedisDeploymentStore:
 	def __init__(
 		self,
 		*,
@@ -241,7 +241,7 @@ class RedisDeploymentTracker:
 	) -> None:
 		if redis is None:
 			raise RuntimeError(
-				"RedisDeploymentTracker requires the 'redis' package. Install it to enable the janitor."
+				"RedisDeploymentStore requires the 'redis' package. Install it to enable the janitor."
 			)
 		self.client = client
 		self.prefix = prefix.rstrip(":")
@@ -255,10 +255,10 @@ class RedisDeploymentTracker:
 		url: str,
 		prefix: str = DEFAULT_REDIS_PREFIX,
 		websocket_ttl_seconds: int = DEFAULT_WEBSOCKET_TTL_SECONDS,
-	) -> "RedisDeploymentTracker":
+	) -> "RedisDeploymentStore":
 		if redis is None:
 			raise RuntimeError(
-				"RedisDeploymentTracker requires the 'redis' package. Install it to enable the janitor."
+				"RedisDeploymentStore requires the 'redis' package. Install it to enable the janitor."
 			)
 		client = redis.Redis.from_url(url, decode_responses=True)
 		return cls(
@@ -407,7 +407,7 @@ class RedisDeploymentTracker:
 			count += 1
 		return count
 
-	async def list_draining_deployments(self) -> list[TrackedDeployment]:
+	async def list_draining_deployments(self) -> list[StoredDeployment]:
 		deployment_ids = list(await self.client.smembers(self._deployments_key()))
 		if not deployment_ids:
 			return []
@@ -416,12 +416,12 @@ class RedisDeploymentTracker:
 			pipe.hgetall(self._deployment_key(deployment_id))
 		records = await pipe.execute()
 
-		deployments: list[TrackedDeployment] = []
+		deployments: list[StoredDeployment] = []
 		for deployment_id, record in zip(deployment_ids, records, strict=True):
 			if record.get("state") != "draining":
 				continue
 			deployments.append(
-				TrackedDeployment(
+				StoredDeployment(
 					deployment_id=deployment_id,
 					state=record.get("state"),
 					service_name=record.get("service_name"),
@@ -467,8 +467,8 @@ def _now(value: float | None) -> float:
 
 
 __all__ = [
-	"DeploymentTracker",
-	"MemoryDeploymentTracker",
-	"RedisDeploymentTracker",
-	"TrackedDeployment",
+	"DeploymentStore",
+	"MemoryDeploymentStore",
+	"RedisDeploymentStore",
+	"StoredDeployment",
 ]

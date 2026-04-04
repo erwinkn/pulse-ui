@@ -22,7 +22,7 @@ from pulse_railway.deployment import (
 	generate_deployment_id,
 )
 from pulse_railway.railway import ServiceDomain, ServiceRecord, TemplateRecord
-from pulse_railway.tracker import MemoryDeploymentTracker
+from pulse_railway.store import MemoryDeploymentStore
 
 
 def test_generate_deployment_id_and_prefix() -> None:
@@ -96,7 +96,7 @@ async def test_deploy_happy_path(monkeypatch, tmp_path) -> None:
 	}
 	variables: list[tuple[str | None, str, str]] = []
 	service_instance_updates: list[dict[str, Any]] = []
-	memory_tracker = MemoryDeploymentTracker()
+	memory_store = MemoryDeploymentStore()
 
 	class _FakeClient:
 		def __init__(self, **_: object) -> None:
@@ -213,8 +213,8 @@ async def test_deploy_happy_path(monkeypatch, tmp_path) -> None:
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 	monkeypatch.setattr(
-		"pulse_railway.deployment.RedisDeploymentTracker.from_url",
-		lambda **_: memory_tracker,
+		"pulse_railway.deployment.RedisDeploymentStore.from_url",
+		lambda **_: memory_store,
 	)
 
 	async def fake_build_router_image(*, image_ref: str) -> str:
@@ -280,7 +280,7 @@ async def test_deploy_happy_path(monkeypatch, tmp_path) -> None:
 	assert janitor_update["cron_schedule"] == DEFAULT_JANITOR_CRON_SCHEDULE
 	assert janitor_update["restart_policy_type"] == "NEVER"
 	assert janitor_update["start_command"] == JANITOR_START_COMMAND
-	draining = await memory_tracker.list_draining_deployments()
+	draining = await memory_store.list_draining_deployments()
 	assert {deployment.deployment_id for deployment in draining} == {
 		"prod-prev",
 		"prod-old",
@@ -340,9 +340,9 @@ async def test_deploy_provisions_redis_when_missing(monkeypatch, tmp_path) -> No
 
 	service_state: dict[str, ServiceRecord] = {}
 	service_variables: dict[str, dict[str, str]] = {}
-	memory_tracker = MemoryDeploymentTracker()
+	memory_store = MemoryDeploymentStore()
 	template_deploys: list[str] = []
-	tracker_urls: list[str] = []
+	store_urls: list[str] = []
 	service_instance_updates: list[dict[str, Any]] = []
 
 	class _FakeClient:
@@ -476,8 +476,8 @@ async def test_deploy_provisions_redis_when_missing(monkeypatch, tmp_path) -> No
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 	monkeypatch.setattr(
-		"pulse_railway.deployment.RedisDeploymentTracker.from_url",
-		lambda **kwargs: tracker_urls.append(kwargs["url"]) or memory_tracker,
+		"pulse_railway.deployment.RedisDeploymentStore.from_url",
+		lambda **kwargs: store_urls.append(kwargs["url"]) or memory_store,
 	)
 
 	async def fake_build_router_image(*, image_ref: str) -> str:
@@ -517,7 +517,7 @@ async def test_deploy_provisions_redis_when_missing(monkeypatch, tmp_path) -> No
 
 	assert result.janitor_service_name == "pulse-router-janitor"
 	assert "pulse-router-redis" in template_deploys
-	assert tracker_urls == ["redis://public-host:6379"]
+	assert store_urls == ["redis://public-host:6379"]
 	assert project.service_prefix == "Pulse"
 	assert project.redis_url is None
 	assert docker.build_args == {"KEEP": "1"}
@@ -542,8 +542,8 @@ async def test_deploy_prefers_public_redis_when_configured_url_is_internal(
 		"pulse-router-redis": ServiceRecord(id="svc-redis", name="pulse-router-redis")
 	}
 	service_variables: dict[str, dict[str, str]] = {}
-	memory_tracker = MemoryDeploymentTracker()
-	tracker_urls: list[str] = []
+	memory_store = MemoryDeploymentStore()
+	store_urls: list[str] = []
 
 	class _FakeClient:
 		def __init__(self, **_: object) -> None:
@@ -651,8 +651,8 @@ async def test_deploy_prefers_public_redis_when_configured_url_is_internal(
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 	monkeypatch.setattr(
-		"pulse_railway.deployment.RedisDeploymentTracker.from_url",
-		lambda **kwargs: tracker_urls.append(kwargs["url"]) or memory_tracker,
+		"pulse_railway.deployment.RedisDeploymentStore.from_url",
+		lambda **kwargs: store_urls.append(kwargs["url"]) or memory_store,
 	)
 
 	async def fake_build_router_image(*, image_ref: str) -> str:
@@ -686,11 +686,11 @@ async def test_deploy_prefers_public_redis_when_configured_url_is_internal(
 		deployment_id="next",
 	)
 
-	assert tracker_urls == ["redis://public-host:6379"]
+	assert store_urls == ["redis://public-host:6379"]
 
 
 @pytest.mark.asyncio
-async def test_deploy_syncs_tracker_via_router_without_public_redis(
+async def test_deploy_syncs_store_via_router_without_public_redis(
 	monkeypatch, tmp_path
 ) -> None:
 	dockerfile = tmp_path / "Dockerfile"
@@ -834,16 +834,16 @@ async def test_deploy_syncs_tracker_via_router_without_public_redis(
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 	monkeypatch.setattr(
-		"pulse_railway.deployment.RedisDeploymentTracker.from_url",
+		"pulse_railway.deployment.RedisDeploymentStore.from_url",
 		lambda **_: pytest.fail("should not connect to Redis directly"),
 	)
 
-	async def fake_sync_tracker_via_router(**kwargs: Any) -> None:
+	async def fake_sync_store_via_router(**kwargs: Any) -> None:
 		sync_calls.append(kwargs)
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment._sync_tracker_via_router",
-		fake_sync_tracker_via_router,
+		"pulse_railway.deployment._sync_store_via_router",
+		fake_sync_store_via_router,
 	)
 
 	async def fake_build_router_image(*, image_ref: str) -> str:

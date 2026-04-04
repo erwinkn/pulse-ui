@@ -22,8 +22,8 @@ from pulse_railway.constants import (
 	ACTIVE_DEPLOYMENT_VARIABLE,
 	DEFAULT_REDIS_TEMPLATE_CODE,
 	DEFAULT_ROUTER_PORT,
+	INTERNAL_STORE_SYNC_PATH,
 	INTERNAL_TOKEN_HEADER,
-	INTERNAL_TRACKER_SYNC_PATH,
 	RAILWAY_DEPLOYMENT_ID_ENV,
 	RAILWAY_ENVIRONMENT_ID_ENV,
 	RAILWAY_INTERNAL_TOKEN_ENV,
@@ -44,7 +44,7 @@ from pulse_railway.railway import (
 	service_name_for_deployment,
 	validate_deployment_id,
 )
-from pulse_railway.tracker import RedisDeploymentTracker
+from pulse_railway.store import RedisDeploymentStore
 
 
 class DeploymentError(RuntimeError):
@@ -156,7 +156,7 @@ async def _run_command(*args: str, cwd: Path | None = None) -> None:
 		)
 
 
-async def _sync_tracker_via_router(
+async def _sync_store_via_router(
 	*,
 	server_address: str,
 	internal_token: str,
@@ -165,7 +165,7 @@ async def _sync_tracker_via_router(
 	draining_deployments: list[tuple[str, str]],
 	timeout: float = 30.0,
 ) -> None:
-	url = f"{server_address.rstrip('/')}{INTERNAL_TRACKER_SYNC_PATH}"
+	url = f"{server_address.rstrip('/')}{INTERNAL_STORE_SYNC_PATH}"
 	deadline = asyncio.get_running_loop().time() + timeout
 	last_error: Exception | None = None
 	payload = {
@@ -204,8 +204,8 @@ async def _sync_tracker_via_router(
 					break
 				await asyncio.sleep(1)
 	if last_error is None:
-		raise DeploymentError(f"failed to sync tracker via router at {url}")
-	raise DeploymentError(f"failed to sync tracker via router at {url}: {last_error}")
+		raise DeploymentError(f"failed to sync store via router at {url}")
+	raise DeploymentError(f"failed to sync store via router at {url}: {last_error}")
 
 
 async def build_and_push_image(
@@ -689,7 +689,7 @@ async def deploy(
 		prefix=deployment_id,
 	)
 	janitor_image = project.janitor_image or router_image
-	tracker = None
+	store = None
 
 	try:
 		async with RailwayGraphQLClient(token=project.token) as client:
@@ -705,15 +705,15 @@ async def deploy(
 			internals = await resolve_project_internals(client, project=project)
 			if internals.redis_url is None:
 				raise DeploymentError("redis_url is required for deployment tracking")
-			tracker_url = (
+			store_url = (
 				project.redis_url
 				if project.redis_url is not None
 				and ".railway.internal" not in project.redis_url
 				else internals.redis_public_url
 			)
-			if tracker_url is not None:
-				tracker = RedisDeploymentTracker.from_url(
-					url=tracker_url,
+			if store_url is not None:
+				store = RedisDeploymentStore.from_url(
+					url=store_url,
 					prefix=project.redis_prefix,
 					websocket_ttl_seconds=project.websocket_ttl_seconds,
 				)
@@ -813,14 +813,14 @@ async def deploy(
 				)
 				if tracked_deployment_id != deployment_id
 			]
-			if tracker is not None:
-				await tracker.mark_active(
+			if store is not None:
+				await store.mark_active(
 					deployment_id=deployment_id,
 					service_name=backend_service_name,
 				)
 				await asyncio.gather(
 					*[
-						tracker.mark_draining(
+						store.mark_draining(
 							deployment_id=tracked_deployment_id,
 							service_name=tracked_service_name,
 						)
@@ -828,7 +828,7 @@ async def deploy(
 					]
 				)
 			else:
-				await _sync_tracker_via_router(
+				await _sync_store_via_router(
 					server_address=server_address,
 					internal_token=internals.internal_token,
 					deployment_id=deployment_id,
@@ -856,8 +856,8 @@ async def deploy(
 				janitor_status="SUCCESS",
 			)
 	finally:
-		if tracker is not None:
-			await tracker.close()
+		if store is not None:
+			await store.close()
 
 
 async def delete_deployment(
@@ -870,8 +870,8 @@ async def delete_deployment(
 		normalize_service_prefix(project.service_prefix),
 		deployment_id,
 	)
-	tracker = (
-		RedisDeploymentTracker.from_url(
+	store = (
+		RedisDeploymentStore.from_url(
 			url=project.redis_url,
 			prefix=project.redis_prefix,
 			websocket_ttl_seconds=project.websocket_ttl_seconds,
@@ -892,8 +892,8 @@ async def delete_deployment(
 				service_id=service.id,
 				environment_id=project.environment_id,
 			)
-			if tracker is not None:
-				await tracker.clear_deployment(deployment_id=deployment_id)
+			if store is not None:
+				await store.clear_deployment(deployment_id=deployment_id)
 			if not clear_active:
 				return
 			variables = await client.get_project_variables(
@@ -907,8 +907,8 @@ async def delete_deployment(
 					name=ACTIVE_DEPLOYMENT_VARIABLE,
 				)
 	finally:
-		if tracker is not None:
-			await tracker.close()
+		if store is not None:
+			await store.close()
 
 
 __all__ = [

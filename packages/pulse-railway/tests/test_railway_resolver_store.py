@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import pulse_railway.tracker as tracker_module
+import pulse_railway.store as store_module
 import pytest
 from pulse_railway.constants import ACTIVE_DEPLOYMENT_VARIABLE
 from pulse_railway.railway import RailwayResolver, ServiceRecord
-from pulse_railway.tracker import RedisDeploymentTracker
+from pulse_railway.store import RedisDeploymentStore
 
 
 @pytest.mark.asyncio
@@ -82,10 +82,10 @@ async def test_resolver_skips_service_refresh_when_active_deployment_is_unchange
 
 
 @pytest.mark.asyncio
-async def test_redis_tracker_batches_draining_hash_fetches(
+async def test_redis_store_batches_draining_hash_fetches(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-	monkeypatch.setattr(tracker_module, "redis", object())
+	monkeypatch.setattr(store_module, "redis", object())
 
 	class _FakePipeline:
 		def __init__(self, client: "_FakeRedisClient") -> None:
@@ -137,9 +137,9 @@ async def test_redis_tracker_batches_draining_hash_fetches(
 			return dict(self.records[key])
 
 	client = _FakeRedisClient()
-	tracker = RedisDeploymentTracker(client=client)
+	store = RedisDeploymentStore(client=client)
 
-	draining = await tracker.list_draining_deployments()
+	draining = await store.list_draining_deployments()
 
 	assert {deployment.deployment_id for deployment in draining} == {"v1", "v3"}
 	assert client.pipeline_execute_calls == 1

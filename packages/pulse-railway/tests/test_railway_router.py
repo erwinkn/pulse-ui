@@ -10,9 +10,9 @@ import socketio
 import uvicorn
 from aiohttp import web
 from httpx import ASGITransport, AsyncClient
-from pulse_railway.constants import INTERNAL_TOKEN_HEADER, INTERNAL_TRACKER_SYNC_PATH
+from pulse_railway.constants import INTERNAL_STORE_SYNC_PATH, INTERNAL_TOKEN_HEADER
 from pulse_railway.router import StaticResolver, build_app
-from pulse_railway.tracker import MemoryDeploymentTracker
+from pulse_railway.store import MemoryDeploymentStore
 
 
 @pytest_asyncio.fixture
@@ -101,13 +101,13 @@ async def test_router_blocks_internal_paths(backend_servers: dict[str, str]) -> 
 
 
 @pytest.mark.asyncio
-async def test_router_syncs_tracker_via_internal_endpoint(
+async def test_router_syncs_store_via_internal_endpoint(
 	backend_servers: dict[str, str],
 ) -> None:
-	tracker = MemoryDeploymentTracker()
+	store = MemoryDeploymentStore()
 	app = build_app(
 		StaticResolver(backends=backend_servers, active_deployment="v2"),
-		tracker=tracker,
+		store=store,
 		internal_token="secret-token",
 	)
 	async with AsyncClient(
@@ -115,7 +115,7 @@ async def test_router_syncs_tracker_via_internal_endpoint(
 		base_url="http://testserver",
 	) as client:
 		response = await client.post(
-			INTERNAL_TRACKER_SYNC_PATH,
+			INTERNAL_STORE_SYNC_PATH,
 			headers={INTERNAL_TOKEN_HEADER: "secret-token"},
 			json={
 				"active": {
@@ -138,17 +138,17 @@ async def test_router_syncs_tracker_via_internal_endpoint(
 		"active_deployment_id": "v2",
 		"draining_count": 1,
 	}
-	draining = await tracker.list_draining_deployments()
+	draining = await store.list_draining_deployments()
 	assert [deployment.deployment_id for deployment in draining] == ["v1"]
 
 
 @pytest.mark.asyncio
-async def test_router_rejects_tracker_sync_without_valid_token(
+async def test_router_rejects_store_sync_without_valid_token(
 	backend_servers: dict[str, str],
 ) -> None:
 	app = build_app(
 		StaticResolver(backends=backend_servers, active_deployment="v2"),
-		tracker=MemoryDeploymentTracker(),
+		store=MemoryDeploymentStore(),
 		internal_token="secret-token",
 	)
 	async with AsyncClient(
@@ -156,7 +156,7 @@ async def test_router_rejects_tracker_sync_without_valid_token(
 		base_url="http://testserver",
 	) as client:
 		response = await client.post(
-			INTERNAL_TRACKER_SYNC_PATH,
+			INTERNAL_STORE_SYNC_PATH,
 			headers={INTERNAL_TOKEN_HEADER: "wrong-token"},
 			json={
 				"active": {
@@ -187,10 +187,10 @@ async def test_router_returns_404_for_unknown_backend(
 
 @pytest.mark.asyncio
 async def test_router_records_http_activity(backend_servers: dict[str, str]) -> None:
-	tracker = MemoryDeploymentTracker()
+	store = MemoryDeploymentStore()
 	app = build_app(
 		StaticResolver(backends=backend_servers, active_deployment="v2"),
-		tracker=tracker,
+		store=store,
 	)
 	async with AsyncClient(
 		transport=ASGITransport(app=app),
@@ -200,7 +200,7 @@ async def test_router_records_http_activity(backend_servers: dict[str, str]) -> 
 	await app.state.router.close()
 
 	assert response.status_code == 200
-	assert await tracker.list_draining_deployments() == []
+	assert await store.list_draining_deployments() == []
 
 
 @pytest.mark.asyncio
@@ -240,7 +240,7 @@ async def test_router_forces_identity_encoding(
 
 
 @pytest.mark.asyncio
-async def test_router_proxies_socketio_websocket_without_tracker(
+async def test_router_proxies_socketio_websocket_without_store(
 	unused_tcp_port_factory: Callable[[], int],
 ) -> None:
 	sio = socketio.AsyncServer(

@@ -72,7 +72,7 @@ class RailwayInternals:
 	redis_public_url: str | None = None
 
 	@property
-	def tracker_url(self) -> str | None:
+	def store_url(self) -> str | None:
 		return self.redis_public_url or self.redis_url
 
 

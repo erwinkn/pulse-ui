@@ -35,3 +35,30 @@ from pulse_railway.janitor import (
 from pulse_railway.plugin import (
 	RailwayPlugin as RailwayPlugin,
 )
+from pulse_railway.store import (
+	DeploymentStore as DeploymentStore,
+)
+from pulse_railway.store import (
+	InMemoryKVStore as InMemoryKVStore,
+)
+from pulse_railway.store import (
+	KVStore as KVStore,
+)
+from pulse_railway.store import (
+	KVStoreSpec as KVStoreSpec,
+)
+from pulse_railway.store import (
+	MemoryDeploymentStore as MemoryDeploymentStore,
+)
+from pulse_railway.store import (
+	RedisDeploymentStore as RedisDeploymentStore,
+)
+from pulse_railway.store import (
+	RedisKVStore as RedisKVStore,
+)
+from pulse_railway.store import (
+	SQLiteKVStore as SQLiteKVStore,
+)
+from pulse_railway.store import (
+	StoredDeployment as StoredDeployment,
+)

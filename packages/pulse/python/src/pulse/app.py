@@ -44,6 +44,7 @@ from pulse.helpers import (
 	get_client_address_socketio,
 )
 from pulse.hooks.core import hooks
+from pulse.kv import DEFAULT_DEV_KV_PATH, KVStore, SQLiteKVStore
 from pulse.messages import (
 	ClientChannelMessage,
 	ClientChannelRequestMessage,
@@ -145,7 +146,11 @@ class App:
 		plugins: Application plugins that can contribute routes, middleware,
 			and lifecycle hooks.
 		cookie: Session cookie configuration.
+		store: Shared app store used by SessionStore, plugins, and user code.
+			Defaults to SQLiteKVStore in dev.
 		session_store: Session storage backend. Defaults to CookieSessionStore.
+			When a SessionStore is provided without its own KV backend, it binds
+			to `store=` if one is available.
 		server_address: Public server URL. Used only in ci/prod.
 		dev_server_address: Development server URL. Defaults to
 			"http://localhost:8000".
@@ -197,6 +202,7 @@ class App:
 	not_found: str
 	user_sessions: dict[str, UserSession]
 	render_sessions: dict[str, RenderSession]
+	store: KVStore | None
 	session_store: SessionStore | CookieSessionStore
 	cookie: Cookie
 	cors: CORSOptions | None
@@ -228,7 +234,8 @@ class App:
 		middleware: PulseMiddleware | Sequence[PulseMiddleware] | None = None,
 		plugins: Sequence[Plugin] | None = None,
 		cookie: Cookie | None = None,
-		session_store: SessionStore | None = None,
+		store: KVStore | None = None,
+		session_store: SessionStore | CookieSessionStore | None = None,
 		server_address: str | None = None,
 		dev_server_address: str = "http://localhost:8000",
 		internal_server_address: str | None = None,
@@ -280,7 +287,21 @@ class App:
 		# Users can override via App(..., not_found_path="/my-404") in future
 		self.user_sessions = {}
 		self.render_sessions = {}
-		self.session_store = session_store or CookieSessionStore()
+		explicit_store = store
+		self.store = (
+			explicit_store if explicit_store is not None else self._default_store()
+		)
+		if session_store is None:
+			self.session_store = CookieSessionStore()
+		else:
+			self.session_store = session_store
+		if isinstance(self.session_store, SessionStore):
+			if self.session_store.store is None and self.store is None:
+				raise RuntimeError(
+					"SessionStore requires SessionStore(store=...) or App(store=...)"
+				)
+			if self.session_store.store is None:
+				self.session_store.bind(self.store)
 		self.cookie = cookie or session_cookie(mode=self.mode)
 		self.cors = cors
 
@@ -326,6 +347,11 @@ class App:
 
 		self.middleware = MiddlewareStack(mw_stack)
 
+	def _default_store(self) -> KVStore | None:
+		if self.env != "dev":
+			return None
+		return SQLiteKVStore(DEFAULT_DEV_KV_PATH)
+
 	def _validate_reserved_routes(self, routes: Sequence[Route | Layout]) -> None:
 		def _walk(
 			nodes: Sequence[Route | Layout],
@@ -349,6 +375,12 @@ class App:
 
 	@asynccontextmanager
 	async def fastapi_lifespan(self, _: FastAPI):
+		try:
+			if self.store is not None:
+				await self.store.init()
+		except Exception:
+			logger.exception("Error during App store init()")
+
 		try:
 			if isinstance(self.session_store, SessionStore):
 				await self.session_store.init()
@@ -379,6 +411,12 @@ class App:
 					await self.session_store.close()
 			except Exception:
 				logger.exception("Error during SessionStore.close()")
+
+			try:
+				if self.store is not None:
+					await self.store.close()
+			except Exception:
+				logger.exception("Error during App store close()")
 
 	def run_codegen(
 		self, address: str | None = None, internal_address: str | None = None

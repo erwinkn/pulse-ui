@@ -21,6 +21,20 @@ def dashboard():
 - Store IDs/references, not large objects
 - Session data persists across page navigations and reconnects
 
+## `ps.store()`
+
+Get the current app store.
+
+```python
+def cache_user(user_id: str):
+    store = ps.store()
+    return store
+```
+
+**Returns:** `KVStore` — the app-level shared store
+
+**Raises:** `RuntimeError` if the current app does not have a store
+
 **Raises:** `RuntimeError` if called outside session context
 
 ## `ps.session_id()`
@@ -166,9 +180,31 @@ app = ps.App(
 - Signed with HMAC-SHA256, compressed with zlib
 - Tamper-proof (invalid signatures rejected)
 
+### `ps.SessionStore`
+
+Server-backed session store.
+
+```python
+app = ps.App(
+    routes=[...],
+    store=ps.RedisKVStore.from_url("redis://localhost:6379/0"),
+    session_store=ps.SessionStore(),
+)
+```
+
+**Characteristics:**
+- Stores only the session id in the cookie
+- Uses its own KV store when provided via `ps.SessionStore(store=...)`
+- Otherwise falls back to `ps.App(store=...)`
+- If you don't opt in, Pulse defaults to `ps.CookieSessionStore()`
+- In dev, `ps.App()` creates a local SQLite app store by default
+
+**Warning:**
+- If multiple dev apps share one working directory and use the default local app store, server-backed sessions can be shared across those apps
+
 ### `ps.InMemorySessionStore`
 
-Development-only store. Sessions in server memory.
+Convenience wrapper around an in-memory app store.
 
 ```python
 app = ps.App(
@@ -179,45 +215,7 @@ app = ps.App(
 
 **Characteristics:**
 - Sessions lost on server restart
-- No size limit (unlike cookies)
-- Single-server only (no horizontal scaling)
-- Good for development and testing
-
-### Custom Session Store
-
-Implement `ps.SessionStore` for custom backends (Redis, database, etc.).
-
-```python
-class RedisSessionStore(ps.SessionStore):
-    async def init(self) -> None:
-        # Called on app start
-        self.redis = await aioredis.from_url("redis://localhost")
-
-    async def close(self) -> None:
-        # Called on app shutdown
-        await self.redis.close()
-
-    async def get(self, sid: str) -> dict[str, Any] | None:
-        data = await self.redis.get(f"session:{sid}")
-        return json.loads(data) if data else None
-
-    async def create(self, sid: str) -> dict[str, Any]:
-        session = {}
-        await self.save(sid, session)
-        return session
-
-    async def save(self, sid: str, session: dict[str, Any]) -> None:
-        await self.redis.set(
-            f"session:{sid}",
-            json.dumps(session),
-            ex=7 * 24 * 3600,  # 7 day TTL
-        )
-
-    async def delete(self, sid: str) -> None:
-        await self.redis.delete(f"session:{sid}")
-```
-
-**Required methods:**
+- Good for tests and short-lived local workflows
 
 | Method | Description |
 |--------|-------------|

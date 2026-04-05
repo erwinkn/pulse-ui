@@ -142,27 +142,28 @@ Create from a Socket.IO environ dictionary.
 
 ### SessionStore
 
-Abstract base class for server-backed session stores.
+KV-backed server session store.
 
 ```python
-class SessionStore(ABC):
+class SessionStore:
+    def __init__(
+        self,
+        store: KVStore | None = None,
+        *,
+        prefix: str = "pulse:session",
+    ) -> None: ...
+
     async def init(self) -> None: ...
     async def close(self) -> None: ...
-
-    @abstractmethod
     async def get(self, sid: str) -> dict[str, Any] | None: ...
-
-    @abstractmethod
     async def create(self, sid: str) -> dict[str, Any]: ...
-
-    @abstractmethod
     async def delete(self, sid: str) -> None: ...
-
-    @abstractmethod
     async def save(self, sid: str, session: dict[str, Any]) -> None: ...
 ```
 
 #### Methods
+
+`SessionStore(store=...)` uses its own KV store. If you pass `SessionStore()` to `ps.App(...)` without a store, Pulse binds it to `App(store=...)`.
 
 | Method | Description |
 |--------|-------------|

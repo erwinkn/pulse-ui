@@ -11,6 +11,7 @@ from typing import Any, Protocol, cast
 import aiohttp
 from fastapi import FastAPI, Header, HTTPException, Request, Response, WebSocket
 from fastapi.responses import JSONResponse
+from pulse.kv import build_kv_store
 from starlette.websockets import WebSocketDisconnect
 
 from pulse_railway.constants import (
@@ -27,14 +28,16 @@ from pulse_railway.constants import (
 	RAILWAY_INTERNAL_TOKEN_ENV,
 	RAILWAY_PROJECT_ID_ENV,
 	RAILWAY_REDIS_PREFIX_ENV,
-	RAILWAY_REDIS_URL_ENV,
 	RAILWAY_SERVICE_PREFIX_ENV,
 	RAILWAY_TOKEN_ENV,
 	RAILWAY_WEBSOCKET_HEARTBEAT_SECONDS_ENV,
 	RAILWAY_WEBSOCKET_TTL_SECONDS_ENV,
 )
 from pulse_railway.railway import RailwayGraphQLClient, RailwayResolver, RouteTarget
-from pulse_railway.store import DeploymentStore, RedisDeploymentStore
+from pulse_railway.store import (
+	DeploymentStore,
+	kv_store_spec_from_env,
+)
 
 _HOP_BY_HOP_HEADERS = {
 	"connection",
@@ -445,14 +448,15 @@ def build_app_from_env() -> FastAPI:
 		),
 	)
 	store = None
-	redis_url = os.environ.get(RAILWAY_REDIS_URL_ENV)
-	if redis_url:
-		store = RedisDeploymentStore.from_url(
-			url=redis_url,
+	spec = kv_store_spec_from_env(dict(os.environ))
+	if spec is not None:
+		store = DeploymentStore(
+			store=build_kv_store(spec),
 			prefix=os.environ.get(RAILWAY_REDIS_PREFIX_ENV, DEFAULT_REDIS_PREFIX),
 			websocket_ttl_seconds=int(
 				os.environ.get(RAILWAY_WEBSOCKET_TTL_SECONDS_ENV, "45")
 			),
+			owns_store=True,
 		)
 	return build_app(
 		resolver,

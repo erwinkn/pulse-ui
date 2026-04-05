@@ -5,7 +5,6 @@ import logging
 import secrets
 import uuid
 import zlib
-from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast, override
 
 from fastapi import Response
@@ -13,8 +12,10 @@ from fastapi import Response
 from pulse.cookies import SetCookie
 from pulse.env import env
 from pulse.helpers import Disposable
+from pulse.kv import KVStore, MemoryKVStore
 from pulse.reactive import AsyncEffect, Effect
 from pulse.reactive_extensions import ReactiveDict, reactive, unwrap
+from pulse.serializer import Serialized, deserialize, serialize
 
 if TYPE_CHECKING:
 	from pulse.app import App
@@ -116,92 +117,74 @@ class UserSession(Disposable):
 			self.scheduled_cookie_refresh = True
 
 
-class SessionStore(ABC):
-	"""Abstract base class for server-backed session stores.
+class SessionStore:
+	"""KV-backed server session store.
 
-	Implementations persist session state on the server and place only a
-	stable identifier in the cookie. Override methods to integrate with
-	your storage backend (database, cache, memory, etc.).
-
-	Example:
-		```python
-		class RedisSessionStore(SessionStore):
-			async def init(self) -> None:
-				self.redis = await aioredis.from_url("redis://localhost")
-
-			async def get(self, sid: str) -> dict[str, Any] | None:
-				data = await self.redis.get(f"session:{sid}")
-				return json.loads(data) if data else None
-
-			async def create(self, sid: str) -> dict[str, Any]:
-				session = {}
-				await self.save(sid, session)
-				return session
-
-			async def delete(self, sid: str) -> None:
-				await self.redis.delete(f"session:{sid}")
-
-			async def save(self, sid: str, session: dict[str, Any]) -> None:
-				await self.redis.set(f"session:{sid}", json.dumps(session))
-		```
+	Session data lives in an app-owned store when one is available, or in an
+	explicitly provided KV store. Only the stable session id is sent to the
+	client cookie.
 	"""
 
-	async def init(self) -> None:
-		"""Async initialization, called on app start.
+	store: KVStore | None
+	prefix: str
 
-		Override to establish connections or perform startup work.
-		"""
+	def __init__(
+		self,
+		store: KVStore | None = None,
+		*,
+		prefix: str = "pulse:session",
+	) -> None:
+		self.store = store
+		self.prefix = prefix.rstrip(":")
+
+	def bind(self, store: KVStore | None) -> None:
+		if store is None:
+			return
+		if self.store is not None and self.store is not store:
+			raise RuntimeError("SessionStore is already bound to a different store")
+		self.store = store
+
+	def _store(self) -> KVStore:
+		if self.store is None:
+			raise RuntimeError(
+				"SessionStore requires App(store=...) or an explicit store=..."
+			)
+		return self.store
+
+	def _key(self, sid: str) -> str:
+		return f"{self.prefix}:{sid}"
+
+	async def init(self) -> None:
 		return None
 
 	async def close(self) -> None:
-		"""Async cleanup, called on app shutdown.
-
-		Override to tear down connections or perform cleanup.
-		"""
 		return None
 
-	@abstractmethod
 	async def get(self, sid: str) -> dict[str, Any] | None:
-		"""Retrieve session by ID.
+		payload = await self._store().get(self._key(sid))
+		if payload is None:
+			return None
+		return ReactiveDict(
+			cast(
+				dict[str, Any],
+				deserialize(cast(Serialized, json.loads(payload))),
+			)
+		)
 
-		Args:
-			sid: Session identifier.
-
-		Returns:
-			Session data dict if found, None otherwise.
-		"""
-		...
-
-	@abstractmethod
 	async def create(self, sid: str) -> dict[str, Any]:
-		"""Create a new session.
+		session: dict[str, Any] = ReactiveDict()
+		await self.save(sid, session)
+		return session
 
-		Args:
-			sid: Session identifier.
-
-		Returns:
-			New empty session dict.
-		"""
-		...
-
-	@abstractmethod
 	async def delete(self, sid: str) -> None:
-		"""Delete a session.
+		await self._store().delete(self._key(sid))
 
-		Args:
-			sid: Session identifier.
-		"""
-		...
-
-	@abstractmethod
 	async def save(self, sid: str, session: dict[str, Any]) -> None:
-		"""Persist session data.
-
-		Args:
-			sid: Session identifier.
-			session: Session data to persist.
-		"""
-		...
+		payload = json.dumps(
+			serialize(dict(session)),
+			separators=(",", ":"),
+		)
+		await self._store().set(self._key(sid), payload)
 
 
 class InMemorySessionStore(SessionStore):
@@ -218,26 +201,7 @@ class InMemorySessionStore(SessionStore):
 	"""
 
 	def __init__(self) -> None:
-		self._sessions: dict[str, dict[str, Any]] = {}
-
-	@override
-	async def get(self, sid: str) -> dict[str, Any] | None:
-		return self._sessions.get(sid)
-
-	@override
-	async def create(self, sid: str) -> dict[str, Any]:
-		session: Session = ReactiveDict()
-		self._sessions[sid] = session
-		return session
-
-	@override
-	async def save(self, sid: str, session: dict[str, Any]) -> None:
-		# Should not matter as the session ReactiveDict is normally mutated directly
-		self._sessions[sid] = session
-
-	@override
-	async def delete(self, sid: str) -> None:
-		_ = self._sessions.pop(sid, None)
+		super().__init__(store=MemoryKVStore())
 
 
 class SessionCookiePayload(TypedDict):

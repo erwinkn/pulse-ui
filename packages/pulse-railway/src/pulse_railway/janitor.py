@@ -17,7 +17,10 @@ from pulse_railway.deployment import (
 	resolve_project_internals,
 )
 from pulse_railway.railway import RailwayGraphQLClient, service_name_for_deployment
-from pulse_railway.store import DeploymentStore, RedisDeploymentStore
+from pulse_railway.store import (
+	DeploymentStore,
+	RedisDeploymentStore,
+)
 
 JANITOR_STATUS_CONCURRENCY = 4
 

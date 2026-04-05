@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
+from pulse.cli.helpers import load_app_from_target
+from pulse.kv import KVStoreConfig
 
 from pulse_railway.config import (
 	DEFAULT_BACKEND_INSTANCE,
@@ -29,6 +31,7 @@ from pulse_railway.constants import (
 	RAILWAY_INTERNAL_TOKEN_ENV,
 	RAILWAY_JANITOR_DRAIN_GRACE_SECONDS_ENV,
 	RAILWAY_JANITOR_MAX_DRAIN_AGE_SECONDS_ENV,
+	RAILWAY_KV_URL_ENV,
 	RAILWAY_PROJECT_ID_ENV,
 	RAILWAY_REDIS_PREFIX_ENV,
 	RAILWAY_REDIS_URL_ENV,
@@ -44,7 +47,9 @@ from pulse_railway.railway import (
 	service_name_for_deployment,
 	validate_deployment_id,
 )
-from pulse_railway.store import RedisDeploymentStore
+from pulse_railway.store import (
+	RedisDeploymentStore,
+)
 
 
 class DeploymentError(RuntimeError):
@@ -140,6 +145,55 @@ def default_image_ref(*, image_repository: str | None, prefix: str) -> str:
 	if image_repository:
 		return f"{image_repository}:{prefix}"
 	return f"ttl.sh/pulse-railway-{prefix}-{secrets.token_hex(4)}:24h"
+
+
+def _app_kv_spec(app_file: str, context_path: Path) -> KVStoreConfig | None:
+	app_path = Path(app_file)
+	if not app_path.is_absolute():
+		app_path = (context_path / app_path).resolve()
+	if not app_path.exists():
+		return None
+	try:
+		app_ctx = load_app_from_target(str(app_path))
+	except (Exception, SystemExit):
+		return None
+	store = getattr(app_ctx.app, "kv", None)
+	if store is None:
+		store = getattr(app_ctx.app, "store", None)
+	if store is None or not hasattr(store, "config"):
+		return None
+	try:
+		spec = store.config()
+	except Exception:
+		return None
+	return spec if isinstance(spec, KVStoreConfig) else None
+
+
+def _shareable_kv_env_from_app(
+	app_file: str,
+	context_path: Path,
+) -> dict[str, str]:
+	spec = _app_kv_spec(app_file, context_path)
+	if spec is None or not spec.shareable:
+		return {}
+	return spec.to_env()
+
+
+def _deployment_store_url(
+	*,
+	project: RailwayProject,
+	internals: RailwayInternals,
+	shared_redis_url: str | None,
+) -> str | None:
+	if shared_redis_url is not None:
+		if ".railway.internal" not in shared_redis_url:
+			return shared_redis_url
+		return internals.redis_public_url
+	if project.redis_url is not None and ".railway.internal" not in project.redis_url:
+		return project.redis_url
+	if project.redis_url is not None:
+		return internals.redis_public_url or project.redis_url
+	return internals.redis_public_url
 
 
 async def _run_command(*args: str, cwd: Path | None = None) -> None:
@@ -322,6 +376,7 @@ async def _ensure_router_service(
 	internals: RailwayInternals,
 	router_image: str,
 	router_instance: ServiceInstanceConfig,
+	shareable_kv_env: dict[str, str],
 ) -> tuple[ServiceRecord, str, str]:
 	service = await _ensure_service(
 		client,
@@ -337,6 +392,7 @@ async def _ensure_router_service(
 		RAILWAY_SERVICE_PREFIX_ENV: internals.service_prefix,
 		"PULSE_RAILWAY_BACKEND_PORT": str(project.backend_port),
 		"PORT": str(project.router_port),
+		**shareable_kv_env,
 	}
 	if internals.redis_url:
 		router_variables[RAILWAY_REDIS_URL_ENV] = internals.redis_url
@@ -426,6 +482,7 @@ async def _ensure_janitor_service(
 	project: RailwayProject,
 	internals: RailwayInternals,
 	janitor_image: str,
+	shareable_kv_env: dict[str, str],
 ) -> tuple[ServiceRecord, str]:
 	service_name = project.janitor_service_name or default_janitor_service_name(
 		project.service_name
@@ -453,6 +510,7 @@ async def _ensure_janitor_service(
 			project.websocket_heartbeat_seconds
 		),
 		RAILWAY_WEBSOCKET_TTL_SECONDS_ENV: str(project.websocket_ttl_seconds),
+		**shareable_kv_env,
 	}.items():
 		await client.upsert_variable(
 			project_id=project.project_id,
@@ -611,8 +669,9 @@ async def resolve_project_internals(
 	client: RailwayGraphQLClient,
 	*,
 	project: RailwayProject,
+	redis_url: str | None = None,
 ) -> RailwayInternals:
-	redis_url = project.redis_url
+	redis_url = redis_url or project.redis_url
 	redis_public_url: str | None = None
 	if redis_url is None:
 		resolved_redis = await resolve_or_create_redis(client, project=project)
@@ -672,6 +731,8 @@ async def deploy(
 ) -> DeployResult:
 	docker = replace(docker, build_args=dict(docker.build_args))
 	build_args = dict(docker.build_args)
+	shareable_kv_env = _shareable_kv_env_from_app(app_file, docker.context_path)
+	shared_redis_url = shareable_kv_env.get(RAILWAY_KV_URL_ENV)
 	deployment_id = (
 		validate_deployment_id(deployment_id)
 		if deployment_id is not None
@@ -702,16 +763,19 @@ async def deploy(
 				raise DeploymentError(
 					f"service already exists for deployment {deployment_id}"
 				)
-			internals = await resolve_project_internals(client, project=project)
+			internals = await resolve_project_internals(
+				client,
+				project=project,
+				redis_url=shared_redis_url,
+			)
 			if internals.redis_url is None:
 				raise DeploymentError("redis_url is required for deployment tracking")
-			store_url = (
-				project.redis_url
-				if project.redis_url is not None
-				and ".railway.internal" not in project.redis_url
-				else internals.redis_public_url
+			store_url = _deployment_store_url(
+				project=project,
+				internals=internals,
+				shared_redis_url=shared_redis_url,
 			)
-			if store_url is not None:
+			if store_url is not None and ".railway.internal" not in store_url:
 				store = RedisDeploymentStore.from_url(
 					url=store_url,
 					prefix=project.redis_prefix,
@@ -731,12 +795,14 @@ async def deploy(
 				internals=internals,
 				router_image=router_image,
 				router_instance=router_instance,
+				shareable_kv_env=shareable_kv_env,
 			)
 			janitor_service, janitor_deployment_id = await _ensure_janitor_service(
 				client,
 				project=project,
 				internals=internals,
 				janitor_image=janitor_image,
+				shareable_kv_env=shareable_kv_env,
 			)
 
 			server_address = (
@@ -769,6 +835,7 @@ async def deploy(
 				"PULSE_APP_FILE": app_file,
 				"PULSE_SERVER_ADDRESS": server_address,
 				"PORT": str(project.backend_port),
+				**shareable_kv_env,
 				**project.env_vars,
 			}.items():
 				await client.upsert_variable(

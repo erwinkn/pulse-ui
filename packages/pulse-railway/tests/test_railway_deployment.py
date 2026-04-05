@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pulse.kv import KVStoreConfig
 from pulse_railway.config import DockerBuild, RailwayProject
 from pulse_railway.constants import (
 	ACTIVE_DEPLOYMENT_VARIABLE,
 	DEFAULT_JANITOR_CRON_SCHEDULE,
 	RAILWAY_DEPLOYMENT_ID_ENV,
 	RAILWAY_INTERNAL_TOKEN_ENV,
+	RAILWAY_KV_KIND_ENV,
+	RAILWAY_KV_URL_ENV,
 	RAILWAY_REDIS_PREFIX_ENV,
 	RAILWAY_REDIS_URL_ENV,
 )
@@ -17,6 +21,7 @@ from pulse_railway.deployment import (
 	JANITOR_START_COMMAND,
 	DeploymentError,
 	_list_deployment_services,
+	_shareable_kv_env_from_app,
 	default_service_prefix,
 	deploy,
 	generate_deployment_id,
@@ -30,6 +35,30 @@ def test_generate_deployment_id_and_prefix() -> None:
 	assert deployment_id.startswith("production-")
 	assert len(deployment_id) <= 24
 	assert default_service_prefix("pulse-router") == "pulse-"
+
+
+def test_shareable_kv_env_from_app_uses_redis_store(monkeypatch, tmp_path) -> None:
+	app_file = tmp_path / "main.py"
+	app_file.write_text("app = object()\n")
+
+	monkeypatch.setattr(
+		"pulse_railway.deployment.load_app_from_target",
+		lambda _: SimpleNamespace(
+			app=SimpleNamespace(
+				store=SimpleNamespace(
+					config=lambda: KVStoreConfig(
+						kind="redis",
+						url="redis://shared",
+					)
+				)
+			)
+		),
+	)
+
+	assert _shareable_kv_env_from_app("main.py", tmp_path) == {
+		RAILWAY_KV_KIND_ENV: "redis",
+		RAILWAY_KV_URL_ENV: "redis://shared",
+	}
 
 
 @pytest.mark.asyncio
@@ -678,6 +707,168 @@ async def test_deploy_prefers_public_redis_when_configured_url_is_internal(
 			token="token",
 			service_name="pulse-router",
 			redis_url="redis://pulse-router-redis.railway.internal:6379",
+		),
+		docker=DockerBuild(
+			dockerfile_path=dockerfile,
+			context_path=tmp_path,
+		),
+		deployment_id="next",
+	)
+
+	assert store_urls == ["redis://public-host:6379"]
+
+
+@pytest.mark.asyncio
+async def test_deploy_keeps_shared_app_redis_canonical(monkeypatch, tmp_path) -> None:
+	dockerfile = tmp_path / "Dockerfile"
+	dockerfile.write_text("FROM scratch\n")
+
+	service_state: dict[str, ServiceRecord] = {
+		"pulse-router-redis": ServiceRecord(id="svc-redis", name="pulse-router-redis")
+	}
+	service_variables: dict[str, dict[str, str]] = {}
+	store_urls: list[str] = []
+
+	class _FakeClient:
+		def __init__(self, **_: object) -> None:
+			self.service_counter = 0
+
+		async def __aenter__(self) -> "_FakeClient":
+			return self
+
+		async def __aexit__(self, *_: object) -> None:
+			return None
+
+		async def find_service_by_name(
+			self, *, project_id: str, environment_id: str, name: str
+		) -> ServiceRecord | None:
+			assert project_id == "project"
+			assert environment_id == "env"
+			return service_state.get(name)
+
+		async def get_project_variables(
+			self, *, project_id: str, environment_id: str, service_id: str | None = None
+		) -> dict[str, str]:
+			assert project_id == "project"
+			assert environment_id == "env"
+			assert service_id is None
+			return {RAILWAY_INTERNAL_TOKEN_ENV: "secret-token"}
+
+		async def list_services(
+			self, *, project_id: str, environment_id: str
+		) -> list[ServiceRecord]:
+			assert project_id == "project"
+			assert environment_id == "env"
+			return list(service_state.values())
+
+		async def get_service_variables_for_deployment(
+			self, *, project_id: str, environment_id: str, service_id: str
+		) -> dict[str, str]:
+			assert project_id == "project"
+			assert environment_id == "env"
+			service = next(
+				(
+					record
+					for record in service_state.values()
+					if record.id == service_id
+				),
+				None,
+			)
+			if service is not None and service.name == "pulse-router":
+				return {"RAILWAY_PUBLIC_DOMAIN": "test.pulse.sc"}
+			if service_id == "svc-redis":
+				return {
+					"REDIS_URL": "redis://pulse-router-redis.railway.internal:6379",
+					"REDIS_PUBLIC_URL": "redis://public-host:6379",
+				}
+			return dict(service_variables.get(service_id, {}))
+
+		async def create_service(
+			self,
+			*,
+			project_id: str,
+			environment_id: str,
+			name: str,
+			image: str | None = None,
+		) -> str:
+			self.service_counter += 1
+			service_id = f"svc-{self.service_counter}"
+			service_state[name] = ServiceRecord(id=service_id, name=name, image=image)
+			service_variables[service_id] = {}
+			return service_id
+
+		async def upsert_variable(self, **kwargs: Any) -> None:
+			service_id = kwargs.get("service_id")
+			if service_id is not None:
+				service_variables.setdefault(service_id, {})[kwargs["name"]] = kwargs[
+					"value"
+				]
+
+		async def update_service_instance(self, **kwargs: Any) -> None:
+			return None
+
+		async def deploy_service(self, *, service_id: str, environment_id: str) -> str:
+			assert environment_id == "env"
+			return f"deploy-{service_id}"
+
+		async def wait_for_deployment(self, *, deployment_id: str) -> dict[str, str]:
+			return {"id": deployment_id, "status": "SUCCESS"}
+
+		async def create_service_domain(
+			self,
+			*,
+			service_id: str,
+			environment_id: str,
+			target_port: int,
+		) -> str:
+			assert environment_id == "env"
+			assert target_port == 8000
+			for service in service_state.values():
+				if service.id != service_id:
+					continue
+				domain = "pulse-router-production.up.railway.app"
+				service.domains = [
+					ServiceDomain(id="domain-1", domain=domain, target_port=target_port)
+				]
+				return domain
+			raise AssertionError(service_id)
+
+	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
+	monkeypatch.setattr(
+		"pulse_railway.deployment._shareable_kv_env_from_app",
+		lambda *_: {
+			RAILWAY_KV_KIND_ENV: "redis",
+			RAILWAY_KV_URL_ENV: "redis://pulse-router-redis.railway.internal:6379",
+		},
+	)
+	monkeypatch.setattr(
+		"pulse_railway.deployment.RedisDeploymentStore.from_url",
+		lambda **kwargs: store_urls.append(kwargs["url"]) or MemoryDeploymentStore(),
+	)
+
+	async def fake_build_router_image(*, image_ref: str) -> str:
+		return image_ref
+
+	async def fake_build_and_push_image(*, docker: DockerBuild, image_ref: str) -> str:
+		assert docker.build_args["PULSE_SERVER_ADDRESS"] == "https://test.pulse.sc"
+		return image_ref
+
+	monkeypatch.setattr(
+		"pulse_railway.deployment.build_router_image",
+		fake_build_router_image,
+	)
+	monkeypatch.setattr(
+		"pulse_railway.deployment.build_and_push_image",
+		fake_build_and_push_image,
+	)
+
+	await deploy(
+		project=RailwayProject(
+			project_id="project",
+			environment_id="env",
+			token="token",
+			service_name="pulse-router",
+			redis_url="redis://project-public:6379",
 		),
 		docker=DockerBuild(
 			dockerfile_path=dockerfile,

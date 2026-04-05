@@ -44,6 +44,8 @@ Pulse handles all the behind-the-scenes work. It automatically:
 
 No cookies or local storage code required.
 
+If you need direct access to the shared app store, use `ps.store()`.
+
 ## Common patterns
 
 ### Remembering user preferences
@@ -178,18 +180,41 @@ def connection_info():
 
 ## Session storage in production
 
-By default, Pulse stores sessions in memory. This works well for development, but sessions are lost when the server restarts.
+By default, Pulse stores sessions in signed cookies. That's true in development and production unless you opt into a server-backed `ps.SessionStore`.
 
-For production, configure a persistent session store when creating your app:
+Pulse also has an app-level store primitive. In development, `ps.App()` creates a local SQLite-backed app store by default, so `ps.store()` works without extra setup.
+
+If you want the same store for sessions and other app state, pass a `ps.SessionStore()` and let it inherit the app store:
 
 ```python
-from pulse.user_session import InMemorySessionStore
+import pulse as ps
 
 app = ps.App(
     routes=[...],
-    session_store=InMemorySessionStore(),  # Or your custom store
+    store=ps.RedisKVStore.from_url("redis://localhost:6379/0"),
+    session_store=ps.SessionStore(),
 )
 ```
+
+If you want sessions in a different backend, give the session store its own KV store:
+
+```python
+import pulse as ps
+
+app = ps.App(
+    routes=[...],
+    store=ps.SQLiteKVStore(".pulse/app.sqlite3"),
+    session_store=ps.SessionStore(
+        store=ps.RedisKVStore.from_url("redis://localhost:6379/1"),
+    ),
+)
+```
+
+`ps.SessionStore(store=...)` uses its own KV store first, then falls back to `ps.App(store=...)` when no store is provided.
+
+<Callout type="warn">
+If you opt into server-backed sessions in development, multiple Pulse apps in the same working directory can share the same default local store. That's convenient for reloads, but it can also make dev sessions bleed across apps that reuse the same host and cookie name.
+</Callout>
 
 ## Using sessions in middleware
 

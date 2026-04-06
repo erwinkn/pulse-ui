@@ -582,7 +582,7 @@ def app_layout():
 # Define the application's routes. A layout route wraps all other routes
 # to provide a consistent navigation experience.
 deployment_plugin = (
-	RailwayPlugin() if os.environ.get("PULSE_RAILWAY_DEPLOYMENT_ID") else AWSECSPlugin()
+	RailwayPlugin() if os.environ.get("PULSE_DEPLOYMENT_ID") else AWSECSPlugin()
 )
 
 app = ps.App(

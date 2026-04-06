@@ -26,6 +26,9 @@ from pulse_railway.deployment import (
 from pulse_railway.deployment import (
 	deploy as deploy,
 )
+from pulse_railway.deployment import (
+	resolve_deployment_id_by_name as resolve_deployment_id_by_name,
+)
 from pulse_railway.janitor import (
 	JanitorResult as JanitorResult,
 )

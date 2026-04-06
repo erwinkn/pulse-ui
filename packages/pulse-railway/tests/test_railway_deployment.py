@@ -10,12 +10,12 @@ from pulse_railway.config import DockerBuild, RailwayProject
 from pulse_railway.constants import (
 	ACTIVE_DEPLOYMENT_VARIABLE,
 	DEFAULT_JANITOR_CRON_SCHEDULE,
-	RAILWAY_DEPLOYMENT_ID_ENV,
-	RAILWAY_INTERNAL_TOKEN_ENV,
-	RAILWAY_KV_KIND_ENV,
-	RAILWAY_KV_URL_ENV,
-	RAILWAY_REDIS_PREFIX_ENV,
-	RAILWAY_REDIS_URL_ENV,
+	PULSE_DEPLOYMENT_ID,
+	PULSE_INTERNAL_TOKEN,
+	PULSE_KV_KIND,
+	PULSE_KV_URL,
+	PULSE_REDIS_PREFIX,
+	PULSE_REDIS_URL,
 )
 from pulse_railway.deployment import (
 	JANITOR_START_COMMAND,
@@ -25,6 +25,7 @@ from pulse_railway.deployment import (
 	default_service_prefix,
 	deploy,
 	generate_deployment_id,
+	resolve_deployment_id_by_name,
 )
 from pulse_railway.railway import ServiceDomain, ServiceRecord, TemplateRecord
 from pulse_railway.store import MemoryDeploymentStore
@@ -56,8 +57,8 @@ def test_shareable_kv_env_from_app_uses_redis_store(monkeypatch, tmp_path) -> No
 	)
 
 	assert _shareable_kv_env_from_app("main.py", tmp_path) == {
-		RAILWAY_KV_KIND_ENV: "redis",
-		RAILWAY_KV_URL_ENV: "redis://shared",
+		PULSE_KV_KIND: "redis",
+		PULSE_KV_URL: "redis://shared",
 	}
 
 
@@ -91,7 +92,7 @@ async def test_list_deployment_services_fetches_variables_concurrently() -> None
 			in_flight -= 1
 			if service_id == "svc-2":
 				return {}
-			return {RAILWAY_DEPLOYMENT_ID_ENV: f"dep-{service_id}"}
+			return {PULSE_DEPLOYMENT_ID: f"dep-{service_id}"}
 
 	deployments = await _list_deployment_services(
 		_FakeClient(),
@@ -111,6 +112,91 @@ async def test_list_deployment_services_fetches_variables_concurrently() -> None
 
 
 @pytest.mark.asyncio
+async def test_resolve_deployment_id_by_name_matches_single_prefix(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	class _FakeClient:
+		def __init__(self, **_: object) -> None:
+			return None
+
+		async def __aenter__(self) -> "_FakeClient":
+			return self
+
+		async def __aexit__(self, *_: object) -> None:
+			return None
+
+	async def fake_list(
+		client: object, *, project: RailwayProject
+	) -> list[tuple[str, str]]:
+		assert isinstance(client, _FakeClient)
+		assert project.project_id == "project"
+		return [
+			("redis-smoke-260405-120000", "pulse-redis-smoke-260405-120000"),
+			("prod-260405-120001", "pulse-prod-260405-120001"),
+		]
+
+	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
+	monkeypatch.setattr(
+		"pulse_railway.deployment._list_deployment_services",
+		fake_list,
+	)
+
+	deployment_id = await resolve_deployment_id_by_name(
+		project=RailwayProject(
+			project_id="project",
+			environment_id="env",
+			token="token",
+			service_name="pulse-router",
+		),
+		deployment_name="redis smoke",
+	)
+
+	assert deployment_id == "redis-smoke-260405-120000"
+
+
+@pytest.mark.asyncio
+async def test_resolve_deployment_id_by_name_requires_unique_match(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	class _FakeClient:
+		def __init__(self, **_: object) -> None:
+			return None
+
+		async def __aenter__(self) -> "_FakeClient":
+			return self
+
+		async def __aexit__(self, *_: object) -> None:
+			return None
+
+	async def fake_list(
+		client: object, *, project: RailwayProject
+	) -> list[tuple[str, str]]:
+		assert isinstance(client, _FakeClient)
+		assert project.project_id == "project"
+		return [
+			("redis-smoke-260405-120000", "pulse-redis-smoke-260405-120000"),
+			("redis-smoke-260405-130000", "pulse-redis-smoke-260405-130000"),
+		]
+
+	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
+	monkeypatch.setattr(
+		"pulse_railway.deployment._list_deployment_services",
+		fake_list,
+	)
+
+	with pytest.raises(DeploymentError, match="is ambiguous"):
+		await resolve_deployment_id_by_name(
+			project=RailwayProject(
+				project_id="project",
+				environment_id="env",
+				token="token",
+				service_name="pulse-router",
+			),
+			deployment_name="redis-smoke",
+		)
+
+
+@pytest.mark.asyncio
 async def test_deploy_happy_path(monkeypatch, tmp_path) -> None:
 	dockerfile = tmp_path / "Dockerfile"
 	dockerfile.write_text("FROM scratch\n")
@@ -120,8 +206,8 @@ async def test_deploy_happy_path(monkeypatch, tmp_path) -> None:
 		"pulse-prod-old": ServiceRecord(id="svc-old-2", name="pulse-prod-old"),
 	}
 	service_variables: dict[str, dict[str, str]] = {
-		"svc-old-1": {RAILWAY_DEPLOYMENT_ID_ENV: "prod-prev"},
-		"svc-old-2": {RAILWAY_DEPLOYMENT_ID_ENV: "prod-old"},
+		"svc-old-1": {PULSE_DEPLOYMENT_ID: "prod-prev"},
+		"svc-old-2": {PULSE_DEPLOYMENT_ID: "prod-old"},
 	}
 	variables: list[tuple[str | None, str, str]] = []
 	service_instance_updates: list[dict[str, Any]] = []
@@ -152,7 +238,7 @@ async def test_deploy_happy_path(monkeypatch, tmp_path) -> None:
 			assert service_id is None
 			return {
 				ACTIVE_DEPLOYMENT_VARIABLE: "prod-prev",
-				RAILWAY_INTERNAL_TOKEN_ENV: "secret-token",
+				PULSE_INTERNAL_TOKEN: "secret-token",
 			}
 
 		async def list_services(
@@ -288,17 +374,17 @@ async def test_deploy_happy_path(monkeypatch, tmp_path) -> None:
 	assert (None, ACTIVE_DEPLOYMENT_VARIABLE, "prod-260402-120000") in variables
 	assert (
 		result.router_service_id,
-		RAILWAY_REDIS_URL_ENV,
+		PULSE_REDIS_URL,
 		"redis://test",
 	) in variables
 	assert (
 		result.router_service_id,
-		RAILWAY_REDIS_PREFIX_ENV,
+		PULSE_REDIS_PREFIX,
 		"pulse:railway",
 	) in variables
 	assert (
 		result.janitor_service_id,
-		RAILWAY_INTERNAL_TOKEN_ENV,
+		PULSE_INTERNAL_TOKEN,
 		"secret-token",
 	) in variables
 	janitor_update = next(
@@ -597,7 +683,7 @@ async def test_deploy_prefers_public_redis_when_configured_url_is_internal(
 			assert project_id == "project"
 			assert environment_id == "env"
 			assert service_id is None
-			return {RAILWAY_INTERNAL_TOKEN_ENV: "secret-token"}
+			return {PULSE_INTERNAL_TOKEN: "secret-token"}
 
 		async def list_services(
 			self, *, project_id: str, environment_id: str
@@ -752,7 +838,7 @@ async def test_deploy_keeps_shared_app_redis_canonical(monkeypatch, tmp_path) ->
 			assert project_id == "project"
 			assert environment_id == "env"
 			assert service_id is None
-			return {RAILWAY_INTERNAL_TOKEN_ENV: "secret-token"}
+			return {PULSE_INTERNAL_TOKEN: "secret-token"}
 
 		async def list_services(
 			self, *, project_id: str, environment_id: str
@@ -837,8 +923,8 @@ async def test_deploy_keeps_shared_app_redis_canonical(monkeypatch, tmp_path) ->
 	monkeypatch.setattr(
 		"pulse_railway.deployment._shareable_kv_env_from_app",
 		lambda *_: {
-			RAILWAY_KV_KIND_ENV: "redis",
-			RAILWAY_KV_URL_ENV: "redis://pulse-router-redis.railway.internal:6379",
+			PULSE_KV_KIND: "redis",
+			PULSE_KV_URL: "redis://pulse-router-redis.railway.internal:6379",
 		},
 	)
 	monkeypatch.setattr(
@@ -891,7 +977,7 @@ async def test_deploy_syncs_store_via_router_without_public_redis(
 		"pulse-prev": ServiceRecord(id="svc-old", name="pulse-prev"),
 	}
 	service_variables: dict[str, dict[str, str]] = {
-		"svc-old": {RAILWAY_DEPLOYMENT_ID_ENV: "prev"},
+		"svc-old": {PULSE_DEPLOYMENT_ID: "prev"},
 	}
 	sync_calls: list[dict[str, Any]] = []
 
@@ -918,7 +1004,7 @@ async def test_deploy_syncs_store_via_router_without_public_redis(
 			assert project_id == "project"
 			assert environment_id == "env"
 			assert service_id is None
-			return {RAILWAY_INTERNAL_TOKEN_ENV: "secret-token"}
+			return {PULSE_INTERNAL_TOKEN: "secret-token"}
 
 		async def list_services(
 			self, *, project_id: str, environment_id: str

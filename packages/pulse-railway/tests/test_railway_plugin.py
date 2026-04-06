@@ -7,8 +7,8 @@ from pulse_railway.constants import (
 	AFFINITY_QUERY_PARAM,
 	INTERNAL_SESSIONS_PATH,
 	INTERNAL_TOKEN_HEADER,
-	RAILWAY_DEPLOYMENT_ID_ENV,
-	RAILWAY_INTERNAL_TOKEN_ENV,
+	PULSE_DEPLOYMENT_ID,
+	PULSE_INTERNAL_TOKEN,
 )
 from pulse_railway.plugin import RailwayDirectivesMiddleware, RailwayPlugin
 
@@ -25,7 +25,7 @@ class _TrackedRenderSessions(dict[str, object]):
 
 @pytest.mark.asyncio
 async def test_prerender_adds_affinity_query_directives(monkeypatch) -> None:
-	monkeypatch.setenv(RAILWAY_DEPLOYMENT_ID_ENV, "prod-260402-120000")
+	monkeypatch.setenv(PULSE_DEPLOYMENT_ID, "prod-260402-120000")
 	plugin = RailwayPlugin()
 	plugin.on_startup(ps.App(routes=[]))
 
@@ -65,7 +65,7 @@ async def _ok_prerender() -> ps.Ok[ps.Prerender]:
 
 @pytest.mark.asyncio
 async def test_plugin_exposes_deployment_metadata_endpoint(monkeypatch) -> None:
-	monkeypatch.setenv(RAILWAY_DEPLOYMENT_ID_ENV, "prod-260402-120000")
+	monkeypatch.setenv(PULSE_DEPLOYMENT_ID, "prod-260402-120000")
 	plugin = RailwayPlugin()
 
 	app = ps.App(routes=[], plugins=[plugin], mode="subdomains")
@@ -88,8 +88,8 @@ async def test_plugin_exposes_deployment_metadata_endpoint(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_plugin_exposes_internal_session_endpoint(monkeypatch) -> None:
-	monkeypatch.setenv(RAILWAY_DEPLOYMENT_ID_ENV, "prod-260402-120000")
-	monkeypatch.setenv(RAILWAY_INTERNAL_TOKEN_ENV, "secret-token")
+	monkeypatch.setenv(PULSE_DEPLOYMENT_ID, "prod-260402-120000")
+	monkeypatch.setenv(PULSE_INTERNAL_TOKEN, "secret-token")
 	plugin = RailwayPlugin()
 
 	app = ps.App(routes=[], plugins=[plugin], mode="subdomains")

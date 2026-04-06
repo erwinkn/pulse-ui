@@ -13,6 +13,7 @@ from pulse_railway.cli import (
 	_run_delete,
 	_run_deploy,
 	_run_janitor_run,
+	_run_remove,
 	main,
 )
 from pulse_railway.deployment import DeployResult
@@ -85,9 +86,9 @@ def _write_deploy_fixture(root: Path) -> None:
 
 
 def test_deploy_parser_reads_env_overrides(monkeypatch) -> None:
-	monkeypatch.setenv("PULSE_RAILWAY_SERVICE", "router")
-	monkeypatch.setenv("PULSE_RAILWAY_APP_FILE", "examples/aws-ecs/main.py")
-	monkeypatch.setenv("PULSE_RAILWAY_JANITOR_CRON_SCHEDULE", "0 */6 * * *")
+	monkeypatch.setenv("PULSE_SERVICE", "router")
+	monkeypatch.setenv("PULSE_APP_FILE", "examples/aws-ecs/main.py")
+	monkeypatch.setenv("PULSE_JANITOR_CRON_SCHEDULE", "0 */6 * * *")
 	parser = argparse.ArgumentParser()
 
 	_add_deploy_args(parser)
@@ -99,9 +100,9 @@ def test_deploy_parser_reads_env_overrides(monkeypatch) -> None:
 
 
 def test_janitor_parser_reads_service_env_defaults(monkeypatch) -> None:
-	monkeypatch.setenv("PULSE_RAILWAY_PROJECT_ID", "project")
-	monkeypatch.setenv("PULSE_RAILWAY_ENVIRONMENT_ID", "env")
-	monkeypatch.setenv("PULSE_RAILWAY_TOKEN", "token")
+	monkeypatch.setenv("RAILWAY_PROJECT_ID", "project")
+	monkeypatch.setenv("RAILWAY_ENVIRONMENT_ID", "env")
+	monkeypatch.setenv("RAILWAY_TOKEN", "token")
 	parser = argparse.ArgumentParser()
 
 	_add_janitor_run_args(parser)
@@ -173,6 +174,48 @@ async def test_run_delete_builds_shared_project_defaults(monkeypatch) -> None:
 	assert delete_call["project"].service_prefix == "custom-"
 	assert delete_call["project"].redis_service_name == "pulse-router-redis"
 	assert delete_call["clear_active"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_remove_resolves_name_then_deletes(
+	monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+	delete_call: dict[str, Any] = {}
+	resolve_call: dict[str, Any] = {}
+
+	async def fake_resolve_deployment_id_by_name(**kwargs: Any) -> str:
+		resolve_call.update(kwargs)
+		return "redis-smoke-260405-120000"
+
+	async def fake_delete_deployment(**kwargs: Any) -> None:
+		delete_call.update(kwargs)
+
+	monkeypatch.setattr(
+		"pulse_railway.cli.resolve_deployment_id_by_name",
+		fake_resolve_deployment_id_by_name,
+	)
+	monkeypatch.setattr("pulse_railway.cli.delete_deployment", fake_delete_deployment)
+
+	result = await _run_remove(
+		argparse.Namespace(
+			service="pulse-router",
+			deployment_name="redis-smoke",
+			project_id="project",
+			environment_id="env",
+			token="token",
+			service_prefix=None,
+			keep_active_variable=False,
+			redis_url=None,
+			redis_service=None,
+			redis_prefix="pulse:railway",
+		)
+	)
+
+	assert result == 0
+	assert resolve_call["deployment_name"] == "redis-smoke"
+	assert delete_call["deployment_id"] == "redis-smoke-260405-120000"
+	assert delete_call["project"].redis_service_name == "pulse-router-redis"
+	assert capsys.readouterr().out == "redis-smoke-260405-120000\n"
 
 
 @pytest.mark.asyncio

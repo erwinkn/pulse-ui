@@ -24,14 +24,14 @@ from pulse_railway.constants import (
 	INTERNAL_API_PREFIX,
 	INTERNAL_STORE_SYNC_PATH,
 	INTERNAL_TOKEN_HEADER,
-	RAILWAY_ENVIRONMENT_ID_ENV,
-	RAILWAY_INTERNAL_TOKEN_ENV,
-	RAILWAY_PROJECT_ID_ENV,
-	RAILWAY_REDIS_PREFIX_ENV,
-	RAILWAY_SERVICE_PREFIX_ENV,
-	RAILWAY_TOKEN_ENV,
-	RAILWAY_WEBSOCKET_HEARTBEAT_SECONDS_ENV,
-	RAILWAY_WEBSOCKET_TTL_SECONDS_ENV,
+	PULSE_INTERNAL_TOKEN,
+	PULSE_REDIS_PREFIX,
+	PULSE_SERVICE_PREFIX,
+	PULSE_WEBSOCKET_HEARTBEAT_SECONDS,
+	PULSE_WEBSOCKET_TTL_SECONDS,
+	RAILWAY_ENVIRONMENT_ID,
+	RAILWAY_PROJECT_ID,
+	RAILWAY_TOKEN,
 )
 from pulse_railway.railway import RailwayGraphQLClient, RailwayResolver, RouteTarget
 from pulse_railway.store import (
@@ -428,23 +428,21 @@ def build_app(
 
 
 def build_app_from_env() -> FastAPI:
-	token = os.environ.get(RAILWAY_TOKEN_ENV)
-	project_id = os.environ.get(RAILWAY_PROJECT_ID_ENV)
-	environment_id = os.environ.get(RAILWAY_ENVIRONMENT_ID_ENV)
+	token = os.environ.get(RAILWAY_TOKEN)
+	project_id = os.environ.get(RAILWAY_PROJECT_ID)
+	environment_id = os.environ.get(RAILWAY_ENVIRONMENT_ID)
 	if not token or not project_id or not environment_id:
 		raise RuntimeError(
-			f"missing required env vars: {RAILWAY_TOKEN_ENV}, {RAILWAY_PROJECT_ID_ENV}, {RAILWAY_ENVIRONMENT_ID_ENV}"
+			f"missing required env vars: {RAILWAY_TOKEN}, {RAILWAY_PROJECT_ID}, {RAILWAY_ENVIRONMENT_ID}"
 		)
 	client = RailwayGraphQLClient(token=token)
 	resolver = RailwayResolver(
 		client=client,
 		project_id=project_id,
 		environment_id=environment_id,
-		service_prefix=os.environ.get(
-			RAILWAY_SERVICE_PREFIX_ENV, DEFAULT_SERVICE_PREFIX
-		),
+		service_prefix=os.environ.get(PULSE_SERVICE_PREFIX, DEFAULT_SERVICE_PREFIX),
 		backend_port=int(
-			os.environ.get("PULSE_RAILWAY_BACKEND_PORT", str(DEFAULT_BACKEND_PORT))
+			os.environ.get("PULSE_BACKEND_PORT", str(DEFAULT_BACKEND_PORT))
 		),
 	)
 	store = None
@@ -452,9 +450,9 @@ def build_app_from_env() -> FastAPI:
 	if spec is not None:
 		store = DeploymentStore(
 			store=build_kv_store(spec),
-			prefix=os.environ.get(RAILWAY_REDIS_PREFIX_ENV, DEFAULT_REDIS_PREFIX),
+			prefix=os.environ.get(PULSE_REDIS_PREFIX, DEFAULT_REDIS_PREFIX),
 			websocket_ttl_seconds=int(
-				os.environ.get(RAILWAY_WEBSOCKET_TTL_SECONDS_ENV, "45")
+				os.environ.get(PULSE_WEBSOCKET_TTL_SECONDS, "45")
 			),
 			owns_store=True,
 		)
@@ -462,9 +460,9 @@ def build_app_from_env() -> FastAPI:
 		resolver,
 		store=store,
 		websocket_heartbeat_seconds=int(
-			os.environ.get(RAILWAY_WEBSOCKET_HEARTBEAT_SECONDS_ENV, "15")
+			os.environ.get(PULSE_WEBSOCKET_HEARTBEAT_SECONDS, "15")
 		),
-		internal_token=os.environ.get(RAILWAY_INTERNAL_TOKEN_ENV, ""),
+		internal_token=os.environ.get(PULSE_INTERNAL_TOKEN, ""),
 	)
 
 

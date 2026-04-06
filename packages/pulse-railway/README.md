@@ -35,9 +35,9 @@ By default, the package builds and pushes both images to `ttl.sh` for a zero-con
 
 ## Runtime
 
-Backend services must set `PULSE_RAILWAY_DEPLOYMENT_ID`. `RailwayPlugin` injects the affinity query into Pulse prerender and websocket directives and exposes `/_pulse/meta` for verification.
+Backend services must set `PULSE_DEPLOYMENT_ID`. `RailwayPlugin` injects the affinity query into Pulse prerender and websocket directives and exposes `/_pulse/meta` for verification.
 
-When `PULSE_RAILWAY_REDIS_URL` is set:
+When `PULSE_REDIS_URL` is set:
 
 - deploy marks the new deployment `active`
 - previous active deployments become `draining`
@@ -53,6 +53,19 @@ If you need to trigger cleanup manually, run the command from inside the deploye
 ```bash
 pulse-railway janitor run
 ```
+
+To remove a deployment by the original deployment name prefix, use:
+
+```bash
+pulse-railway remove \
+  --service pulse-router \
+  --deployment-name prod \
+  --project-id <project-id> \
+  --environment-id <environment-id> \
+  --token <project-token>
+```
+
+If the name matches multiple generated deployment ids, the command fails and prints the matching ids so you can retry with `pulse-railway delete --deployment-id ...`.
 
 ## Notes
 

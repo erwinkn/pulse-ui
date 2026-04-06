@@ -10,7 +10,10 @@ import socketio
 import uvicorn
 from aiohttp import web
 from httpx import ASGITransport, AsyncClient
-from pulse_railway.constants import INTERNAL_STORE_SYNC_PATH, INTERNAL_TOKEN_HEADER
+from pulse_railway.constants import (
+	INTERNAL_STORE_SYNC_PATH,
+	INTERNAL_TOKEN_HEADER,
+)
 from pulse_railway.router import StaticResolver, build_app
 from pulse_railway.store import MemoryDeploymentStore
 

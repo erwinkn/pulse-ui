@@ -13,8 +13,8 @@ from pulse_railway.constants import (
 	DEPLOYMENT_META_PATH,
 	INTERNAL_SESSIONS_PATH,
 	INTERNAL_TOKEN_HEADER,
-	RAILWAY_DEPLOYMENT_ID_ENV,
-	RAILWAY_INTERNAL_TOKEN_ENV,
+	PULSE_DEPLOYMENT_ID,
+	PULSE_INTERNAL_TOKEN,
 )
 
 
@@ -33,11 +33,11 @@ class RailwayPlugin(ps.Plugin):
 
 	@override
 	def on_startup(self, app: ps.App) -> None:
-		deployment_id = os.environ.get(RAILWAY_DEPLOYMENT_ID_ENV)
+		deployment_id = os.environ.get(PULSE_DEPLOYMENT_ID)
 		if not deployment_id:
 			return
 		self.deployment_id = deployment_id
-		self.internal_token = os.environ.get(RAILWAY_INTERNAL_TOKEN_ENV, "")
+		self.internal_token = os.environ.get(PULSE_INTERNAL_TOKEN, "")
 		self.enabled = True
 
 	@override

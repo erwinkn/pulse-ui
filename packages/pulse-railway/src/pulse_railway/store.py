@@ -17,10 +17,10 @@ from pulse.kv import (
 from pulse_railway.constants import (
 	DEFAULT_REDIS_PREFIX,
 	DEFAULT_WEBSOCKET_TTL_SECONDS,
-	RAILWAY_KV_KIND_ENV,
-	RAILWAY_KV_PATH_ENV,
-	RAILWAY_KV_URL_ENV,
-	RAILWAY_REDIS_URL_ENV,
+	PULSE_KV_KIND,
+	PULSE_KV_PATH,
+	PULSE_KV_URL,
+	PULSE_REDIS_URL,
 )
 
 InMemoryKVStore = MemoryKVStore
@@ -40,22 +40,20 @@ def kv_store_spec_from_env(
 	env: dict[str, str] | None = None,
 ) -> KVStoreConfig | None:
 	source = env or {}
-	kind = source.get(RAILWAY_KV_KIND_ENV) or source.get("kind")
+	kind = source.get(PULSE_KV_KIND) or source.get("kind")
 	if kind == "redis":
 		url = (
-			source.get(RAILWAY_KV_URL_ENV)
-			or source.get(RAILWAY_REDIS_URL_ENV)
-			or source.get("url")
+			source.get(PULSE_KV_URL) or source.get(PULSE_REDIS_URL) or source.get("url")
 		)
 		if url is None:
 			return None
 		return KVStoreConfig(kind="redis", url=url)
 	if kind == "sqlite":
-		path = source.get(RAILWAY_KV_PATH_ENV) or source.get("path")
+		path = source.get(PULSE_KV_PATH) or source.get("path")
 		if path is None:
 			return None
 		return KVStoreConfig(kind="sqlite", path=path)
-	redis_url = source.get(RAILWAY_KV_URL_ENV) or source.get(RAILWAY_REDIS_URL_ENV)
+	redis_url = source.get(PULSE_KV_URL) or source.get(PULSE_REDIS_URL)
 	if redis_url is not None:
 		return KVStoreConfig(kind="redis", url=redis_url)
 	return None

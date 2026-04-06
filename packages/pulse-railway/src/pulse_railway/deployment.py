@@ -26,19 +26,19 @@ from pulse_railway.constants import (
 	DEFAULT_ROUTER_PORT,
 	INTERNAL_STORE_SYNC_PATH,
 	INTERNAL_TOKEN_HEADER,
-	RAILWAY_DEPLOYMENT_ID_ENV,
-	RAILWAY_ENVIRONMENT_ID_ENV,
-	RAILWAY_INTERNAL_TOKEN_ENV,
-	RAILWAY_JANITOR_DRAIN_GRACE_SECONDS_ENV,
-	RAILWAY_JANITOR_MAX_DRAIN_AGE_SECONDS_ENV,
-	RAILWAY_KV_URL_ENV,
-	RAILWAY_PROJECT_ID_ENV,
-	RAILWAY_REDIS_PREFIX_ENV,
-	RAILWAY_REDIS_URL_ENV,
-	RAILWAY_SERVICE_PREFIX_ENV,
-	RAILWAY_TOKEN_ENV,
-	RAILWAY_WEBSOCKET_HEARTBEAT_SECONDS_ENV,
-	RAILWAY_WEBSOCKET_TTL_SECONDS_ENV,
+	PULSE_DEPLOYMENT_ID,
+	PULSE_INTERNAL_TOKEN,
+	PULSE_JANITOR_DRAIN_GRACE_SECONDS,
+	PULSE_JANITOR_MAX_DRAIN_AGE_SECONDS,
+	PULSE_KV_URL,
+	PULSE_REDIS_PREFIX,
+	PULSE_REDIS_URL,
+	PULSE_SERVICE_PREFIX,
+	PULSE_WEBSOCKET_HEARTBEAT_SECONDS,
+	PULSE_WEBSOCKET_TTL_SECONDS,
+	RAILWAY_ENVIRONMENT_ID,
+	RAILWAY_PROJECT_ID,
+	RAILWAY_TOKEN,
 )
 from pulse_railway.railway import (
 	RailwayGraphQLClient,
@@ -99,11 +99,15 @@ def pulse_start_command() -> str:
 	)
 
 
-def generate_deployment_id(deployment_name: str) -> str:
+def deployment_name_slug(deployment_name: str) -> str:
 	base = "".join(
 		char if char.isalnum() else "-" for char in deployment_name.strip().lower()
 	)
-	base = "-".join(segment for segment in base.split("-") if segment) or "prod"
+	return "-".join(segment for segment in base.split("-") if segment) or "prod"
+
+
+def generate_deployment_id(deployment_name: str) -> str:
+	base = deployment_name_slug(deployment_name)
 	suffix = datetime.now(UTC).strftime("%y%m%d-%H%M%S")
 	prefix_limit = 24 - len(suffix) - 1
 	base = base[:prefix_limit].rstrip("-") or "prod"
@@ -386,21 +390,21 @@ async def _ensure_router_service(
 		image=router_image,
 	)
 	router_variables = {
-		RAILWAY_TOKEN_ENV: project.token,
-		RAILWAY_PROJECT_ID_ENV: project.project_id,
-		RAILWAY_ENVIRONMENT_ID_ENV: project.environment_id,
-		RAILWAY_SERVICE_PREFIX_ENV: internals.service_prefix,
-		"PULSE_RAILWAY_BACKEND_PORT": str(project.backend_port),
+		RAILWAY_TOKEN: project.token,
+		RAILWAY_PROJECT_ID: project.project_id,
+		RAILWAY_ENVIRONMENT_ID: project.environment_id,
+		PULSE_SERVICE_PREFIX: internals.service_prefix,
+		"PULSE_BACKEND_PORT": str(project.backend_port),
 		"PORT": str(project.router_port),
 		**shareable_kv_env,
 	}
 	if internals.redis_url:
-		router_variables[RAILWAY_REDIS_URL_ENV] = internals.redis_url
-		router_variables[RAILWAY_REDIS_PREFIX_ENV] = project.redis_prefix
-		router_variables[RAILWAY_WEBSOCKET_HEARTBEAT_SECONDS_ENV] = str(
+		router_variables[PULSE_REDIS_URL] = internals.redis_url
+		router_variables[PULSE_REDIS_PREFIX] = project.redis_prefix
+		router_variables[PULSE_WEBSOCKET_HEARTBEAT_SECONDS] = str(
 			project.websocket_heartbeat_seconds
 		)
-		router_variables[RAILWAY_WEBSOCKET_TTL_SECONDS_ENV] = str(
+		router_variables[PULSE_WEBSOCKET_TTL_SECONDS] = str(
 			project.websocket_ttl_seconds
 		)
 	for key, value in router_variables.items():
@@ -497,19 +501,17 @@ async def _ensure_janitor_service(
 	if not internals.redis_url:
 		raise DeploymentError("redis_url is required for janitor service creation")
 	for key, value in {
-		RAILWAY_TOKEN_ENV: project.token,
-		RAILWAY_PROJECT_ID_ENV: project.project_id,
-		RAILWAY_ENVIRONMENT_ID_ENV: project.environment_id,
-		RAILWAY_SERVICE_PREFIX_ENV: internals.service_prefix,
-		RAILWAY_INTERNAL_TOKEN_ENV: internals.internal_token,
-		RAILWAY_REDIS_URL_ENV: internals.redis_url,
-		RAILWAY_REDIS_PREFIX_ENV: project.redis_prefix,
-		RAILWAY_JANITOR_DRAIN_GRACE_SECONDS_ENV: str(project.drain_grace_seconds),
-		RAILWAY_JANITOR_MAX_DRAIN_AGE_SECONDS_ENV: str(project.max_drain_age_seconds),
-		RAILWAY_WEBSOCKET_HEARTBEAT_SECONDS_ENV: str(
-			project.websocket_heartbeat_seconds
-		),
-		RAILWAY_WEBSOCKET_TTL_SECONDS_ENV: str(project.websocket_ttl_seconds),
+		RAILWAY_TOKEN: project.token,
+		RAILWAY_PROJECT_ID: project.project_id,
+		RAILWAY_ENVIRONMENT_ID: project.environment_id,
+		PULSE_SERVICE_PREFIX: internals.service_prefix,
+		PULSE_INTERNAL_TOKEN: internals.internal_token,
+		PULSE_REDIS_URL: internals.redis_url,
+		PULSE_REDIS_PREFIX: project.redis_prefix,
+		PULSE_JANITOR_DRAIN_GRACE_SECONDS: str(project.drain_grace_seconds),
+		PULSE_JANITOR_MAX_DRAIN_AGE_SECONDS: str(project.max_drain_age_seconds),
+		PULSE_WEBSOCKET_HEARTBEAT_SECONDS: str(project.websocket_heartbeat_seconds),
+		PULSE_WEBSOCKET_TTL_SECONDS: str(project.websocket_ttl_seconds),
 		**shareable_kv_env,
 	}.items():
 		await client.upsert_variable(
@@ -651,14 +653,14 @@ async def resolve_or_create_internal_token(
 		project_id=project.project_id,
 		environment_id=project.environment_id,
 	)
-	internal_token = variables.get(RAILWAY_INTERNAL_TOKEN_ENV)
+	internal_token = variables.get(PULSE_INTERNAL_TOKEN)
 	if internal_token:
 		return internal_token
 	internal_token = secrets.token_urlsafe(32)
 	await client.upsert_variable(
 		project_id=project.project_id,
 		environment_id=project.environment_id,
-		name=RAILWAY_INTERNAL_TOKEN_ENV,
+		name=PULSE_INTERNAL_TOKEN,
 		value=internal_token,
 		skip_deploys=True,
 	)
@@ -712,10 +714,43 @@ async def _list_deployment_services(
 	)
 	deployments: list[tuple[str, str]] = []
 	for service, variables in zip(services, variable_sets, strict=True):
-		deployment_id = variables.get(RAILWAY_DEPLOYMENT_ID_ENV)
+		deployment_id = variables.get(PULSE_DEPLOYMENT_ID)
 		if deployment_id:
 			deployments.append((deployment_id, service.name))
 	return deployments
+
+
+async def resolve_deployment_id_by_name(
+	*,
+	project: RailwayProject,
+	deployment_name: str,
+) -> str:
+	target = deployment_name.strip().lower()
+	if not target:
+		raise DeploymentError("deployment name is required")
+	async with RailwayGraphQLClient(token=project.token) as client:
+		deployments = await _list_deployment_services(client, project=project)
+	exact_matches = [
+		deployment_id
+		for deployment_id, _service_name in deployments
+		if deployment_id == target
+	]
+	if len(exact_matches) == 1:
+		return exact_matches[0]
+	prefix = f"{deployment_name_slug(target)}-"
+	prefix_matches = [
+		deployment_id
+		for deployment_id, _service_name in deployments
+		if deployment_id.startswith(prefix)
+	]
+	if len(prefix_matches) == 1:
+		return prefix_matches[0]
+	if not prefix_matches:
+		raise DeploymentError(f"deployment '{deployment_name}' not found")
+	matches = ", ".join(sorted(prefix_matches))
+	raise DeploymentError(
+		f"deployment name '{deployment_name}' is ambiguous; matches: {matches}"
+	)
 
 
 async def deploy(
@@ -732,7 +767,7 @@ async def deploy(
 	docker = replace(docker, build_args=dict(docker.build_args))
 	build_args = dict(docker.build_args)
 	shareable_kv_env = _shareable_kv_env_from_app(app_file, docker.context_path)
-	shared_redis_url = shareable_kv_env.get(RAILWAY_KV_URL_ENV)
+	shared_redis_url = shareable_kv_env.get(PULSE_KV_URL)
 	deployment_id = (
 		validate_deployment_id(deployment_id)
 		if deployment_id is not None
@@ -830,8 +865,8 @@ async def deploy(
 				image=backend_image,
 			)
 			for key, value in {
-				RAILWAY_DEPLOYMENT_ID_ENV: deployment_id,
-				RAILWAY_INTERNAL_TOKEN_ENV: internals.internal_token,
+				PULSE_DEPLOYMENT_ID: deployment_id,
+				PULSE_INTERNAL_TOKEN: internals.internal_token,
 				"PULSE_APP_FILE": app_file,
 				"PULSE_SERVER_ADDRESS": server_address,
 				"PORT": str(project.backend_port),
@@ -983,12 +1018,14 @@ __all__ = [
 	"DeploymentError",
 	"build_and_push_image",
 	"build_router_image",
+	"deployment_name_slug",
 	"default_redis_service_name",
 	"default_service_prefix",
 	"delete_deployment",
 	"deploy",
 	"generate_deployment_id",
 	"ResolvedRedis",
+	"resolve_deployment_id_by_name",
 	"resolve_or_create_redis",
 	"resolve_project_internals",
 ]

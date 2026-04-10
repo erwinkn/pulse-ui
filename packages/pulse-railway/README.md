@@ -12,9 +12,9 @@ set -a; source .env; set +a
 uv run pulse-railway deploy \
   --service pulse-router \
   --deployment-name prod \
-  --app-file examples/aws-ecs/main.py \
-  --web-root examples/aws-ecs/web \
-  --dockerfile examples/aws-ecs/Dockerfile \
+  --app-file examples/railway/main.py \
+  --web-root examples/railway/web \
+  --dockerfile examples/Dockerfile \
   --context .
 ```
 
@@ -37,7 +37,12 @@ By default, the package builds and pushes both images to `ttl.sh` for a zero-con
 
 Backend services must set `PULSE_DEPLOYMENT_ID`. `RailwayPlugin` injects the affinity query into Pulse prerender and websocket directives and exposes `/_pulse/meta` for verification.
 
-When `PULSE_REDIS_URL` is set:
+If your app opts into `pulse_railway.railway_session_store()`:
+
+- deploy injects `PULSE_RAILWAY_REDIS_URL` into the backend app
+- the app session store uses that Redis for server-backed sessions
+
+When `PULSE_RAILWAY_REDIS_URL` is set:
 
 - deploy marks the new deployment `active`
 - previous active deployments become `draining`

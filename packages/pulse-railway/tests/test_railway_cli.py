@@ -86,9 +86,9 @@ def _write_deploy_fixture(root: Path) -> None:
 
 
 def test_deploy_parser_reads_env_overrides(monkeypatch) -> None:
-	monkeypatch.setenv("PULSE_SERVICE", "router")
-	monkeypatch.setenv("PULSE_APP_FILE", "examples/aws-ecs/main.py")
-	monkeypatch.setenv("PULSE_JANITOR_CRON_SCHEDULE", "0 */6 * * *")
+	monkeypatch.setenv("PULSE_RAILWAY_SERVICE", "router")
+	monkeypatch.setenv("PULSE_RAILWAY_APP_FILE", "examples/aws-ecs/main.py")
+	monkeypatch.setenv("PULSE_RAILWAY_JANITOR_CRON_SCHEDULE", "0 */6 * * *")
 	parser = argparse.ArgumentParser()
 
 	_add_deploy_args(parser)

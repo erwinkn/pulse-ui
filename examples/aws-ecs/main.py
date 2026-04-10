@@ -20,7 +20,6 @@ from pulse.render_session import run_js
 from pulse.request import PulseRequest
 from pulse.user_session import InMemorySessionStore
 from pulse_aws import AWSECSPlugin
-from pulse_railway import RailwayPlugin
 
 
 # State Management
@@ -577,14 +576,6 @@ def app_layout():
 	)
 
 
-# Routing
-# -------
-# Define the application's routes. A layout route wraps all other routes
-# to provide a consistent navigation experience.
-deployment_plugin = (
-	RailwayPlugin() if os.environ.get("PULSE_DEPLOYMENT_ID") else AWSECSPlugin()
-)
-
 app = ps.App(
 	routes=[
 		ps.Layout(
@@ -607,7 +598,7 @@ app = ps.App(
 			],
 		)
 	],
-	plugins=[deployment_plugin],
+	plugins=[AWSECSPlugin()],
 	session_store=InMemorySessionStore() if ps.mode() == "prod" else None,
 	server_address=os.environ.get("PULSE_SERVER_ADDRESS"),
 	internal_server_address=os.environ.get("PULSE_INTERNAL_SERVER_ADDRESS"),

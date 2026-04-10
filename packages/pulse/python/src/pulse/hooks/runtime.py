@@ -12,7 +12,6 @@ from typing import (
 
 from pulse.context import PulseContext
 from pulse.hooks.core import HOOK_CONTEXT
-from pulse.kv import KVStore
 from pulse.reactive_extensions import ReactiveDict
 from pulse.routing import Layout, Route, RouteInfo
 from pulse.state.state import State
@@ -90,19 +89,6 @@ def pulse_route() -> Route | Layout:
 			"`pulse.pulse_route` can only be called within a component during rendering."
 		)
 	return ctx.route.pulse_route
-
-
-def app():
-	"""Get the current Pulse app."""
-	return PulseContext.get().app
-
-
-def store() -> KVStore:
-	"""Get the current app store."""
-	current_app = app()
-	if current_app.store is None:
-		raise RuntimeError("Could not resolve app store")
-	return current_app.store
 
 
 def session() -> ReactiveDict[str, Any]:

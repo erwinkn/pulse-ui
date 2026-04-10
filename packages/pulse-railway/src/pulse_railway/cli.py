@@ -116,12 +116,12 @@ def _railway_project(
 def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
 		"--service",
-		default=_env("PULSE_SERVICE") or "pulse-router",
+		default=_env("PULSE_RAILWAY_SERVICE") or "pulse-router",
 		help="Stable public Railway router service name",
 	)
 	parser.add_argument(
 		"--deployment-name",
-		default=_env("PULSE_DEPLOYMENT_NAME") or "prod",
+		default=_env("PULSE_RAILWAY_DEPLOYMENT_NAME") or "prod",
 		help="Deployment prefix used when generating deployment ids",
 	)
 	parser.add_argument(
@@ -146,7 +146,7 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument(
 		"--service-prefix",
-		default=_env("PULSE_SERVICE_PREFIX"),
+		default=_env("PULSE_RAILWAY_SERVICE_PREFIX"),
 		help="Backend Railway service prefix. Defaults to a short prefix derived from --service.",
 	)
 	parser.add_argument(
@@ -156,74 +156,74 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument(
 		"--redis-url",
-		default=_env("PULSE_REDIS_URL"),
+		default=_env("PULSE_RAILWAY_REDIS_URL"),
 		help="Redis URL used for draining state and janitor cleanup. If omitted, pulse-railway creates or reuses a Redis service in the Railway project.",
 	)
 	parser.add_argument(
 		"--redis-service",
-		default=_env("PULSE_REDIS_SERVICE"),
+		default=_env("PULSE_RAILWAY_REDIS_SERVICE"),
 		help="Stable Railway Redis service name. Defaults to <service>-redis.",
 	)
 	parser.add_argument(
 		"--redis-prefix",
-		default=_env("PULSE_REDIS_PREFIX") or "pulse:railway",
+		default=_env("PULSE_RAILWAY_REDIS_PREFIX") or "pulse:railway",
 		help="Redis key prefix for pulse-railway control-plane state.",
 	)
 	parser.add_argument(
 		"--janitor-service",
-		default=_env("PULSE_JANITOR_SERVICE"),
+		default=_env("PULSE_RAILWAY_JANITOR_SERVICE"),
 		help="Stable Railway janitor service name. Defaults to <service>-janitor.",
 	)
 	parser.add_argument(
 		"--janitor-image",
-		default=_env("PULSE_JANITOR_IMAGE"),
+		default=_env("PULSE_RAILWAY_JANITOR_IMAGE"),
 		help="Prebuilt janitor image. Defaults to the router image.",
 	)
 	parser.add_argument(
 		"--janitor-cron-schedule",
-		default=_env("PULSE_JANITOR_CRON_SCHEDULE") or "*/5 * * * *",
+		default=_env("PULSE_RAILWAY_JANITOR_CRON_SCHEDULE") or "*/5 * * * *",
 		help="Railway cron schedule for the janitor service. Defaults to every 5 minutes.",
 	)
 	parser.add_argument(
 		"--drain-grace-seconds",
 		type=int,
-		default=int(_env("PULSE_JANITOR_DRAIN_GRACE_SECONDS") or "60"),
+		default=int(_env("PULSE_RAILWAY_JANITOR_DRAIN_GRACE_SECONDS") or "60"),
 		help="Minimum idle and drain duration before janitor cleanup.",
 	)
 	parser.add_argument(
 		"--max-drain-age-seconds",
 		type=int,
-		default=int(_env("PULSE_JANITOR_MAX_DRAIN_AGE_SECONDS") or "86400"),
+		default=int(_env("PULSE_RAILWAY_JANITOR_MAX_DRAIN_AGE_SECONDS") or "86400"),
 		help="Maximum time to keep a draining deployment before forced cleanup.",
 	)
 	parser.add_argument(
 		"--app-file",
-		default=_env("PULSE_APP_FILE") or "main.py",
+		default=_env("PULSE_RAILWAY_APP_FILE") or "main.py",
 		help="App entry file for Docker build args",
 	)
 	parser.add_argument(
 		"--web-root",
-		default=_env("PULSE_WEB_ROOT") or "web",
+		default=_env("PULSE_RAILWAY_WEB_ROOT") or "web",
 		help="Web root for Docker build args",
 	)
 	parser.add_argument(
 		"--dockerfile",
-		default=_env("PULSE_DOCKERFILE") or "Dockerfile",
+		default=_env("PULSE_RAILWAY_DOCKERFILE") or "Dockerfile",
 		help="Path to Dockerfile",
 	)
 	parser.add_argument(
 		"--context",
-		default=_env("PULSE_CONTEXT") or ".",
+		default=_env("PULSE_RAILWAY_CONTEXT") or ".",
 		help="Docker build context",
 	)
 	parser.add_argument(
 		"--image-repository",
-		default=_env("PULSE_IMAGE_REPOSITORY"),
+		default=_env("PULSE_RAILWAY_IMAGE_REPOSITORY"),
 		help="Registry repository for pushed images. Defaults to ttl.sh.",
 	)
 	parser.add_argument(
 		"--router-image",
-		default=_env("PULSE_ROUTER_IMAGE"),
+		default=_env("PULSE_RAILWAY_ROUTER_IMAGE"),
 		help="Prebuilt router image. If omitted, pulse-railway builds one.",
 	)
 	parser.add_argument(
@@ -241,19 +241,19 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
 		"--backend-port",
 		type=int,
-		default=int(_env("PULSE_BACKEND_PORT") or "8000"),
+		default=int(_env("PULSE_RAILWAY_BACKEND_PORT") or "8000"),
 		help="Backend container port",
 	)
 	parser.add_argument(
 		"--backend-replicas",
 		type=int,
-		default=int(_env("PULSE_BACKEND_REPLICAS") or "1"),
+		default=int(_env("PULSE_RAILWAY_BACKEND_REPLICAS") or "1"),
 		help="Backend Railway replicas. Use 1 for Pulse session affinity.",
 	)
 	parser.add_argument(
 		"--router-replicas",
 		type=int,
-		default=int(_env("PULSE_ROUTER_REPLICAS") or "1"),
+		default=int(_env("PULSE_RAILWAY_ROUTER_REPLICAS") or "1"),
 		help="Router Railway replicas",
 	)
 
@@ -277,21 +277,21 @@ def _add_delete_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument(
 		"--service-prefix",
-		default=_env("PULSE_SERVICE_PREFIX"),
+		default=_env("PULSE_RAILWAY_SERVICE_PREFIX"),
 	)
 	parser.add_argument(
 		"--keep-active-variable",
 		action="store_true",
 		help="Do not delete PULSE_ACTIVE_DEPLOYMENT when it points at the removed deployment",
 	)
-	parser.add_argument("--redis-url", default=_env("PULSE_REDIS_URL"))
+	parser.add_argument("--redis-url", default=_env("PULSE_RAILWAY_REDIS_URL"))
 	parser.add_argument(
 		"--redis-service",
-		default=_env("PULSE_REDIS_SERVICE"),
+		default=_env("PULSE_RAILWAY_REDIS_SERVICE"),
 	)
 	parser.add_argument(
 		"--redis-prefix",
-		default=_env("PULSE_REDIS_PREFIX") or "pulse:railway",
+		default=_env("PULSE_RAILWAY_REDIS_PREFIX") or "pulse:railway",
 	)
 
 
@@ -316,21 +316,21 @@ def _add_remove_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument(
 		"--service-prefix",
-		default=_env("PULSE_SERVICE_PREFIX"),
+		default=_env("PULSE_RAILWAY_SERVICE_PREFIX"),
 	)
 	parser.add_argument(
 		"--keep-active-variable",
 		action="store_true",
 		help="Do not delete PULSE_ACTIVE_DEPLOYMENT when it points at the removed deployment",
 	)
-	parser.add_argument("--redis-url", default=_env("PULSE_REDIS_URL"))
+	parser.add_argument("--redis-url", default=_env("PULSE_RAILWAY_REDIS_URL"))
 	parser.add_argument(
 		"--redis-service",
-		default=_env("PULSE_REDIS_SERVICE"),
+		default=_env("PULSE_RAILWAY_REDIS_SERVICE"),
 	)
 	parser.add_argument(
 		"--redis-prefix",
-		default=_env("PULSE_REDIS_PREFIX") or "pulse:railway",
+		default=_env("PULSE_RAILWAY_REDIS_PREFIX") or "pulse:railway",
 	)
 
 
@@ -338,7 +338,7 @@ def _add_janitor_run_args(parser: argparse.ArgumentParser) -> None:
 	parser.description = JANITOR_RUN_DESCRIPTION
 	parser.add_argument(
 		"--service",
-		default=_env("PULSE_SERVICE") or "pulse-router",
+		default=_env("PULSE_RAILWAY_SERVICE") or "pulse-router",
 		help="Stable public Railway router service name for the deployed janitor.",
 	)
 	parser.add_argument(
@@ -355,31 +355,31 @@ def _add_janitor_run_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument(
 		"--service-prefix",
-		default=_env("PULSE_SERVICE_PREFIX"),
+		default=_env("PULSE_RAILWAY_SERVICE_PREFIX"),
 	)
 	parser.add_argument(
 		"--redis-url",
-		default=_env("PULSE_REDIS_URL"),
+		default=_env("PULSE_RAILWAY_REDIS_URL"),
 		help="Redis URL used for draining state and janitor cleanup inside Railway.",
 	)
 	parser.add_argument(
 		"--redis-service",
-		default=_env("PULSE_REDIS_SERVICE"),
+		default=_env("PULSE_RAILWAY_REDIS_SERVICE"),
 		help="Stable Railway Redis service name. Defaults to <service>-redis.",
 	)
 	parser.add_argument(
 		"--redis-prefix",
-		default=_env("PULSE_REDIS_PREFIX") or "pulse:railway",
+		default=_env("PULSE_RAILWAY_REDIS_PREFIX") or "pulse:railway",
 	)
 	parser.add_argument(
 		"--drain-grace-seconds",
 		type=int,
-		default=int(_env("PULSE_JANITOR_DRAIN_GRACE_SECONDS") or "60"),
+		default=int(_env("PULSE_RAILWAY_JANITOR_DRAIN_GRACE_SECONDS") or "60"),
 	)
 	parser.add_argument(
 		"--max-drain-age-seconds",
 		type=int,
-		default=int(_env("PULSE_JANITOR_MAX_DRAIN_AGE_SECONDS") or "86400"),
+		default=int(_env("PULSE_RAILWAY_JANITOR_MAX_DRAIN_AGE_SECONDS") or "86400"),
 	)
 
 

@@ -11,7 +11,6 @@ from typing import Any, Protocol, cast
 import aiohttp
 from fastapi import FastAPI, Header, HTTPException, Request, Response, WebSocket
 from fastapi.responses import JSONResponse
-from pulse.kv import build_kv_store
 from starlette.websockets import WebSocketDisconnect
 
 from pulse_railway.constants import (
@@ -449,7 +448,7 @@ def build_app_from_env() -> FastAPI:
 	spec = kv_store_spec_from_env(dict(os.environ))
 	if spec is not None:
 		store = DeploymentStore(
-			store=build_kv_store(spec),
+			store=spec,
 			prefix=os.environ.get(PULSE_REDIS_PREFIX, DEFAULT_REDIS_PREFIX),
 			websocket_ttl_seconds=int(
 				os.environ.get(PULSE_WEBSOCKET_TTL_SECONDS, "45")

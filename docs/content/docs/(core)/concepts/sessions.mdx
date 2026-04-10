@@ -44,8 +44,6 @@ Pulse handles all the behind-the-scenes work. It automatically:
 
 No cookies or local storage code required.
 
-If you need direct access to the shared app store, use `ps.store()`.
-
 ## Common patterns
 
 ### Remembering user preferences
@@ -182,38 +180,44 @@ def connection_info():
 
 By default, Pulse stores sessions in signed cookies. That's true in development and production unless you opt into a server-backed `ps.SessionStore`.
 
-Pulse also has an app-level store primitive. In development, `ps.App()` creates a local SQLite-backed app store by default, so `ps.store()` works without extra setup.
-
-If you want the same store for sessions and other app state, pass a `ps.SessionStore()` and let it inherit the app store:
+If you want sessions to live on the server, implement `ps.SessionStore` with your own backend:
 
 ```python
 import pulse as ps
+from redis import asyncio as redis
+import json
+
+
+class RedisSessionStore(ps.SessionStore):
+    async def init(self) -> None:
+        self.redis = redis.from_url("redis://localhost:6379/0", decode_responses=True)
+
+    async def close(self) -> None:
+        await self.redis.aclose()
+
+    async def get(self, sid: str) -> dict[str, object] | None:
+        payload = await self.redis.get(f"session:{sid}")
+        return None if payload is None else json.loads(payload)
+
+    async def create(self, sid: str) -> dict[str, object]:
+        session: dict[str, object] = {}
+        await self.save(sid, session)
+        return session
+
+    async def save(self, sid: str, session: dict[str, object]) -> None:
+        await self.redis.set(f"session:{sid}", json.dumps(session))
+
+    async def delete(self, sid: str) -> None:
+        await self.redis.delete(f"session:{sid}")
 
 app = ps.App(
     routes=[...],
-    store=ps.RedisKVStore.from_url("redis://localhost:6379/0"),
-    session_store=ps.SessionStore(),
+    session_store=RedisSessionStore(),
 )
 ```
-
-If you want sessions in a different backend, give the session store its own KV store:
-
-```python
-import pulse as ps
-
-app = ps.App(
-    routes=[...],
-    store=ps.SQLiteKVStore(".pulse/app.sqlite3"),
-    session_store=ps.SessionStore(
-        store=ps.RedisKVStore.from_url("redis://localhost:6379/1"),
-    ),
-)
-```
-
-`ps.SessionStore(store=...)` uses its own KV store first, then falls back to `ps.App(store=...)` when no store is provided.
 
 <Callout type="warn">
-If you opt into server-backed sessions in development, multiple Pulse apps in the same working directory can share the same default local store. That's convenient for reloads, but it can also make dev sessions bleed across apps that reuse the same host and cookie name.
+If you opt into server-backed sessions, make sure every app instance can reach the same backend. Otherwise users can lose their sessions when traffic moves between processes or deployments.
 </Callout>
 
 ## Using sessions in middleware

@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import pytest
-from pulse_railway.constants import ACTIVE_DEPLOYMENT_VARIABLE
+from pulse_railway.constants import (
+	ACTIVE_DEPLOYMENT_VARIABLE,
+	PULSE_KV_KIND,
+	PULSE_KV_URL,
+)
 from pulse_railway.railway import RailwayResolver, ServiceRecord
 from pulse_railway.store import (
 	DeploymentStore,
 	InMemoryKVStore,
-	KVStoreSpec,
 	RedisDeploymentStore,
+	RedisKVStore,
 	kv_store_spec_from_env,
 )
 
@@ -211,5 +215,11 @@ async def test_redis_store_batches_draining_deployment_fetches() -> None:
 
 
 def test_kv_store_spec_round_trip_from_env() -> None:
-	spec = KVStoreSpec(kind="redis", url="redis://localhost:6379/0")
-	assert kv_store_spec_from_env(spec.to_env()) == spec
+	spec = kv_store_spec_from_env(
+		{
+			PULSE_KV_KIND: "redis",
+			PULSE_KV_URL: "redis://localhost:6379/0",
+		}
+	)
+	assert isinstance(spec, RedisKVStore)
+	assert spec.url == "redis://localhost:6379/0"

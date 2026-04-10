@@ -1,19 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from pulse.kv import KVStoreConfig
+from pulse_railway import RailwayRedisSessionStore
 from pulse_railway.config import DockerBuild, RailwayProject
 from pulse_railway.constants import (
 	ACTIVE_DEPLOYMENT_VARIABLE,
 	DEFAULT_JANITOR_CRON_SCHEDULE,
 	PULSE_DEPLOYMENT_ID,
 	PULSE_INTERNAL_TOKEN,
-	PULSE_KV_KIND,
-	PULSE_KV_URL,
 	PULSE_REDIS_PREFIX,
 	PULSE_REDIS_URL,
 )
@@ -21,7 +18,7 @@ from pulse_railway.deployment import (
 	JANITOR_START_COMMAND,
 	DeploymentError,
 	_list_deployment_services,
-	_shareable_kv_env_from_app,
+	_railway_session_store_from_app,
 	default_service_prefix,
 	deploy,
 	generate_deployment_id,
@@ -31,6 +28,24 @@ from pulse_railway.railway import ServiceDomain, ServiceRecord, TemplateRecord
 from pulse_railway.store import MemoryDeploymentStore
 
 
+def _write_app_fixture(
+	root,
+	*,
+	relative_path: str = "main.py",
+	session_store_expr: str = "None",
+) -> None:
+	app_path = root / relative_path
+	app_path.parent.mkdir(parents=True, exist_ok=True)
+	if session_store_expr == "None":
+		app_path.write_text("import pulse as ps\napp = ps.App()\n")
+		return
+	app_path.write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import redis_session_store\n"
+		f"app = ps.App(session_store={session_store_expr})\n"
+	)
+
+
 def test_generate_deployment_id_and_prefix() -> None:
 	deployment_id = generate_deployment_id("Production Main")
 	assert deployment_id.startswith("production-")
@@ -38,28 +53,19 @@ def test_generate_deployment_id_and_prefix() -> None:
 	assert default_service_prefix("pulse-router") == "pulse-"
 
 
-def test_shareable_kv_env_from_app_uses_redis_store(monkeypatch, tmp_path) -> None:
+def test_railway_session_store_from_app_uses_declared_helper(tmp_path) -> None:
 	app_file = tmp_path / "main.py"
-	app_file.write_text("app = object()\n")
-
-	monkeypatch.setattr(
-		"pulse_railway.deployment.load_app_from_target",
-		lambda _: SimpleNamespace(
-			app=SimpleNamespace(
-				store=SimpleNamespace(
-					config=lambda: KVStoreConfig(
-						kind="redis",
-						url="redis://shared",
-					)
-				)
-			)
-		),
+	app_file.write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import redis_session_store\n"
+		"app = ps.App(\n"
+		"    session_store=redis_session_store()\n"
+		")\n"
 	)
 
-	assert _shareable_kv_env_from_app("main.py", tmp_path) == {
-		PULSE_KV_KIND: "redis",
-		PULSE_KV_URL: "redis://shared",
-	}
+	spec = _railway_session_store_from_app("main.py", tmp_path)
+
+	assert isinstance(spec, RailwayRedisSessionStore)
 
 
 @pytest.mark.asyncio
@@ -200,6 +206,7 @@ async def test_resolve_deployment_id_by_name_requires_unique_match(
 async def test_deploy_happy_path(monkeypatch, tmp_path) -> None:
 	dockerfile = tmp_path / "Dockerfile"
 	dockerfile.write_text("FROM scratch\n")
+	_write_app_fixture(tmp_path, relative_path="examples/aws-ecs/main.py")
 
 	service_state: dict[str, ServiceRecord] = {
 		"pulse-prod-prev": ServiceRecord(id="svc-old-1", name="pulse-prod-prev"),
@@ -377,6 +384,10 @@ async def test_deploy_happy_path(monkeypatch, tmp_path) -> None:
 		PULSE_REDIS_URL,
 		"redis://test",
 	) in variables
+	assert not any(
+		service_id == result.backend_service_id and key == PULSE_REDIS_URL
+		for service_id, key, _value in variables
+	)
 	assert (
 		result.router_service_id,
 		PULSE_REDIS_PREFIX,
@@ -406,6 +417,7 @@ async def test_deploy_happy_path(monkeypatch, tmp_path) -> None:
 async def test_deploy_rejects_duplicate_deployment(monkeypatch, tmp_path) -> None:
 	dockerfile = tmp_path / "Dockerfile"
 	dockerfile.write_text("FROM scratch\n")
+	_write_app_fixture(tmp_path)
 
 	class _FakeClient:
 		def __init__(self, **_: object) -> None:
@@ -452,6 +464,10 @@ async def test_deploy_rejects_duplicate_deployment(monkeypatch, tmp_path) -> Non
 async def test_deploy_provisions_redis_when_missing(monkeypatch, tmp_path) -> None:
 	dockerfile = tmp_path / "Dockerfile"
 	dockerfile.write_text("FROM scratch\n")
+	_write_app_fixture(
+		tmp_path,
+		session_store_expr="redis_session_store()",
+	)
 
 	service_state: dict[str, ServiceRecord] = {}
 	service_variables: dict[str, dict[str, str]] = {}
@@ -633,6 +649,10 @@ async def test_deploy_provisions_redis_when_missing(monkeypatch, tmp_path) -> No
 	assert result.janitor_service_name == "pulse-router-janitor"
 	assert "pulse-router-redis" in template_deploys
 	assert store_urls == ["redis://public-host:6379"]
+	assert (
+		service_variables[result.backend_service_id][PULSE_REDIS_URL]
+		== "redis://pulse-router-redis.railway.internal:6379"
+	)
 	assert project.service_prefix == "Pulse"
 	assert project.redis_url is None
 	assert docker.build_args == {"KEEP": "1"}
@@ -652,6 +672,7 @@ async def test_deploy_prefers_public_redis_when_configured_url_is_internal(
 ) -> None:
 	dockerfile = tmp_path / "Dockerfile"
 	dockerfile.write_text("FROM scratch\n")
+	_write_app_fixture(tmp_path)
 
 	service_state: dict[str, ServiceRecord] = {
 		"pulse-router-redis": ServiceRecord(id="svc-redis", name="pulse-router-redis")
@@ -808,6 +829,14 @@ async def test_deploy_prefers_public_redis_when_configured_url_is_internal(
 async def test_deploy_keeps_shared_app_redis_canonical(monkeypatch, tmp_path) -> None:
 	dockerfile = tmp_path / "Dockerfile"
 	dockerfile.write_text("FROM scratch\n")
+	_write_app_fixture(
+		tmp_path,
+		session_store_expr=(
+			"redis_session_store("
+			"url='redis://pulse-router-redis.railway.internal:6379'"
+			")"
+		),
+	)
 
 	service_state: dict[str, ServiceRecord] = {
 		"pulse-router-redis": ServiceRecord(id="svc-redis", name="pulse-router-redis")
@@ -921,13 +950,6 @@ async def test_deploy_keeps_shared_app_redis_canonical(monkeypatch, tmp_path) ->
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 	monkeypatch.setattr(
-		"pulse_railway.deployment._shareable_kv_env_from_app",
-		lambda *_: {
-			PULSE_KV_KIND: "redis",
-			PULSE_KV_URL: "redis://pulse-router-redis.railway.internal:6379",
-		},
-	)
-	monkeypatch.setattr(
 		"pulse_railway.deployment.RedisDeploymentStore.from_url",
 		lambda **kwargs: store_urls.append(kwargs["url"]) or MemoryDeploymentStore(),
 	)
@@ -972,6 +994,7 @@ async def test_deploy_syncs_store_via_router_without_public_redis(
 ) -> None:
 	dockerfile = tmp_path / "Dockerfile"
 	dockerfile.write_text("FROM scratch\n")
+	_write_app_fixture(tmp_path)
 
 	service_state: dict[str, ServiceRecord] = {
 		"pulse-prev": ServiceRecord(id="svc-old", name="pulse-prev"),

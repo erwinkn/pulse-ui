@@ -6,14 +6,6 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from pulse.kv import (
-	KVStore,
-	KVStoreConfig,
-	MemoryKVStore,
-	RedisKVStore,
-	SQLiteKVStore,
-)
-
 from pulse_railway.constants import (
 	DEFAULT_REDIS_PREFIX,
 	DEFAULT_WEBSOCKET_TTL_SECONDS,
@@ -22,9 +14,18 @@ from pulse_railway.constants import (
 	PULSE_KV_URL,
 	PULSE_REDIS_URL,
 )
+from pulse_railway.kv import (
+	InMemoryKVStore,
+	KVStore,
+	MemoryKVStore,
+	RedisKVStore,
+	RedisStore,
+	SQLiteKVStore,
+	SQLiteStore,
+	Store,
+)
 
-InMemoryKVStore = MemoryKVStore
-KVStoreSpec = KVStoreConfig
+KVStoreSpec = Store
 
 
 @dataclass(slots=True)
@@ -36,26 +37,26 @@ class StoredDeployment:
 	drain_started_at: float | None
 
 
-def kv_store_spec_from_env(
-	env: dict[str, str] | None = None,
-) -> KVStoreConfig | None:
+def kv_store_spec_from_env(env: dict[str, str] | None = None) -> Store | None:
 	source = env or {}
 	kind = source.get(PULSE_KV_KIND) or source.get("kind")
+	if kind == "memory":
+		return MemoryKVStore()
 	if kind == "redis":
 		url = (
 			source.get(PULSE_KV_URL) or source.get(PULSE_REDIS_URL) or source.get("url")
 		)
 		if url is None:
 			return None
-		return KVStoreConfig(kind="redis", url=url)
+		return RedisStore(url=url)
 	if kind == "sqlite":
 		path = source.get(PULSE_KV_PATH) or source.get("path")
 		if path is None:
 			return None
-		return KVStoreConfig(kind="sqlite", path=path)
+		return SQLiteStore(path=path)
 	redis_url = source.get(PULSE_KV_URL) or source.get(PULSE_REDIS_URL)
 	if redis_url is not None:
-		return KVStoreConfig(kind="redis", url=redis_url)
+		return RedisStore(url=redis_url)
 	return None
 
 
@@ -347,10 +348,11 @@ def _now(value: float | None) -> float:
 __all__ = [
 	"DeploymentStore",
 	"InMemoryKVStore",
+	"KVStore",
 	"KVStoreSpec",
 	"MemoryDeploymentStore",
 	"RedisDeploymentStore",
-	"SQLiteDeploymentStore",
 	"StoredDeployment",
+	"SQLiteDeploymentStore",
 	"kv_store_spec_from_env",
 ]

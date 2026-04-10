@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import abc
 import asyncio
+import os
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, ClassVar, Literal, override
+
+from pulse_railway.constants import PULSE_KV_PATH, PULSE_KV_URL
 
 try:
 	import redis.asyncio as redis
@@ -14,35 +18,23 @@ except Exception:
 	redis = None
 
 
-DEFAULT_DEV_KV_PATH = ".pulse/dev.sqlite3"
-
-
-@dataclass(slots=True)
-class KVStoreConfig:
-	kind: Literal["redis", "sqlite"]
-	url: str | None = None
-	path: str | None = None
+class Store(abc.ABC):
+	kind: ClassVar[Literal["memory", "redis", "sqlite"]]
 
 	@property
 	def shareable(self) -> bool:
-		return self.kind == "redis"
+		return False
 
-	def to_env(self) -> dict[str, str]:
-		env = {"PULSE_KV_KIND": self.kind}
-		if self.url is not None:
-			env["PULSE_KV_URL"] = self.url
-		if self.path is not None:
-			env["PULSE_KV_PATH"] = self.path
-		return env
-
-
-class KVStore(Protocol):
+	@abc.abstractmethod
 	async def init(self) -> None: ...
 
+	@abc.abstractmethod
 	async def close(self) -> None: ...
 
+	@abc.abstractmethod
 	async def get(self, key: str) -> str | None: ...
 
+	@abc.abstractmethod
 	async def set(
 		self,
 		key: str,
@@ -52,22 +44,27 @@ class KVStore(Protocol):
 		only_if_missing: bool = False,
 	) -> bool: ...
 
+	@abc.abstractmethod
 	async def delete(self, key: str) -> None: ...
 
+	@abc.abstractmethod
 	async def scan_prefix(self, prefix: str) -> list[str]: ...
 
-	def config(self) -> KVStoreConfig | None: ...
 
+class MemoryStore(Store):
+	__slots__: tuple[str, ...] = ("_entries",)
+	kind: ClassVar[Literal["memory", "redis", "sqlite"]] = "memory"
 
-class MemoryKVStore:
 	def __init__(self) -> None:
 		self._entries: dict[str, tuple[str, float | None]] = {}
 
-	async def init(self) -> None:
-		return None
+	@override
+	def __repr__(self) -> str:
+		return "MemoryStore()"
 
-	async def close(self) -> None:
-		self._entries.clear()
+	@override
+	def __eq__(self, other: object) -> bool:
+		return isinstance(other, MemoryStore)
 
 	def _prune(self, key: str | None = None, *, now: float | None = None) -> None:
 		timestamp = time.time() if now is None else now
@@ -87,6 +84,15 @@ class MemoryKVStore:
 		for entry_key in expired:
 			self._entries.pop(entry_key, None)
 
+	@override
+	async def init(self) -> None:
+		return None
+
+	@override
+	async def close(self) -> None:
+		self._entries.clear()
+
+	@override
 	async def get(self, key: str) -> str | None:
 		self._prune(key)
 		entry = self._entries.get(key)
@@ -94,6 +100,7 @@ class MemoryKVStore:
 			return None
 		return entry[0]
 
+	@override
 	async def set(
 		self,
 		key: str,
@@ -109,38 +116,53 @@ class MemoryKVStore:
 		self._entries[key] = (value, expires_at)
 		return True
 
+	@override
 	async def delete(self, key: str) -> None:
 		self._entries.pop(key, None)
 
+	@override
 	async def scan_prefix(self, prefix: str) -> list[str]:
 		self._prune()
 		return sorted(key for key in self._entries if key.startswith(prefix))
 
-	def config(self) -> KVStoreConfig | None:
-		return None
 
+class SQLiteStore(Store):
+	__slots__: tuple[str, ...] = ("path", "_lock", "_conn")
+	kind: ClassVar[Literal["memory", "redis", "sqlite"]] = "sqlite"
 
-class SQLiteKVStore:
-	path: Path
+	path: str
 	_lock: threading.Lock
 	_conn: sqlite3.Connection | None
 
-	def __init__(self, path: str | Path = DEFAULT_DEV_KV_PATH) -> None:
-		self.path = Path(path)
+	def __init__(
+		self,
+		path: str | os.PathLike[str] | None = None,
+		*,
+		env: Mapping[str, str] | None = None,
+	) -> None:
+		if path is None:
+			values = os.environ if env is None else env
+			path = values.get(PULSE_KV_PATH)
+		if path is None:
+			raise ValueError(f"SQLiteStore requires path= or {PULSE_KV_PATH}")
+		self.path = os.fspath(path)
 		self._lock = threading.Lock()
 		self._conn = None
 
-	def config(self) -> KVStoreConfig | None:
-		return KVStoreConfig(kind="sqlite", path=str(self.path))
+	@override
+	def __repr__(self) -> str:
+		return f"SQLiteStore(path={self.path!r})"
+
+	@override
+	def __eq__(self, other: object) -> bool:
+		return isinstance(other, SQLiteStore) and self.path == other.path
 
 	def _ensure_conn(self) -> sqlite3.Connection:
 		with self._lock:
 			if self._conn is None:
-				self.path.parent.mkdir(parents=True, exist_ok=True)
-				conn = sqlite3.connect(
-					self.path,
-					check_same_thread=False,
-				)
+				path = Path(self.path)
+				path.parent.mkdir(parents=True, exist_ok=True)
+				conn = sqlite3.connect(path, check_same_thread=False)
 				conn.execute("PRAGMA journal_mode=WAL")
 				conn.execute("PRAGMA synchronous=NORMAL")
 				conn.execute(
@@ -155,9 +177,6 @@ class SQLiteKVStore:
 				self._conn = conn
 			return self._conn
 
-	async def init(self) -> None:
-		await asyncio.to_thread(self._ensure_conn)
-
 	def _delete_expired(self, conn: sqlite3.Connection, *, now: float) -> None:
 		conn.execute(
 			"DELETE FROM pulse_kv WHERE expires_at IS NOT NULL AND expires_at <= ?",
@@ -165,6 +184,11 @@ class SQLiteKVStore:
 		)
 		conn.commit()
 
+	@override
+	async def init(self) -> None:
+		await asyncio.to_thread(self._ensure_conn)
+
+	@override
 	async def close(self) -> None:
 		conn = self._conn
 		if conn is None:
@@ -178,6 +202,7 @@ class SQLiteKVStore:
 
 		await asyncio.to_thread(_close)
 
+	@override
 	async def get(self, key: str) -> str | None:
 		def _get() -> str | None:
 			now = time.time()
@@ -192,6 +217,7 @@ class SQLiteKVStore:
 
 		return await asyncio.to_thread(_get)
 
+	@override
 	async def set(
 		self,
 		key: str,
@@ -228,6 +254,7 @@ class SQLiteKVStore:
 
 		return await asyncio.to_thread(_set)
 
+	@override
 	async def delete(self, key: str) -> None:
 		def _delete() -> None:
 			conn = self._ensure_conn()
@@ -237,6 +264,7 @@ class SQLiteKVStore:
 
 		await asyncio.to_thread(_delete)
 
+	@override
 	async def scan_prefix(self, prefix: str) -> list[str]:
 		def _scan() -> list[str]:
 			now = time.time()
@@ -252,49 +280,79 @@ class SQLiteKVStore:
 		return await asyncio.to_thread(_scan)
 
 
-class RedisKVStore:
-	client: Any
+class RedisStore(Store):
+	__slots__: tuple[str, ...] = ("url", "client", "owns_client")
+	kind: ClassVar[Literal["memory", "redis", "sqlite"]] = "redis"
+
 	url: str | None
+	client: Any
 	owns_client: bool
 
 	def __init__(
 		self,
-		*,
-		client: Any,
 		url: str | None = None,
+		*,
+		env: Mapping[str, str] | None = None,
+		client: Any = None,
 		owns_client: bool = False,
 	) -> None:
-		if redis is None:
-			raise RuntimeError(
-				"RedisKVStore requires the 'redis' package. Install it to use Redis-backed KV storage."
-			)
-		self.client = client
+		if url is None and client is None:
+			values = os.environ if env is None else env
+			url = values.get(PULSE_KV_URL)
+		if url is None and client is None:
+			raise ValueError(f"RedisStore requires url= or {PULSE_KV_URL}")
 		self.url = url
+		self.client = client
 		self.owns_client = owns_client
 
 	@classmethod
-	def from_url(cls, url: str) -> "RedisKVStore":
+	def from_url(cls, url: str) -> RedisStore:
+		return cls(url=url)
+
+	@override
+	def __repr__(self) -> str:
+		return f"RedisStore(url={self.url!r})"
+
+	@override
+	def __eq__(self, other: object) -> bool:
+		return isinstance(other, RedisStore) and self.url == other.url
+
+	@property
+	@override
+	def shareable(self) -> bool:
+		return True
+
+	def _ensure_client(self) -> Any:
+		client = self.client
+		if client is not None:
+			return client
 		if redis is None:
 			raise RuntimeError(
-				"RedisKVStore requires the 'redis' package. Install it to use Redis-backed KV storage."
+				"RedisStore requires the 'redis' package. Install it to use Redis-backed storage."
 			)
-		return cls(
-			client=redis.Redis.from_url(url, decode_responses=True),
-			url=url,
-			owns_client=True,
-		)
+		if self.url is None:
+			raise RuntimeError(f"RedisStore requires url= or {PULSE_KV_URL}")
+		client = redis.Redis.from_url(self.url, decode_responses=True)
+		self.client = client
+		self.owns_client = True
+		return client
 
+	@override
 	async def init(self) -> None:
-		return None
+		self._ensure_client()
 
+	@override
 	async def close(self) -> None:
-		if self.owns_client:
+		if self.owns_client and self.client is not None:
 			await self.client.aclose()
+			self.client = None
 
+	@override
 	async def get(self, key: str) -> str | None:
-		value = await self.client.get(key)
+		value = await self._ensure_client().get(key)
 		return None if value is None else str(value)
 
+	@override
 	async def set(
 		self,
 		key: str,
@@ -308,45 +366,24 @@ class RedisKVStore:
 			kwargs["ex"] = ttl_seconds
 		if only_if_missing:
 			kwargs["nx"] = True
-		result = await self.client.set(key, value, **kwargs)
+		result = await self._ensure_client().set(key, value, **kwargs)
 		return bool(result) if only_if_missing else True
 
+	@override
 	async def delete(self, key: str) -> None:
-		await self.client.delete(key)
+		await self._ensure_client().delete(key)
 
+	@override
 	async def scan_prefix(self, prefix: str) -> list[str]:
 		keys: list[str] = []
-		async for key in self.client.scan_iter(match=f"{prefix}*"):
+		async for key in self._ensure_client().scan_iter(match=f"{prefix}*"):
 			keys.append(str(key))
 		keys.sort()
 		return keys
 
-	def config(self) -> KVStoreConfig | None:
-		if self.url is None:
-			return None
-		return KVStoreConfig(kind="redis", url=self.url)
 
-
-def build_kv_store(config: KVStoreConfig) -> KVStore:
-	if config.kind == "redis":
-		if config.url is None:
-			raise ValueError("Redis KV config requires a url")
-		return RedisKVStore.from_url(config.url)
-	if config.path is None:
-		raise ValueError("SQLite KV config requires a path")
-	return SQLiteKVStore(config.path)
-
-
-InMemoryKVStore = MemoryKVStore
-
-
-__all__ = [
-	"DEFAULT_DEV_KV_PATH",
-	"InMemoryKVStore",
-	"KVStore",
-	"KVStoreConfig",
-	"MemoryKVStore",
-	"RedisKVStore",
-	"SQLiteKVStore",
-	"build_kv_store",
-]
+KVStore = Store
+MemoryKVStore = MemoryStore
+SQLiteKVStore = SQLiteStore
+RedisKVStore = RedisStore
+InMemoryKVStore = MemoryStore

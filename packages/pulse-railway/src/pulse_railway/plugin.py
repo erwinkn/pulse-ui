@@ -10,11 +10,17 @@ from fastapi import Header, HTTPException
 
 from pulse_railway.constants import (
 	AFFINITY_QUERY_PARAM,
+	DEFAULT_SERVICE_PREFIX,
 	DEPLOYMENT_META_PATH,
 	INTERNAL_SESSIONS_PATH,
 	INTERNAL_TOKEN_HEADER,
 	PULSE_DEPLOYMENT_ID,
 	PULSE_INTERNAL_TOKEN,
+)
+from pulse_railway.railway import (
+	normalize_service_name,
+	normalize_service_prefix,
+	prefixed_service_name,
 )
 
 
@@ -22,14 +28,47 @@ class RailwayPlugin(ps.Plugin):
 	"""Pulse plugin for Railway deployment affinity."""
 
 	priority: int = 100
+	project_id: str | None
+	environment_id: str | None
+	router_service: str
+	janitor_service: str
+	redis_service: str
+	service_prefix: str
 	deployment_id: str
 	internal_token: str
 	enabled: bool
 
-	def __init__(self) -> None:
+	def __init__(
+		self,
+		*,
+		project_id: str | None = None,
+		environment_id: str | None = None,
+		router_service: str = "router",
+		janitor_service: str = "janitor",
+		redis_service: str = "redis",
+		service_prefix: str = DEFAULT_SERVICE_PREFIX,
+	) -> None:
+		self.project_id = _clean_optional(project_id)
+		self.environment_id = _clean_optional(environment_id)
+		self.router_service = normalize_service_name(router_service)
+		self.janitor_service = normalize_service_name(janitor_service)
+		self.redis_service = normalize_service_name(redis_service)
+		self.service_prefix = normalize_service_prefix(service_prefix)
 		self.deployment_id = ""
 		self.internal_token = ""
 		self.enabled = False
+
+	@property
+	def router_service_name(self) -> str:
+		return prefixed_service_name(self.service_prefix, self.router_service)
+
+	@property
+	def janitor_service_name(self) -> str:
+		return prefixed_service_name(self.service_prefix, self.janitor_service)
+
+	@property
+	def redis_service_name(self) -> str:
+		return prefixed_service_name(self.service_prefix, self.redis_service)
 
 	@override
 	def on_startup(self, app: ps.App) -> None:
@@ -118,3 +157,10 @@ class RailwayDirectivesMiddleware(ps.PulseMiddleware):
 
 
 __all__ = ["RailwayPlugin"]
+
+
+def _clean_optional(value: str | None) -> str | None:
+	if value is None:
+		return None
+	candidate = value.strip()
+	return candidate or None

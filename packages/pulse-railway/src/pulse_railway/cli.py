@@ -9,6 +9,8 @@ import os
 from dataclasses import asdict
 from pathlib import Path
 
+from pulse.cli.helpers import load_app_from_target
+
 from pulse_railway.config import DockerBuild, RailwayProject
 from pulse_railway.deployment import (
 	default_janitor_service_name,
@@ -20,6 +22,11 @@ from pulse_railway.deployment import (
 )
 from pulse_railway.janitor import JanitorResult, run_janitor
 from pulse_railway.railway import normalize_service_prefix, validate_deployment_id
+from pulse_railway.target import (
+	RailwayDeployTarget,
+	RailwayDeployTargetError,
+	railway_deploy_target_from_app,
+)
 
 RAILWAY_RUNTIME_ENV_VARS = (
 	"RAILWAY_SERVICE_ID",
@@ -96,18 +103,38 @@ def _print_janitor_result(result: JanitorResult) -> None:
 
 def _railway_project(
 	args: argparse.Namespace,
+	*,
+	project_id: str | None = None,
+	environment_id: str | None = None,
+	token: str | None = None,
+	service_name: str | None = None,
+	service_prefix: str | None = None,
+	redis_service_name: str | None = None,
 	**overrides: object,
 ) -> RailwayProject:
-	service_prefix = args.service_prefix or default_service_prefix(args.service)
+	service_name = (
+		service_name or args.service or _env("PULSE_RAILWAY_SERVICE") or "pulse-router"
+	)
+	service_prefix = (
+		service_prefix
+		or args.service_prefix
+		or _env("PULSE_RAILWAY_SERVICE_PREFIX")
+		or default_service_prefix(service_name)
+	)
 	return RailwayProject(
-		project_id=args.project_id,
-		environment_id=args.environment_id,
-		token=args.token,
-		service_name=args.service,
+		project_id=project_id or args.project_id or _env("RAILWAY_PROJECT_ID") or "",
+		environment_id=environment_id
+		or args.environment_id
+		or _env("RAILWAY_ENVIRONMENT_ID")
+		or "",
+		token=token or args.token or _env("RAILWAY_TOKEN") or "",
+		service_name=service_name,
 		service_prefix=normalize_service_prefix(service_prefix),
 		redis_url=args.redis_url,
-		redis_service_name=args.redis_service
-		or default_redis_service_name(args.service),
+		redis_service_name=redis_service_name
+		or args.redis_service
+		or _env("PULSE_RAILWAY_REDIS_SERVICE")
+		or default_redis_service_name(service_name),
 		redis_prefix=args.redis_prefix,
 		**overrides,
 	)
@@ -116,7 +143,7 @@ def _railway_project(
 def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
 		"--service",
-		default=_env("PULSE_RAILWAY_SERVICE") or "pulse-router",
+		default=None,
 		help="Stable public Railway router service name",
 	)
 	parser.add_argument(
@@ -131,22 +158,22 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument(
 		"--project-id",
-		default=_env("RAILWAY_PROJECT_ID"),
+		default=None,
 		help="Railway project id",
 	)
 	parser.add_argument(
 		"--environment-id",
-		default=_env("RAILWAY_ENVIRONMENT_ID"),
+		default=None,
 		help="Railway environment id",
 	)
 	parser.add_argument(
 		"--token",
-		default=_env("RAILWAY_TOKEN"),
+		default=None,
 		help="Railway project access token",
 	)
 	parser.add_argument(
 		"--service-prefix",
-		default=_env("PULSE_RAILWAY_SERVICE_PREFIX"),
+		default=None,
 		help="Backend Railway service prefix. Defaults to a short prefix derived from --service.",
 	)
 	parser.add_argument(
@@ -161,7 +188,7 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument(
 		"--redis-service",
-		default=_env("PULSE_RAILWAY_REDIS_SERVICE"),
+		default=None,
 		help="Stable Railway Redis service name. Defaults to <service>-redis.",
 	)
 	parser.add_argument(
@@ -171,7 +198,7 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument(
 		"--janitor-service",
-		default=_env("PULSE_RAILWAY_JANITOR_SERVICE"),
+		default=None,
 		help="Stable Railway janitor service name. Defaults to <service>-janitor.",
 	)
 	parser.add_argument(
@@ -384,9 +411,6 @@ def _add_janitor_run_args(parser: argparse.ArgumentParser) -> None:
 
 
 async def _run_deploy(args: argparse.Namespace) -> int:
-	if not args.project_id or not args.environment_id or not args.token:
-		raise ValueError("project id, environment id, and token are required")
-
 	invocation_cwd = Path.cwd()
 	dockerfile_path = _resolve_path(invocation_cwd, args.dockerfile)
 	context_path = _resolve_path(invocation_cwd, args.context)
@@ -404,16 +428,68 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 	web_root_path = _resolve_path(context_path, args.web_root)
 	if not web_root_path.exists():
 		raise ValueError(f"Web root not found: {web_root_path}")
+	app_ctx = load_app_from_target(str(app_path))
+	deploy_target: RailwayDeployTarget | None = None
+	deploy_target_error: RailwayDeployTargetError | None = None
+	try:
+		deploy_target = railway_deploy_target_from_app(app_ctx.app)
+	except RailwayDeployTargetError as exc:
+		deploy_target_error = exc
+
+	project_id = (
+		args.project_id
+		or (deploy_target.project_id if deploy_target is not None else None)
+		or _env("RAILWAY_PROJECT_ID")
+	)
+	environment_id = (
+		args.environment_id
+		or (deploy_target.environment_id if deploy_target is not None else None)
+		or _env("RAILWAY_ENVIRONMENT_ID")
+	)
+	token = args.token or _env("RAILWAY_TOKEN")
+	service_name = (
+		args.service
+		or (deploy_target.router_service_name if deploy_target is not None else None)
+		or _env("PULSE_RAILWAY_SERVICE")
+		or "pulse-router"
+	)
+	service_prefix = (
+		args.service_prefix
+		or (deploy_target.service_prefix if deploy_target is not None else None)
+		or _env("PULSE_RAILWAY_SERVICE_PREFIX")
+		or default_service_prefix(service_name)
+	)
+	redis_service_name = (
+		args.redis_service
+		or (deploy_target.redis_service_name if deploy_target is not None else None)
+		or _env("PULSE_RAILWAY_REDIS_SERVICE")
+		or default_redis_service_name(service_name)
+	)
+	janitor_service_name = (
+		args.janitor_service
+		or (deploy_target.janitor_service_name if deploy_target is not None else None)
+		or _env("PULSE_RAILWAY_JANITOR_SERVICE")
+		or default_janitor_service_name(service_name)
+	)
+	if not project_id or not environment_id or not token:
+		if deploy_target_error is not None:
+			raise ValueError(str(deploy_target_error)) from deploy_target_error
+		raise ValueError("project id, environment id, and token are required")
 
 	project = _railway_project(
 		args,
+		project_id=project_id,
+		environment_id=environment_id,
+		token=token,
+		service_name=service_name,
+		service_prefix=service_prefix,
+		redis_service_name=redis_service_name,
 		backend_port=args.backend_port,
 		backend_replicas=args.backend_replicas,
 		router_replicas=args.router_replicas,
 		router_image=args.router_image,
 		server_address=args.server_address,
-		janitor_service_name=args.janitor_service
-		or default_janitor_service_name(args.service),
+		janitor_service_name=janitor_service_name,
 		janitor_image=args.janitor_image,
 		janitor_cron_schedule=args.janitor_cron_schedule,
 		drain_grace_seconds=args.drain_grace_seconds,

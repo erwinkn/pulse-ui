@@ -142,7 +142,12 @@ def create_app(
 ) -> ps.App:
 	app = ps.App(
 		routes=[ps.Route("/", home)],
-		plugins=[RailwayPlugin()],
+		plugins=[
+			RailwayPlugin(
+				project_id=os.environ.get("RAILWAY_PROJECT_ID"),
+				environment_id=os.environ.get("RAILWAY_ENVIRONMENT_ID"),
+			)
+		],
 		session_store=session_store
 		or railway_session_store(
 			prefix=SESSION_PREFIX,

@@ -46,6 +46,25 @@ def normalize_service_prefix(prefix: str) -> str:
 	return candidate
 
 
+def normalize_service_name(name: str) -> str:
+	candidate = re.sub(r"[^a-z0-9-]+", "-", name.strip().lower())
+	candidate = candidate.strip("-")
+	if not candidate:
+		raise ValueError(
+			"service name must contain at least one alphanumeric character"
+		)
+	if len(candidate) > 32:
+		raise ValueError("service name must be <= 32 chars")
+	return candidate
+
+
+def prefixed_service_name(prefix: str, name: str) -> str:
+	full_name = f"{normalize_service_prefix(prefix)}{normalize_service_name(name)}"
+	if len(full_name) > 32:
+		raise ValueError("service name must be <= 32 chars")
+	return full_name
+
+
 def service_name_for_deployment(prefix: str, deployment_id: str) -> str:
 	service_prefix = normalize_service_prefix(prefix)
 	name = f"{service_prefix}{validate_deployment_id(deployment_id)}"

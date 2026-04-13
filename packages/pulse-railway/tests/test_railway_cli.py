@@ -82,11 +82,14 @@ def _install_fake_deploy(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 def _write_deploy_fixture(root: Path) -> None:
 	(root / "web").mkdir(parents=True)
 	(root / "Dockerfile").write_text("FROM scratch\n")
-	(root / "main.py").write_text("print('hello')\n")
+	(root / "main.py").write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import RailwayPlugin\n"
+		"app = ps.App(routes=[], plugins=[RailwayPlugin()])\n"
+	)
 
 
 def test_deploy_parser_reads_env_overrides(monkeypatch) -> None:
-	monkeypatch.setenv("PULSE_RAILWAY_SERVICE", "router")
 	monkeypatch.setenv("PULSE_RAILWAY_APP_FILE", "examples/aws-ecs/main.py")
 	monkeypatch.setenv("PULSE_RAILWAY_JANITOR_CRON_SCHEDULE", "0 */6 * * *")
 	parser = argparse.ArgumentParser()
@@ -94,7 +97,7 @@ def test_deploy_parser_reads_env_overrides(monkeypatch) -> None:
 	_add_deploy_args(parser)
 	args = parser.parse_args([])
 
-	assert args.service == "router"
+	assert args.service is None
 	assert args.app_file == "examples/aws-ecs/main.py"
 	assert args.janitor_cron_schedule == "0 */6 * * *"
 
@@ -130,6 +133,47 @@ async def test_run_deploy_resolves_paths_and_defaults(monkeypatch, tmp_path) -> 
 	assert deploy_call["project"].janitor_cron_schedule == "*/5 * * * *"
 	assert deploy_call["docker"].dockerfile_path == (project_root / "Dockerfile")
 	assert deploy_call["docker"].context_path == project_root
+
+
+@pytest.mark.asyncio
+async def test_run_deploy_reads_target_from_railway_plugin(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	(project_root / "main.py").write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import RailwayPlugin\n"
+		"app = ps.App(\n"
+		"    routes=[],\n"
+		"    plugins=[\n"
+		'        RailwayPlugin(project_id="project", environment_id="env")\n'
+		"    ],\n"
+		")\n"
+	)
+	deploy_call = _install_fake_deploy(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_deploy(
+		_make_deploy_args(
+			project_id=None,
+			environment_id=None,
+			token="token",
+			service=None,
+			service_prefix=None,
+			redis_service=None,
+			janitor_service=None,
+		)
+	)
+
+	assert result == 0
+	assert deploy_call["project"].project_id == "project"
+	assert deploy_call["project"].environment_id == "env"
+	assert deploy_call["project"].service_name == "pulse-router"
+	assert deploy_call["project"].service_prefix == "pulse-"
+	assert deploy_call["project"].redis_service_name == "pulse-redis"
+	assert deploy_call["project"].janitor_service_name == "pulse-janitor"
 
 
 @pytest.mark.asyncio

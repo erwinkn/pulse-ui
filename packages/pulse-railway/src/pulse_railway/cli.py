@@ -13,9 +13,7 @@ from pulse.cli.helpers import load_app_from_target
 
 from pulse_railway.config import DockerBuild, RailwayProject
 from pulse_railway.deployment import (
-	default_janitor_service_name,
 	default_redis_service_name,
-	default_service_prefix,
 	delete_deployment,
 	deploy,
 	resolve_deployment_id_by_name,
@@ -23,7 +21,6 @@ from pulse_railway.deployment import (
 from pulse_railway.janitor import JanitorResult, run_janitor
 from pulse_railway.railway import normalize_service_prefix, validate_deployment_id
 from pulse_railway.target import (
-	RailwayDeployTarget,
 	RailwayDeployTargetError,
 	railway_deploy_target_from_app,
 )
@@ -48,6 +45,15 @@ JANITOR_RUN_RUNTIME_ERROR = (
 
 def _env(name: str) -> str | None:
 	return os.environ.get(name)
+
+
+def _normalize_optional_service_prefix(value: str | None) -> str | None:
+	if value is None:
+		return None
+	candidate = value.strip()
+	if not candidate:
+		return None
+	return normalize_service_prefix(candidate)
 
 
 def _parse_kv_items(items: list[str] | None, label: str) -> dict[str, str]:
@@ -116,10 +122,7 @@ def _railway_project(
 		service_name or args.service or _env("PULSE_RAILWAY_SERVICE") or "pulse-router"
 	)
 	service_prefix = (
-		service_prefix
-		or args.service_prefix
-		or _env("PULSE_RAILWAY_SERVICE_PREFIX")
-		or default_service_prefix(service_name)
+		service_prefix or args.service_prefix or _env("PULSE_RAILWAY_SERVICE_PREFIX")
 	)
 	return RailwayProject(
 		project_id=project_id or args.project_id or _env("RAILWAY_PROJECT_ID") or "",
@@ -129,7 +132,7 @@ def _railway_project(
 		or "",
 		token=token or args.token or _env("RAILWAY_TOKEN") or "",
 		service_name=service_name,
-		service_prefix=normalize_service_prefix(service_prefix),
+		service_prefix=_normalize_optional_service_prefix(service_prefix),
 		redis_url=args.redis_url,
 		redis_service_name=redis_service_name
 		or args.redis_service
@@ -142,13 +145,8 @@ def _railway_project(
 
 def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
-		"--service",
-		default=None,
-		help="Stable public Railway router service name",
-	)
-	parser.add_argument(
 		"--deployment-name",
-		default=_env("PULSE_RAILWAY_DEPLOYMENT_NAME") or "prod",
+		default=None,
 		help="Deployment prefix used when generating deployment ids",
 	)
 	parser.add_argument(
@@ -174,7 +172,7 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
 		"--service-prefix",
 		default=None,
-		help="Backend Railway service prefix. Defaults to a short prefix derived from --service.",
+		help="Backend Railway service prefix. Defaults to the RailwayPlugin service prefix.",
 	)
 	parser.add_argument(
 		"--server-address",
@@ -187,19 +185,9 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 		help="Redis URL used for draining state and janitor cleanup. If omitted, pulse-railway creates or reuses a Redis service in the Railway project.",
 	)
 	parser.add_argument(
-		"--redis-service",
-		default=None,
-		help="Stable Railway Redis service name. Defaults to <service>-redis.",
-	)
-	parser.add_argument(
 		"--redis-prefix",
 		default=_env("PULSE_RAILWAY_REDIS_PREFIX") or "pulse:railway",
 		help="Redis key prefix for pulse-railway control-plane state.",
-	)
-	parser.add_argument(
-		"--janitor-service",
-		default=None,
-		help="Stable Railway janitor service name. Defaults to <service>-janitor.",
 	)
 	parser.add_argument(
 		"--janitor-image",
@@ -429,51 +417,35 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 	if not web_root_path.exists():
 		raise ValueError(f"Web root not found: {web_root_path}")
 	app_ctx = load_app_from_target(str(app_path))
-	deploy_target: RailwayDeployTarget | None = None
-	deploy_target_error: RailwayDeployTargetError | None = None
 	try:
 		deploy_target = railway_deploy_target_from_app(app_ctx.app)
 	except RailwayDeployTargetError as exc:
-		deploy_target_error = exc
+		raise ValueError(str(exc)) from exc
 
 	project_id = (
-		args.project_id
-		or (deploy_target.project_id if deploy_target is not None else None)
-		or _env("RAILWAY_PROJECT_ID")
+		args.project_id or deploy_target.project_id or _env("RAILWAY_PROJECT_ID")
 	)
 	environment_id = (
 		args.environment_id
-		or (deploy_target.environment_id if deploy_target is not None else None)
+		or deploy_target.environment_id
 		or _env("RAILWAY_ENVIRONMENT_ID")
 	)
 	token = args.token or _env("RAILWAY_TOKEN")
-	service_name = (
-		args.service
-		or (deploy_target.router_service_name if deploy_target is not None else None)
-		or _env("PULSE_RAILWAY_SERVICE")
-		or "pulse-router"
+	deployment_name = (
+		args.deployment_name
+		or _env("PULSE_RAILWAY_DEPLOYMENT_NAME")
+		or deploy_target.deployment_name
+		or "prod"
 	)
+	service_name = deploy_target.router_service_name
 	service_prefix = (
 		args.service_prefix
-		or (deploy_target.service_prefix if deploy_target is not None else None)
+		or deploy_target.service_prefix
 		or _env("PULSE_RAILWAY_SERVICE_PREFIX")
-		or default_service_prefix(service_name)
 	)
-	redis_service_name = (
-		args.redis_service
-		or (deploy_target.redis_service_name if deploy_target is not None else None)
-		or _env("PULSE_RAILWAY_REDIS_SERVICE")
-		or default_redis_service_name(service_name)
-	)
-	janitor_service_name = (
-		args.janitor_service
-		or (deploy_target.janitor_service_name if deploy_target is not None else None)
-		or _env("PULSE_RAILWAY_JANITOR_SERVICE")
-		or default_janitor_service_name(service_name)
-	)
+	redis_service_name = deploy_target.redis_service_name
+	janitor_service_name = deploy_target.janitor_service_name
 	if not project_id or not environment_id or not token:
-		if deploy_target_error is not None:
-			raise ValueError(str(deploy_target_error)) from deploy_target_error
 		raise ValueError("project id, environment id, and token are required")
 
 	project = _railway_project(
@@ -505,7 +477,7 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 	result = await deploy(
 		project=project,
 		docker=docker,
-		deployment_name=args.deployment_name,
+		deployment_name=deployment_name,
 		deployment_id=args.deployment_id,
 		app_file=args.app_file,
 		web_root=args.web_root,

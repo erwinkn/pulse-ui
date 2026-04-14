@@ -13,12 +13,13 @@ class RailwayDeployTargetError(ValueError):
 
 @dataclass(slots=True, frozen=True)
 class RailwayDeployTarget:
-	project_id: str
-	environment_id: str
+	project_id: str | None
+	environment_id: str | None
+	deployment_name: str | None
 	router_service_name: str
 	janitor_service_name: str
 	redis_service_name: str
-	service_prefix: str
+	service_prefix: str | None
 
 
 def railway_deploy_target_from_app(app: ps.App) -> RailwayDeployTarget:
@@ -28,13 +29,10 @@ def railway_deploy_target_from_app(app: ps.App) -> RailwayDeployTarget:
 	if len(plugins) > 1:
 		raise RailwayDeployTargetError("expected exactly one RailwayPlugin on app")
 	plugin = plugins[0]
-	if not plugin.project_id:
-		raise RailwayDeployTargetError("RailwayPlugin.project_id is required")
-	if not plugin.environment_id:
-		raise RailwayDeployTargetError("RailwayPlugin.environment_id is required")
 	return RailwayDeployTarget(
 		project_id=plugin.project_id,
 		environment_id=plugin.environment_id,
+		deployment_name=plugin.deployment_name,
 		router_service_name=plugin.router_service_name,
 		janitor_service_name=plugin.janitor_service_name,
 		redis_service_name=plugin.redis_service_name,

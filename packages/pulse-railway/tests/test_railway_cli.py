@@ -22,8 +22,7 @@ from pulse_railway.janitor import JanitorResult
 
 def _make_deploy_args(**overrides: Any) -> argparse.Namespace:
 	values: dict[str, Any] = {
-		"service": "pulse-router",
-		"deployment_name": "prod",
+		"deployment_name": None,
 		"deployment_id": None,
 		"project_id": "project",
 		"environment_id": "env",
@@ -31,9 +30,7 @@ def _make_deploy_args(**overrides: Any) -> argparse.Namespace:
 		"service_prefix": None,
 		"server_address": None,
 		"redis_url": None,
-		"redis_service": None,
 		"redis_prefix": "pulse:railway",
-		"janitor_service": None,
 		"janitor_image": None,
 		"janitor_cron_schedule": "*/5 * * * *",
 		"drain_grace_seconds": 60,
@@ -97,7 +94,10 @@ def test_deploy_parser_reads_env_overrides(monkeypatch) -> None:
 	_add_deploy_args(parser)
 	args = parser.parse_args([])
 
-	assert args.service is None
+	assert not hasattr(args, "service")
+	assert not hasattr(args, "redis_service")
+	assert not hasattr(args, "janitor_service")
+	assert args.deployment_name is None
 	assert args.app_file == "examples/aws-ecs/main.py"
 	assert args.janitor_cron_schedule == "0 */6 * * *"
 
@@ -127,9 +127,10 @@ async def test_run_deploy_resolves_paths_and_defaults(monkeypatch, tmp_path) -> 
 	result = await _run_deploy(_make_deploy_args())
 
 	assert result == 0
-	assert deploy_call["project"].service_prefix == "pulse-"
-	assert deploy_call["project"].redis_service_name == "pulse-router-redis"
-	assert deploy_call["project"].janitor_service_name == "pulse-router-janitor"
+	assert deploy_call["project"].service_prefix is None
+	assert deploy_call["project"].service_name == "pulse-router"
+	assert deploy_call["project"].redis_service_name == "pulse-redis"
+	assert deploy_call["project"].janitor_service_name == "pulse-janitor"
 	assert deploy_call["project"].janitor_cron_schedule == "*/5 * * * *"
 	assert deploy_call["docker"].dockerfile_path == (project_root / "Dockerfile")
 	assert deploy_call["docker"].context_path == project_root
@@ -148,7 +149,7 @@ async def test_run_deploy_reads_target_from_railway_plugin(
 		"app = ps.App(\n"
 		"    routes=[],\n"
 		"    plugins=[\n"
-		'        RailwayPlugin(project_id="project", environment_id="env")\n'
+		'        RailwayPlugin(project_id="project", environment_id="env", deployment_name="staging")\n'
 		"    ],\n"
 		")\n"
 	)
@@ -160,20 +161,80 @@ async def test_run_deploy_reads_target_from_railway_plugin(
 			project_id=None,
 			environment_id=None,
 			token="token",
-			service=None,
 			service_prefix=None,
-			redis_service=None,
-			janitor_service=None,
 		)
 	)
 
 	assert result == 0
 	assert deploy_call["project"].project_id == "project"
 	assert deploy_call["project"].environment_id == "env"
+	assert deploy_call["deployment_name"] == "staging"
 	assert deploy_call["project"].service_name == "pulse-router"
-	assert deploy_call["project"].service_prefix == "pulse-"
+	assert deploy_call["project"].service_prefix is None
 	assert deploy_call["project"].redis_service_name == "pulse-redis"
 	assert deploy_call["project"].janitor_service_name == "pulse-janitor"
+
+
+@pytest.mark.asyncio
+async def test_run_deploy_env_overrides_plugin_deployment_name(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	(project_root / "main.py").write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import RailwayPlugin\n"
+		'app = ps.App(routes=[], plugins=[RailwayPlugin(deployment_name="staging")])\n'
+	)
+	deploy_call = _install_fake_deploy(monkeypatch)
+	monkeypatch.chdir(project_root)
+	monkeypatch.setenv("PULSE_RAILWAY_DEPLOYMENT_NAME", "preview")
+
+	result = await _run_deploy(_make_deploy_args(deployment_name=None))
+
+	assert result == 0
+	assert deploy_call["deployment_name"] == "preview"
+
+
+@pytest.mark.asyncio
+async def test_run_deploy_uses_literal_stable_service_names_without_prefix(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	(project_root / "main.py").write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import RailwayPlugin\n"
+		"app = ps.App(routes=[], plugins=[RailwayPlugin(router_service='api')])\n"
+	)
+	deploy_call = _install_fake_deploy(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_deploy(_make_deploy_args())
+
+	assert result == 0
+	assert deploy_call["project"].service_name == "api"
+	assert deploy_call["project"].service_prefix is None
+	assert deploy_call["project"].redis_service_name == "pulse-redis"
+	assert deploy_call["project"].janitor_service_name == "pulse-janitor"
+
+
+@pytest.mark.asyncio
+async def test_run_deploy_requires_railway_plugin(monkeypatch, tmp_path) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	(project_root / "web").mkdir(parents=True)
+	(project_root / "Dockerfile").write_text("FROM scratch\n")
+	(project_root / "main.py").write_text(
+		"import pulse as ps\napp = ps.App(routes=[])\n"
+	)
+	_install_fake_deploy(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	with pytest.raises(ValueError, match="RailwayPlugin not found on app"):
+		await _run_deploy(_make_deploy_args())
 
 
 @pytest.mark.asyncio

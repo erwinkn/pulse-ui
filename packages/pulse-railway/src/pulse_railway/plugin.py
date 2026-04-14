@@ -10,7 +10,6 @@ from fastapi import Header, HTTPException
 
 from pulse_railway.constants import (
 	AFFINITY_QUERY_PARAM,
-	DEFAULT_SERVICE_PREFIX,
 	DEPLOYMENT_META_PATH,
 	INTERNAL_SESSIONS_PATH,
 	INTERNAL_TOKEN_HEADER,
@@ -20,7 +19,6 @@ from pulse_railway.constants import (
 from pulse_railway.railway import (
 	normalize_service_name,
 	normalize_service_prefix,
-	prefixed_service_name,
 )
 
 
@@ -30,10 +28,11 @@ class RailwayPlugin(ps.Plugin):
 	priority: int = 100
 	project_id: str | None
 	environment_id: str | None
+	deployment_name: str | None
 	router_service: str
 	janitor_service: str
 	redis_service: str
-	service_prefix: str
+	service_prefix: str | None
 	deployment_id: str
 	internal_token: str
 	enabled: bool
@@ -43,32 +42,45 @@ class RailwayPlugin(ps.Plugin):
 		*,
 		project_id: str | None = None,
 		environment_id: str | None = None,
-		router_service: str = "router",
-		janitor_service: str = "janitor",
-		redis_service: str = "redis",
-		service_prefix: str = DEFAULT_SERVICE_PREFIX,
+		deployment_name: str | None = None,
+		router_service: str = "pulse-router",
+		janitor_service: str = "pulse-janitor",
+		redis_service: str = "pulse-redis",
+		service_prefix: str | None = None,
 	) -> None:
 		self.project_id = _clean_optional(project_id)
 		self.environment_id = _clean_optional(environment_id)
+		self.deployment_name = _clean_optional(deployment_name)
 		self.router_service = normalize_service_name(router_service)
 		self.janitor_service = normalize_service_name(janitor_service)
 		self.redis_service = normalize_service_name(redis_service)
-		self.service_prefix = normalize_service_prefix(service_prefix)
+		self.service_prefix = (
+			normalize_service_prefix(service_prefix)
+			if _clean_optional(service_prefix) is not None
+			else None
+		)
 		self.deployment_id = ""
 		self.internal_token = ""
 		self.enabled = False
 
 	@property
 	def router_service_name(self) -> str:
-		return prefixed_service_name(self.service_prefix, self.router_service)
+		return self._service_name(self.router_service)
 
 	@property
 	def janitor_service_name(self) -> str:
-		return prefixed_service_name(self.service_prefix, self.janitor_service)
+		return self._service_name(self.janitor_service)
 
 	@property
 	def redis_service_name(self) -> str:
-		return prefixed_service_name(self.service_prefix, self.redis_service)
+		return self._service_name(self.redis_service)
+
+	def _service_name(self, name: str) -> str:
+		if self.service_prefix is None:
+			return name
+		if name.startswith("pulse-"):
+			name = name.removeprefix("pulse-")
+		return f"{self.service_prefix}{name}"
 
 	@override
 	def on_startup(self, app: ps.App) -> None:

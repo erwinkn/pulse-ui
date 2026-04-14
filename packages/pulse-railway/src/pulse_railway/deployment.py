@@ -8,7 +8,6 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-import httpx
 from pulse.cli.helpers import load_app_from_target
 
 from pulse_railway.config import (
@@ -23,9 +22,11 @@ from pulse_railway.constants import (
 	ACTIVE_DEPLOYMENT_VARIABLE,
 	DEFAULT_REDIS_TEMPLATE_CODE,
 	DEFAULT_ROUTER_PORT,
-	INTERNAL_STORE_SYNC_PATH,
-	INTERNAL_TOKEN_HEADER,
+	DEPLOYMENT_STATE_ACTIVE,
+	DEPLOYMENT_STATE_DRAINING,
 	PULSE_DEPLOYMENT_ID,
+	PULSE_DEPLOYMENT_STATE,
+	PULSE_DRAIN_STARTED_AT,
 	PULSE_INTERNAL_TOKEN,
 	PULSE_JANITOR_DRAIN_GRACE_SECONDS,
 	PULSE_JANITOR_MAX_DRAIN_AGE_SECONDS,
@@ -46,9 +47,6 @@ from pulse_railway.railway import (
 	validate_deployment_id,
 )
 from pulse_railway.session import RailwayRedisSessionStore
-from pulse_railway.store import (
-	RedisDeploymentStore,
-)
 
 
 class DeploymentError(RuntimeError):
@@ -80,8 +78,16 @@ class DeployResult:
 @dataclass(slots=True)
 class ResolvedRedis:
 	internal_url: str
-	public_url: str | None
 	service: ServiceRecord
+
+
+@dataclass(slots=True)
+class DeploymentServiceRecord:
+	service_id: str
+	service_name: str
+	deployment_id: str
+	state: str | None = None
+	drain_started_at: float | None = None
 
 
 ROUTER_START_COMMAND = (
@@ -190,23 +196,6 @@ def _backend_session_env(
 	return {PULSE_REDIS_URL: redis_url}
 
 
-def _deployment_store_url(
-	*,
-	project: RailwayProject,
-	internals: RailwayInternals,
-	shared_redis_url: str | None,
-) -> str | None:
-	if shared_redis_url is not None:
-		if ".railway.internal" not in shared_redis_url:
-			return shared_redis_url
-		return internals.redis_public_url
-	if project.redis_url is not None and ".railway.internal" not in project.redis_url:
-		return project.redis_url
-	if project.redis_url is not None:
-		return internals.redis_public_url or project.redis_url
-	return internals.redis_public_url
-
-
 async def _run_command(*args: str, cwd: Path | None = None) -> None:
 	process = await asyncio.create_subprocess_exec(
 		*args,
@@ -219,58 +208,6 @@ async def _run_command(*args: str, cwd: Path | None = None) -> None:
 		raise DeploymentError(
 			f"command failed ({' '.join(args)}):\n{stdout.decode()}{stderr.decode()}"
 		)
-
-
-async def _sync_store_via_router(
-	*,
-	server_address: str,
-	internal_token: str,
-	deployment_id: str,
-	service_name: str,
-	draining_deployments: list[tuple[str, str]],
-	timeout: float = 30.0,
-) -> None:
-	url = f"{server_address.rstrip('/')}{INTERNAL_STORE_SYNC_PATH}"
-	deadline = asyncio.get_running_loop().time() + timeout
-	last_error: Exception | None = None
-	payload = {
-		"active": {
-			"deployment_id": deployment_id,
-			"service_name": service_name,
-		},
-		"draining": [
-			{
-				"deployment_id": draining_deployment_id,
-				"service_name": draining_service_name,
-			}
-			for draining_deployment_id, draining_service_name in draining_deployments
-		],
-	}
-	timeout_config = httpx.Timeout(timeout, connect=min(timeout, 30.0))
-	async with httpx.AsyncClient(timeout=timeout_config) as client:
-		while True:
-			try:
-				response = await client.post(
-					url,
-					headers={INTERNAL_TOKEN_HEADER: internal_token},
-					json=payload,
-				)
-				response.raise_for_status()
-				return
-			except (
-				httpx.HTTPStatusError,
-				httpx.ReadError,
-				httpx.ReadTimeout,
-				httpx.ConnectError,
-				httpx.ConnectTimeout,
-			) as exc:
-				last_error = exc
-				if asyncio.get_running_loop().time() >= deadline:
-					break
-				await asyncio.sleep(1)
-	if last_error is None:
-		raise DeploymentError(f"failed to sync store via router at {url}")
-	raise DeploymentError(f"failed to sync store via router at {url}: {last_error}")
 
 
 async def build_and_push_image(
@@ -399,10 +336,11 @@ async def _ensure_router_service(
 		RAILWAY_TOKEN: project.token,
 		RAILWAY_PROJECT_ID: project.project_id,
 		RAILWAY_ENVIRONMENT_ID: project.environment_id,
-		PULSE_SERVICE_PREFIX: internals.service_prefix,
 		"PULSE_BACKEND_PORT": str(project.backend_port),
 		"PORT": str(project.router_port),
 	}
+	if internals.service_prefix is not None:
+		router_variables[PULSE_SERVICE_PREFIX] = internals.service_prefix
 	if internals.redis_url:
 		router_variables[PULSE_REDIS_URL] = internals.redis_url
 		router_variables[PULSE_REDIS_PREFIX] = project.redis_prefix
@@ -504,11 +442,10 @@ async def _ensure_janitor_service(
 	)
 	if not internals.redis_url:
 		raise DeploymentError("redis_url is required for janitor service creation")
-	for key, value in {
+	janitor_variables = {
 		RAILWAY_TOKEN: project.token,
 		RAILWAY_PROJECT_ID: project.project_id,
 		RAILWAY_ENVIRONMENT_ID: project.environment_id,
-		PULSE_SERVICE_PREFIX: internals.service_prefix,
 		PULSE_INTERNAL_TOKEN: internals.internal_token,
 		PULSE_REDIS_URL: internals.redis_url,
 		PULSE_REDIS_PREFIX: project.redis_prefix,
@@ -516,7 +453,10 @@ async def _ensure_janitor_service(
 		PULSE_JANITOR_MAX_DRAIN_AGE_SECONDS: str(project.max_drain_age_seconds),
 		PULSE_WEBSOCKET_HEARTBEAT_SECONDS: str(project.websocket_heartbeat_seconds),
 		PULSE_WEBSOCKET_TTL_SECONDS: str(project.websocket_ttl_seconds),
-	}.items():
+	}
+	if internals.service_prefix is not None:
+		janitor_variables[PULSE_SERVICE_PREFIX] = internals.service_prefix
+	for key, value in janitor_variables.items():
 		await client.upsert_variable(
 			project_id=project.project_id,
 			environment_id=project.environment_id,
@@ -635,14 +575,8 @@ async def resolve_or_create_redis(
 		service_id=service.id,
 		name="REDIS_URL",
 	)
-	service_variables = await client.get_service_variables_for_deployment(
-		project_id=project.project_id,
-		environment_id=project.environment_id,
-		service_id=service.id,
-	)
 	return ResolvedRedis(
 		internal_url=internal_url,
-		public_url=service_variables.get("REDIS_PUBLIC_URL"),
 		service=service,
 	)
 
@@ -677,30 +611,34 @@ async def resolve_project_internals(
 	redis_url: str | None = None,
 ) -> RailwayInternals:
 	redis_url = redis_url or project.redis_url
-	redis_public_url: str | None = None
 	if redis_url is None:
 		resolved_redis = await resolve_or_create_redis(client, project=project)
 		redis_url = resolved_redis.internal_url
-		redis_public_url = resolved_redis.public_url
-	elif ".railway.internal" in redis_url:
-		resolved_redis = await resolve_or_create_redis(client, project=project)
-		redis_public_url = resolved_redis.public_url
 	return RailwayInternals(
-		service_prefix=normalize_service_prefix(project.service_prefix),
+		service_prefix=(
+			normalize_service_prefix(project.service_prefix)
+			if project.service_prefix is not None and project.service_prefix.strip()
+			else None
+		),
 		internal_token=await resolve_or_create_internal_token(
 			client,
 			project=project,
 		),
 		redis_url=redis_url,
-		redis_public_url=redis_public_url,
 	)
 
 
-async def _list_deployment_services(
+def _parse_optional_float(value: str | None) -> float | None:
+	if value is None or not value:
+		return None
+	return float(value)
+
+
+async def _list_deployment_service_records(
 	client: RailwayGraphQLClient,
 	*,
 	project: RailwayProject,
-) -> list[tuple[str, str]]:
+) -> list[DeploymentServiceRecord]:
 	services = await client.list_services(
 		project_id=project.project_id,
 		environment_id=project.environment_id,
@@ -715,12 +653,57 @@ async def _list_deployment_services(
 			for service in services
 		]
 	)
-	deployments: list[tuple[str, str]] = []
+	deployments: list[DeploymentServiceRecord] = []
 	for service, variables in zip(services, variable_sets, strict=True):
 		deployment_id = variables.get(PULSE_DEPLOYMENT_ID)
 		if deployment_id:
-			deployments.append((deployment_id, service.name))
+			deployments.append(
+				DeploymentServiceRecord(
+					service_id=service.id,
+					service_name=service.name,
+					deployment_id=deployment_id,
+					state=variables.get(PULSE_DEPLOYMENT_STATE),
+					drain_started_at=_parse_optional_float(
+						variables.get(PULSE_DRAIN_STARTED_AT)
+					),
+				)
+			)
 	return deployments
+
+
+async def _set_deployment_service_state(
+	client: RailwayGraphQLClient,
+	*,
+	project: RailwayProject,
+	service_id: str,
+	state: str,
+	drain_started_at: float | None,
+) -> None:
+	await client.upsert_variable(
+		project_id=project.project_id,
+		environment_id=project.environment_id,
+		service_id=service_id,
+		name=PULSE_DEPLOYMENT_STATE,
+		value=state,
+		skip_deploys=True,
+	)
+	await client.upsert_variable(
+		project_id=project.project_id,
+		environment_id=project.environment_id,
+		service_id=service_id,
+		name=PULSE_DRAIN_STARTED_AT,
+		value="" if drain_started_at is None else str(drain_started_at),
+		skip_deploys=True,
+	)
+
+
+async def _list_deployment_services(
+	client: RailwayGraphQLClient,
+	*,
+	project: RailwayProject,
+) -> list[tuple[str, str]]:
+	services = await _list_deployment_service_records(client, project=project)
+	return [(service.deployment_id, service.service_name) for service in services]
 
 
 async def resolve_deployment_id_by_name(
@@ -777,7 +760,8 @@ async def deploy(
 		else generate_deployment_id(deployment_name)
 	)
 	backend_service_name = service_name_for_deployment(
-		normalize_service_prefix(project.service_prefix), deployment_id
+		project.service_prefix,
+		deployment_id,
 	)
 	router_image = project.router_image or default_image_ref(
 		image_repository=docker.image_repository,
@@ -788,183 +772,173 @@ async def deploy(
 		prefix=deployment_id,
 	)
 	janitor_image = project.janitor_image or router_image
-	store = None
 
-	try:
-		async with RailwayGraphQLClient(token=project.token) as client:
-			existing_backend = await client.find_service_by_name(
-				project_id=project.project_id,
-				environment_id=project.environment_id,
-				name=backend_service_name,
+	async with RailwayGraphQLClient(token=project.token) as client:
+		existing_backend = await client.find_service_by_name(
+			project_id=project.project_id,
+			environment_id=project.environment_id,
+			name=backend_service_name,
+		)
+		if existing_backend is not None:
+			raise DeploymentError(
+				f"service already exists for deployment {deployment_id}"
 			)
-			if existing_backend is not None:
-				raise DeploymentError(
-					f"service already exists for deployment {deployment_id}"
-				)
-			internals = await resolve_project_internals(
-				client,
-				project=project,
-				redis_url=shared_redis_url,
-			)
-			if internals.redis_url is None:
-				raise DeploymentError("redis_url is required for deployment tracking")
-			store_url = _deployment_store_url(
-				project=project,
-				internals=internals,
-				shared_redis_url=shared_redis_url,
-			)
-			if store_url is not None and ".railway.internal" not in store_url:
-				store = RedisDeploymentStore.from_url(
-					url=store_url,
-					prefix=project.redis_prefix,
-					websocket_ttl_seconds=project.websocket_ttl_seconds,
-				)
+		internals = await resolve_project_internals(
+			client,
+			project=project,
+			redis_url=shared_redis_url,
+		)
+		if internals.redis_url is None:
+			raise DeploymentError("redis_url is required for deployment tracking")
 
-			if project.router_image is None:
-				router_image = await build_router_image(image_ref=router_image)
-				janitor_image = project.janitor_image or router_image
-			(
-				router_service,
-				router_domain,
-				router_deployment_id,
-			) = await _ensure_router_service(
-				client,
-				project=project,
-				internals=internals,
-				router_image=router_image,
-				router_instance=router_instance,
-			)
-			janitor_service, janitor_deployment_id = await _ensure_janitor_service(
-				client,
-				project=project,
-				internals=internals,
-				janitor_image=janitor_image,
-			)
+		if project.router_image is None:
+			router_image = await build_router_image(image_ref=router_image)
+			janitor_image = project.janitor_image or router_image
+		(
+			router_service,
+			router_domain,
+			router_deployment_id,
+		) = await _ensure_router_service(
+			client,
+			project=project,
+			internals=internals,
+			router_image=router_image,
+			router_instance=router_instance,
+		)
+		janitor_service, janitor_deployment_id = await _ensure_janitor_service(
+			client,
+			project=project,
+			internals=internals,
+			janitor_image=janitor_image,
+		)
 
-			server_address = (
-				project.server_address
-				or await _resolve_router_server_address(
-					client,
-					project_id=project.project_id,
-					environment_id=project.environment_id,
-					service_id=router_service.id,
-					fallback_domain=router_domain,
-				)
-			)
-			build_args.setdefault("APP_FILE", app_file)
-			build_args.setdefault("WEB_ROOT", web_root)
-			build_args.setdefault("PULSE_SERVER_ADDRESS", server_address)
-			backend_session_env = _backend_session_env(
-				session_store,
-				redis_url=internals.redis_url,
-			)
-			backend_image = await build_and_push_image(
-				docker=replace(docker, build_args=build_args),
-				image_ref=backend_image,
-			)
+		server_address = project.server_address or await _resolve_router_server_address(
+			client,
+			project_id=project.project_id,
+			environment_id=project.environment_id,
+			service_id=router_service.id,
+			fallback_domain=router_domain,
+		)
+		build_args.setdefault("APP_FILE", app_file)
+		build_args.setdefault("WEB_ROOT", web_root)
+		build_args.setdefault("PULSE_SERVER_ADDRESS", server_address)
+		backend_session_env = _backend_session_env(
+			session_store,
+			redis_url=internals.redis_url,
+		)
+		backend_image = await build_and_push_image(
+			docker=replace(docker, build_args=build_args),
+			image_ref=backend_image,
+		)
 
-			backend_service_id = await client.create_service(
-				project_id=project.project_id,
-				environment_id=project.environment_id,
-				name=backend_service_name,
-				image=backend_image,
-			)
-			for key, value in {
-				PULSE_DEPLOYMENT_ID: deployment_id,
-				PULSE_INTERNAL_TOKEN: internals.internal_token,
-				"PULSE_APP_FILE": app_file,
-				"PULSE_SERVER_ADDRESS": server_address,
-				"PORT": str(project.backend_port),
-				**backend_session_env,
-				**project.env_vars,
-			}.items():
-				await client.upsert_variable(
-					project_id=project.project_id,
-					environment_id=project.environment_id,
-					service_id=backend_service_id,
-					name=key,
-					value=value,
-					skip_deploys=True,
-				)
-			await client.update_service_instance(
-				service_id=backend_service_id,
-				environment_id=project.environment_id,
-				source_image=backend_image,
-				num_replicas=project.backend_replicas,
-				healthcheck_path=backend_instance.healthcheck_path,
-				healthcheck_timeout=backend_instance.healthcheck_timeout,
-				overlap_seconds=backend_instance.overlap_seconds,
-				start_command=pulse_start_command(),
-			)
-			backend_deployment_id = await client.deploy_service(
-				service_id=backend_service_id,
-				environment_id=project.environment_id,
-			)
-			backend_deployment = await client.wait_for_deployment(
-				deployment_id=backend_deployment_id
-			)
-			if backend_deployment["status"] != "SUCCESS":
-				raise DeploymentError("backend deployment failed")
-
+		backend_service_id = await client.create_service(
+			project_id=project.project_id,
+			environment_id=project.environment_id,
+			name=backend_service_name,
+			image=backend_image,
+		)
+		for key, value in {
+			PULSE_DEPLOYMENT_ID: deployment_id,
+			PULSE_INTERNAL_TOKEN: internals.internal_token,
+			"PULSE_APP_FILE": app_file,
+			"PULSE_SERVER_ADDRESS": server_address,
+			"PORT": str(project.backend_port),
+			**backend_session_env,
+			**project.env_vars,
+		}.items():
 			await client.upsert_variable(
 				project_id=project.project_id,
 				environment_id=project.environment_id,
-				name=ACTIVE_DEPLOYMENT_VARIABLE,
-				value=deployment_id,
+				service_id=backend_service_id,
+				name=key,
+				value=value,
 				skip_deploys=True,
 			)
-			draining_deployments = [
-				(tracked_deployment_id, tracked_service_name)
-				for tracked_deployment_id, tracked_service_name in await _list_deployment_services(
-					client, project=project
+		await client.update_service_instance(
+			service_id=backend_service_id,
+			environment_id=project.environment_id,
+			source_image=backend_image,
+			num_replicas=project.backend_replicas,
+			healthcheck_path=backend_instance.healthcheck_path,
+			healthcheck_timeout=backend_instance.healthcheck_timeout,
+			overlap_seconds=backend_instance.overlap_seconds,
+			start_command=pulse_start_command(),
+		)
+		backend_deployment_id = await client.deploy_service(
+			service_id=backend_service_id,
+			environment_id=project.environment_id,
+		)
+		backend_deployment = await client.wait_for_deployment(
+			deployment_id=backend_deployment_id
+		)
+		if backend_deployment["status"] != "SUCCESS":
+			raise DeploymentError("backend deployment failed")
+
+		project_variables = await client.get_project_variables(
+			project_id=project.project_id,
+			environment_id=project.environment_id,
+		)
+		previous_active_deployment_id = project_variables.get(
+			ACTIVE_DEPLOYMENT_VARIABLE
+		)
+		deployment_services = await _list_deployment_service_records(
+			client,
+			project=project,
+		)
+		drain_started_at = datetime.now(UTC).timestamp()
+		await _set_deployment_service_state(
+			client,
+			project=project,
+			service_id=backend_service_id,
+			state=DEPLOYMENT_STATE_ACTIVE,
+			drain_started_at=None,
+		)
+		await asyncio.gather(
+			*[
+				_set_deployment_service_state(
+					client,
+					project=project,
+					service_id=service.service_id,
+					state=DEPLOYMENT_STATE_DRAINING,
+					drain_started_at=(
+						service.drain_started_at
+						if service.state == DEPLOYMENT_STATE_DRAINING
+						and service.deployment_id != previous_active_deployment_id
+						and service.drain_started_at is not None
+						else drain_started_at
+					),
 				)
-				if tracked_deployment_id != deployment_id
+				for service in deployment_services
+				if service.deployment_id != deployment_id
 			]
-			if store is not None:
-				await store.mark_active(
-					deployment_id=deployment_id,
-					service_name=backend_service_name,
-				)
-				await asyncio.gather(
-					*[
-						store.mark_draining(
-							deployment_id=tracked_deployment_id,
-							service_name=tracked_service_name,
-						)
-						for tracked_deployment_id, tracked_service_name in draining_deployments
-					]
-				)
-			else:
-				await _sync_store_via_router(
-					server_address=server_address,
-					internal_token=internals.internal_token,
-					deployment_id=deployment_id,
-					service_name=backend_service_name,
-					draining_deployments=draining_deployments,
-				)
-			return DeployResult(
-				deployment_id=deployment_id,
-				backend_service_id=backend_service_id,
-				backend_service_name=backend_service_name,
-				backend_image=backend_image,
-				router_service_id=router_service.id,
-				router_service_name=project.service_name,
-				router_image=router_image,
-				router_domain=router_domain,
-				server_address=server_address,
-				backend_deployment_id=backend_deployment_id,
-				router_deployment_id=router_deployment_id,
-				backend_status=backend_deployment["status"],
-				router_status="SUCCESS",
-				janitor_service_id=janitor_service.id,
-				janitor_service_name=janitor_service.name,
-				janitor_image=janitor_image,
-				janitor_deployment_id=janitor_deployment_id,
-				janitor_status="SUCCESS",
-			)
-	finally:
-		if store is not None:
-			await store.close()
+		)
+		await client.upsert_variable(
+			project_id=project.project_id,
+			environment_id=project.environment_id,
+			name=ACTIVE_DEPLOYMENT_VARIABLE,
+			value=deployment_id,
+			skip_deploys=True,
+		)
+		return DeployResult(
+			deployment_id=deployment_id,
+			backend_service_id=backend_service_id,
+			backend_service_name=backend_service_name,
+			backend_image=backend_image,
+			router_service_id=router_service.id,
+			router_service_name=project.service_name,
+			router_image=router_image,
+			router_domain=router_domain,
+			server_address=server_address,
+			backend_deployment_id=backend_deployment_id,
+			router_deployment_id=router_deployment_id,
+			backend_status=backend_deployment["status"],
+			router_status="SUCCESS",
+			janitor_service_id=janitor_service.id,
+			janitor_service_name=janitor_service.name,
+			janitor_image=janitor_image,
+			janitor_deployment_id=janitor_deployment_id,
+			janitor_status="SUCCESS",
+		)
 
 
 async def delete_deployment(
@@ -974,48 +948,33 @@ async def delete_deployment(
 	clear_active: bool = True,
 ) -> None:
 	service_name = service_name_for_deployment(
-		normalize_service_prefix(project.service_prefix),
+		project.service_prefix,
 		deployment_id,
 	)
-	store = (
-		RedisDeploymentStore.from_url(
-			url=project.redis_url,
-			prefix=project.redis_prefix,
-			websocket_ttl_seconds=project.websocket_ttl_seconds,
+	async with RailwayGraphQLClient(token=project.token) as client:
+		service = await client.find_service_by_name(
+			project_id=project.project_id,
+			environment_id=project.environment_id,
+			name=service_name,
 		)
-		if project.redis_url
-		else None
-	)
-	try:
-		async with RailwayGraphQLClient(token=project.token) as client:
-			service = await client.find_service_by_name(
+		if service is None:
+			raise DeploymentError(f"service {service_name} not found")
+		await client.delete_service(
+			service_id=service.id,
+			environment_id=project.environment_id,
+		)
+		if not clear_active:
+			return
+		variables = await client.get_project_variables(
+			project_id=project.project_id,
+			environment_id=project.environment_id,
+		)
+		if variables.get(ACTIVE_DEPLOYMENT_VARIABLE) == deployment_id:
+			await client.delete_variable(
 				project_id=project.project_id,
 				environment_id=project.environment_id,
-				name=service_name,
+				name=ACTIVE_DEPLOYMENT_VARIABLE,
 			)
-			if service is None:
-				raise DeploymentError(f"service {service_name} not found")
-			await client.delete_service(
-				service_id=service.id,
-				environment_id=project.environment_id,
-			)
-			if store is not None:
-				await store.clear_deployment(deployment_id=deployment_id)
-			if not clear_active:
-				return
-			variables = await client.get_project_variables(
-				project_id=project.project_id,
-				environment_id=project.environment_id,
-			)
-			if variables.get(ACTIVE_DEPLOYMENT_VARIABLE) == deployment_id:
-				await client.delete_variable(
-					project_id=project.project_id,
-					environment_id=project.environment_id,
-					name=ACTIVE_DEPLOYMENT_VARIABLE,
-				)
-	finally:
-		if store is not None:
-			await store.close()
 
 
 __all__ = [

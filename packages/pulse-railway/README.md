@@ -10,7 +10,6 @@ Railway deployment utilities for Pulse applications.
 set -a; source .env; set +a
 
 uv run pulse-railway deploy \
-  --service pulse-router \
   --deployment-name prod \
   --app-file examples/railway/main.py \
   --web-root examples/railway/web \
@@ -18,7 +17,11 @@ uv run pulse-railway deploy \
   --context .
 ```
 
-If `--redis-url` is omitted, `pulse-railway` creates or reuses a stable Redis service in the Railway project. To pin that service name, pass `--redis-service`.
+`pulse-railway deploy` reads the stable router, Redis, and janitor service names from `RailwayPlugin` on the target app. By default those are `pulse-router`, `pulse-redis`, and `pulse-janitor` without extra prefixing. Backend deployment services also default to no prefix, so their Railway service names match the generated deployment id unless you pass `--service-prefix`.
+
+You can also set `deployment_name` on `RailwayPlugin` to provide the default deploy name from app config. Precedence is: `--deployment-name`, then `PULSE_RAILWAY_DEPLOYMENT_NAME`, then `RailwayPlugin(deployment_name=...)`, then `prod`.
+
+If `--redis-url` is omitted, `pulse-railway` creates or reuses the stable Redis service configured by `RailwayPlugin` in the Railway project.
 
 By default, the package builds and pushes both images to `ttl.sh` for a zero-config flow. For longer-lived deployments, pass `--image-repository ghcr.io/<org>/<name>`.
 
@@ -32,6 +35,8 @@ By default, the package builds and pushes both images to `ttl.sh` for a zero-con
 - Explicit affinity via `pulse_deployment` query param or `x-pulse-deployment` header
 - Websockets proxied through the router to the selected backend service
 - Draining and cleanup state stored in Redis
+- Before janitor deletion, the backend broadcasts Pulse `reload` to connected clients
+- Websocket reconnects with stale affinity fall back to the active deployment so the app can trigger a full-page reload
 
 ## Runtime
 
@@ -47,6 +52,7 @@ When `PULSE_RAILWAY_REDIS_URL` is set:
 - deploy marks the new deployment `active`
 - previous active deployments become `draining`
 - the router records HTTP activity and websocket leases in Redis
+- the janitor signals connected browsers to reload before deleting a drained deployment
 - the janitor cron job deletes drained deployments after they are idle
 
 The janitor job runs as a Railway cron service, not a permanent always-on process. Use a cadence of 5 minutes or slower; Railway does not run cron jobs more frequently than that.

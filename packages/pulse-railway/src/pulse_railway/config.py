@@ -15,7 +15,6 @@ from pulse_railway.constants import (
 	DEFAULT_REDIS_TEMPLATE_CODE,
 	DEFAULT_ROUTER_HEALTH_PATH,
 	DEFAULT_ROUTER_PORT,
-	DEFAULT_SERVICE_PREFIX,
 	DEFAULT_WEBSOCKET_HEARTBEAT_SECONDS,
 	DEFAULT_WEBSOCKET_TTL_SECONDS,
 )
@@ -40,7 +39,7 @@ class RailwayProject:
 	environment_id: str
 	token: str
 	service_name: str
-	service_prefix: str = DEFAULT_SERVICE_PREFIX
+	service_prefix: str | None = None
 	backend_port: int = DEFAULT_BACKEND_PORT
 	backend_replicas: int = 1
 	router_port: int = DEFAULT_ROUTER_PORT
@@ -66,14 +65,9 @@ class RailwayProject:
 class RailwayInternals:
 	"""Resolved runtime state derived from RailwayProject."""
 
-	service_prefix: str
+	service_prefix: str | None
 	internal_token: str
 	redis_url: str | None = None
-	redis_public_url: str | None = None
-
-	@property
-	def store_url(self) -> str | None:
-		return self.redis_public_url or self.redis_url
 
 
 @dataclass

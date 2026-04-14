@@ -65,9 +65,14 @@ def prefixed_service_name(prefix: str, name: str) -> str:
 	return full_name
 
 
-def service_name_for_deployment(prefix: str, deployment_id: str) -> str:
-	service_prefix = normalize_service_prefix(prefix)
-	name = f"{service_prefix}{validate_deployment_id(deployment_id)}"
+def service_name_for_deployment(prefix: str | None, deployment_id: str) -> str:
+	deployment_id = validate_deployment_id(deployment_id)
+	service_prefix = (
+		normalize_service_prefix(prefix)
+		if prefix is not None and prefix.strip()
+		else ""
+	)
+	name = f"{service_prefix}{deployment_id}"
 	if len(name) > 32:
 		raise ValueError("service name must be <= 32 chars")
 	return name
@@ -548,14 +553,18 @@ class RailwayResolver:
 		client: RailwayGraphQLClient,
 		project_id: str,
 		environment_id: str,
-		service_prefix: str,
+		service_prefix: str | None,
 		backend_port: int = DEFAULT_BACKEND_PORT,
 		cache_ttl_seconds: float = 5.0,
 	) -> None:
 		self.client = client
 		self.project_id = project_id
 		self.environment_id = environment_id
-		self.service_prefix = normalize_service_prefix(service_prefix)
+		self.service_prefix = (
+			normalize_service_prefix(service_prefix)
+			if service_prefix is not None and service_prefix.strip()
+			else None
+		)
 		self.backend_port = backend_port
 		self.cache_ttl_seconds = cache_ttl_seconds
 		self._cached_active_deployment_id: str | None = None

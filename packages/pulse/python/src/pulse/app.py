@@ -1072,6 +1072,13 @@ class App:
 		if len(self._user_to_render[sid]) == 0:
 			self.close_session(sid)
 
+	async def reload_connected_clients(self) -> int:
+		payload = list(serialize({"type": "reload"}))
+		socket_ids = list(self._socket_to_render.keys())
+		for socket_id in socket_ids:
+			await self.sio.emit("message", payload, to=socket_id)
+		return len(socket_ids)
+
 	async def close(self):
 		"""
 		Close the app and clean up all sessions.

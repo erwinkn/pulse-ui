@@ -105,6 +105,9 @@ class DeploymentStore:
 			drain_started_at=_to_float(record.get("drain_started_at")),
 		)
 
+	async def get_deployment(self, *, deployment_id: str) -> StoredDeployment | None:
+		return await self._get_deployment(deployment_id)
+
 	async def _save_deployment(self, deployment: StoredDeployment) -> None:
 		payload = json.dumps(asdict(deployment), separators=(",", ":"))
 		await self.store.set(self._deployment_key(deployment.deployment_id), payload)

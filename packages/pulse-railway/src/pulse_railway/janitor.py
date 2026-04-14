@@ -9,11 +9,16 @@ import aiohttp
 
 from pulse_railway.config import RailwayInternals, RailwayProject
 from pulse_railway.constants import (
+	ACTIVE_DEPLOYMENT_VARIABLE,
 	DEFAULT_JANITOR_LOCK_TTL_SECONDS,
+	DEPLOYMENT_STATE_DRAINING,
+	INTERNAL_RELOAD_PATH,
 	INTERNAL_SESSIONS_PATH,
 	INTERNAL_TOKEN_HEADER,
 )
 from pulse_railway.deployment import (
+	_list_deployment_service_records,
+	_set_deployment_service_state,
 	resolve_project_internals,
 )
 from pulse_railway.railway import RailwayGraphQLClient, service_name_for_deployment
@@ -23,6 +28,7 @@ from pulse_railway.store import (
 )
 
 JANITOR_STATUS_CONCURRENCY = 4
+JANITOR_RELOAD_GRACE_SECONDS = 1.0
 
 
 @dataclass(slots=True)
@@ -56,6 +62,7 @@ async def _probe_draining_deployment(
 	deployment_id: str,
 	service_name: str,
 	drain_started_at: float | None,
+	last_seen_at: float | None,
 	project: RailwayProject,
 	internals: RailwayInternals,
 	now: float,
@@ -69,6 +76,17 @@ async def _probe_draining_deployment(
 			service_name=service_name,
 			drainable=True,
 			force_delete=True,
+		)
+	idle_for = now - last_seen_at if last_seen_at is not None else now
+	if (
+		draining_for < project.drain_grace_seconds
+		or idle_for < project.drain_grace_seconds
+	):
+		return _DrainDecision(
+			deployment_id=deployment_id,
+			service_name=service_name,
+			drainable=False,
+			force_delete=False,
 		)
 	async with semaphore:
 		try:
@@ -120,6 +138,26 @@ async def _fetch_deployment_session_status(
 	)
 
 
+async def _signal_deployment_reload(
+	session: aiohttp.ClientSession,
+	*,
+	service_name: str,
+	project: RailwayProject,
+	internals: RailwayInternals,
+) -> int:
+	url = (
+		f"http://{service_name}.railway.internal:{project.backend_port}"
+		f"{INTERNAL_RELOAD_PATH}"
+	)
+	async with session.post(
+		url,
+		headers={INTERNAL_TOKEN_HEADER: internals.internal_token},
+	) as response:
+		response.raise_for_status()
+		payload = await response.json()
+	return int(payload.get("reloaded_socket_count", 0))
+
+
 async def run_janitor(
 	*,
 	project: RailwayProject,
@@ -133,10 +171,10 @@ async def run_janitor(
 		async with RailwayGraphQLClient(token=project.token) as client:
 			internals = await resolve_project_internals(client, project=project)
 			if store is None:
-				if internals.store_url is None:
+				if internals.redis_url is None:
 					raise RuntimeError("redis_url is required for janitor tracking")
 				store = RedisDeploymentStore.from_url(
-					url=internals.store_url,
+					url=internals.redis_url,
 					prefix=project.redis_prefix,
 					websocket_ttl_seconds=project.websocket_ttl_seconds,
 				)
@@ -150,14 +188,48 @@ async def run_janitor(
 				return JanitorResult(lock_acquired=False)
 
 			timestamp = time.time() if now is None else now
-			draining = await store.list_draining_deployments()
+			project_variables = await client.get_project_variables(
+				project_id=project.project_id,
+				environment_id=project.environment_id,
+			)
+			active_deployment_id = project_variables.get(ACTIVE_DEPLOYMENT_VARIABLE)
+			deployment_services = await _list_deployment_service_records(
+				client,
+				project=project,
+			)
+			draining = []
+			for service in deployment_services:
+				if service.deployment_id == active_deployment_id:
+					continue
+				if service.state != DEPLOYMENT_STATE_DRAINING:
+					service.state = DEPLOYMENT_STATE_DRAINING
+					service.drain_started_at = service.drain_started_at or timestamp
+					await _set_deployment_service_state(
+						client,
+						project=project,
+						service_id=service.service_id,
+						state=service.state,
+						drain_started_at=service.drain_started_at,
+					)
+				elif service.drain_started_at is None:
+					service.drain_started_at = timestamp
+					await _set_deployment_service_state(
+						client,
+						project=project,
+						service_id=service.service_id,
+						state=service.state,
+						drain_started_at=service.drain_started_at,
+					)
+				draining.append(service)
 			result = JanitorResult(lock_acquired=True, scanned_count=len(draining))
-			services_by_name = {
-				service.name: service
-				for service in await client.list_services(
-					project_id=project.project_id,
-					environment_id=project.environment_id,
+			draining_service_ids = {
+				service.service_name: service.service_id for service in draining
+			}
+			activity_by_deployment = {
+				deployment.deployment_id: await store.get_deployment(
+					deployment_id=deployment.deployment_id
 				)
+				for deployment in draining
 			}
 			async with aiohttp.ClientSession(
 				timeout=aiohttp.ClientTimeout(total=10, sock_connect=5)
@@ -173,22 +245,40 @@ async def run_janitor(
 								internals.service_prefix, deployment.deployment_id
 							),
 							drain_started_at=deployment.drain_started_at,
+							last_seen_at=(
+								activity.last_seen_at if activity is not None else None
+							),
 							project=project,
 							internals=internals,
 							now=timestamp,
 							semaphore=semaphore,
 						)
 						for deployment in draining
+						for activity in [
+							activity_by_deployment[deployment.deployment_id]
+						]
 					]
 				)
 				for decision in decisions:
 					if not decision.drainable:
 						result.skipped_deployments.append(decision.deployment_id)
 						continue
-					service = services_by_name.get(decision.service_name)
-					if service is not None:
+					connected_reload_count = 0
+					try:
+						connected_reload_count = await _signal_deployment_reload(
+							session,
+							service_name=decision.service_name,
+							project=project,
+							internals=internals,
+						)
+					except Exception:
+						connected_reload_count = 0
+					if connected_reload_count > 0:
+						await asyncio.sleep(JANITOR_RELOAD_GRACE_SECONDS)
+					service_id = draining_service_ids.get(decision.service_name)
+					if service_id is not None:
 						await client.delete_service(
-							service_id=service.id,
+							service_id=service_id,
 							environment_id=project.environment_id,
 						)
 					await store.clear_deployment(deployment_id=decision.deployment_id)

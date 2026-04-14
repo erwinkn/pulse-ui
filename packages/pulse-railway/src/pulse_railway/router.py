@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
@@ -9,21 +8,19 @@ from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 import aiohttp
-from fastapi import FastAPI, Header, HTTPException, Request, Response, WebSocket
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
 from fastapi.responses import JSONResponse
 from starlette.websockets import WebSocketDisconnect
 
 from pulse_railway.constants import (
 	AFFINITY_HEADER,
 	AFFINITY_QUERY_PARAM,
+	CLIENT_LOADER_HEADER,
+	CLIENT_LOADER_LOCATION_HEADER,
 	DEFAULT_BACKEND_PORT,
 	DEFAULT_REDIS_PREFIX,
 	DEFAULT_ROUTER_HEALTH_PATH,
-	DEFAULT_SERVICE_PREFIX,
 	INTERNAL_API_PREFIX,
-	INTERNAL_STORE_SYNC_PATH,
-	INTERNAL_TOKEN_HEADER,
-	PULSE_INTERNAL_TOKEN,
 	PULSE_REDIS_PREFIX,
 	PULSE_SERVICE_PREFIX,
 	PULSE_WEBSOCKET_HEARTBEAT_SECONDS,
@@ -31,6 +28,7 @@ from pulse_railway.constants import (
 	RAILWAY_ENVIRONMENT_ID,
 	RAILWAY_PROJECT_ID,
 	RAILWAY_TOKEN,
+	STALE_AFFINITY_RELOAD_QUERY_PARAM,
 )
 from pulse_railway.railway import RailwayGraphQLClient, RailwayResolver, RouteTarget
 from pulse_railway.store import (
@@ -134,31 +132,41 @@ class AffinityRouter:
 		if self.store is not None:
 			await self.store.close()
 
+	async def _resolve_target(
+		self,
+		deployment_id: str | None,
+	) -> RouteTarget:
+		if deployment_id:
+			target = await self.resolver.resolve(deployment_id)
+			if target is not None:
+				return target
+			raise HTTPException(status_code=404, detail="deployment not found")
+		target = await self.resolver.resolve_active()
+		if target is None:
+			raise HTTPException(status_code=404, detail="deployment not found")
+		return target
+
 	async def _resolve_from_http(self, request: Request) -> RouteTarget:
 		deployment_id = request.query_params.get(AFFINITY_QUERY_PARAM)
 		if not deployment_id:
 			deployment_id = request.headers.get(AFFINITY_HEADER)
-		target = (
-			await self.resolver.resolve(deployment_id)
-			if deployment_id
-			else await self.resolver.resolve_active()
-		)
-		if target is None:
-			raise HTTPException(status_code=404, detail="deployment not found")
-		return target
+		return await self._resolve_target(deployment_id)
 
 	async def _resolve_from_websocket(self, websocket: WebSocket) -> RouteTarget:
 		deployment_id = websocket.query_params.get(AFFINITY_QUERY_PARAM)
 		if not deployment_id:
 			deployment_id = websocket.headers.get(AFFINITY_HEADER)
-		target = (
-			await self.resolver.resolve(deployment_id)
-			if deployment_id
-			else await self.resolver.resolve_active()
-		)
-		if target is None:
-			raise HTTPException(status_code=404, detail="deployment not found")
-		return target
+		try:
+			return await self._resolve_target(deployment_id)
+		except HTTPException:
+			reload_on_stale_affinity = (
+				websocket.query_params.get(STALE_AFFINITY_RELOAD_QUERY_PARAM) == "1"
+			)
+			if deployment_id and reload_on_stale_affinity:
+				target = await self.resolver.resolve_active()
+				if target is not None:
+					return target
+			raise
 
 	async def health(self) -> JSONResponse:
 		return JSONResponse({"ok": True})
@@ -171,7 +179,25 @@ class AffinityRouter:
 	async def proxy_http(self, request: Request, path: str) -> Response:
 		if self._is_internal_path(path):
 			raise HTTPException(status_code=404, detail="not found")
-		target = await self._resolve_from_http(request)
+		deployment_id = request.query_params.get(AFFINITY_QUERY_PARAM)
+		if not deployment_id:
+			deployment_id = request.headers.get(AFFINITY_HEADER)
+		client_loader = request.headers.get(CLIENT_LOADER_HEADER) == "1"
+		client_loader_location = request.headers.get(CLIENT_LOADER_LOCATION_HEADER)
+		try:
+			target = await self._resolve_target(deployment_id)
+		except HTTPException:
+			if deployment_id and await self.resolver.resolve_active() is not None:
+				if client_loader and client_loader_location:
+					return Response(
+						status_code=302,
+						headers={"location": client_loader_location},
+					)
+				return JSONResponse(
+					{"detail": "stale affinity"},
+					status_code=409,
+				)
+			raise
 		if self.store is not None:
 			await self.store.record_request(deployment_id=target.deployment_id)
 		url = target.base_url.rstrip("/")
@@ -322,7 +348,6 @@ def build_app(
 	resolver: Resolver,
 	store: DeploymentStore | None = None,
 	websocket_heartbeat_seconds: int = 15,
-	internal_token: str = "",
 ) -> FastAPI:
 	router = AffinityRouter(
 		resolver,
@@ -341,76 +366,6 @@ def build_app(
 	@app.get(DEFAULT_ROUTER_HEALTH_PATH)
 	async def healthz() -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
 		return await router.health()
-
-	@app.post(INTERNAL_STORE_SYNC_PATH)
-	async def sync_store(
-		payload: dict[str, Any],
-		x_internal_token: str | None = Header(
-			default=None, alias=INTERNAL_TOKEN_HEADER
-		),
-	) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
-		if store is None:
-			raise HTTPException(status_code=503, detail="store unavailable")
-		if not internal_token or x_internal_token is None:
-			raise HTTPException(status_code=403, detail="forbidden")
-		if not hmac.compare_digest(x_internal_token, internal_token):
-			raise HTTPException(status_code=403, detail="forbidden")
-
-		active = payload.get("active")
-		if not isinstance(active, dict):
-			raise HTTPException(status_code=400, detail="active is required")
-		active_deployment_id = active.get("deployment_id")
-		active_service_name = active.get("service_name")
-		if not isinstance(active_deployment_id, str) or not isinstance(
-			active_service_name, str
-		):
-			raise HTTPException(
-				status_code=400,
-				detail="active deployment_id and service_name are required",
-			)
-
-		await store.mark_active(
-			deployment_id=active_deployment_id,
-			service_name=active_service_name,
-		)
-
-		draining_payload = payload.get("draining") or []
-		if not isinstance(draining_payload, list):
-			raise HTTPException(status_code=400, detail="draining must be a list")
-		draining_count = 0
-		for item in draining_payload:
-			if not isinstance(item, dict):
-				raise HTTPException(
-					status_code=400,
-					detail="draining entries must be objects",
-				)
-			draining_deployment_id = item.get("deployment_id")
-			draining_service_name = item.get("service_name")
-			if not isinstance(draining_deployment_id, str):
-				raise HTTPException(
-					status_code=400,
-					detail="draining deployment_id is required",
-				)
-			if draining_service_name is not None and not isinstance(
-				draining_service_name, str
-			):
-				raise HTTPException(
-					status_code=400,
-					detail="draining service_name must be a string",
-				)
-			await store.mark_draining(
-				deployment_id=draining_deployment_id,
-				service_name=draining_service_name,
-			)
-			draining_count += 1
-
-		return JSONResponse(
-			{
-				"ok": True,
-				"active_deployment_id": active_deployment_id,
-				"draining_count": draining_count,
-			}
-		)
 
 	@app.api_route(
 		"/{path:path}",
@@ -439,7 +394,7 @@ def build_app_from_env() -> FastAPI:
 		client=client,
 		project_id=project_id,
 		environment_id=environment_id,
-		service_prefix=os.environ.get(PULSE_SERVICE_PREFIX, DEFAULT_SERVICE_PREFIX),
+		service_prefix=os.environ.get(PULSE_SERVICE_PREFIX),
 		backend_port=int(
 			os.environ.get("PULSE_BACKEND_PORT", str(DEFAULT_BACKEND_PORT))
 		),
@@ -461,7 +416,6 @@ def build_app_from_env() -> FastAPI:
 		websocket_heartbeat_seconds=int(
 			os.environ.get(PULSE_WEBSOCKET_HEARTBEAT_SECONDS, "15")
 		),
-		internal_token=os.environ.get(PULSE_INTERNAL_TOKEN, ""),
 	)
 
 

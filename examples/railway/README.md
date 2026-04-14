@@ -29,7 +29,6 @@ Deploy from the repository root so Docker uses the local workspace packages:
 set -a; source .env; set +a
 
 uv run pulse-railway deploy \
-  --service pulse-router \
   --deployment-name redis-smoke \
   --app-file examples/railway/main.py \
   --web-root examples/railway/web \
@@ -37,7 +36,7 @@ uv run pulse-railway deploy \
   --context .
 ```
 
-The app opts into `pulse_railway.railway_session_store()`. Locally, the example falls back to `ps.InMemorySessionStore()`. On Railway deploy, `pulse-railway` injects `PULSE_RAILWAY_REDIS_URL` so the same Redis service backs deployment tracking and app sessions.
+The app opts into `pulse_railway.railway_session_store()`. Locally, the example falls back to `ps.InMemorySessionStore()`. On Railway deploy, `pulse-railway` reads the stable service names from `RailwayPlugin` and injects `PULSE_RAILWAY_REDIS_URL` so the same Redis service backs deployment tracking and app sessions.
 
 ## Verify
 

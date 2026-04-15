@@ -19,9 +19,9 @@ from pulse_railway.constants import (
 from pulse_railway.deployment import (
 	_list_deployment_service_records,
 	_set_deployment_service_state,
-	resolve_project_internals,
 )
 from pulse_railway.railway import RailwayGraphQLClient, service_name_for_deployment
+from pulse_railway.stack import resolve_project_internals
 from pulse_railway.store import (
 	DeploymentStore,
 	RedisDeploymentStore,

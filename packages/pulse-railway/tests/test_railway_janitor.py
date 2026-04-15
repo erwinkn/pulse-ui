@@ -530,7 +530,7 @@ async def test_janitor_resolves_project_redis_when_url_missing(monkeypatch) -> N
 		return "secret-token"
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment.resolve_or_create_internal_token",
+		"pulse_railway.stack.resolve_or_create_internal_token",
 		fake_internal_token,
 	)
 

@@ -18,7 +18,7 @@ uv run pulse run examples/railway/main.py
 With a local Redis instead of the example's in-memory fallback:
 
 ```bash
-PULSE_RAILWAY_REDIS_URL=redis://localhost:6379/0 uv run pulse run examples/railway/main.py
+REDIS_URL=redis://localhost:6379/0 uv run pulse run examples/railway/main.py
 ```
 
 ## Railway Deploy
@@ -28,6 +28,9 @@ Deploy from the repository root so Docker uses the local workspace packages:
 ```bash
 set -a; source .env; set +a
 
+uv run pulse-railway init \
+  --app-file examples/railway/main.py
+
 uv run pulse-railway deploy \
   --deployment-name redis-smoke \
   --app-file examples/railway/main.py \
@@ -36,7 +39,16 @@ uv run pulse-railway deploy \
   --context .
 ```
 
-The app opts into `pulse_railway.railway_session_store()`. Locally, the example falls back to `ps.InMemorySessionStore()`. On Railway deploy, `pulse-railway` reads the stable service names from `RailwayPlugin` and injects `PULSE_RAILWAY_REDIS_URL` so the same Redis service backs deployment tracking and app sessions.
+The app opts into `pulse_railway.railway_session_store()`. Locally, the example falls back to `ps.InMemorySessionStore()`. On Railway deploy, `pulse-railway` reads the stable service names from `RailwayPlugin` and injects `REDIS_URL` so the same Redis service backs deployment tracking and app sessions.
+
+When you upgrade `pulse-railway`, run:
+
+```bash
+uv run pulse-railway upgrade \
+  --app-file examples/railway/main.py
+```
+
+`pulse-railway deploy` now assumes the baseline stack already exists. If you skip `init` or need to reconcile an older stack, `deploy` fails fast and points you back to `init` or `upgrade`.
 
 ## Verify
 

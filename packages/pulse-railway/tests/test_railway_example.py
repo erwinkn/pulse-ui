@@ -73,6 +73,7 @@ async def test_example_preserves_session_across_app_instances(
 	assert session_response.status_code == 200
 	assert meta_response.status_code == 200
 	assert session_response.json()["counter"] == 1
+	assert session_response.json()["behavior_version"] == "concurrent-v2"
 	assert session_response.json()["first_deployment_id"] == "blue"
 	assert session_response.json()["redis_target"] == "in-memory fallback"
 	assert meta_response.json()["deployment_id"] == "blue"
@@ -93,6 +94,7 @@ async def test_example_preserves_session_across_app_instances(
 	assert session_response.status_code == 200
 	assert meta_response.status_code == 200
 	assert session_response.json()["counter"] == 1
+	assert session_response.json()["behavior_version"] == "concurrent-v2"
 	assert session_response.json()["first_deployment_id"] == "blue"
 	assert session_response.json()["redis_target"] == "in-memory fallback"
 	assert meta_response.json()["deployment_id"] == "green"
@@ -176,7 +178,8 @@ def test_railway_example_prod_smoke() -> None:
 
 		assert response is not None
 		assert response.status_code == 200
-		assert "Pulse Railway Session Store Smoke Test" in response.text
+		assert "Pulse Railway Concurrent Deploy Smoke Test" in response.text
+		assert "Behavior version: concurrent-v2" in response.text
 	finally:
 		process.terminate()
 		try:

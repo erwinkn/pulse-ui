@@ -109,6 +109,12 @@ class TemplateRecord:
 	serialized_config: dict[str, Any]
 
 
+@dataclass(slots=True)
+class EnvironmentRecord:
+	id: str
+	name: str
+
+
 class RailwayGraphQLClient:
 	def __init__(
 		self,
@@ -116,14 +122,17 @@ class RailwayGraphQLClient:
 		token: str,
 		endpoint: str = RAILWAY_API_ENDPOINT,
 		timeout: float = DEFAULT_RAILWAY_GRAPHQL_TIMEOUT,
+		auth_mode: str = "auto",
 	) -> None:
+		self.token = token
 		self.endpoint = endpoint
+		self.auth_mode = auth_mode
+		self._resolved_auth_mode: str | None = (
+			None if auth_mode == "auto" else auth_mode
+		)
 		self._client = httpx.AsyncClient(
 			base_url=endpoint,
-			headers={
-				"Content-Type": "application/json",
-				"Project-Access-Token": token,
-			},
+			headers={"Content-Type": "application/json"},
 			timeout=httpx.Timeout(
 				timeout,
 				connect=min(timeout, DEFAULT_RAILWAY_GRAPHQL_CONNECT_TIMEOUT),
@@ -139,18 +148,149 @@ class RailwayGraphQLClient:
 	async def __aexit__(self, *_: object) -> None:
 		await self.aclose()
 
-	async def graphql(self, query: str, variables: dict[str, Any] | None = None) -> Any:
+	def _headers_for_auth_mode(self, auth_mode: str) -> dict[str, str]:
+		if auth_mode == "project-token":
+			return {"Project-Access-Token": self.token}
+		if auth_mode == "bearer":
+			return {"Authorization": f"Bearer {self.token}"}
+		raise ValueError(f"unsupported Railway auth mode: {auth_mode}")
+
+	async def _post_graphql(
+		self,
+		*,
+		query: str,
+		variables: dict[str, Any] | None = None,
+		auth_mode: str,
+	) -> dict[str, Any]:
 		response = await self._client.post(
 			"",
 			json={"query": query, "variables": variables or {}},
+			headers=self._headers_for_auth_mode(auth_mode),
 		)
 		response.raise_for_status()
-		payload = response.json()
+		return response.json()
+
+	async def _ensure_auth_mode(self) -> str:
+		if self._resolved_auth_mode is not None:
+			return self._resolved_auth_mode
+		try:
+			payload = await self._post_graphql(
+				query="""
+				query {
+					projectToken {
+						projectId
+					}
+				}
+				""",
+				auth_mode="project-token",
+			)
+		except (httpx.HTTPError, ValueError):
+			payload = {}
+		project_token = (payload.get("data") or {}).get("projectToken")
+		self._resolved_auth_mode = (
+			"project-token" if isinstance(project_token, dict) else "bearer"
+		)
+		return self._resolved_auth_mode
+
+	async def graphql(
+		self,
+		query: str,
+		variables: dict[str, Any] | None = None,
+		*,
+		auth_mode: str | None = None,
+	) -> Any:
+		selected_auth_mode = auth_mode or await self._ensure_auth_mode()
+		payload = await self._post_graphql(
+			query=query,
+			variables=variables,
+			auth_mode=selected_auth_mode,
+		)
 		errors = payload.get("errors") or []
 		if errors:
 			message = "; ".join(error["message"] for error in errors)
 			raise RailwayGraphQLError(message)
 		return payload["data"]
+
+	async def create_project(
+		self,
+		*,
+		name: str,
+		workspace_id: str,
+		default_environment_name: str | None = None,
+	) -> str:
+		input_payload: dict[str, Any] = {
+			"name": name,
+			"workspaceId": workspace_id,
+		}
+		if default_environment_name is not None:
+			input_payload["defaultEnvironmentName"] = default_environment_name
+		data = await self.graphql(
+			"""
+			mutation($input: ProjectCreateInput!) {
+				projectCreate(input: $input) {
+					id
+				}
+			}
+			""",
+			{"input": input_payload},
+			auth_mode="bearer",
+		)
+		return data["projectCreate"]["id"]
+
+	async def list_environments(self, *, project_id: str) -> list[EnvironmentRecord]:
+		data = await self.graphql(
+			"""
+			query($projectId: String!) {
+				environments(projectId: $projectId) {
+					edges {
+						node {
+							id
+							name
+						}
+					}
+				}
+			}
+			""",
+			{"projectId": project_id},
+		)
+		return [
+			EnvironmentRecord(id=edge["node"]["id"], name=edge["node"]["name"])
+			for edge in data["environments"]["edges"]
+		]
+
+	async def get_environment_config(
+		self, *, project_id: str, environment_id: str
+	) -> dict[str, Any]:
+		data = await self.graphql(
+			"""
+			query($projectId: String!, $environmentId: String!) {
+				environment(id: $environmentId, projectId: $projectId) {
+					config
+				}
+			}
+			""",
+			{"projectId": project_id, "environmentId": environment_id},
+		)
+		return dict(data["environment"]["config"])
+
+	async def set_service_group_id(
+		self, *, environment_id: str, service_id: str, group_id: str
+	) -> None:
+		await self.graphql(
+			"""
+			mutation($environmentId: String!, $patch: EnvironmentConfig) {
+				environmentPatchCommit(
+					environmentId: $environmentId,
+					patch: $patch,
+					commitMessage: "Place service in Railway canvas group"
+				)
+			}
+			""",
+			{
+				"environmentId": environment_id,
+				"patch": {"services": {service_id: {"groupId": group_id}}},
+			},
+		)
 
 	async def get_project_variables(
 		self,
@@ -232,20 +372,22 @@ class RailwayGraphQLClient:
 		project_id: str,
 		environment_id: str,
 		name: str,
+		service_id: str | None = None,
 	) -> None:
+		input_payload: dict[str, Any] = {
+			"projectId": project_id,
+			"environmentId": environment_id,
+			"name": name,
+		}
+		if service_id is not None:
+			input_payload["serviceId"] = service_id
 		await self.graphql(
 			"""
 			mutation($input: VariableDeleteInput!) {
 				variableDelete(input: $input)
 			}
 			""",
-			{
-				"input": {
-					"projectId": project_id,
-					"environmentId": environment_id,
-					"name": name,
-				}
-			},
+			{"input": input_payload},
 		)
 
 	async def list_services(
@@ -624,6 +766,7 @@ class RailwayResolver:
 
 __all__ = [
 	"ACTIVE_DEPLOYMENT_VARIABLE",
+	"EnvironmentRecord",
 	"RailwayGraphQLClient",
 	"RailwayGraphQLError",
 	"RailwayResolver",

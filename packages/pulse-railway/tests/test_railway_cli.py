@@ -9,15 +9,47 @@ import pytest
 from pulse_railway.cli import (
 	JANITOR_RUN_RUNTIME_ERROR,
 	_add_deploy_args,
+	_add_init_args,
 	_add_janitor_run_args,
+	_add_upgrade_args,
 	_run_delete,
 	_run_deploy,
+	_run_init,
 	_run_janitor_run,
 	_run_remove,
+	_run_upgrade,
 	main,
 )
 from pulse_railway.deployment import DeployResult
 from pulse_railway.janitor import JanitorResult
+from pulse_railway.stack import InitResult, StackServiceResult, UpgradeResult
+
+
+def _make_init_args(**overrides: Any) -> argparse.Namespace:
+	values: dict[str, Any] = {
+		"app_file": "main.py",
+		"project_id": "project",
+		"environment_id": "env",
+		"workspace_id": None,
+		"project_name": None,
+		"token": "token",
+		"service_prefix": None,
+		"redis_url": None,
+		"redis_prefix": "pulse:railway",
+		"router_image": None,
+		"janitor_image": None,
+		"janitor_cron_schedule": "*/5 * * * *",
+		"drain_grace_seconds": 60,
+		"max_drain_age_seconds": 86400,
+		"backend_port": 8000,
+		"router_replicas": 1,
+	}
+	values.update(overrides)
+	return argparse.Namespace(**values)
+
+
+def _make_upgrade_args(**overrides: Any) -> argparse.Namespace:
+	return _make_init_args(**overrides)
 
 
 def _make_deploy_args(**overrides: Any) -> argparse.Namespace:
@@ -29,26 +61,94 @@ def _make_deploy_args(**overrides: Any) -> argparse.Namespace:
 		"token": "token",
 		"service_prefix": None,
 		"server_address": None,
-		"redis_url": None,
-		"redis_prefix": "pulse:railway",
-		"janitor_image": None,
-		"janitor_cron_schedule": "*/5 * * * *",
-		"drain_grace_seconds": 60,
-		"max_drain_age_seconds": 86400,
 		"app_file": "main.py",
 		"web_root": "web",
 		"dockerfile": "Dockerfile",
 		"context": ".",
 		"image_repository": None,
-		"router_image": None,
 		"build_arg": [],
 		"env": [],
 		"backend_port": 8000,
 		"backend_replicas": 1,
-		"router_replicas": 1,
 	}
 	values.update(overrides)
 	return argparse.Namespace(**values)
+
+
+def _install_fake_init(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+	init_call: dict[str, Any] = {}
+
+	async def fake_bootstrap_stack(**kwargs: Any) -> InitResult:
+		init_call.update(kwargs)
+		return InitResult(
+			router=StackServiceResult(
+				service_id="svc-router",
+				service_name="pulse-router",
+				domain="pulse-router-production.up.railway.app",
+				created=True,
+				deployed=True,
+				deployment_id="deploy-router",
+				status="SUCCESS",
+			),
+			janitor=StackServiceResult(
+				service_id="svc-janitor",
+				service_name="pulse-janitor",
+				created=True,
+				deployed=True,
+				deployment_id="deploy-janitor",
+				status="SUCCESS",
+			),
+			redis=StackServiceResult(
+				service_id="svc-redis",
+				service_name="pulse-redis",
+				created=True,
+			),
+			internal_token_created=True,
+			redis_url="redis://pulse-router-redis.railway.internal:6379",
+			server_address="https://pulse-router-production.up.railway.app",
+		)
+
+	monkeypatch.setattr(
+		"pulse_railway.commands.init.bootstrap_stack", fake_bootstrap_stack
+	)
+	return init_call
+
+
+def _install_fake_upgrade(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+	upgrade_call: dict[str, Any] = {}
+
+	async def fake_upgrade_stack(**kwargs: Any) -> UpgradeResult:
+		upgrade_call.update(kwargs)
+		return UpgradeResult(
+			router=StackServiceResult(
+				service_id="svc-router",
+				service_name="pulse-router",
+				domain="pulse-router-production.up.railway.app",
+				deployed=True,
+				deployment_id="deploy-router",
+				status="SUCCESS",
+			),
+			janitor=StackServiceResult(
+				service_id="svc-janitor",
+				service_name="pulse-janitor",
+				deployed=True,
+				deployment_id="deploy-janitor",
+				status="SUCCESS",
+			),
+			redis=StackServiceResult(
+				service_id="svc-redis",
+				service_name="pulse-redis",
+			),
+			internal_token_created=False,
+			redis_url="redis://pulse-router-redis.railway.internal:6379",
+			server_address="https://pulse-router-production.up.railway.app",
+		)
+
+	monkeypatch.setattr(
+		"pulse_railway.commands.upgrade.upgrade_stack",
+		fake_upgrade_stack,
+	)
+	return upgrade_call
 
 
 def _install_fake_deploy(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
@@ -59,7 +159,7 @@ def _install_fake_deploy(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 		return DeployResult(
 			deployment_id="prod-260402-120000",
 			backend_service_id="svc-2",
-			backend_service_name="pulse-prod-260402-120000",
+			backend_service_name="prod-260402-120000",
 			backend_image="ttl.sh/backend:24h",
 			router_service_id="svc-1",
 			router_service_name="pulse-router",
@@ -67,12 +167,12 @@ def _install_fake_deploy(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 			router_domain="pulse-router-production.up.railway.app",
 			server_address="https://pulse-router-production.up.railway.app",
 			backend_deployment_id="deploy-svc-2",
-			router_deployment_id="deploy-svc-1",
 			backend_status="SUCCESS",
-			router_status="SUCCESS",
+			janitor_service_id="svc-3",
+			janitor_service_name="pulse-janitor",
 		)
 
-	monkeypatch.setattr("pulse_railway.cli.deploy", fake_deploy)
+	monkeypatch.setattr("pulse_railway.commands.deploy.deploy", fake_deploy)
 	return deploy_call
 
 
@@ -86,20 +186,50 @@ def _write_deploy_fixture(root: Path) -> None:
 	)
 
 
-def test_deploy_parser_reads_env_overrides(monkeypatch) -> None:
+def test_init_parser_reads_env_overrides(monkeypatch) -> None:
 	monkeypatch.setenv("PULSE_RAILWAY_APP_FILE", "examples/aws-ecs/main.py")
 	monkeypatch.setenv("PULSE_RAILWAY_JANITOR_CRON_SCHEDULE", "0 */6 * * *")
+	parser = argparse.ArgumentParser()
+
+	_add_init_args(parser)
+	args = parser.parse_args([])
+
+	assert args.app_file == "examples/aws-ecs/main.py"
+	assert args.janitor_cron_schedule == "0 */6 * * *"
+	assert args.redis_url is None
+
+
+def test_init_parser_reads_workspace_env_override(monkeypatch) -> None:
+	monkeypatch.setenv("RAILWAY_WORKSPACE_ID", "workspace")
+	parser = argparse.ArgumentParser()
+
+	_add_init_args(parser)
+	args = parser.parse_args([])
+
+	assert args.workspace_id == "workspace"
+
+
+def test_upgrade_parser_reads_env_overrides(monkeypatch) -> None:
+	monkeypatch.setenv("PULSE_RAILWAY_ROUTER_IMAGE", "ghcr.io/pulse/router:1")
+	parser = argparse.ArgumentParser()
+
+	_add_upgrade_args(parser)
+	args = parser.parse_args([])
+
+	assert args.router_image == "ghcr.io/pulse/router:1"
+
+
+def test_deploy_parser_drops_stable_stack_flags(monkeypatch) -> None:
+	monkeypatch.setenv("PULSE_RAILWAY_APP_FILE", "examples/aws-ecs/main.py")
 	parser = argparse.ArgumentParser()
 
 	_add_deploy_args(parser)
 	args = parser.parse_args([])
 
-	assert not hasattr(args, "service")
-	assert not hasattr(args, "redis_service")
-	assert not hasattr(args, "janitor_service")
-	assert args.deployment_name is None
 	assert args.app_file == "examples/aws-ecs/main.py"
-	assert args.janitor_cron_schedule == "0 */6 * * *"
+	assert not hasattr(args, "redis_url")
+	assert not hasattr(args, "janitor_cron_schedule")
+	assert not hasattr(args, "router_image")
 
 
 def test_janitor_parser_reads_service_env_defaults(monkeypatch) -> None:
@@ -117,6 +247,213 @@ def test_janitor_parser_reads_service_env_defaults(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_init_reads_target_from_railway_plugin(monkeypatch, tmp_path) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	(project_root / "main.py").write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import RailwayPlugin\n"
+		"app = ps.App(\n"
+		"    routes=[],\n"
+		"    plugins=[\n"
+		'        RailwayPlugin(project_id="project", environment_id="env")\n'
+		"    ],\n"
+		")\n"
+	)
+	init_call = _install_fake_init(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_init(
+		_make_init_args(
+			project_id=None,
+			environment_id=None,
+			token="token",
+		)
+	)
+
+	assert result == 0
+	assert init_call["project"].project_id == "project"
+	assert init_call["project"].environment_id == "env"
+	assert init_call["project"].service_name == "pulse-router"
+	assert init_call["project"].redis_service_name == "pulse-redis"
+	assert init_call["project"].janitor_service_name == "pulse-janitor"
+
+
+@pytest.mark.asyncio
+async def test_run_init_creates_project_when_project_id_missing(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	init_call = _install_fake_init(monkeypatch)
+	client_calls: dict[str, Any] = {}
+
+	class _FakeClient:
+		def __init__(self, **_: object) -> None:
+			return None
+
+		async def __aenter__(self) -> "_FakeClient":
+			return self
+
+		async def __aexit__(self, *_: object) -> None:
+			return None
+
+		async def create_project(
+			self,
+			*,
+			name: str,
+			workspace_id: str,
+			default_environment_name: str | None = None,
+		) -> str:
+			client_calls["name"] = name
+			client_calls["workspace_id"] = workspace_id
+			client_calls["default_environment_name"] = default_environment_name
+			return "project-created"
+
+		async def list_environments(self, *, project_id: str) -> list[Any]:
+			client_calls["project_id"] = project_id
+			return [type("Env", (), {"id": "env-created", "name": "production"})()]
+
+	monkeypatch.setattr("pulse_railway.commands.init.RailwayGraphQLClient", _FakeClient)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_init(
+		_make_init_args(
+			project_id=None,
+			environment_id=None,
+			workspace_id="workspace",
+			project_name=None,
+			token="token",
+		)
+	)
+
+	assert result == 0
+	assert client_calls["name"] == "main"
+	assert client_calls["workspace_id"] == "workspace"
+	assert client_calls["project_id"] == "project-created"
+	assert init_call["project"].project_id == "project-created"
+	assert init_call["project"].environment_id == "env-created"
+
+
+@pytest.mark.asyncio
+async def test_run_init_resolves_project_token_when_project_id_missing(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	init_call = _install_fake_init(monkeypatch)
+
+	class _FakeClient:
+		def __init__(self, **_: object) -> None:
+			return None
+
+		async def __aenter__(self) -> "_FakeClient":
+			return self
+
+		async def __aexit__(self, *_: object) -> None:
+			return None
+
+		async def graphql(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+			assert kwargs["auth_mode"] == "project-token"
+			return {
+				"projectToken": {
+					"projectId": "project-from-token",
+					"environmentId": "env-from-token",
+				}
+			}
+
+		async def create_project(self, **kwargs: Any) -> str:
+			raise AssertionError("project token should not create a new project")
+
+	monkeypatch.setattr("pulse_railway.commands.init.RailwayGraphQLClient", _FakeClient)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_init(
+		_make_init_args(
+			project_id=None,
+			environment_id=None,
+			workspace_id=None,
+			project_name=None,
+			token="token",
+		)
+	)
+
+	assert result == 0
+	assert init_call["project"].project_id == "project-from-token"
+	assert init_call["project"].environment_id == "env-from-token"
+
+
+@pytest.mark.asyncio
+async def test_run_init_prefers_explicit_project_name_for_created_project(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	_install_fake_init(monkeypatch)
+	client_calls: dict[str, Any] = {}
+
+	class _FakeClient:
+		def __init__(self, **_: object) -> None:
+			return None
+
+		async def __aenter__(self) -> "_FakeClient":
+			return self
+
+		async def __aexit__(self, *_: object) -> None:
+			return None
+
+		async def create_project(
+			self,
+			*,
+			name: str,
+			workspace_id: str,
+			default_environment_name: str | None = None,
+		) -> str:
+			client_calls["name"] = name
+			return "project-created"
+
+		async def list_environments(self, *, project_id: str) -> list[Any]:
+			return [type("Env", (), {"id": "env-created", "name": "production"})()]
+
+	monkeypatch.setattr("pulse_railway.commands.init.RailwayGraphQLClient", _FakeClient)
+	monkeypatch.chdir(project_root)
+
+	await _run_init(
+		_make_init_args(
+			project_id=None,
+			environment_id=None,
+			workspace_id="workspace",
+			project_name="custom-project",
+			token="token",
+		)
+	)
+
+	assert client_calls["name"] == "custom-project"
+
+
+@pytest.mark.asyncio
+async def test_run_upgrade_reads_target_from_railway_plugin(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	upgrade_call = _install_fake_upgrade(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_upgrade(_make_upgrade_args())
+
+	assert result == 0
+	assert upgrade_call["project"].service_name == "pulse-router"
+	assert upgrade_call["project"].redis_service_name == "pulse-redis"
+	assert upgrade_call["project"].janitor_service_name == "pulse-janitor"
+
+
+@pytest.mark.asyncio
 async def test_run_deploy_resolves_paths_and_defaults(monkeypatch, tmp_path) -> None:
 	project_root = tmp_path / "project"
 	project_root.mkdir()
@@ -131,9 +468,27 @@ async def test_run_deploy_resolves_paths_and_defaults(monkeypatch, tmp_path) -> 
 	assert deploy_call["project"].service_name == "pulse-router"
 	assert deploy_call["project"].redis_service_name == "pulse-redis"
 	assert deploy_call["project"].janitor_service_name == "pulse-janitor"
-	assert deploy_call["project"].janitor_cron_schedule == "*/5 * * * *"
 	assert deploy_call["docker"].dockerfile_path == (project_root / "Dockerfile")
 	assert deploy_call["docker"].context_path == project_root
+
+
+@pytest.mark.asyncio
+async def test_run_deploy_passes_env_vars_to_backend(monkeypatch, tmp_path) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	deploy_call = _install_fake_deploy(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_deploy(
+		_make_deploy_args(env=["FEATURE_FLAG=enabled", "EMPTY_ALLOWED="])
+	)
+
+	assert result == 0
+	assert deploy_call["project"].env_vars == {
+		"FEATURE_FLAG": "enabled",
+		"EMPTY_ALLOWED": "",
+	}
 
 
 @pytest.mark.asyncio

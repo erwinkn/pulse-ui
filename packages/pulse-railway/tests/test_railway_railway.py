@@ -60,3 +60,95 @@ def test_graphql_client_uses_longer_read_timeout() -> None:
 		assert timeout.pool == 120.0
 	finally:
 		asyncio.run(client.aclose())
+
+
+@pytest.mark.asyncio
+async def test_graphql_client_auto_detects_project_token_auth() -> None:
+	request_headers: list[httpx.Headers] = []
+
+	def handler(request: httpx.Request) -> httpx.Response:
+		request_headers.append(request.headers)
+		payload = request.read().decode()
+		if "projectToken" in payload:
+			assert request.headers["Project-Access-Token"] == "token"
+			return httpx.Response(
+				200,
+				json={"data": {"projectToken": {"projectId": "project"}}},
+			)
+		assert request.headers["Project-Access-Token"] == "token"
+		return httpx.Response(200, json={"data": {"variables": []}})
+
+	client = RailwayGraphQLClient(token="token")
+	client._client = httpx.AsyncClient(
+		base_url=client.endpoint,
+		headers={"Content-Type": "application/json"},
+		transport=httpx.MockTransport(handler),
+		timeout=client._client.timeout,
+	)
+	try:
+		result = await client.get_project_variables(
+			project_id="project",
+			environment_id="env",
+		)
+	finally:
+		await client.aclose()
+
+	assert result == {}
+	assert len(request_headers) == 2
+
+
+@pytest.mark.asyncio
+async def test_graphql_client_falls_back_to_bearer_auth() -> None:
+	request_headers: list[httpx.Headers] = []
+
+	def handler(request: httpx.Request) -> httpx.Response:
+		request_headers.append(request.headers)
+		payload = request.read().decode()
+		if "projectToken" in payload:
+			assert request.headers["Project-Access-Token"] == "token"
+			return httpx.Response(403, json={"errors": [{"message": "forbidden"}]})
+		assert request.headers["Authorization"] == "Bearer token"
+		return httpx.Response(200, json={"data": {"variables": []}})
+
+	client = RailwayGraphQLClient(token="token")
+	client._client = httpx.AsyncClient(
+		base_url=client.endpoint,
+		headers={"Content-Type": "application/json"},
+		transport=httpx.MockTransport(handler),
+		timeout=client._client.timeout,
+	)
+	try:
+		result = await client.get_project_variables(
+			project_id="project",
+			environment_id="env",
+		)
+	finally:
+		await client.aclose()
+
+	assert result == {}
+	assert len(request_headers) == 2
+
+
+@pytest.mark.asyncio
+async def test_create_project_uses_bearer_auth() -> None:
+	request_headers: list[httpx.Headers] = []
+
+	def handler(request: httpx.Request) -> httpx.Response:
+		request_headers.append(request.headers)
+		assert request.headers["Authorization"] == "Bearer token"
+		return httpx.Response(200, json={"data": {"projectCreate": {"id": "project"}}})
+
+	client = RailwayGraphQLClient(token="token")
+	client._client = httpx.AsyncClient(
+		base_url=client.endpoint,
+		headers={"Content-Type": "application/json"},
+		transport=httpx.MockTransport(handler),
+		timeout=client._client.timeout,
+	)
+	try:
+		project_id = await client.create_project(name="pulse", workspace_id="workspace")
+	finally:
+		await client.aclose()
+
+	assert project_id == "project"
+	assert len(request_headers) == 1

@@ -9,6 +9,9 @@ Railway deployment utilities for Pulse applications.
 ```bash
 set -a; source .env; set +a
 
+uv run pulse-railway init \
+  --app-file examples/railway/main.py
+
 uv run pulse-railway deploy \
   --deployment-name prod \
   --app-file examples/railway/main.py \
@@ -17,13 +20,25 @@ uv run pulse-railway deploy \
   --context .
 ```
 
-`pulse-railway deploy` reads the stable router, Redis, and janitor service names from `RailwayPlugin` on the target app. By default those are `pulse-router`, `pulse-redis`, and `pulse-janitor` without extra prefixing. Backend deployment services also default to no prefix, so their Railway service names match the generated deployment id unless you pass `--service-prefix`.
+Use the commands like this:
+
+- `pulse-railway init` bootstraps the stable router, Redis, and janitor stack into the Railway project. It is idempotent.
+- `pulse-railway upgrade` reconciles that stable stack to the current `pulse-railway` version without creating a new app deployment.
+- `pulse-railway deploy` builds and rolls out a new backend service on top of an already-initialized stack.
+
+All three commands read the stable router, Redis, and janitor service names from `RailwayPlugin` on the target app. By default those are `pulse-router`, `pulse-redis`, and `pulse-janitor` without extra prefixing. Backend deployment services also default to no prefix, so their Railway service names match the generated deployment id unless you pass `--service-prefix`.
+
+`pulse-railway init` is template-first. On an empty target it deploys a published Pulse baseline template so the router, janitor, and Redis land on the Railway canvas with a stable layout, then reconciles runtime images, variables, domains, cron, and healthchecks. On an existing fully initialized target it skips template deployment and validates/reconciles the baseline. On a partially initialized target it fails fast and tells you to either run `pulse-railway upgrade` or clean up the partial baseline before retrying.
+
+If you omit `--project-id`, `pulse-railway init` creates a new Railway project first. That flow requires an account/workspace-capable Railway token plus `--workspace-id` (or `RAILWAY_WORKSPACE_ID`). The new project name defaults to the app file stem and can be overridden with `--project-name`.
 
 You can also set `deployment_name` on `RailwayPlugin` to provide the default deploy name from app config. Precedence is: `--deployment-name`, then `PULSE_RAILWAY_DEPLOYMENT_NAME`, then `RailwayPlugin(deployment_name=...)`, then `prod`.
 
-If `--redis-url` is omitted, `pulse-railway` creates or reuses the stable Redis service configured by `RailwayPlugin` in the Railway project.
+If `--redis-url` is omitted, `pulse-railway init` and `pulse-railway upgrade` create or reuse the stable Redis service configured by `RailwayPlugin` in the Railway project.
 
-By default, the package builds and pushes both images to `ttl.sh` for a zero-config flow. For longer-lived deployments, pass `--image-repository ghcr.io/<org>/<name>`.
+`pulse-railway deploy` is now strict. It does not create or repair the stable baseline stack. If the router, Redis, or janitor baseline is missing or outdated, run `pulse-railway init` or `pulse-railway upgrade` first.
+
+By default, the package builds and pushes deploy images to `ttl.sh` for a zero-config flow. For longer-lived deployments, pass `--image-repository ghcr.io/<org>/<name>`.
 
 ## Model
 
@@ -44,10 +59,10 @@ Backend services must set `PULSE_DEPLOYMENT_ID`. `RailwayPlugin` injects the aff
 
 If your app opts into `pulse_railway.railway_session_store()`:
 
-- deploy injects `PULSE_RAILWAY_REDIS_URL` into the backend app
+- deploy injects `REDIS_URL` into the backend app
 - the app session store uses that Redis for server-backed sessions
 
-When `PULSE_RAILWAY_REDIS_URL` is set:
+When `REDIS_URL` is set:
 
 - deploy marks the new deployment `active`
 - previous active deployments become `draining`

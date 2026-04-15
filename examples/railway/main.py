@@ -11,6 +11,7 @@ from pulse_railway import RailwayPlugin, railway_session_store
 from pulse_railway.constants import PULSE_DEPLOYMENT_ID, PULSE_REDIS_URL
 
 SESSION_PREFIX = "pulse:railway-example:session"
+BEHAVIOR_VERSION = "concurrent-v2"
 
 
 def deployment_id(env: Mapping[str, str] | None = None) -> str:
@@ -35,6 +36,7 @@ def session_snapshot() -> dict[str, Any]:
 	return {
 		"sid": ctx_session.sid,
 		"counter": int(session.get("counter") or 0),
+		"behavior_version": BEHAVIOR_VERSION,
 		"started_at": session.get("started_at") or "",
 		"last_updated_at": session.get("last_updated_at") or "",
 		"first_deployment_id": session.get("first_deployment_id") or "",
@@ -63,12 +65,16 @@ def home():
 				f"Serving deployment: {deployment_id()}",
 				className="rounded-full bg-slate-900 px-3 py-1 text-sm font-semibold text-white",
 			),
+			ps.span(
+				f"Behavior version: {BEHAVIOR_VERSION}",
+				className="ml-3 rounded-full bg-emerald-600 px-3 py-1 text-sm font-semibold text-white",
+			),
 			ps.h1(
-				"Pulse Railway Session Store Smoke Test",
+				"Pulse Railway Concurrent Deploy Smoke Test",
 				className="mt-6 text-4xl font-black tracking-tight text-slate-950",
 			),
 			ps.p(
-				"One example app. Two checks: pulse-railway deployment tracking and server-side sessions that can move onto Railway Redis.",
+				"One example app. Three checks: deployment affinity, concurrent old/new deployments, and Redis-backed server-side sessions.",
 				className="mt-4 max-w-3xl text-lg text-slate-600",
 			),
 			className="mx-auto max-w-5xl px-6 pt-12",
@@ -123,6 +129,7 @@ def register_probe_routes(app: ps.App) -> None:
 	@app.fastapi.get("/api/railway-example/meta")
 	async def railway_example_meta():  # pyright: ignore[reportUnusedFunction]
 		return {
+			"behavior_version": BEHAVIOR_VERSION,
 			"deployment_id": deployment_id(),
 			"session": session_snapshot(),
 		}

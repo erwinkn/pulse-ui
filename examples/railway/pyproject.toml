@@ -1,0 +1,10 @@
+[project]
+name = "pulse-railway-app"
+version = "0.1.0"
+description = "Pulse Railway shared Redis smoke test"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pulse-framework==0.1.78",
+    "pulse-railway>=0.1.0",
+]

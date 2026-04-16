@@ -5,6 +5,7 @@ import asyncio
 import json
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from pulse_railway.commands.common import (
 	build_target_project,
@@ -14,7 +15,7 @@ from pulse_railway.commands.common import (
 	resolve_path,
 )
 from pulse_railway.config import DockerBuild
-from pulse_railway.deployment import deploy
+from pulse_railway.deployment import deploy, validate_backend_env_vars
 
 
 def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
@@ -136,13 +137,15 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 	)
 	if not project_id or not environment_id or not token:
 		raise ValueError("project id, environment id, and token are required")
+	env_vars = parse_kv_items(args.env, "--env")
+	validate_backend_env_vars(env_vars)
 	project = build_target_project(
 		args,
 		deploy_target=deploy_target,
 		project_id=project_id,
 		environment_id=environment_id,
 		token=token,
-		env_vars=parse_kv_items(args.env, "--env"),
+		env_vars=env_vars,
 		backend_port=args.backend_port,
 		backend_replicas=args.backend_replicas,
 		server_address=args.server_address,
@@ -165,7 +168,11 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 	return 0
 
 
-def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+add_deploy_args = _add_deploy_args
+run_deploy = _run_deploy
+
+
+def register(subparsers: Any) -> None:
 	deploy_parser = subparsers.add_parser(
 		"deploy",
 		help="Deploy a new application version onto an existing pulse-railway stack.",

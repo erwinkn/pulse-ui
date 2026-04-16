@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
 import secrets
 import tempfile
 from pathlib import Path
@@ -8,6 +9,9 @@ from pathlib import Path
 from pulse_railway.config import DockerBuild
 from pulse_railway.constants import DEFAULT_ROUTER_PORT
 from pulse_railway.errors import DeploymentError
+
+OFFICIAL_JANITOR_IMAGE_REPOSITORY = "ghcr.io/erwinkn/pulse-railway-janitor"
+OFFICIAL_ROUTER_IMAGE_REPOSITORY = "ghcr.io/erwinkn/pulse-railway-router"
 
 
 async def _run_command(*args: str, cwd: Path | None = None) -> None:
@@ -28,6 +32,18 @@ def default_image_ref(*, image_repository: str | None, prefix: str) -> str:
 	if image_repository:
 		return f"{image_repository}:{prefix}"
 	return f"ttl.sh/pulse-railway-{prefix}-{secrets.token_hex(4)}:24h"
+
+
+def package_version() -> str:
+	return importlib.metadata.version("pulse-railway")
+
+
+def official_router_image_ref(*, version: str | None = None) -> str:
+	return f"{OFFICIAL_ROUTER_IMAGE_REPOSITORY}:{version or package_version()}"
+
+
+def official_janitor_image_ref(*, version: str | None = None) -> str:
+	return f"{OFFICIAL_JANITOR_IMAGE_REPOSITORY}:{version or package_version()}"
 
 
 async def build_and_push_image(
@@ -113,4 +129,13 @@ async def build_router_image(*, image_ref: str) -> str:
 		dockerfile_path.unlink(missing_ok=True)
 
 
-__all__ = ["build_and_push_image", "build_router_image", "default_image_ref"]
+__all__ = [
+	"OFFICIAL_JANITOR_IMAGE_REPOSITORY",
+	"OFFICIAL_ROUTER_IMAGE_REPOSITORY",
+	"build_and_push_image",
+	"build_router_image",
+	"default_image_ref",
+	"official_janitor_image_ref",
+	"official_router_image_ref",
+	"package_version",
+]

@@ -4,17 +4,17 @@ from datetime import date
 
 import pulse as ps
 import pytest
-from pulse_railway.constants import PULSE_REDIS_URL
+from pulse_railway.constants import REDIS_URL
 from pulse_railway.session import RailwayRedisSessionStore, railway_session_store
 
 
 def test_redis_url_env_name_is_standard() -> None:
-	assert PULSE_REDIS_URL == "REDIS_URL"
+	assert REDIS_URL == "REDIS_URL"
 
 
 def test_railway_session_store_resolves_env_url() -> None:
 	store = railway_session_store(
-		env={PULSE_REDIS_URL: "redis://shared:6379/0"},
+		env={REDIS_URL: "redis://shared:6379/0"},
 	)
 
 	assert store.configured_url() == "redis://shared:6379/0"

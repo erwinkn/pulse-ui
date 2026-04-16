@@ -5,6 +5,7 @@ import asyncio
 import json
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from pulse_railway.commands.common import (
 	build_target_project,
@@ -49,12 +50,12 @@ def _add_upgrade_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
 		"--router-image",
 		default=env("PULSE_RAILWAY_ROUTER_IMAGE"),
-		help="Prebuilt router image. If omitted, pulse-railway builds one.",
+		help="Router image override. Defaults to the official pulse-railway router image for this package version.",
 	)
 	parser.add_argument(
 		"--janitor-image",
 		default=env("PULSE_RAILWAY_JANITOR_IMAGE"),
-		help="Prebuilt janitor image. Defaults to the router image.",
+		help="Janitor image override. Defaults to the official pulse-railway janitor image for this package version.",
 	)
 	parser.add_argument(
 		"--janitor-cron-schedule",
@@ -124,7 +125,11 @@ async def _run_upgrade(args: argparse.Namespace) -> int:
 	return 0
 
 
-def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+add_upgrade_args = _add_upgrade_args
+run_upgrade = _run_upgrade
+
+
+def register(subparsers: Any) -> None:
 	upgrade_parser = subparsers.add_parser(
 		"upgrade",
 		help="Reconcile an existing Railway stack to the current pulse-railway version.",

@@ -8,7 +8,7 @@ from typing import Any, cast, override
 import pulse as ps
 from pulse.serializer import Serialized, deserialize, serialize
 
-from pulse_railway.constants import PULSE_REDIS_URL
+from pulse_railway.constants import REDIS_URL
 
 try:
 	import redis.asyncio as redis
@@ -71,7 +71,7 @@ class RailwayRedisSessionStore(ps.SessionStore):
 		if self.url is not None:
 			return self.url
 		values = os.environ if self._env is None else self._env
-		return values.get(PULSE_REDIS_URL)
+		return values.get(REDIS_URL)
 
 	def current_store(self) -> ps.SessionStore:
 		if self._use_fallback():
@@ -99,9 +99,7 @@ class RailwayRedisSessionStore(ps.SessionStore):
 			)
 		url = self.configured_url()
 		if url is None:
-			raise RuntimeError(
-				f"RailwayRedisSessionStore requires url= or {PULSE_REDIS_URL}"
-			)
+			raise RuntimeError(f"RailwayRedisSessionStore requires url= or {REDIS_URL}")
 		client = redis.Redis.from_url(url, decode_responses=True)
 		self.client = client
 		self.owns_client = True

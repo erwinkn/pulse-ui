@@ -4,13 +4,14 @@ import asyncio
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
 from pulse_railway.constants import (
 	ACTIVE_DEPLOYMENT_VARIABLE,
 	DEFAULT_BACKEND_PORT,
+	PULSE_DEPLOYMENT_ID,
 	RAILWAY_API_ENDPOINT,
 )
 
@@ -124,13 +125,13 @@ class RailwayGraphQLClient:
 		timeout: float = DEFAULT_RAILWAY_GRAPHQL_TIMEOUT,
 		auth_mode: str = "auto",
 	) -> None:
-		self.token = token
-		self.endpoint = endpoint
-		self.auth_mode = auth_mode
+		self.token: str = token
+		self.endpoint: str = endpoint
+		self.auth_mode: str = auth_mode
 		self._resolved_auth_mode: str | None = (
 			None if auth_mode == "auto" else auth_mode
 		)
-		self._client = httpx.AsyncClient(
+		self._client: httpx.AsyncClient = httpx.AsyncClient(
 			base_url=endpoint,
 			headers={"Content-Type": "application/json"},
 			timeout=httpx.Timeout(
@@ -205,9 +206,22 @@ class RailwayGraphQLClient:
 			variables=variables,
 			auth_mode=selected_auth_mode,
 		)
-		errors = payload.get("errors") or []
+		errors = payload.get("errors")
 		if errors:
-			message = "; ".join(error["message"] for error in errors)
+			messages: list[str] = []
+			error_items = errors if isinstance(errors, list) else [errors]
+			for error in error_items:
+				if isinstance(error, dict):
+					error_fields = cast(dict[str, object], error)
+					error_message = error_fields.get("message")
+					messages.append(
+						error_message
+						if isinstance(error_message, str)
+						else str(error_fields)
+					)
+				else:
+					messages.append(str(cast(object, error)))
+			message = "; ".join(messages)
 			raise RailwayGraphQLError(message)
 		return payload["data"]
 
@@ -699,22 +713,22 @@ class RailwayResolver:
 		backend_port: int = DEFAULT_BACKEND_PORT,
 		cache_ttl_seconds: float = 5.0,
 	) -> None:
-		self.client = client
-		self.project_id = project_id
-		self.environment_id = environment_id
-		self.service_prefix = (
+		self.client: RailwayGraphQLClient = client
+		self.project_id: str = project_id
+		self.environment_id: str = environment_id
+		self.service_prefix: str | None = (
 			normalize_service_prefix(service_prefix)
 			if service_prefix is not None and service_prefix.strip()
 			else None
 		)
-		self.backend_port = backend_port
-		self.cache_ttl_seconds = cache_ttl_seconds
+		self.backend_port: int = backend_port
+		self.cache_ttl_seconds: float = cache_ttl_seconds
 		self._cached_active_deployment_id: str | None = None
-		self._active_cached_at = 0.0
+		self._active_cached_at: float = 0.0
 		self._resolved_active_deployment_id: str | None = None
 		self._cached_active_target: RouteTarget | None = None
-		self._cached_service_names: set[str] = set()
-		self._cached_at = 0.0
+		self._cached_deployment_service_names: dict[str, str] = {}
+		self._cached_at: float = 0.0
 
 	async def _refresh_active_deployment(self) -> str | None:
 		if time.monotonic() - self._active_cached_at < self.cache_ttl_seconds:
@@ -734,13 +748,28 @@ class RailwayResolver:
 			project_id=self.project_id,
 			environment_id=self.environment_id,
 		)
-		self._cached_service_names = {service.name for service in services}
+		variable_sets = await asyncio.gather(
+			*[
+				self.client.get_service_variables_for_deployment(
+					project_id=self.project_id,
+					environment_id=self.environment_id,
+					service_id=service.id,
+				)
+				for service in services
+			]
+		)
+		self._cached_deployment_service_names = {
+			deployment_id: service.name
+			for service, variables in zip(services, variable_sets, strict=True)
+			for deployment_id in [variables.get(PULSE_DEPLOYMENT_ID)]
+			if deployment_id
+		}
 		self._cached_at = time.monotonic()
 
 	async def resolve(self, deployment_id: str) -> RouteTarget | None:
 		service_name = service_name_for_deployment(self.service_prefix, deployment_id)
 		await self._refresh_services()
-		if service_name not in self._cached_service_names:
+		if self._cached_deployment_service_names.get(deployment_id) != service_name:
 			return None
 		return RouteTarget(
 			deployment_id=deployment_id,

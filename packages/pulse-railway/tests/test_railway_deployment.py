@@ -13,7 +13,7 @@ from pulse_railway.constants import (
 	PULSE_DEPLOYMENT_ID,
 	PULSE_DEPLOYMENT_STATE,
 	PULSE_DRAIN_STARTED_AT,
-	PULSE_REDIS_URL,
+	REDIS_URL,
 )
 from pulse_railway.deployment import (
 	DeploymentError,
@@ -23,6 +23,7 @@ from pulse_railway.deployment import (
 	deploy,
 	generate_deployment_id,
 	resolve_deployment_id_by_name,
+	validate_backend_env_vars,
 )
 from pulse_railway.railway import ServiceRecord
 from pulse_railway.stack import StackServiceState, StackState
@@ -51,6 +52,23 @@ def test_generate_deployment_id_and_prefix() -> None:
 	assert deployment_id.startswith("production-")
 	assert len(deployment_id) <= 24
 	assert default_service_prefix("pulse-router") == "pulse-"
+
+
+def test_validate_backend_env_vars_rejects_managed_names() -> None:
+	with pytest.raises(DeploymentError, match="PORT"):
+		validate_backend_env_vars({"PORT": "9000", "FEATURE_FLAG": "enabled"})
+
+
+def test_validate_backend_env_vars_allows_unmanaged_redis_url() -> None:
+	validate_backend_env_vars({REDIS_URL: "redis://app-cache:6379/0"})
+
+
+def test_validate_backend_env_vars_rejects_managed_redis_url() -> None:
+	with pytest.raises(DeploymentError, match="REDIS_URL"):
+		validate_backend_env_vars(
+			{REDIS_URL: "redis://app-cache:6379/0"},
+			managed_env_vars={REDIS_URL},
+		)
 
 
 def test_railway_session_store_from_app_uses_declared_helper(tmp_path) -> None:
@@ -391,7 +409,7 @@ async def test_deploy_happy_path_on_ready_stack(monkeypatch, tmp_path) -> None:
 	assert group_updates == [("env", result.backend_service_id, "group-baseline")]
 	assert (None, ACTIVE_DEPLOYMENT_VARIABLE, "prod-260402-120000") in variables
 	assert not any(
-		service_id == result.backend_service_id and key == PULSE_REDIS_URL
+		service_id == result.backend_service_id and key == REDIS_URL
 		for service_id, key, _value in variables
 	)
 	assert (
@@ -641,7 +659,7 @@ async def test_deploy_keeps_shared_app_redis_canonical(monkeypatch, tmp_path) ->
 		service for service in service_state.values() if service.name == "next"
 	)
 	assert (
-		service_variables[backend_service.id][PULSE_REDIS_URL]
+		service_variables[backend_service.id][REDIS_URL]
 		== "redis://pulse-router-redis.railway.internal:6379"
 	)
 	assert (

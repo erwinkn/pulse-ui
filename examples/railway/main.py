@@ -8,7 +8,7 @@ from typing import Any
 
 import pulse as ps
 from pulse_railway import RailwayPlugin, railway_session_store
-from pulse_railway.constants import PULSE_DEPLOYMENT_ID, PULSE_REDIS_URL
+from pulse_railway.constants import PULSE_DEPLOYMENT_ID, REDIS_URL
 
 SESSION_PREFIX = "pulse:railway-example:session"
 BEHAVIOR_VERSION = "concurrent-v2"
@@ -25,7 +25,7 @@ def now_iso() -> str:
 
 def redis_target(env: Mapping[str, str] | None = None) -> str:
 	values = os.environ if env is None else env
-	return values.get(PULSE_REDIS_URL) or "in-memory fallback"
+	return values.get(REDIS_URL) or "in-memory fallback"
 
 
 def session_snapshot() -> dict[str, Any]:

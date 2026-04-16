@@ -4,28 +4,39 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from typing import Unpack
 
-from pulse_railway.commands.common import env, normalize_optional_service_prefix
+from pulse_railway.commands.common import (
+	RailwayProjectOverrides,
+	env,
+	normalize_optional_service_prefix,
+)
 from pulse_railway.commands.deploy import (
-	_add_deploy_args,
-	_run_deploy,
+	add_deploy_args as _add_deploy_args,
 )
 from pulse_railway.commands.deploy import (
 	register as register_deploy,
 )
+from pulse_railway.commands.deploy import (
+	run_deploy as _run_deploy,
+)
 from pulse_railway.commands.init import (
-	_add_init_args,
-	_run_init,
+	add_init_args as _add_init_args,
 )
 from pulse_railway.commands.init import (
 	register as register_init,
 )
+from pulse_railway.commands.init import (
+	run_init as _run_init,
+)
 from pulse_railway.commands.upgrade import (
-	_add_upgrade_args,
-	_run_upgrade,
+	add_upgrade_args as _add_upgrade_args,
 )
 from pulse_railway.commands.upgrade import (
 	register as register_upgrade,
+)
+from pulse_railway.commands.upgrade import (
+	run_upgrade as _run_upgrade,
 )
 from pulse_railway.config import RailwayProject
 from pulse_railway.deployment import (
@@ -77,11 +88,11 @@ def _print_janitor_result(result: JanitorResult) -> None:
 		print(f"delete {deployment_id}; reason=drainable")
 	for deployment_id in result.skipped_deployments:
 		print(f"keep {deployment_id}; reason=still_active")
-	print(
-		"scan complete; "
-		f"deleted={len(result.deleted_deployments)} "
-		f"skipped={len(result.skipped_deployments)}"
+	message = (
+		f"scan complete; deleted={len(result.deleted_deployments)} "
+		+ f"skipped={len(result.skipped_deployments)}"
 	)
+	print(message)
 
 
 def _railway_project(
@@ -93,12 +104,12 @@ def _railway_project(
 	service_name: str | None = None,
 	service_prefix: str | None = None,
 	redis_service_name: str | None = None,
-	**overrides: object,
+	**overrides: Unpack[RailwayProjectOverrides],
 ) -> RailwayProject:
-	service_name = (
+	resolved_service_name = (
 		service_name or args.service or env("PULSE_RAILWAY_SERVICE") or "pulse-router"
 	)
-	service_prefix = (
+	resolved_service_prefix = (
 		service_prefix or args.service_prefix or env("PULSE_RAILWAY_SERVICE_PREFIX")
 	)
 	return RailwayProject(
@@ -108,13 +119,13 @@ def _railway_project(
 		or env("RAILWAY_ENVIRONMENT_ID")
 		or "",
 		token=token or args.token or env("RAILWAY_TOKEN") or "",
-		service_name=service_name,
-		service_prefix=normalize_optional_service_prefix(service_prefix),
+		service_name=resolved_service_name,
+		service_prefix=normalize_optional_service_prefix(resolved_service_prefix),
 		redis_url=args.redis_url,
 		redis_service_name=redis_service_name
 		or args.redis_service
 		or env("PULSE_RAILWAY_REDIS_SERVICE")
-		or default_redis_service_name(service_name),
+		or default_redis_service_name(resolved_service_name),
 		redis_prefix=args.redis_prefix,
 		**overrides,
 	)

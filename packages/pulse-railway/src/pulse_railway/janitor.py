@@ -17,8 +17,9 @@ from pulse_railway.constants import (
 	INTERNAL_TOKEN_HEADER,
 )
 from pulse_railway.deployment import (
-	_list_deployment_service_records,
-	_set_deployment_service_state,
+	DeploymentServiceRecord,
+	list_deployment_service_records,
+	set_deployment_service_state,
 )
 from pulse_railway.railway import RailwayGraphQLClient, service_name_for_deployment
 from pulse_railway.stack import resolve_project_internals
@@ -193,18 +194,18 @@ async def run_janitor(
 				environment_id=project.environment_id,
 			)
 			active_deployment_id = project_variables.get(ACTIVE_DEPLOYMENT_VARIABLE)
-			deployment_services = await _list_deployment_service_records(
+			deployment_services = await list_deployment_service_records(
 				client,
 				project=project,
 			)
-			draining = []
+			draining: list[DeploymentServiceRecord] = []
 			for service in deployment_services:
 				if service.deployment_id == active_deployment_id:
 					continue
 				if service.state != DEPLOYMENT_STATE_DRAINING:
 					service.state = DEPLOYMENT_STATE_DRAINING
 					service.drain_started_at = service.drain_started_at or timestamp
-					await _set_deployment_service_state(
+					await set_deployment_service_state(
 						client,
 						project=project,
 						service_id=service.service_id,
@@ -213,7 +214,7 @@ async def run_janitor(
 					)
 				elif service.drain_started_at is None:
 					service.drain_started_at = timestamp
-					await _set_deployment_service_state(
+					await set_deployment_service_state(
 						client,
 						project=project,
 						service_id=service.service_id,

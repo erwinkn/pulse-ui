@@ -15,21 +15,20 @@ from pulse_railway.constants import (
 	DEFAULT_PULSE_BASELINE_NO_REDIS_TEMPLATE_CODE,
 	DEFAULT_PULSE_BASELINE_TEMPLATE_CODE,
 	DEFAULT_REDIS_TEMPLATE_CODE,
-	LEGACY_PULSE_REDIS_URL,
 	PULSE_INTERNAL_TOKEN,
 	PULSE_JANITOR_DRAIN_GRACE_SECONDS,
 	PULSE_JANITOR_MAX_DRAIN_AGE_SECONDS,
 	PULSE_REDIS_PREFIX,
-	PULSE_REDIS_URL,
 	PULSE_SERVICE_PREFIX,
 	PULSE_WEBSOCKET_HEARTBEAT_SECONDS,
 	PULSE_WEBSOCKET_TTL_SECONDS,
 	RAILWAY_ENVIRONMENT_ID,
 	RAILWAY_PROJECT_ID,
 	RAILWAY_TOKEN,
+	REDIS_URL,
 )
 from pulse_railway.errors import DeploymentError
-from pulse_railway.images import build_router_image, default_image_ref
+from pulse_railway.images import official_janitor_image_ref, official_router_image_ref
 from pulse_railway.railway import (
 	RailwayGraphQLClient,
 	ServiceRecord,
@@ -122,9 +121,9 @@ def _raise_for_partial_baseline(
 	expected_text = ", ".join(expected_names)
 	raise DeploymentError(
 		"baseline stack is partially initialized; "
-		f"found services: {found_text}; expected services: {expected_text}. "
-		"Run `pulse-railway upgrade` to reconcile it, or delete the partial "
-		"baseline services and rerun `pulse-railway init`."
+		+ f"found services: {found_text}; expected services: {expected_text}. "
+		+ "Run `pulse-railway upgrade` to reconcile it, or delete the partial "
+		+ "baseline services and rerun `pulse-railway init`."
 	)
 
 
@@ -230,27 +229,6 @@ async def _ensure_service(
 	return service, True
 
 
-async def _delete_legacy_redis_url_variable(
-	client: RailwayGraphQLClient,
-	*,
-	project: RailwayProject,
-	service_id: str,
-) -> None:
-	variables = await client.get_service_variables_for_deployment(
-		project_id=project.project_id,
-		environment_id=project.environment_id,
-		service_id=service_id,
-	)
-	if LEGACY_PULSE_REDIS_URL not in variables:
-		return
-	await client.delete_variable(
-		project_id=project.project_id,
-		environment_id=project.environment_id,
-		service_id=service_id,
-		name=LEGACY_PULSE_REDIS_URL,
-	)
-
-
 async def _wait_for_service_by_name(
 	client: RailwayGraphQLClient,
 	*,
@@ -315,7 +293,7 @@ def _require_variables(
 		missing_text = ", ".join(missing)
 		raise DeploymentError(
 			f"{service_name} is missing required runtime variables ({missing_text}); "
-			f"run `pulse-railway {command}`"
+			+ f"run `pulse-railway {command}`"
 		)
 
 
@@ -324,8 +302,8 @@ def _effective_redis_url(
 	router_variables: dict[str, str],
 	janitor_variables: dict[str, str],
 ) -> str:
-	router_redis_url = router_variables.get(PULSE_REDIS_URL)
-	janitor_redis_url = janitor_variables.get(PULSE_REDIS_URL)
+	router_redis_url = router_variables.get(REDIS_URL)
+	janitor_redis_url = janitor_variables.get(REDIS_URL)
 	if not router_redis_url or not janitor_redis_url:
 		raise DeploymentError(
 			"baseline stack is missing REDIS_URL; run `pulse-railway upgrade`"
@@ -438,7 +416,7 @@ async def _ensure_router_service(
 	if internals.service_prefix is not None:
 		router_variables[PULSE_SERVICE_PREFIX] = internals.service_prefix
 	if internals.redis_url:
-		router_variables[PULSE_REDIS_URL] = internals.redis_url
+		router_variables[REDIS_URL] = internals.redis_url
 		router_variables[PULSE_REDIS_PREFIX] = project.redis_prefix
 		router_variables[PULSE_WEBSOCKET_HEARTBEAT_SECONDS] = str(
 			project.websocket_heartbeat_seconds
@@ -455,9 +433,6 @@ async def _ensure_router_service(
 			value=value,
 			skip_deploys=True,
 		)
-	await _delete_legacy_redis_url_variable(
-		client, project=project, service_id=service.id
-	)
 	await client.update_service_instance(
 		service_id=service.id,
 		environment_id=project.environment_id,
@@ -508,7 +483,7 @@ async def _ensure_janitor_service(
 		RAILWAY_PROJECT_ID: project.project_id,
 		RAILWAY_ENVIRONMENT_ID: project.environment_id,
 		PULSE_INTERNAL_TOKEN: internals.internal_token,
-		PULSE_REDIS_URL: internals.redis_url,
+		REDIS_URL: internals.redis_url,
 		PULSE_REDIS_PREFIX: project.redis_prefix,
 		PULSE_JANITOR_DRAIN_GRACE_SECONDS: str(project.drain_grace_seconds),
 		PULSE_JANITOR_MAX_DRAIN_AGE_SECONDS: str(project.max_drain_age_seconds),
@@ -526,9 +501,6 @@ async def _ensure_janitor_service(
 			value=value,
 			skip_deploys=True,
 		)
-	await _delete_legacy_redis_url_variable(
-		client, project=project, service_id=service.id
-	)
 	await client.update_service_instance(
 		service_id=service.id,
 		environment_id=project.environment_id,
@@ -666,7 +638,7 @@ async def _validate_router_service(
 	)
 	if require_redis:
 		names = names + (
-			PULSE_REDIS_URL,
+			REDIS_URL,
 			PULSE_REDIS_PREFIX,
 			PULSE_WEBSOCKET_HEARTBEAT_SECONDS,
 			PULSE_WEBSOCKET_TTL_SECONDS,
@@ -681,7 +653,7 @@ async def _validate_router_service(
 	if server_address is None:
 		raise DeploymentError(
 			f"could not resolve a public address for {service.name}; "
-			f"run `pulse-railway {command}`"
+			+ f"run `pulse-railway {command}`"
 		)
 	return server_address
 
@@ -708,7 +680,7 @@ async def _validate_janitor_service(
 			RAILWAY_PROJECT_ID,
 			RAILWAY_ENVIRONMENT_ID,
 			PULSE_INTERNAL_TOKEN,
-			PULSE_REDIS_URL,
+			REDIS_URL,
 			PULSE_REDIS_PREFIX,
 			PULSE_JANITOR_DRAIN_GRACE_SECONDS,
 			PULSE_JANITOR_MAX_DRAIN_AGE_SECONDS,
@@ -831,13 +803,8 @@ async def bootstrap_stack(
 		router_image = project.router_image
 		janitor_image = project.janitor_image
 		if needs_router or needs_janitor:
-			router_image = router_image or default_image_ref(
-				image_repository=None,
-				prefix="router",
-			)
-			if project.router_image is None:
-				router_image = await build_router_image(image_ref=router_image)
-			janitor_image = janitor_image or router_image
+			router_image = router_image or official_router_image_ref()
+			janitor_image = janitor_image or official_janitor_image_ref()
 
 		if needs_router:
 			assert router_image is not None
@@ -924,13 +891,8 @@ async def upgrade_stack(
 	project: RailwayProject,
 	router_instance: ServiceInstanceConfig = DEFAULT_ROUTER_INSTANCE,
 ) -> UpgradeResult:
-	router_image = project.router_image or default_image_ref(
-		image_repository=None,
-		prefix="router",
-	)
-	if project.router_image is None:
-		router_image = await build_router_image(image_ref=router_image)
-	janitor_image = project.janitor_image or router_image
+	router_image = project.router_image or official_router_image_ref()
+	janitor_image = project.janitor_image or official_janitor_image_ref()
 
 	async with RailwayGraphQLClient(token=project.token) as client:
 		existing_router = await client.find_service_by_name(
@@ -1027,7 +989,7 @@ async def require_ready_stack(*, project: RailwayProject) -> StackState:
 	if project.redis_url is not None:
 		raise DeploymentError(
 			"`pulse-railway deploy` does not accept an explicit redis url; "
-			"run `pulse-railway init` or `pulse-railway upgrade` to manage baseline infra"
+			+ "run `pulse-railway init` or `pulse-railway upgrade` to manage baseline infra"
 		)
 	async with RailwayGraphQLClient(token=project.token) as client:
 		router_service = await client.find_service_by_name(
@@ -1038,7 +1000,7 @@ async def require_ready_stack(*, project: RailwayProject) -> StackState:
 		if router_service is None:
 			raise DeploymentError(
 				f"router service {project.service_name} not found; "
-				"run `pulse-railway init` or `pulse-railway upgrade`"
+				+ "run `pulse-railway init` or `pulse-railway upgrade`"
 			)
 		janitor_name = project.janitor_service_name or default_janitor_service_name(
 			project.service_name
@@ -1051,7 +1013,7 @@ async def require_ready_stack(*, project: RailwayProject) -> StackState:
 		if janitor_service is None:
 			raise DeploymentError(
 				f"janitor service {janitor_name} not found; "
-				"run `pulse-railway init` or `pulse-railway upgrade`"
+				+ "run `pulse-railway init` or `pulse-railway upgrade`"
 			)
 		project_variables = await client.get_project_variables(
 			project_id=project.project_id,
@@ -1061,7 +1023,7 @@ async def require_ready_stack(*, project: RailwayProject) -> StackState:
 		if not internal_token:
 			raise DeploymentError(
 				"project is missing PULSE_RAILWAY_INTERNAL_TOKEN; "
-				"run `pulse-railway upgrade`"
+				+ "run `pulse-railway upgrade`"
 			)
 		router_variables = await client.get_service_variables_for_deployment(
 			project_id=project.project_id,

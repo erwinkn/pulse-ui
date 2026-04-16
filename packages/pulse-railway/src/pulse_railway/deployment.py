@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Container
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,7 +22,7 @@ from pulse_railway.constants import (
 	PULSE_DEPLOYMENT_STATE,
 	PULSE_DRAIN_STARTED_AT,
 	PULSE_INTERNAL_TOKEN,
-	PULSE_REDIS_URL,
+	REDIS_URL,
 )
 from pulse_railway.errors import DeploymentError
 from pulse_railway.images import (
@@ -78,6 +79,35 @@ class DeploymentServiceRecord:
 	deployment_id: str
 	state: str | None = None
 	drain_started_at: float | None = None
+
+
+RESERVED_BACKEND_ENV_VARS: frozenset[str] = frozenset(
+	{
+		PULSE_DEPLOYMENT_ID,
+		PULSE_DEPLOYMENT_STATE,
+		PULSE_DRAIN_STARTED_AT,
+		PULSE_INTERNAL_TOKEN,
+		"PULSE_APP_FILE",
+		"PULSE_SERVER_ADDRESS",
+		"PORT",
+	}
+)
+
+
+def validate_backend_env_vars(
+	env_vars: dict[str, str],
+	*,
+	managed_env_vars: Container[str] | None = None,
+) -> None:
+	managed = () if managed_env_vars is None else managed_env_vars
+	reserved = sorted(
+		key for key in env_vars if key in RESERVED_BACKEND_ENV_VARS or key in managed
+	)
+	if reserved:
+		raise DeploymentError(
+			"backend env vars cannot override pulse-railway managed variables: "
+			+ ", ".join(reserved)
+		)
 
 
 def pulse_start_command() -> str:
@@ -145,10 +175,10 @@ def _backend_session_env(
 		return {}
 	configured_url = store.configured_url()
 	if configured_url is not None:
-		return {PULSE_REDIS_URL: configured_url}
+		return {REDIS_URL: configured_url}
 	if redis_url is None:
 		raise DeploymentError("redis_url is required for Railway session store wiring")
-	return {PULSE_REDIS_URL: redis_url}
+	return {REDIS_URL: redis_url}
 
 
 async def _place_backend_in_router_group(
@@ -242,6 +272,10 @@ async def _set_deployment_service_state(
 	)
 
 
+list_deployment_service_records = _list_deployment_service_records
+set_deployment_service_state = _set_deployment_service_state
+
+
 async def _list_deployment_services(
 	client: RailwayGraphQLClient,
 	*,
@@ -294,6 +328,7 @@ async def deploy(
 	web_root: str = "web",
 	backend_instance: ServiceInstanceConfig = DEFAULT_BACKEND_INSTANCE,
 ) -> DeployResult:
+	validate_backend_env_vars(project.env_vars)
 	docker = replace(docker, build_args=dict(docker.build_args))
 	build_args = dict(docker.build_args)
 	session_store = _railway_session_store_from_app(app_file, docker.context_path)
@@ -329,6 +364,10 @@ async def deploy(
 		backend_session_env = _backend_session_env(
 			session_store,
 			redis_url=stack_state.redis_url,
+		)
+		validate_backend_env_vars(
+			project.env_vars,
+			managed_env_vars=backend_session_env,
 		)
 		backend_image = await build_and_push_image(
 			docker=replace(docker, build_args=build_args),
@@ -496,10 +535,13 @@ __all__ = [
 	"default_service_prefix",
 	"delete_deployment",
 	"deploy",
+	"DeploymentServiceRecord",
 	"generate_deployment_id",
+	"list_deployment_service_records",
 	"ResolvedRedis",
 	"resolve_deployment_id_by_name",
 	"resolve_or_create_redis",
 	"resolve_or_create_internal_token",
 	"resolve_project_internals",
+	"set_deployment_service_state",
 ]

@@ -5,6 +5,7 @@ import asyncio
 import json
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from pulse_railway.commands.common import (
 	build_target_project,
@@ -61,12 +62,12 @@ def _add_init_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
 		"--router-image",
 		default=env("PULSE_RAILWAY_ROUTER_IMAGE"),
-		help="Prebuilt router image. If omitted, pulse-railway builds one when needed.",
+		help="Router image override. Defaults to the official pulse-railway router image for this package version.",
 	)
 	parser.add_argument(
 		"--janitor-image",
 		default=env("PULSE_RAILWAY_JANITOR_IMAGE"),
-		help="Prebuilt janitor image. Defaults to the router image.",
+		help="Janitor image override. Defaults to the official pulse-railway janitor image for this package version.",
 	)
 	parser.add_argument(
 		"--janitor-cron-schedule",
@@ -180,6 +181,8 @@ async def _run_init(args: argparse.Namespace) -> int:
 		args=args,
 		token=token,
 	)
+	if not token:
+		raise ValueError("token is required")
 	project = build_target_project(
 		args,
 		deploy_target=deploy_target,
@@ -200,7 +203,11 @@ async def _run_init(args: argparse.Namespace) -> int:
 	return 0
 
 
-def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+add_init_args = _add_init_args
+run_init = _run_init
+
+
+def register(subparsers: Any) -> None:
 	init_parser = subparsers.add_parser(
 		"init",
 		help="Bootstrap the stable Railway router, redis, and janitor stack.",

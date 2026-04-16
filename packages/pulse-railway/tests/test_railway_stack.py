@@ -12,11 +12,15 @@ from pulse_railway.constants import (
 	PULSE_JANITOR_DRAIN_GRACE_SECONDS,
 	PULSE_JANITOR_MAX_DRAIN_AGE_SECONDS,
 	PULSE_REDIS_PREFIX,
-	PULSE_REDIS_URL,
 	PULSE_WEBSOCKET_HEARTBEAT_SECONDS,
 	PULSE_WEBSOCKET_TTL_SECONDS,
+	REDIS_URL,
 )
 from pulse_railway.errors import DeploymentError
+from pulse_railway.images import (
+	official_janitor_image_ref,
+	official_router_image_ref,
+)
 from pulse_railway.railway import ServiceDomain, ServiceRecord, TemplateRecord
 from pulse_railway.stack import (
 	JANITOR_START_COMMAND,
@@ -175,13 +179,6 @@ async def test_bootstrap_stack_creates_baseline_from_empty_project(monkeypatch) 
 
 	monkeypatch.setattr("pulse_railway.stack.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_build_router_image(*, image_ref: str) -> str:
-		return image_ref
-
-	monkeypatch.setattr(
-		"pulse_railway.stack.build_router_image", fake_build_router_image
-	)
-
 	result = await bootstrap_stack(
 		project=RailwayProject(
 			project_id="project",
@@ -195,8 +192,10 @@ async def test_bootstrap_stack_creates_baseline_from_empty_project(monkeypatch) 
 
 	assert result.router.created is True
 	assert result.router.deployed is True
+	assert result.router.image == official_router_image_ref()
 	assert result.janitor.created is True
 	assert result.janitor.deployed is True
+	assert result.janitor.image == official_janitor_image_ref()
 	assert result.redis is not None
 	assert result.redis.created is True
 	assert result.internal_token_created is True
@@ -217,7 +216,7 @@ async def test_bootstrap_stack_creates_baseline_from_empty_project(monkeypatch) 
 		if update["start_command"] == JANITOR_START_COMMAND
 	)
 	assert janitor_update["restart_policy_type"] == "NEVER"
-	assert PULSE_REDIS_URL in service_variables[result.router.service_id]
+	assert REDIS_URL in service_variables[result.router.service_id]
 	assert PULSE_REDIS_PREFIX in service_variables[result.router.service_id]
 	assert (
 		PULSE_JANITOR_DRAIN_GRACE_SECONDS
@@ -254,7 +253,7 @@ async def test_bootstrap_stack_is_idempotent_for_existing_stack(monkeypatch) -> 
 			"RAILWAY_ENVIRONMENT_ID": "env",
 			"PULSE_BACKEND_PORT": "8000",
 			"PORT": "8000",
-			PULSE_REDIS_URL: "redis://pulse-redis.railway.internal:6379",
+			REDIS_URL: "redis://pulse-redis.railway.internal:6379",
 			PULSE_REDIS_PREFIX: "pulse:railway",
 			PULSE_WEBSOCKET_HEARTBEAT_SECONDS: "15",
 			PULSE_WEBSOCKET_TTL_SECONDS: "45",
@@ -266,7 +265,7 @@ async def test_bootstrap_stack_is_idempotent_for_existing_stack(monkeypatch) -> 
 			"RAILWAY_PROJECT_ID": "project",
 			"RAILWAY_ENVIRONMENT_ID": "env",
 			PULSE_INTERNAL_TOKEN: "secret-token",
-			PULSE_REDIS_URL: "redis://pulse-redis.railway.internal:6379",
+			REDIS_URL: "redis://pulse-redis.railway.internal:6379",
 			PULSE_REDIS_PREFIX: "pulse:railway",
 			PULSE_JANITOR_DRAIN_GRACE_SECONDS: "60",
 			PULSE_JANITOR_MAX_DRAIN_AGE_SECONDS: "86400",
@@ -484,13 +483,6 @@ async def test_bootstrap_stack_uses_no_redis_template_for_external_redis(
 
 	monkeypatch.setattr("pulse_railway.stack.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_build_router_image(*, image_ref: str) -> str:
-		return image_ref
-
-	monkeypatch.setattr(
-		"pulse_railway.stack.build_router_image", fake_build_router_image
-	)
-
 	result = await bootstrap_stack(
 		project=RailwayProject(
 			project_id="project",
@@ -503,6 +495,8 @@ async def test_bootstrap_stack_uses_no_redis_template_for_external_redis(
 	)
 
 	assert template_codes == [DEFAULT_PULSE_BASELINE_NO_REDIS_TEMPLATE_CODE]
+	assert result.router.image == official_router_image_ref()
+	assert result.janitor.image == official_janitor_image_ref()
 	assert result.redis is None
 	assert result.redis_url == "redis://external.example:6379"
 
@@ -533,7 +527,7 @@ async def test_require_ready_stack_accepts_external_redis_baseline(
 			"RAILWAY_ENVIRONMENT_ID": "env",
 			"PULSE_BACKEND_PORT": "8000",
 			"PORT": "8000",
-			PULSE_REDIS_URL: redis_url,
+			REDIS_URL: redis_url,
 			PULSE_REDIS_PREFIX: "pulse:railway",
 			PULSE_WEBSOCKET_HEARTBEAT_SECONDS: "15",
 			PULSE_WEBSOCKET_TTL_SECONDS: "45",
@@ -544,7 +538,7 @@ async def test_require_ready_stack_accepts_external_redis_baseline(
 			"RAILWAY_PROJECT_ID": "project",
 			"RAILWAY_ENVIRONMENT_ID": "env",
 			PULSE_INTERNAL_TOKEN: "secret-token",
-			PULSE_REDIS_URL: redis_url,
+			REDIS_URL: redis_url,
 			PULSE_REDIS_PREFIX: "pulse:railway",
 			PULSE_JANITOR_DRAIN_GRACE_SECONDS: "60",
 			PULSE_JANITOR_MAX_DRAIN_AGE_SECONDS: "86400",
@@ -728,13 +722,6 @@ async def test_upgrade_stack_reconciles_and_creates_missing_services(
 
 	monkeypatch.setattr("pulse_railway.stack.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_build_router_image(*, image_ref: str) -> str:
-		return image_ref
-
-	monkeypatch.setattr(
-		"pulse_railway.stack.build_router_image", fake_build_router_image
-	)
-
 	result = await upgrade_stack(
 		project=RailwayProject(
 			project_id="project",
@@ -747,7 +734,9 @@ async def test_upgrade_stack_reconciles_and_creates_missing_services(
 	)
 
 	assert result.router.deployed is True
+	assert result.router.image == official_router_image_ref()
 	assert result.janitor.deployed is True
+	assert result.janitor.image == official_janitor_image_ref()
 	assert result.janitor.created is True
 	assert result.redis is not None
 	assert result.redis.created is True

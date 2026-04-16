@@ -20,7 +20,7 @@ from pulse_railway.cli import (
 	_run_upgrade,
 	main,
 )
-from pulse_railway.deployment import DeployResult
+from pulse_railway.deployment import DeploymentError, DeployResult
 from pulse_railway.janitor import JanitorResult
 from pulse_railway.stack import InitResult, StackServiceResult, UpgradeResult
 
@@ -481,14 +481,35 @@ async def test_run_deploy_passes_env_vars_to_backend(monkeypatch, tmp_path) -> N
 	monkeypatch.chdir(project_root)
 
 	result = await _run_deploy(
-		_make_deploy_args(env=["FEATURE_FLAG=enabled", "EMPTY_ALLOWED="])
+		_make_deploy_args(
+			env=[
+				"FEATURE_FLAG=enabled",
+				"EMPTY_ALLOWED=",
+				"REDIS_URL=redis://app-cache:6379/0",
+			]
+		)
 	)
 
 	assert result == 0
 	assert deploy_call["project"].env_vars == {
 		"FEATURE_FLAG": "enabled",
 		"EMPTY_ALLOWED": "",
+		"REDIS_URL": "redis://app-cache:6379/0",
 	}
+
+
+@pytest.mark.asyncio
+async def test_run_deploy_rejects_reserved_backend_env_vars(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	_install_fake_deploy(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	with pytest.raises(DeploymentError, match="PULSE_DEPLOYMENT_ID"):
+		await _run_deploy(_make_deploy_args(env=["PULSE_DEPLOYMENT_ID=wrong"]))
 
 
 @pytest.mark.asyncio

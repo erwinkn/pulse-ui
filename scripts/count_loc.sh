@@ -30,9 +30,10 @@ lucide_py=$(count_loc "pulse-lucide" "packages/pulse-lucide/src" "py")
 recharts_py=$(count_loc "pulse-recharts" "packages/pulse-recharts/src" "py")
 msal_py=$(count_loc "pulse-msal" "packages/pulse-msal/src" "py")
 aws_py=$(count_loc "pulse-aws" "packages/pulse-aws/src" "py")
+railway_py=$(count_loc "pulse-railway" "packages/pulse-railway/src" "py")
 
 # Totals
-total_py=$((pulse_py + mantine_py + ag_grid_py + lucide_py + recharts_py + msal_py + aws_py))
+total_py=$((pulse_py + mantine_py + ag_grid_py + lucide_py + recharts_py + msal_py + aws_py + railway_py))
 total_ts=$((pulse_ts + mantine_ts))
 grand_total=$((total_py + total_ts))
 
@@ -46,5 +47,6 @@ printf "%-20s %10d %10s %10d\n" "pulse-lucide" "$lucide_py" "-" "$lucide_py"
 printf "%-20s %10d %10s %10d\n" "pulse-recharts" "$recharts_py" "-" "$recharts_py"
 printf "%-20s %10d %10s %10d\n" "pulse-msal" "$msal_py" "-" "$msal_py"
 printf "%-20s %10d %10s %10d\n" "pulse-aws" "$aws_py" "-" "$aws_py"
+printf "%-20s %10d %10s %10d\n" "pulse-railway" "$railway_py" "-" "$railway_py"
 printf "%-20s %10s %10s %10s\n" "-------" "------" "-----" "-----"
 printf "%-20s %10d %10d %10d\n" "TOTAL" "$total_py" "$total_ts" "$grand_total"

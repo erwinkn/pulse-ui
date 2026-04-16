@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from pulse_railway.constants import (
 	ACTIVE_DEPLOYMENT_VARIABLE,
+	PULSE_DEPLOYMENT_ID,
 	PULSE_KV_KIND,
 	PULSE_KV_URL,
 )
@@ -53,6 +54,17 @@ async def test_resolver_skips_service_refresh_when_active_deployment_is_unchange
 				ServiceRecord(id="svc-2", name="pulse-v2"),
 			]
 
+		async def get_service_variables_for_deployment(
+			self, *, project_id: str, environment_id: str, service_id: str
+		) -> dict[str, str]:
+			assert project_id == "project"
+			assert environment_id == "env"
+			if service_id == "svc-1":
+				return {PULSE_DEPLOYMENT_ID: "v1"}
+			if service_id == "svc-2":
+				return {PULSE_DEPLOYMENT_ID: "v2"}
+			return {}
+
 	client = _FakeClient()
 	resolver = RailwayResolver(
 		client=client,
@@ -88,6 +100,43 @@ async def test_resolver_skips_service_refresh_when_active_deployment_is_unchange
 	assert fourth.deployment_id == "v2"
 	assert client.variable_calls == 3
 	assert client.service_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_resolver_only_routes_services_with_matching_deployment_id() -> None:
+	class _FakeClient:
+		async def list_services(
+			self, *, project_id: str, environment_id: str
+		) -> list[ServiceRecord]:
+			assert project_id == "project"
+			assert environment_id == "env"
+			return [
+				ServiceRecord(id="svc-router", name="pulse-router"),
+				ServiceRecord(id="svc-backend", name="pulse-v1"),
+			]
+
+		async def get_service_variables_for_deployment(
+			self, *, project_id: str, environment_id: str, service_id: str
+		) -> dict[str, str]:
+			assert project_id == "project"
+			assert environment_id == "env"
+			if service_id == "svc-backend":
+				return {PULSE_DEPLOYMENT_ID: "v1"}
+			return {}
+
+	resolver = RailwayResolver(
+		client=_FakeClient(),
+		project_id="project",
+		environment_id="env",
+		service_prefix="pulse",
+		cache_ttl_seconds=5.0,
+	)
+
+	assert await resolver.resolve("router") is None
+	target = await resolver.resolve("v1")
+
+	assert target is not None
+	assert target.deployment_id == "v1"
 
 
 @pytest.mark.asyncio

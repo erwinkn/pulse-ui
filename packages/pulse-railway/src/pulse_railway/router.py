@@ -95,9 +95,9 @@ class AffinityRouter:
 		store: DeploymentStore | None = None,
 		websocket_heartbeat_seconds: int = 15,
 	) -> None:
-		self.resolver = resolver
-		self.store = store
-		self.websocket_heartbeat_seconds = websocket_heartbeat_seconds
+		self.resolver: Resolver = resolver
+		self.store: DeploymentStore | None = store
+		self.websocket_heartbeat_seconds: int = websocket_heartbeat_seconds
 		self._session: aiohttp.ClientSession | None = None
 		self._active_websockets: set[aiohttp.ClientWebSocketResponse] = set()
 		self._tasks: set[asyncio.Task[Any]] = set()
@@ -262,7 +262,7 @@ class AffinityRouter:
 		backend_ws = await self.session.ws_connect(
 			backend_url,
 			headers=headers,
-			protocols=requested_protocols or None,
+			protocols=requested_protocols,
 			autoclose=True,
 			autoping=True,
 		)

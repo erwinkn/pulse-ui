@@ -28,7 +28,7 @@ Use the commands like this:
 
 All three commands read the stable router, Redis, and janitor service names from `RailwayPlugin` on the target app. By default those are `pulse-router`, `pulse-redis`, and `pulse-janitor` without extra prefixing. Backend deployment services also default to no prefix, so their Railway service names match the generated deployment id unless you pass `--service-prefix`.
 
-`pulse-railway init` is template-first. On an empty target it deploys a published Pulse baseline template so the router, janitor, and Redis land on the Railway canvas with a stable layout, then reconciles runtime images, variables, domains, cron, and healthchecks. On an existing fully initialized target it skips template deployment and validates/reconciles the baseline. On a partially initialized target it fails fast and tells you to either run `pulse-railway upgrade` or clean up the partial baseline before retrying.
+`pulse-railway init` is template-first. On an empty target it deploys a published Pulse baseline template so the router, janitor, and Redis land on the Railway canvas with a stable layout, then reconciles runtime images, variables, domains, cron, and healthchecks. Router and janitor services use the official GHCR images for the installed `pulse-railway` version unless you pass explicit image overrides: `ghcr.io/erwinkn/pulse-railway-router:<version>` and `ghcr.io/erwinkn/pulse-railway-janitor:<version>`. On an existing fully initialized target it skips template deployment and validates/reconciles the baseline. On a partially initialized target it fails fast and tells you to either run `pulse-railway upgrade` or clean up the partial baseline before retrying.
 
 If you omit `--project-id`, `pulse-railway init` creates a new Railway project first. That flow requires an account/workspace-capable Railway token plus `--workspace-id` (or `RAILWAY_WORKSPACE_ID`). The new project name defaults to the app file stem and can be overridden with `--project-name`.
 
@@ -38,7 +38,7 @@ If `--redis-url` is omitted, `pulse-railway init` and `pulse-railway upgrade` cr
 
 `pulse-railway deploy` is now strict. It does not create or repair the stable baseline stack. If the router, Redis, or janitor baseline is missing or outdated, run `pulse-railway init` or `pulse-railway upgrade` first.
 
-By default, the package builds and pushes deploy images to `ttl.sh` for a zero-config flow. For longer-lived deployments, pass `--image-repository ghcr.io/<org>/<name>`.
+By default, app deployment images are pushed to `ttl.sh` for a zero-config flow. For longer-lived app deployments, pass `--image-repository ghcr.io/<org>/<name>`.
 
 ## Model
 

@@ -56,9 +56,10 @@ class RailwayPlugin(ps.Plugin):
 		self.router_service = normalize_service_name(router_service)
 		self.janitor_service = normalize_service_name(janitor_service)
 		self.redis_service = normalize_service_name(redis_service)
+		clean_service_prefix = _clean_optional(service_prefix)
 		self.service_prefix = (
-			normalize_service_prefix(service_prefix)
-			if _clean_optional(service_prefix) is not None
+			normalize_service_prefix(clean_service_prefix)
+			if clean_service_prefix is not None
 			else None
 		)
 		self.deployment_id = ""
@@ -112,11 +113,11 @@ class RailwayPlugin(ps.Plugin):
 			}
 
 		@app.fastapi.get(INTERNAL_SESSIONS_PATH)
-		def deployment_sessions(
+		def deployment_sessions(  # pyright: ignore[reportUnusedFunction]
 			x_internal_token: str | None = Header(
 				default=None, alias=INTERNAL_TOKEN_HEADER
-			),
-		):  # pyright: ignore[reportUnusedFunction]
+			),  # pyright: ignore[reportCallInDefaultInitializer]
+		):
 			if not self.enabled:
 				raise HTTPException(
 					status_code=503, detail="Railway plugin is disabled"
@@ -142,11 +143,11 @@ class RailwayPlugin(ps.Plugin):
 			}
 
 		@app.fastapi.post(INTERNAL_RELOAD_PATH)
-		async def reload_deployment_clients(
+		async def reload_deployment_clients(  # pyright: ignore[reportUnusedFunction]
 			x_internal_token: str | None = Header(
 				default=None, alias=INTERNAL_TOKEN_HEADER
-			),
-		):  # pyright: ignore[reportUnusedFunction]
+			),  # pyright: ignore[reportCallInDefaultInitializer]
+		):
 			if not self.enabled:
 				raise HTTPException(
 					status_code=503, detail="Railway plugin is disabled"

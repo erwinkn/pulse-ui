@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+from typing import NotRequired, TypedDict, Unpack
 
 from pulse.cli.helpers import load_app_from_target
 
@@ -12,6 +13,23 @@ from pulse_railway.target import (
 	RailwayDeployTargetError,
 	railway_deploy_target_from_app,
 )
+
+
+class RailwayProjectOverrides(TypedDict):
+	backend_port: NotRequired[int]
+	backend_replicas: NotRequired[int]
+	router_port: NotRequired[int]
+	router_replicas: NotRequired[int]
+	router_image: NotRequired[str | None]
+	server_address: NotRequired[str | None]
+	redis_template_code: NotRequired[str]
+	janitor_image: NotRequired[str | None]
+	janitor_replicas: NotRequired[int]
+	janitor_cron_schedule: NotRequired[str]
+	drain_grace_seconds: NotRequired[int]
+	max_drain_age_seconds: NotRequired[int]
+	websocket_heartbeat_seconds: NotRequired[int]
+	websocket_ttl_seconds: NotRequired[int]
 
 
 def env(name: str) -> str | None:
@@ -74,7 +92,7 @@ def build_target_project(
 	token: str,
 	redis_url: str | None = None,
 	env_vars: dict[str, str] | None = None,
-	**overrides: object,
+	**overrides: Unpack[RailwayProjectOverrides],
 ) -> RailwayProject:
 	service_prefix = (
 		args.service_prefix

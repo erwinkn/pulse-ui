@@ -5,6 +5,7 @@ import secrets
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any, override
 
 from pulse_railway.constants import (
 	DEFAULT_REDIS_PREFIX,
@@ -12,7 +13,7 @@ from pulse_railway.constants import (
 	PULSE_KV_KIND,
 	PULSE_KV_PATH,
 	PULSE_KV_URL,
-	PULSE_REDIS_URL,
+	REDIS_URL,
 )
 from pulse_railway.kv import (
 	InMemoryKVStore,
@@ -43,9 +44,7 @@ def kv_store_spec_from_env(env: dict[str, str] | None = None) -> Store | None:
 	if kind == "memory":
 		return MemoryKVStore()
 	if kind == "redis":
-		url = (
-			source.get(PULSE_KV_URL) or source.get(PULSE_REDIS_URL) or source.get("url")
-		)
+		url = source.get(PULSE_KV_URL) or source.get(REDIS_URL) or source.get("url")
 		if url is None:
 			return None
 		return RedisStore(url=url)
@@ -54,7 +53,7 @@ def kv_store_spec_from_env(env: dict[str, str] | None = None) -> Store | None:
 		if path is None:
 			return None
 		return SQLiteStore(path=path)
-	redis_url = source.get(PULSE_KV_URL) or source.get(PULSE_REDIS_URL)
+	redis_url = source.get(PULSE_KV_URL) or source.get(REDIS_URL)
 	if redis_url is not None:
 		return RedisStore(url=redis_url)
 	return None
@@ -68,10 +67,10 @@ class DeploymentStore:
 		websocket_ttl_seconds: int = DEFAULT_WEBSOCKET_TTL_SECONDS,
 		owns_store: bool = False,
 	) -> None:
-		self.store = store
-		self.prefix = prefix.rstrip(":")
-		self.websocket_ttl_seconds = websocket_ttl_seconds
-		self.owns_store = owns_store
+		self.store: KVStore = store
+		self.prefix: str = prefix.rstrip(":")
+		self.websocket_ttl_seconds: int = websocket_ttl_seconds
+		self.owns_store: bool = owns_store
 
 	def _deployment_prefix(self) -> str:
 		return f"{self.prefix}:deployment:"
@@ -277,6 +276,7 @@ class MemoryDeploymentStore(DeploymentStore):
 			owns_store=False,
 		)
 
+	@override
 	async def close(self) -> None:
 		return None
 
@@ -313,7 +313,7 @@ class RedisDeploymentStore(DeploymentStore):
 					"RedisDeploymentStore requires a Redis client or store."
 				)
 			store = RedisKVStore(client=client, owns_client=owns_client)
-		self.client = store.client
+		self.client: Any = store.client
 		super().__init__(
 			store=store,
 			prefix=prefix,

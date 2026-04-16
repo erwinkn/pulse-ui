@@ -13,7 +13,7 @@ import httpx
 import pulse as ps
 import pytest
 from pulse_railway import RailwayRedisSessionStore
-from pulse_railway.constants import PULSE_REDIS_URL
+from pulse_railway.constants import REDIS_URL
 
 ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_PATH = ROOT / "examples/railway/main.py"
@@ -31,7 +31,7 @@ def load_example_module():
 
 def test_railway_session_store_uses_redis_when_env_present() -> None:
 	module = load_example_module()
-	store = module.railway_session_store(env={PULSE_REDIS_URL: "redis://shared:6379/0"})
+	store = module.railway_session_store(env={REDIS_URL: "redis://shared:6379/0"})
 
 	assert isinstance(store, RailwayRedisSessionStore)
 	assert store.configured_url() == "redis://shared:6379/0"

@@ -13,6 +13,7 @@ from pulse_railway.constants import (
 	PULSE_DEPLOYMENT_ID,
 	PULSE_DEPLOYMENT_STATE,
 	PULSE_DRAIN_STARTED_AT,
+	PULSE_RAILWAY_REDIS_URL,
 	REDIS_URL,
 )
 from pulse_railway.deployment import (
@@ -42,7 +43,7 @@ def _write_app_fixture(
 		return
 	app_path.write_text(
 		"import pulse as ps\n"
-		"from pulse_railway import redis_session_store\n"
+		"from pulse_railway import RailwaySessionStore\n"
 		f"app = ps.App(session_store={session_store_expr})\n"
 	)
 
@@ -59,25 +60,22 @@ def test_validate_backend_env_vars_rejects_managed_names() -> None:
 		validate_backend_env_vars({"PORT": "9000", "FEATURE_FLAG": "enabled"})
 
 
+def test_validate_backend_env_vars_rejects_managed_railway_redis_url() -> None:
+	with pytest.raises(DeploymentError, match=PULSE_RAILWAY_REDIS_URL):
+		validate_backend_env_vars({PULSE_RAILWAY_REDIS_URL: "redis://managed:6379/0"})
+
+
 def test_validate_backend_env_vars_allows_unmanaged_redis_url() -> None:
 	validate_backend_env_vars({REDIS_URL: "redis://app-cache:6379/0"})
 
 
-def test_validate_backend_env_vars_rejects_managed_redis_url() -> None:
-	with pytest.raises(DeploymentError, match="REDIS_URL"):
-		validate_backend_env_vars(
-			{REDIS_URL: "redis://app-cache:6379/0"},
-			managed_env_vars={REDIS_URL},
-		)
-
-
-def test_railway_session_store_from_app_uses_declared_helper(tmp_path) -> None:
+def test_railway_session_store_from_app_uses_declared_constructor(tmp_path) -> None:
 	app_file = tmp_path / "main.py"
 	app_file.write_text(
 		"import pulse as ps\n"
-		"from pulse_railway import redis_session_store\n"
+		"from pulse_railway import RailwaySessionStore\n"
 		"app = ps.App(\n"
-		"    session_store=redis_session_store()\n"
+		"    session_store=RailwaySessionStore()\n"
 		")\n"
 	)
 
@@ -428,6 +426,148 @@ async def test_deploy_happy_path_on_ready_stack(monkeypatch, tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_deploy_ignores_ambient_redis_url_for_managed_session_store(
+	monkeypatch,
+	tmp_path,
+) -> None:
+	dockerfile = tmp_path / "Dockerfile"
+	dockerfile.write_text("FROM scratch\n")
+	(tmp_path / "main.py").write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import RailwaySessionStore\n"
+		"app = ps.App(\n"
+		"    session_store=RailwaySessionStore()\n"
+		")\n"
+	)
+	monkeypatch.setenv(REDIS_URL, "redis://local-dev:6379/0")
+
+	service_state: dict[str, ServiceRecord] = {}
+	service_variables: dict[str, dict[str, str]] = {}
+
+	class _FakeClient:
+		def __init__(self, **_: object) -> None:
+			self.service_counter = 0
+
+		async def __aenter__(self) -> "_FakeClient":
+			return self
+
+		async def __aexit__(self, *_: object) -> None:
+			return None
+
+		async def find_service_by_name(
+			self, *, project_id: str, environment_id: str, name: str
+		) -> ServiceRecord | None:
+			return service_state.get(name)
+
+		async def create_service(
+			self,
+			*,
+			project_id: str,
+			environment_id: str,
+			name: str,
+			image: str | None = None,
+		) -> str:
+			self.service_counter += 1
+			service_id = f"svc-{self.service_counter}"
+			service_state[name] = ServiceRecord(id=service_id, name=name, image=image)
+			service_variables[service_id] = {}
+			return service_id
+
+		async def upsert_variable(self, **kwargs: Any) -> None:
+			service_id = kwargs.get("service_id")
+			if service_id is not None:
+				service_variables.setdefault(service_id, {})[kwargs["name"]] = kwargs[
+					"value"
+				]
+
+		async def update_service_instance(self, **kwargs: Any) -> None:
+			return None
+
+		async def deploy_service(self, *, service_id: str, environment_id: str) -> str:
+			assert environment_id == "env"
+			return f"deploy-{service_id}"
+
+		async def wait_for_deployment(self, *, deployment_id: str) -> dict[str, str]:
+			return {"id": deployment_id, "status": "SUCCESS"}
+
+		async def get_project_variables(
+			self, *, project_id: str, environment_id: str
+		) -> dict[str, str]:
+			return {}
+
+		async def get_environment_config(
+			self, *, project_id: str, environment_id: str
+		) -> dict[str, Any]:
+			return {"services": {}}
+
+		async def set_service_group_id(
+			self, *, environment_id: str, service_id: str, group_id: str
+		) -> None:
+			raise AssertionError("backend should not be grouped without router group")
+
+		async def list_services(
+			self, *, project_id: str, environment_id: str
+		) -> list[ServiceRecord]:
+			return list(service_state.values())
+
+		async def get_service_variables_for_deployment(
+			self, *, project_id: str, environment_id: str, service_id: str
+		) -> dict[str, str]:
+			return dict(service_variables.get(service_id, {}))
+
+	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
+
+	async def fake_require_ready_stack(**_: Any) -> StackState:
+		return StackState(
+			router=StackServiceState(
+				service_id="svc-router",
+				service_name="pulse-router",
+				domain="pulse-router-production.up.railway.app",
+			),
+			janitor=StackServiceState("svc-janitor", "pulse-janitor"),
+			redis=StackServiceState("svc-redis", "pulse-redis"),
+			internal_token="secret-token",
+			redis_url="redis://railway-internal:6379/0",
+			server_address="https://test.pulse.sc",
+		)
+
+	monkeypatch.setattr(
+		"pulse_railway.deployment.require_ready_stack",
+		fake_require_ready_stack,
+	)
+
+	async def fake_build_and_push_image(*, docker: DockerBuild, image_ref: str) -> str:
+		return image_ref
+
+	monkeypatch.setattr(
+		"pulse_railway.deployment.build_and_push_image",
+		fake_build_and_push_image,
+	)
+
+	await deploy(
+		project=RailwayProject(
+			project_id="project",
+			environment_id="env",
+			token="token",
+			service_name="pulse-router",
+		),
+		docker=DockerBuild(
+			dockerfile_path=dockerfile,
+			context_path=tmp_path,
+		),
+		deployment_id="next",
+	)
+
+	backend_service = next(
+		service for service in service_state.values() if service.name == "next"
+	)
+	assert service_variables[backend_service.id][PULSE_RAILWAY_REDIS_URL] == (
+		"redis://railway-internal:6379/0"
+	)
+	assert REDIS_URL not in service_variables[backend_service.id]
+
+
+@pytest.mark.asyncio
 async def test_deploy_rejects_duplicate_deployment(monkeypatch, tmp_path) -> None:
 	dockerfile = tmp_path / "Dockerfile"
 	dockerfile.write_text("FROM scratch\n")
@@ -525,16 +665,14 @@ async def test_deploy_fails_when_stack_not_ready(monkeypatch, tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_deploy_keeps_shared_app_redis_canonical(monkeypatch, tmp_path) -> None:
+async def test_deploy_always_injects_managed_railway_redis_url(
+	monkeypatch, tmp_path
+) -> None:
 	dockerfile = tmp_path / "Dockerfile"
 	dockerfile.write_text("FROM scratch\n")
 	_write_app_fixture(
 		tmp_path,
-		session_store_expr=(
-			"redis_session_store("
-			"url='redis://pulse-router-redis.railway.internal:6379'"
-			")"
-		),
+		session_store_expr="RailwaySessionStore(url='redis://custom:6379/0')",
 	)
 
 	service_state: dict[str, ServiceRecord] = {}
@@ -659,8 +797,8 @@ async def test_deploy_keeps_shared_app_redis_canonical(monkeypatch, tmp_path) ->
 		service for service in service_state.values() if service.name == "next"
 	)
 	assert (
-		service_variables[backend_service.id][REDIS_URL]
-		== "redis://pulse-router-redis.railway.internal:6379"
+		service_variables[backend_service.id][PULSE_RAILWAY_REDIS_URL]
+		== "redis://project-public:6379"
 	)
 	assert (
 		service_variables[backend_service.id][PULSE_DEPLOYMENT_STATE]

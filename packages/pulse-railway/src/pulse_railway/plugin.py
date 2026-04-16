@@ -31,6 +31,7 @@ class RailwayPlugin(ps.Plugin):
 	project_id: str | None
 	environment_id: str | None
 	deployment_name: str | None
+	image_repository: str | None
 	router_service: str
 	janitor_service: str
 	redis_service: str
@@ -45,6 +46,7 @@ class RailwayPlugin(ps.Plugin):
 		project_id: str | None = None,
 		environment_id: str | None = None,
 		deployment_name: str | None = None,
+		image_repository: str | None = None,
 		router_service: str = "pulse-router",
 		janitor_service: str = "pulse-janitor",
 		redis_service: str = "pulse-redis",
@@ -53,6 +55,7 @@ class RailwayPlugin(ps.Plugin):
 		self.project_id = _clean_optional(project_id)
 		self.environment_id = _clean_optional(environment_id)
 		self.deployment_name = _clean_optional(deployment_name)
+		self.image_repository = _clean_optional(image_repository)
 		self.router_service = normalize_service_name(router_service)
 		self.janitor_service = normalize_service_name(janitor_service)
 		self.redis_service = normalize_service_name(redis_service)

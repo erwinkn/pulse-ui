@@ -34,11 +34,13 @@ If you omit `--project-id`, `pulse-railway init` creates a new Railway project f
 
 You can also set `deployment_name` on `RailwayPlugin` to provide the default deploy name from app config. Precedence is: `--deployment-name`, then `PULSE_RAILWAY_DEPLOYMENT_NAME`, then `RailwayPlugin(deployment_name=...)`, then `prod`.
 
+You can also set `image_repository` on `RailwayPlugin` to provide the default backend image registry from app config. Precedence is: `--image-repository`, then `PULSE_RAILWAY_IMAGE_REPOSITORY`, then `RailwayPlugin(image_repository=...)`, then the zero-config `ttl.sh` fallback.
+
 If `--redis-url` is omitted, `pulse-railway init` and `pulse-railway upgrade` create or reuse the stable Redis service configured by `RailwayPlugin` in the Railway project.
 
 `pulse-railway deploy` is now strict. It does not create or repair the stable baseline stack. If the router, Redis, or janitor baseline is missing or outdated, run `pulse-railway init` or `pulse-railway upgrade` first.
 
-By default, app deployment images are pushed to `ttl.sh` for a zero-config flow. For longer-lived app deployments, pass `--image-repository ghcr.io/<org>/<name>`.
+By default, app deployment images are pushed to `ttl.sh` for a zero-config flow. For longer-lived app deployments, pass `--image-repository ghcr.io/<org>/<name>` or set `RailwayPlugin(image_repository="ghcr.io/<org>/<name>")` on the app.
 
 ## Model
 
@@ -57,12 +59,12 @@ By default, app deployment images are pushed to `ttl.sh` for a zero-config flow.
 
 Backend services must set `PULSE_DEPLOYMENT_ID`. `RailwayPlugin` injects the affinity query into Pulse prerender and websocket directives and exposes `/_pulse/meta` for verification.
 
-If your app opts into `pulse_railway.railway_session_store()`:
+If your app opts into `pulse_railway.RailwaySessionStore()`:
 
-- deploy injects `REDIS_URL` into the backend app
+- deploy injects `PULSE_RAILWAY_REDIS_URL` into the backend app
 - the app session store uses that Redis for server-backed sessions
 
-When `REDIS_URL` is set:
+When the baseline stack has Redis configured:
 
 - deploy marks the new deployment `active`
 - previous active deployments become `draining`

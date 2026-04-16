@@ -574,6 +574,48 @@ async def test_run_deploy_env_overrides_plugin_deployment_name(
 
 
 @pytest.mark.asyncio
+async def test_run_deploy_reads_plugin_image_repository(monkeypatch, tmp_path) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	(project_root / "main.py").write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import RailwayPlugin\n"
+		'app = ps.App(routes=[], plugins=[RailwayPlugin(image_repository="ghcr.io/acme/stoneware-v3")])\n'
+	)
+	deploy_call = _install_fake_deploy(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_deploy(_make_deploy_args(image_repository=None))
+
+	assert result == 0
+	assert deploy_call["docker"].image_repository == "ghcr.io/acme/stoneware-v3"
+
+
+@pytest.mark.asyncio
+async def test_run_deploy_explicit_image_repository_overrides_plugin(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	(project_root / "main.py").write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import RailwayPlugin\n"
+		'app = ps.App(routes=[], plugins=[RailwayPlugin(image_repository="ghcr.io/acme/stoneware-v3")])\n'
+	)
+	deploy_call = _install_fake_deploy(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_deploy(
+		_make_deploy_args(image_repository="ghcr.io/acme/override")
+	)
+
+	assert result == 0
+	assert deploy_call["docker"].image_repository == "ghcr.io/acme/override"
+
+
+@pytest.mark.asyncio
 async def test_run_deploy_uses_literal_stable_service_names_without_prefix(
 	monkeypatch, tmp_path
 ) -> None:

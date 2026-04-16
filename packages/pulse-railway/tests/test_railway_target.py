@@ -31,6 +31,7 @@ def test_railway_deploy_target_from_app() -> None:
 		project_id="project",
 		environment_id="environment",
 		deployment_name=None,
+		image_repository=None,
 		router_service_name="pulse-router",
 		janitor_service_name="pulse-janitor",
 		redis_service_name="pulse-redis",
@@ -45,6 +46,7 @@ def test_railway_deploy_target_allows_project_ids_to_come_from_elsewhere() -> No
 		project_id=None,
 		environment_id=None,
 		deployment_name=None,
+		image_repository=None,
 		router_service_name="pulse-router",
 		janitor_service_name="pulse-janitor",
 		redis_service_name="pulse-redis",
@@ -62,6 +64,7 @@ def test_railway_deploy_target_does_not_prefix_stable_services_by_default() -> N
 		project_id=None,
 		environment_id=None,
 		deployment_name=None,
+		image_repository=None,
 		router_service_name="api",
 		janitor_service_name="pulse-janitor",
 		redis_service_name="pulse-redis",
@@ -81,6 +84,7 @@ def test_railway_deploy_target_preserves_old_prefixing_for_default_service_names
 		project_id=None,
 		environment_id=None,
 		deployment_name=None,
+		image_repository=None,
 		router_service_name="foo-router",
 		janitor_service_name="foo-janitor",
 		redis_service_name="foo-redis",
@@ -95,6 +99,25 @@ def test_railway_deploy_target_exposes_plugin_deployment_name() -> None:
 		project_id=None,
 		environment_id=None,
 		deployment_name="staging",
+		image_repository=None,
+		router_service_name="pulse-router",
+		janitor_service_name="pulse-janitor",
+		redis_service_name="pulse-redis",
+		service_prefix=None,
+	)
+
+
+def test_railway_deploy_target_exposes_plugin_image_repository() -> None:
+	app = ps.App(
+		routes=[],
+		plugins=[RailwayPlugin(image_repository="ghcr.io/acme/stoneware-v3")],
+	)
+
+	assert railway_deploy_target_from_app(app) == RailwayDeployTarget(
+		project_id=None,
+		environment_id=None,
+		deployment_name=None,
+		image_repository="ghcr.io/acme/stoneware-v3",
 		router_service_name="pulse-router",
 		janitor_service_name="pulse-janitor",
 		redis_service_name="pulse-redis",

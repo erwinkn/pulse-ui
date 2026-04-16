@@ -16,6 +16,7 @@ class RailwayDeployTarget:
 	project_id: str | None
 	environment_id: str | None
 	deployment_name: str | None
+	image_repository: str | None
 	router_service_name: str
 	janitor_service_name: str
 	redis_service_name: str
@@ -33,6 +34,7 @@ def railway_deploy_target_from_app(app: ps.App) -> RailwayDeployTarget:
 		project_id=plugin.project_id,
 		environment_id=plugin.environment_id,
 		deployment_name=plugin.deployment_name,
+		image_repository=plugin.image_repository,
 		router_service_name=plugin.router_service_name,
 		janitor_service_name=plugin.janitor_service_name,
 		redis_service_name=plugin.redis_service_name,

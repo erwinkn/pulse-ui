@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Container
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,7 +21,7 @@ from pulse_railway.constants import (
 	PULSE_DEPLOYMENT_STATE,
 	PULSE_DRAIN_STARTED_AT,
 	PULSE_INTERNAL_TOKEN,
-	REDIS_URL,
+	PULSE_RAILWAY_REDIS_URL,
 )
 from pulse_railway.errors import DeploymentError
 from pulse_railway.images import (
@@ -87,6 +86,7 @@ RESERVED_BACKEND_ENV_VARS: frozenset[str] = frozenset(
 		PULSE_DEPLOYMENT_STATE,
 		PULSE_DRAIN_STARTED_AT,
 		PULSE_INTERNAL_TOKEN,
+		PULSE_RAILWAY_REDIS_URL,
 		"PULSE_APP_FILE",
 		"PULSE_SERVER_ADDRESS",
 		"PORT",
@@ -96,13 +96,8 @@ RESERVED_BACKEND_ENV_VARS: frozenset[str] = frozenset(
 
 def validate_backend_env_vars(
 	env_vars: dict[str, str],
-	*,
-	managed_env_vars: Container[str] | None = None,
 ) -> None:
-	managed = () if managed_env_vars is None else managed_env_vars
-	reserved = sorted(
-		key for key in env_vars if key in RESERVED_BACKEND_ENV_VARS or key in managed
-	)
+	reserved = sorted(key for key in env_vars if key in RESERVED_BACKEND_ENV_VARS)
 	if reserved:
 		raise DeploymentError(
 			"backend env vars cannot override pulse-railway managed variables: "
@@ -173,12 +168,9 @@ def _backend_session_env(
 ) -> dict[str, str]:
 	if store is None:
 		return {}
-	configured_url = store.configured_url()
-	if configured_url is not None:
-		return {REDIS_URL: configured_url}
 	if redis_url is None:
 		raise DeploymentError("redis_url is required for Railway session store wiring")
-	return {REDIS_URL: redis_url}
+	return {PULSE_RAILWAY_REDIS_URL: redis_url}
 
 
 async def _place_backend_in_router_group(
@@ -364,10 +356,6 @@ async def deploy(
 		backend_session_env = _backend_session_env(
 			session_store,
 			redis_url=stack_state.redis_url,
-		)
-		validate_backend_env_vars(
-			project.env_vars,
-			managed_env_vars=backend_session_env,
 		)
 		backend_image = await build_and_push_image(
 			docker=replace(docker, build_args=build_args),

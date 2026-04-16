@@ -2,36 +2,28 @@ from __future__ import annotations
 
 from datetime import date
 
-import pulse as ps
 import pytest
-from pulse_railway.constants import REDIS_URL
-from pulse_railway.session import RailwayRedisSessionStore, railway_session_store
+from pulse_railway.constants import PULSE_RAILWAY_REDIS_URL
+from pulse_railway.session import RailwayRedisSessionStore, RailwaySessionStore
 
 
-def test_redis_url_env_name_is_standard() -> None:
-	assert REDIS_URL == "REDIS_URL"
+def test_railway_session_store_env_name_is_dedicated() -> None:
+	assert PULSE_RAILWAY_REDIS_URL == "PULSE_RAILWAY_REDIS_URL"
 
 
 def test_railway_session_store_resolves_env_url() -> None:
-	store = railway_session_store(
-		env={REDIS_URL: "redis://shared:6379/0"},
+	store = RailwaySessionStore(
+		env={PULSE_RAILWAY_REDIS_URL: "redis://shared:6379/0"},
 	)
 
 	assert store.configured_url() == "redis://shared:6379/0"
 
 
-@pytest.mark.asyncio
-async def test_railway_session_store_uses_fallback_when_unconfigured() -> None:
-	store = railway_session_store(fallback=ps.InMemorySessionStore())
-	await store.init()
+def test_railway_session_store_requires_dedicated_env_var() -> None:
+	store = RailwaySessionStore(env={})
 
-	await store.save("sid-1", {"count": 1})
-	session = await store.get("sid-1")
-
-	assert session == {"count": 1}
-	await store.delete("sid-1")
-	assert await store.get("sid-1") is None
-	await store.close()
+	with pytest.raises(RuntimeError, match=PULSE_RAILWAY_REDIS_URL):
+		store._ensure_client()
 
 
 @pytest.mark.asyncio

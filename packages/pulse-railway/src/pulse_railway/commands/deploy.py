@@ -154,7 +154,7 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 		dockerfile_path=dockerfile_path,
 		context_path=context_path,
 		build_args=parse_kv_items(args.build_arg, "--build-arg"),
-		image_repository=args.image_repository,
+		image_repository=args.image_repository or deploy_target.image_repository,
 	)
 	result = await deploy(
 		project=project,

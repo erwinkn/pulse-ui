@@ -7,8 +7,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pulse as ps
-from pulse_railway import RailwayPlugin, railway_session_store
-from pulse_railway.constants import PULSE_DEPLOYMENT_ID, REDIS_URL
+from pulse_railway import RailwayPlugin, RailwaySessionStore
+from pulse_railway.constants import (
+	PULSE_DEPLOYMENT_ID,
+	PULSE_RAILWAY_REDIS_URL,
+)
 
 SESSION_PREFIX = "pulse:railway-example:session"
 BEHAVIOR_VERSION = "concurrent-v2"
@@ -25,7 +28,7 @@ def now_iso() -> str:
 
 def redis_target(env: Mapping[str, str] | None = None) -> str:
 	values = os.environ if env is None else env
-	return values.get(REDIS_URL) or "in-memory fallback"
+	return values.get(PULSE_RAILWAY_REDIS_URL) or "unconfigured"
 
 
 def session_snapshot() -> dict[str, Any]:
@@ -83,7 +86,7 @@ def home():
 			ps.section(
 				ps.h2("Session store", className="text-2xl font-bold text-slate-950"),
 				ps.p(
-					"The app opts into pulse_railway.railway_session_store(). In this example it falls back to in-memory locally, but Railway injects the shared Redis URL on deploy.",
+					"The app uses pulse_railway.RailwaySessionStore(). Railway injects the shared Redis URL on deploy, and local runs can provide the same env var directly.",
 					className="mt-2 text-sm text-slate-600",
 				),
 				ps.div(
@@ -155,11 +158,7 @@ def create_app(
 				environment_id=os.environ.get("RAILWAY_ENVIRONMENT_ID"),
 			)
 		],
-		session_store=session_store
-		or railway_session_store(
-			prefix=SESSION_PREFIX,
-			fallback=ps.InMemorySessionStore(),
-		),
+		session_store=session_store or RailwaySessionStore(prefix=SESSION_PREFIX),
 		server_address=os.environ.get("PULSE_SERVER_ADDRESS"),
 		internal_server_address=os.environ.get("PULSE_INTERNAL_SERVER_ADDRESS"),
 	)

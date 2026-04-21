@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -130,6 +131,88 @@ async def test_graphql_client_falls_back_to_bearer_auth() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_project_variables_passes_service_id_when_requested() -> None:
+	request_payloads: list[dict[str, object]] = []
+
+	def handler(request: httpx.Request) -> httpx.Response:
+		payload = request.read().decode()
+		if "projectToken" in payload:
+			return httpx.Response(
+				200,
+				json={"data": {"projectToken": {"projectId": "project"}}},
+			)
+		request_payloads.append(json.loads(payload))
+		return httpx.Response(200, json={"data": {"variables": {"FOO": "bar"}}})
+
+	client = RailwayGraphQLClient(token="token")
+	client._client = httpx.AsyncClient(
+		base_url=client.endpoint,
+		headers={"Content-Type": "application/json"},
+		transport=httpx.MockTransport(handler),
+		timeout=client._client.timeout,
+	)
+	try:
+		result = await client.get_project_variables(
+			project_id="project",
+			environment_id="env",
+			service_id="svc-1",
+		)
+	finally:
+		await client.aclose()
+
+	assert result == {"FOO": "bar"}
+	assert len(request_payloads) == 1
+	assert "variables(" in str(request_payloads[0]["query"])
+	assert request_payloads[0]["variables"] == {
+		"projectId": "project",
+		"environmentId": "env",
+		"serviceId": "svc-1",
+		"unrendered": False,
+	}
+
+
+@pytest.mark.asyncio
+async def test_get_project_variables_passes_unrendered_when_requested() -> None:
+	request_payloads: list[dict[str, object]] = []
+
+	def handler(request: httpx.Request) -> httpx.Response:
+		payload = request.read().decode()
+		if "projectToken" in payload:
+			return httpx.Response(
+				200,
+				json={"data": {"projectToken": {"projectId": "project"}}},
+			)
+		request_payloads.append(json.loads(payload))
+		return httpx.Response(200, json={"data": {"variables": {"FOO": "bar"}}})
+
+	client = RailwayGraphQLClient(token="token")
+	client._client = httpx.AsyncClient(
+		base_url=client.endpoint,
+		headers={"Content-Type": "application/json"},
+		transport=httpx.MockTransport(handler),
+		timeout=client._client.timeout,
+	)
+	try:
+		result = await client.get_project_variables(
+			project_id="project",
+			environment_id="env",
+			service_id="svc-1",
+			unrendered=True,
+		)
+	finally:
+		await client.aclose()
+
+	assert result == {"FOO": "bar"}
+	assert len(request_payloads) == 1
+	assert request_payloads[0]["variables"] == {
+		"projectId": "project",
+		"environmentId": "env",
+		"serviceId": "svc-1",
+		"unrendered": True,
+	}
+
+
+@pytest.mark.asyncio
 async def test_create_project_uses_bearer_auth() -> None:
 	request_headers: list[httpx.Headers] = []
 
@@ -152,3 +235,63 @@ async def test_create_project_uses_bearer_auth() -> None:
 
 	assert project_id == "project"
 	assert len(request_headers) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_service_latest_deployment_reads_environment_service_instances() -> (
+	None
+):
+	def handler(request: httpx.Request) -> httpx.Response:
+		payload = request.read().decode()
+		if "projectToken" in payload:
+			return httpx.Response(
+				200,
+				json={"data": {"projectToken": {"projectId": "project"}}},
+			)
+		return httpx.Response(
+			200,
+			json={
+				"data": {
+					"environment": {
+						"serviceInstances": {
+							"edges": [
+								{
+									"node": {
+										"serviceId": "svc-1",
+										"latestDeployment": {
+											"id": "dep-1",
+											"status": "SUCCESS",
+											"createdAt": "2026-01-01T00:00:00Z",
+											"deploymentStopped": False,
+										},
+									}
+								}
+							]
+						}
+					}
+				}
+			},
+		)
+
+	client = RailwayGraphQLClient(token="token")
+	client._client = httpx.AsyncClient(
+		base_url=client.endpoint,
+		headers={"Content-Type": "application/json"},
+		transport=httpx.MockTransport(handler),
+		timeout=client._client.timeout,
+	)
+	try:
+		result = await client.get_service_latest_deployment(
+			project_id="project",
+			environment_id="env",
+			service_id="svc-1",
+		)
+	finally:
+		await client.aclose()
+
+	assert result == {
+		"id": "dep-1",
+		"status": "SUCCESS",
+		"createdAt": "2026-01-01T00:00:00Z",
+		"deploymentStopped": False,
+	}

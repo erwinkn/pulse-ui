@@ -193,6 +193,9 @@ class RailwayGraphQLClient:
 		)
 		return self._resolved_auth_mode
 
+	async def resolve_auth_mode(self) -> str:
+		return await self._ensure_auth_mode()
+
 	async def graphql(
 		self,
 		query: str,
@@ -312,14 +315,21 @@ class RailwayGraphQLClient:
 		project_id: str,
 		environment_id: str,
 		service_id: str | None = None,
+		unrendered: bool = False,
 	) -> dict[str, str]:
 		data = await self.graphql(
 			"""
-			query($projectId: String!, $environmentId: String!, $serviceId: String) {
+			query(
+				$projectId: String!,
+				$environmentId: String!,
+				$serviceId: String,
+				$unrendered: Boolean
+			) {
 				variables(
 					projectId: $projectId,
 					environmentId: $environmentId,
-					serviceId: $serviceId
+					serviceId: $serviceId,
+					unrendered: $unrendered
 				)
 			}
 			""",
@@ -327,6 +337,7 @@ class RailwayGraphQLClient:
 				"projectId": project_id,
 				"environmentId": environment_id,
 				"serviceId": service_id,
+				"unrendered": unrendered,
 			},
 		)
 		return dict(data["variables"])
@@ -475,6 +486,48 @@ class RailwayGraphQLClient:
 		):
 			if service.name == name:
 				return service
+		return None
+
+	async def get_service_latest_deployment(
+		self,
+		*,
+		project_id: str,
+		environment_id: str,
+		service_id: str,
+	) -> dict[str, Any] | None:
+		data = await self.graphql(
+			"""
+			query($projectId: String!, $environmentId: String!) {
+				environment(id: $environmentId, projectId: $projectId) {
+					serviceInstances {
+						edges {
+							node {
+								serviceId
+								latestDeployment {
+									id
+									status
+									createdAt
+									deploymentStopped
+								}
+							}
+						}
+					}
+				}
+			}
+			""",
+			{
+				"projectId": project_id,
+				"environmentId": environment_id,
+			},
+		)
+		for edge in data["environment"]["serviceInstances"]["edges"]:
+			node = edge["node"]
+			if node["serviceId"] != service_id:
+				continue
+			latest = node.get("latestDeployment")
+			if latest is None:
+				return None
+			return dict(latest)
 		return None
 
 	async def create_service(

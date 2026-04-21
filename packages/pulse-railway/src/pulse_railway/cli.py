@@ -6,6 +6,7 @@ import argparse
 import asyncio
 from typing import Unpack
 
+from pulse_railway.auth import railway_access_token
 from pulse_railway.commands.common import (
 	RailwayProjectOverrides,
 	env,
@@ -118,7 +119,7 @@ def _railway_project(
 		or args.environment_id
 		or env("RAILWAY_ENVIRONMENT_ID")
 		or "",
-		token=token or args.token or env("RAILWAY_TOKEN") or "",
+		token=token or args.token or railway_access_token() or "",
 		service_name=resolved_service_name,
 		service_prefix=normalize_optional_service_prefix(resolved_service_prefix),
 		redis_url=args.redis_url,
@@ -138,7 +139,7 @@ def _add_delete_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument("--project-id", default=env("RAILWAY_PROJECT_ID"))
 	parser.add_argument("--environment-id", default=env("RAILWAY_ENVIRONMENT_ID"))
-	parser.add_argument("--token", default=env("RAILWAY_TOKEN"))
+	parser.add_argument("--token", default=railway_access_token())
 	parser.add_argument("--service-prefix", default=env("PULSE_RAILWAY_SERVICE_PREFIX"))
 	parser.add_argument(
 		"--keep-active-variable",
@@ -162,7 +163,7 @@ def _add_remove_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument("--project-id", default=env("RAILWAY_PROJECT_ID"))
 	parser.add_argument("--environment-id", default=env("RAILWAY_ENVIRONMENT_ID"))
-	parser.add_argument("--token", default=env("RAILWAY_TOKEN"))
+	parser.add_argument("--token", default=railway_access_token())
 	parser.add_argument("--service-prefix", default=env("PULSE_RAILWAY_SERVICE_PREFIX"))
 	parser.add_argument(
 		"--keep-active-variable",
@@ -186,7 +187,7 @@ def _add_janitor_run_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument("--project-id", default=env("RAILWAY_PROJECT_ID"))
 	parser.add_argument("--environment-id", default=env("RAILWAY_ENVIRONMENT_ID"))
-	parser.add_argument("--token", default=env("RAILWAY_TOKEN"))
+	parser.add_argument("--token", default=railway_access_token())
 	parser.add_argument("--service-prefix", default=env("PULSE_RAILWAY_SERVICE_PREFIX"))
 	parser.add_argument(
 		"--redis-url",

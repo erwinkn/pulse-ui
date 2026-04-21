@@ -5,8 +5,6 @@ from typing import Any
 import pytest
 from pulse_railway.config import RailwayProject
 from pulse_railway.constants import (
-	ACTIVE_DEPLOYMENT_VARIABLE,
-	DEFAULT_PULSE_BASELINE_NO_REDIS_TEMPLATE_CODE,
 	DEFAULT_PULSE_BASELINE_TEMPLATE_CODE,
 	PULSE_INTERNAL_TOKEN,
 	PULSE_JANITOR_DRAIN_GRACE_SECONDS,
@@ -27,7 +25,6 @@ from pulse_railway.stack import (
 	ROUTER_START_COMMAND,
 	bootstrap_stack,
 	require_ready_stack,
-	upgrade_stack,
 )
 
 
@@ -39,6 +36,7 @@ async def test_bootstrap_stack_creates_baseline_from_empty_project(monkeypatch) 
 	service_updates: list[dict[str, Any]] = []
 	domain_targets: list[str] = []
 	deployed_templates: list[str] = []
+	group_assignments: list[tuple[str, str]] = []
 
 	class _FakeClient:
 		def __init__(self, **_: object) -> None:
@@ -148,6 +146,19 @@ async def test_bootstrap_stack_creates_baseline_from_empty_project(monkeypatch) 
 			service_variables[service_id] = {}
 			return service_id
 
+		async def get_environment_config(
+			self, *, project_id: str, environment_id: str
+		) -> dict[str, Any]:
+			assert project_id == "project"
+			assert environment_id == "env"
+			return {"services": {"svc-1": {"groupId": "group-baseline"}}}
+
+		async def set_service_group_id(
+			self, *, environment_id: str, service_id: str, group_id: str
+		) -> None:
+			assert environment_id == "env"
+			group_assignments.append((service_id, group_id))
+
 		async def update_service_instance(self, **kwargs: Any) -> None:
 			service_updates.append(kwargs)
 
@@ -201,6 +212,8 @@ async def test_bootstrap_stack_creates_baseline_from_empty_project(monkeypatch) 
 	assert result.internal_token_created is True
 	assert result.redis_url == "redis://pulse-redis.railway.internal:6379"
 	assert result.server_address == "https://test.pulse.sc"
+	assert "pulse-env" in service_state
+	assert group_assignments == [("svc-4", "group-baseline")]
 	assert PULSE_INTERNAL_TOKEN in project_variables
 	assert domain_targets
 	assert deployed_templates == ["template-1"]
@@ -229,7 +242,7 @@ async def test_bootstrap_stack_creates_baseline_from_empty_project(monkeypatch) 
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_stack_is_idempotent_for_existing_stack(monkeypatch) -> None:
+async def test_bootstrap_stack_fails_for_existing_stack(monkeypatch) -> None:
 	service_state: dict[str, ServiceRecord] = {
 		"pulse-router": ServiceRecord(
 			id="svc-router",
@@ -245,6 +258,7 @@ async def test_bootstrap_stack_is_idempotent_for_existing_stack(monkeypatch) -> 
 		),
 		"pulse-redis": ServiceRecord(id="svc-redis", name="pulse-redis"),
 		"pulse-janitor": ServiceRecord(id="svc-janitor", name="pulse-janitor"),
+		"pulse-env": ServiceRecord(id="svc-env", name="pulse-env"),
 	}
 	service_variables = {
 		"svc-router": {
@@ -316,25 +330,18 @@ async def test_bootstrap_stack_is_idempotent_for_existing_stack(monkeypatch) -> 
 
 	monkeypatch.setattr("pulse_railway.stack.RailwayGraphQLClient", _FakeClient)
 
-	result = await bootstrap_stack(
-		project=RailwayProject(
-			project_id="project",
-			environment_id="env",
-			token="token",
-			service_name="pulse-router",
-			redis_service_name="pulse-redis",
-			janitor_service_name="pulse-janitor",
+	with pytest.raises(DeploymentError, match="baseline stack already exists"):
+		await bootstrap_stack(
+			project=RailwayProject(
+				project_id="project",
+				environment_id="env",
+				token="token",
+				service_name="pulse-router",
+				redis_service_name="pulse-redis",
+				janitor_service_name="pulse-janitor",
+			)
 		)
-	)
 
-	assert result.router.created is False
-	assert result.router.deployed is False
-	assert result.janitor.created is False
-	assert result.janitor.deployed is False
-	assert result.redis is not None
-	assert result.redis.created is False
-	assert result.internal_token_created is False
-	assert result.server_address == "https://test.pulse.sc"
 	assert create_calls == []
 	assert deploy_calls == []
 
@@ -344,10 +351,15 @@ async def test_bootstrap_stack_fails_for_partial_baseline(monkeypatch) -> None:
 	service_state: dict[str, ServiceRecord] = {
 		"pulse-router": ServiceRecord(id="svc-router", name="pulse-router")
 	}
+	service_variables: dict[str, dict[str, str]] = {"svc-router": {}}
+	project_variables: dict[str, str] = {}
+	service_updates: list[dict[str, Any]] = []
+	deployed_templates: list[str] = []
+	group_assignments: list[tuple[str, str]] = []
 
 	class _FakeClient:
 		def __init__(self, **_: object) -> None:
-			return None
+			self.service_counter = 1
 
 		async def __aenter__(self) -> "_FakeClient":
 			return self
@@ -360,9 +372,112 @@ async def test_bootstrap_stack_fails_for_partial_baseline(monkeypatch) -> None:
 		) -> ServiceRecord | None:
 			return service_state.get(name)
 
+		async def get_template_by_code(self, *, code: str) -> TemplateRecord:
+			return TemplateRecord(
+				id="template-redis",
+				code=code,
+				serialized_config={"services": {"template-service": {"name": "Redis"}}},
+			)
+
+		async def deploy_template(
+			self,
+			*,
+			project_id: str,
+			environment_id: str,
+			template_id: str,
+			serialized_config: dict[str, Any],
+		) -> str:
+			deployed_templates.append(template_id)
+			service_name = serialized_config["services"]["template-service"]["name"]
+			self.service_counter += 1
+			service_id = f"svc-{self.service_counter}"
+			service_state[service_name] = ServiceRecord(
+				id=service_id,
+				name=service_name,
+			)
+			service_variables[service_id] = {
+				"REDIS_URL": "redis://pulse-redis.railway.internal:6379"
+			}
+			return "workflow-redis"
+
+		async def get_service_variables_for_deployment(
+			self, *, project_id: str, environment_id: str, service_id: str
+		) -> dict[str, str]:
+			service = next(
+				record for record in service_state.values() if record.id == service_id
+			)
+			variables = dict(service_variables.get(service_id, {}))
+			if service.name == "pulse-router":
+				variables["RAILWAY_PUBLIC_DOMAIN"] = "test.pulse.sc"
+			return variables
+
+		async def get_project_variables(
+			self, *, project_id: str, environment_id: str
+		) -> dict[str, str]:
+			return dict(project_variables)
+
+		async def upsert_variable(self, **kwargs: Any) -> None:
+			service_id = kwargs.get("service_id")
+			if service_id is None:
+				project_variables[kwargs["name"]] = kwargs["value"]
+				return
+			service_variables.setdefault(service_id, {})[kwargs["name"]] = kwargs[
+				"value"
+			]
+
+		async def create_service(
+			self,
+			*,
+			project_id: str,
+			environment_id: str,
+			name: str,
+			image: str | None = None,
+		) -> str:
+			self.service_counter += 1
+			service_id = f"svc-{self.service_counter}"
+			service_state[name] = ServiceRecord(id=service_id, name=name, image=image)
+			service_variables[service_id] = {}
+			return service_id
+
+		async def get_environment_config(
+			self, *, project_id: str, environment_id: str
+		) -> dict[str, Any]:
+			return {"services": {"svc-router": {"groupId": "group-baseline"}}}
+
+		async def set_service_group_id(
+			self, *, environment_id: str, service_id: str, group_id: str
+		) -> None:
+			group_assignments.append((service_id, group_id))
+
+		async def update_service_instance(self, **kwargs: Any) -> None:
+			service_updates.append(kwargs)
+
+		async def deploy_service(self, *, service_id: str, environment_id: str) -> str:
+			return f"deploy-{service_id}"
+
+		async def wait_for_deployment(self, *, deployment_id: str) -> dict[str, str]:
+			return {"id": deployment_id, "status": "SUCCESS"}
+
+		async def create_service_domain(
+			self,
+			*,
+			service_id: str,
+			environment_id: str,
+			target_port: int,
+		) -> str:
+			for service in service_state.values():
+				if service.id != service_id:
+					continue
+				domain = "pulse-router-production.up.railway.app"
+				service.domains = [
+					ServiceDomain(id="domain-1", domain=domain, target_port=target_port)
+				]
+				return domain
+			raise AssertionError(service_id)
+
 	monkeypatch.setattr("pulse_railway.stack.RailwayGraphQLClient", _FakeClient)
 
-	with pytest.raises(DeploymentError, match="pulse-railway upgrade"):
+	with pytest.raises(DeploymentError, match="baseline stack already exists"):
 		await bootstrap_stack(
 			project=RailwayProject(
 				project_id="project",
@@ -374,15 +489,23 @@ async def test_bootstrap_stack_fails_for_partial_baseline(monkeypatch) -> None:
 			)
 		)
 
+	assert "pulse-janitor" not in service_state
+	assert deployed_templates == []
+	assert group_assignments == []
+	assert service_updates == []
+
 
 @pytest.mark.asyncio
-async def test_bootstrap_stack_uses_no_redis_template_for_external_redis(
+async def test_bootstrap_stack_removes_managed_redis_for_external_redis(
 	monkeypatch,
 ) -> None:
 	service_state: dict[str, ServiceRecord] = {}
 	service_variables: dict[str, dict[str, str]] = {}
 	project_variables: dict[str, str] = {}
 	template_codes: list[str] = []
+	deleted_variables: list[tuple[str | None, str]] = []
+	deleted_services: list[str] = []
+	group_assignments: list[tuple[str, str]] = []
 
 	class _FakeClient:
 		def __init__(self, **_: object) -> None:
@@ -401,14 +524,15 @@ async def test_bootstrap_stack_uses_no_redis_template_for_external_redis(
 
 		async def get_template_by_code(self, *, code: str) -> TemplateRecord:
 			template_codes.append(code)
-			assert code == DEFAULT_PULSE_BASELINE_NO_REDIS_TEMPLATE_CODE
+			assert code == DEFAULT_PULSE_BASELINE_TEMPLATE_CODE
 			return TemplateRecord(
-				id="template-no-redis",
+				id="template-baseline",
 				code=code,
 				serialized_config={
 					"services": {
 						"template-router": {"name": "pulse-router"},
 						"template-janitor": {"name": "pulse-janitor"},
+						"template-redis": {"name": "pulse-redis"},
 					}
 				},
 			)
@@ -442,8 +566,24 @@ async def test_bootstrap_stack_uses_no_redis_template_for_external_redis(
 			return variables
 
 		async def get_project_variables(
-			self, *, project_id: str, environment_id: str
+			self,
+			*,
+			project_id: str,
+			environment_id: str,
+			service_id: str | None = None,
+			unrendered: bool = False,
 		) -> dict[str, str]:
+			if not unrendered:
+				return dict(project_variables)
+			if service_id is None:
+				return dict(project_variables)
+			service = next(
+				record for record in service_state.values() if record.id == service_id
+			)
+			if service.name == "pulse-router":
+				return {"REDIS_URL": "${{pulse-redis.REDIS_URL}}"}
+			if service.name == "pulse-janitor":
+				return {"REDIS_URL": "${{ pulse-redis.REDIS_URL }}"}
 			return dict(project_variables)
 
 		async def upsert_variable(self, **kwargs: Any) -> None:
@@ -455,6 +595,30 @@ async def test_bootstrap_stack_uses_no_redis_template_for_external_redis(
 				"value"
 			]
 
+		async def create_service(
+			self,
+			*,
+			project_id: str,
+			environment_id: str,
+			name: str,
+			image: str | None = None,
+		) -> str:
+			self.service_counter += 1
+			service_id = f"svc-{self.service_counter}"
+			service_state[name] = ServiceRecord(id=service_id, name=name, image=image)
+			service_variables[service_id] = {}
+			return service_id
+
+		async def get_environment_config(
+			self, *, project_id: str, environment_id: str
+		) -> dict[str, Any]:
+			return {"services": {"svc-1": {"groupId": "group-baseline"}}}
+
+		async def set_service_group_id(
+			self, *, environment_id: str, service_id: str, group_id: str
+		) -> None:
+			group_assignments.append((service_id, group_id))
+
 		async def update_service_instance(self, **kwargs: Any) -> None:
 			return None
 
@@ -463,6 +627,25 @@ async def test_bootstrap_stack_uses_no_redis_template_for_external_redis(
 
 		async def wait_for_deployment(self, *, deployment_id: str) -> dict[str, str]:
 			return {"id": deployment_id, "status": "SUCCESS"}
+
+		async def delete_variable(
+			self,
+			*,
+			project_id: str,
+			environment_id: str,
+			name: str,
+			service_id: str | None = None,
+		) -> None:
+			deleted_variables.append((service_id, name))
+
+		async def delete_service(self, *, service_id: str, environment_id: str) -> None:
+			deleted_services.append(service_id)
+			service = next(
+				record_name
+				for record_name, record in service_state.items()
+				if record.id == service_id
+			)
+			del service_state[service]
 
 		async def create_service_domain(
 			self,
@@ -494,11 +677,16 @@ async def test_bootstrap_stack_uses_no_redis_template_for_external_redis(
 		)
 	)
 
-	assert template_codes == [DEFAULT_PULSE_BASELINE_NO_REDIS_TEMPLATE_CODE]
+	assert template_codes == [DEFAULT_PULSE_BASELINE_TEMPLATE_CODE]
 	assert result.router.image == official_router_image_ref()
 	assert result.janitor.image == official_janitor_image_ref()
 	assert result.redis is None
 	assert result.redis_url == "redis://external.example:6379"
+	assert group_assignments == [("svc-4", "group-baseline")]
+	assert deleted_services == ["svc-3"]
+	assert deleted_variables == [("svc-1", "REDIS_URL"), ("svc-2", "REDIS_URL")]
+	assert service_variables["svc-1"][REDIS_URL] == "redis://external.example:6379"
+	assert service_variables["svc-2"][REDIS_URL] == "redis://external.example:6379"
 
 
 @pytest.mark.asyncio
@@ -518,6 +706,7 @@ async def test_require_ready_stack_accepts_external_redis_baseline(
 			],
 		),
 		"pulse-janitor": ServiceRecord(id="svc-janitor", name="pulse-janitor"),
+		"pulse-env": ServiceRecord(id="svc-env", name="pulse-env"),
 	}
 	redis_url = "redis://external.example:6379"
 	service_variables = {
@@ -597,155 +786,3 @@ async def test_require_ready_stack_accepts_external_redis_baseline(
 	assert result.redis is None
 	assert result.redis_url == redis_url
 	assert result.server_address == "https://test.pulse.sc"
-
-
-@pytest.mark.asyncio
-async def test_upgrade_stack_reconciles_and_creates_missing_services(
-	monkeypatch,
-) -> None:
-	service_state: dict[str, ServiceRecord] = {
-		"pulse-router": ServiceRecord(id="svc-router", name="pulse-router"),
-	}
-	service_variables: dict[str, dict[str, str]] = {}
-	project_variables: dict[str, str] = {
-		PULSE_INTERNAL_TOKEN: "secret-token",
-		ACTIVE_DEPLOYMENT_VARIABLE: "prod-1",
-	}
-	service_updates: list[dict[str, Any]] = []
-	project_upserts: list[str] = []
-
-	class _FakeClient:
-		def __init__(self, **_: object) -> None:
-			self.service_counter = 1
-
-		async def __aenter__(self) -> "_FakeClient":
-			return self
-
-		async def __aexit__(self, *_: object) -> None:
-			return None
-
-		async def find_service_by_name(
-			self, *, project_id: str, environment_id: str, name: str
-		) -> ServiceRecord | None:
-			return service_state.get(name)
-
-		async def get_template_by_code(self, *, code: str) -> TemplateRecord:
-			return TemplateRecord(
-				id="template-1",
-				code="redis",
-				serialized_config={"services": {"template-service": {"name": "Redis"}}},
-			)
-
-		async def deploy_template(
-			self,
-			*,
-			project_id: str,
-			environment_id: str,
-			template_id: str,
-			serialized_config: dict[str, Any],
-		) -> str:
-			service_name = serialized_config["services"]["template-service"]["name"]
-			self.service_counter += 1
-			service_state[service_name] = ServiceRecord(
-				id=f"svc-{self.service_counter}",
-				name=service_name,
-			)
-			return "workflow-1"
-
-		async def get_service_variables_for_deployment(
-			self, *, project_id: str, environment_id: str, service_id: str
-		) -> dict[str, str]:
-			service = next(
-				record for record in service_state.values() if record.id == service_id
-			)
-			if service.name == "pulse-redis":
-				return {"REDIS_URL": "redis://pulse-redis.railway.internal:6379"}
-			variables = dict(service_variables.get(service_id, {}))
-			if service.name == "pulse-router":
-				variables["RAILWAY_PUBLIC_DOMAIN"] = "test.pulse.sc"
-			return variables
-
-		async def get_project_variables(
-			self, *, project_id: str, environment_id: str
-		) -> dict[str, str]:
-			return dict(project_variables)
-
-		async def upsert_variable(self, **kwargs: Any) -> None:
-			service_id = kwargs.get("service_id")
-			if service_id is None:
-				project_upserts.append(kwargs["name"])
-				project_variables[kwargs["name"]] = kwargs["value"]
-				return
-			service_variables.setdefault(service_id, {})[kwargs["name"]] = kwargs[
-				"value"
-			]
-
-		async def create_service(
-			self,
-			*,
-			project_id: str,
-			environment_id: str,
-			name: str,
-			image: str | None = None,
-		) -> str:
-			self.service_counter += 1
-			service_id = f"svc-{self.service_counter}"
-			service_state[name] = ServiceRecord(id=service_id, name=name, image=image)
-			service_variables[service_id] = {}
-			return service_id
-
-		async def update_service_instance(self, **kwargs: Any) -> None:
-			service_updates.append(kwargs)
-
-		async def deploy_service(self, *, service_id: str, environment_id: str) -> str:
-			return f"deploy-{service_id}"
-
-		async def wait_for_deployment(self, *, deployment_id: str) -> dict[str, str]:
-			return {"id": deployment_id, "status": "SUCCESS"}
-
-		async def create_service_domain(
-			self,
-			*,
-			service_id: str,
-			environment_id: str,
-			target_port: int,
-		) -> str:
-			for service in service_state.values():
-				if service.id != service_id:
-					continue
-				domain = "pulse-router-production.up.railway.app"
-				service.domains = [
-					ServiceDomain(id="domain-1", domain=domain, target_port=target_port)
-				]
-				return domain
-			raise AssertionError(service_id)
-
-	monkeypatch.setattr("pulse_railway.stack.RailwayGraphQLClient", _FakeClient)
-
-	result = await upgrade_stack(
-		project=RailwayProject(
-			project_id="project",
-			environment_id="env",
-			token="token",
-			service_name="pulse-router",
-			redis_service_name="pulse-redis",
-			janitor_service_name="pulse-janitor",
-		)
-	)
-
-	assert result.router.deployed is True
-	assert result.router.image == official_router_image_ref()
-	assert result.janitor.deployed is True
-	assert result.janitor.image == official_janitor_image_ref()
-	assert result.janitor.created is True
-	assert result.redis is not None
-	assert result.redis.created is True
-	assert result.internal_token_created is False
-	assert result.server_address == "https://test.pulse.sc"
-	assert ACTIVE_DEPLOYMENT_VARIABLE not in project_upserts
-	assert any(
-		update["start_command"] == ROUTER_START_COMMAND for update in service_updates
-	)
-	assert any(
-		update["start_command"] == JANITOR_START_COMMAND for update in service_updates
-	)

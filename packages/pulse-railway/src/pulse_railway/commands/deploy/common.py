@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
-import json
-from dataclasses import asdict
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Literal
 
+from pulse_railway.auth import (
+	railway_access_token,
+	resolve_railway_access_token,
+)
 from pulse_railway.commands.common import (
 	build_target_project,
 	env,
@@ -14,11 +16,35 @@ from pulse_railway.commands.common import (
 	parse_kv_items,
 	resolve_path,
 )
-from pulse_railway.config import DockerBuild
-from pulse_railway.deployment import deploy, validate_backend_env_vars
+from pulse_railway.config import DockerBuild, RailwayProject
+from pulse_railway.deployment import (
+	check_reserved_source_build_args,
+	validate_backend_env_vars,
+)
+
+DeployMode = Literal["image", "source"]
 
 
-def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
+@dataclass(slots=True)
+class ResolvedDeployCommand:
+	mode: DeployMode
+	project: RailwayProject
+	docker: DockerBuild
+	deployment_name: str
+	deployment_id: str | None
+	app_file: str
+	web_root: str
+	cli_token_env_name: str | None
+	no_gitignore: bool
+
+
+def add_shared_deploy_args(parser: argparse.ArgumentParser) -> None:
+	parser.add_argument(
+		"--mode",
+		choices=("image", "source"),
+		default=env("PULSE_RAILWAY_DEPLOY_MODE") or "image",
+		help="Deployment mode. `image` builds locally and deploys an image. `source` uploads source and lets Railway build it.",
+	)
 	parser.add_argument(
 		"--deployment-name",
 		default=None,
@@ -37,7 +63,7 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument(
 		"--token",
-		default=None,
+		default=railway_access_token(),
 		help="Railway project access token",
 	)
 	parser.add_argument(
@@ -68,18 +94,23 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
 		"--context",
 		default=env("PULSE_RAILWAY_CONTEXT") or ".",
-		help="Docker build context",
+		help="Build/upload context",
 	)
 	parser.add_argument(
 		"--image-repository",
 		default=env("PULSE_RAILWAY_IMAGE_REPOSITORY"),
-		help="Registry repository for pushed images. Defaults to ttl.sh.",
+		help="Registry repository for pushed images. Only used for `--mode image`.",
 	)
 	parser.add_argument(
 		"--build-arg",
 		action="append",
 		default=[],
 		help="Extra docker build arg KEY=VALUE (repeatable)",
+	)
+	parser.add_argument(
+		"--no-gitignore",
+		action="store_true",
+		help="Upload gitignored files too. Only used for `--mode source`.",
 	)
 	parser.add_argument(
 		"--env",
@@ -101,7 +132,7 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 	)
 
 
-async def _run_deploy(args: argparse.Namespace) -> int:
+def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployCommand:
 	invocation_cwd = Path.cwd()
 	dockerfile_path = resolve_path(invocation_cwd, args.dockerfile)
 	context_path = resolve_path(invocation_cwd, args.context)
@@ -110,9 +141,9 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 	if not context_path.exists():
 		raise ValueError(f"Context path not found: {context_path}")
 	if Path(args.app_file).is_absolute():
-		raise ValueError("app-file must be relative to the Docker build context")
+		raise ValueError("app-file must be relative to the deploy context")
 	if Path(args.web_root).is_absolute():
-		raise ValueError("web-root must be relative to the Docker build context")
+		raise ValueError("web-root must be relative to the deploy context")
 	app_path, deploy_target = load_deploy_target(
 		app_file=args.app_file,
 		base_path=context_path,
@@ -128,7 +159,9 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 		or deploy_target.environment_id
 		or env("RAILWAY_ENVIRONMENT_ID")
 	)
-	token = args.token or env("RAILWAY_TOKEN")
+	resolved_token = resolve_railway_access_token(args.token)
+	token = resolved_token.value
+	cli_token_env_name = resolved_token.env_name
 	deployment_name = (
 		args.deployment_name
 		or env("PULSE_RAILWAY_DEPLOYMENT_NAME")
@@ -137,8 +170,13 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 	)
 	if not project_id or not environment_id or not token:
 		raise ValueError("project id, environment id, and token are required")
+	if args.mode == "image" and args.no_gitignore:
+		raise ValueError("--no-gitignore requires --mode source")
 	env_vars = parse_kv_items(args.env, "--env")
 	validate_backend_env_vars(env_vars)
+	build_args = parse_kv_items(args.build_arg, "--build-arg")
+	if args.mode == "source":
+		check_reserved_source_build_args(build_args)
 	project = build_target_project(
 		args,
 		deploy_target=deploy_target,
@@ -153,32 +191,21 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 	docker = DockerBuild(
 		dockerfile_path=dockerfile_path,
 		context_path=context_path,
-		build_args=parse_kv_items(args.build_arg, "--build-arg"),
-		image_repository=args.image_repository or deploy_target.image_repository,
+		build_args=build_args,
+		image_repository=(
+			args.image_repository or deploy_target.image_repository
+			if args.mode == "image"
+			else None
+		),
 	)
-	result = await deploy(
+	return ResolvedDeployCommand(
+		mode=args.mode,
 		project=project,
 		docker=docker,
 		deployment_name=deployment_name,
 		deployment_id=args.deployment_id,
 		app_file=str(app_path.relative_to(context_path)),
 		web_root=args.web_root,
+		cli_token_env_name=cli_token_env_name,
+		no_gitignore=args.no_gitignore,
 	)
-	print(json.dumps(asdict(result), indent=2, sort_keys=True))
-	return 0
-
-
-add_deploy_args = _add_deploy_args
-run_deploy = _run_deploy
-
-
-def register(subparsers: Any) -> None:
-	deploy_parser = subparsers.add_parser(
-		"deploy",
-		help="Deploy a new application version onto an existing pulse-railway stack.",
-	)
-	_add_deploy_args(deploy_parser)
-
-
-def main(args: argparse.Namespace) -> int:
-	return asyncio.run(_run_deploy(args))

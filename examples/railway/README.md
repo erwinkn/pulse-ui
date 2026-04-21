@@ -35,14 +35,9 @@ uv run pulse-railway deploy \
 
 The app opts into `pulse_railway.RailwaySessionStore()`. Local runs can provide `PULSE_RAILWAY_REDIS_URL` directly. On Railway deploy, `pulse-railway` reads the stable service names from `RailwayPlugin` and injects that same env var so the shared Redis service backs deployment tracking and app sessions.
 
-When you upgrade `pulse-railway`, run:
+`pulse-railway upgrade` is currently a no-op placeholder.
 
-```bash
-uv run pulse-railway upgrade \
-  --app-file examples/railway/main.py
-```
-
-`pulse-railway deploy` now assumes the baseline stack already exists. If you skip `init` or need to reconcile an older stack, `deploy` fails fast and points you back to `init` or `upgrade`.
+`pulse-railway deploy` now assumes the baseline stack already exists. If you skip `init`, deploy fails fast and points you back to `init`. If a previous init left partial baseline services behind, delete those services before rerunning `init`.
 
 ## Verify
 

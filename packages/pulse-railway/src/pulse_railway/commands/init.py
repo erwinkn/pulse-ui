@@ -7,12 +7,13 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from pulse_railway.auth import railway_access_token
 from pulse_railway.commands.common import (
 	build_target_project,
 	env,
 	load_deploy_target,
 )
-from pulse_railway.constants import RAILWAY_WORKSPACE_ID
+from pulse_railway.constants import RAILWAY_API_TOKEN, RAILWAY_WORKSPACE_ID
 from pulse_railway.railway import RailwayGraphQLClient
 from pulse_railway.stack import bootstrap_stack
 
@@ -107,7 +108,7 @@ async def _resolve_init_target(
 	deploy_target_environment_id: str | None,
 	args: argparse.Namespace,
 	token: str | None,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
 	project_id = (
 		args.project_id or deploy_target_project_id or env("RAILWAY_PROJECT_ID")
 	)
@@ -119,7 +120,7 @@ async def _resolve_init_target(
 	if project_id:
 		if not environment_id or not token:
 			raise ValueError("project id, environment id, and token are required")
-		return project_id, environment_id
+		return project_id, environment_id, token
 	if environment_id:
 		raise ValueError(
 			"environment id requires an existing project id; omit both to create a new project"
@@ -127,34 +128,34 @@ async def _resolve_init_target(
 	if not token:
 		raise ValueError("token is required")
 	workspace_id = args.workspace_id or env(RAILWAY_WORKSPACE_ID)
-	if not workspace_id:
-		async with RailwayGraphQLClient(token=token) as client:
-			try:
-				data = await client.graphql(
-					"""
-					query {
-						projectToken {
-							projectId
-							environmentId
-						}
+	async with RailwayGraphQLClient(token=token) as client:
+		try:
+			data = await client.graphql(
+				"""
+				query {
+					projectToken {
+						projectId
+						environmentId
 					}
-					""",
-					auth_mode="project-token",
-				)
-			except Exception:
-				data = {}
-		project_token = data.get("projectToken") if isinstance(data, dict) else None
-		if isinstance(project_token, dict):
-			project_id = project_token.get("projectId")
-			environment_id = project_token.get("environmentId")
-			if project_id and environment_id:
-				return project_id, environment_id
+				}
+				""",
+				auth_mode="project-token",
+			)
+		except Exception:
+			data = {}
+	project_token = data.get("projectToken") if isinstance(data, dict) else None
+	if isinstance(project_token, dict):
+		project_id = project_token.get("projectId")
+		environment_id = project_token.get("environmentId")
+		if project_id and environment_id:
+			return project_id, environment_id, token
 	if not workspace_id:
 		raise ValueError("workspace id is required when creating a new project")
+	create_token = args.token or env(RAILWAY_API_TOKEN) or token
 	project_name = (args.project_name or app_path.stem).strip()
 	if not project_name:
 		raise ValueError("project name must not be empty")
-	async with RailwayGraphQLClient(token=token) as client:
+	async with RailwayGraphQLClient(token=create_token) as client:
 		project_id = await client.create_project(
 			name=project_name,
 			workspace_id=workspace_id,
@@ -164,7 +165,7 @@ async def _resolve_init_target(
 		raise ValueError(
 			f"created Railway project {project_id} without any environments"
 		)
-	return project_id, environments[0].id
+	return project_id, environments[0].id, create_token
 
 
 async def _run_init(args: argparse.Namespace) -> int:
@@ -173,8 +174,8 @@ async def _run_init(args: argparse.Namespace) -> int:
 		app_file=args.app_file,
 		base_path=base_path,
 	)
-	token = args.token or env("RAILWAY_TOKEN")
-	project_id, environment_id = await _resolve_init_target(
+	token = args.token or railway_access_token()
+	project_id, environment_id, token = await _resolve_init_target(
 		app_path=app_path,
 		deploy_target_project_id=deploy_target.project_id,
 		deploy_target_environment_id=deploy_target.environment_id,

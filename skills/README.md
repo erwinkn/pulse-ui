@@ -8,6 +8,8 @@ AI coding assistant skills for Pulse development. These files help AI tools unde
 |-------|-------------|
 | [pulse](./pulse/SKILL.md) | Complete Pulse framework reference with reactive state, components, routing, queries, channels, and JS interop |
 | [pulse-mantine](./pulse-mantine/SKILL.md) | Mantine UI components for Pulse |
+| [pulse-railway](./pulse-railway/SKILL.md) | Railway deployment utilities for Pulse apps, including `RailwayPlugin`, `RailwaySessionStore`, and `pulse-railway init` / `deploy` |
+| [pulse-aws](./pulse-aws/SKILL.md) | AWS ECS Fargate deployment utilities for Pulse apps |
 
 ### Pulse Skill Structure
 
@@ -37,6 +39,8 @@ Add skills to your `CLAUDE.md`:
 Include these skills for Pulse development:
 - https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse/SKILL.md
 - https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse-mantine/SKILL.md
+- https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse-railway/SKILL.md
+- https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse-aws/SKILL.md
 ```
 
 Or copy the SKILL.md contents directly into your `CLAUDE.md`.
@@ -58,6 +62,8 @@ Add to your `AGENTS.md` or `codex.md`:
 Include these skills:
 @import https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse/SKILL.md
 @import https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse-mantine/SKILL.md
+@import https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse-railway/SKILL.md
+@import https://raw.githubusercontent.com/pulsehq/pulse/main/skills/pulse-aws/SKILL.md
 ```
 
 ### Cursor
@@ -72,6 +78,14 @@ Add to `.cursorrules`:
 # Pulse Mantine Skills
 
 [Paste contents of pulse-mantine/SKILL.md here]
+
+# Pulse Railway Skills
+
+[Paste contents of pulse-railway/SKILL.md here]
+
+# Pulse AWS Skills
+
+[Paste contents of pulse-aws/SKILL.md here]
 ```
 
 ### OpenCode
@@ -84,6 +98,8 @@ Add to `~/.opencode/agents.md` or project-level `AGENTS.md`:
 Include these skills for Pulse development:
 @import skills/pulse/SKILL.md
 @import skills/pulse-mantine/SKILL.md
+@import skills/pulse-railway/SKILL.md
+@import skills/pulse-aws/SKILL.md
 ```
 
 ### Other Tools

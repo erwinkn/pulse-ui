@@ -22,12 +22,12 @@ uv run pulse-railway deploy \
   --context .
 
 uv run pulse-railway deploy \
-  --mode source \
   --deployment-name prod \
   --app-file examples/railway/main.py \
   --web-root examples/railway/web \
   --dockerfile examples/Dockerfile \
-  --context .
+  --context . \
+  --image-repository ghcr.io/<org>/<name>
 ```
 
 Use the commands like this:
@@ -35,7 +35,7 @@ Use the commands like this:
 - `pulse-railway init` bootstraps the stable router, env, Redis, and janitor stack into an empty Railway project.
 - `pulse-railway upgrade` is currently a no-op placeholder.
 - `pulse-railway deploy` builds and rolls out a new backend service on top of an already-initialized stack.
-  The default `--mode image` path builds locally and deploys an image. `--mode source` uploads source and uses `railway up` to build on Railway.
+  By default it uploads source and uses `railway up` to build on Railway. Passing an image repository switches deploy to the local `docker buildx build --push` path.
 
 `init` and `deploy` read the stable router, Redis, and janitor service names from `RailwayPlugin` on the target app. By default those are `pulse-router`, `pulse-redis`, and `pulse-janitor` without extra prefixing. The baseline also includes a stable env service named `pulse-env` that acts as the canonical source for user-managed deployment variables. Backend deployment services also default to no prefix, so their Railway service names match the generated deployment id unless you pass `--service-prefix`.
 
@@ -45,7 +45,7 @@ If you omit `--project-id`, `pulse-railway init` creates a new Railway project f
 
 You can also set `deployment_name` on `RailwayPlugin` to provide the default deploy name from app config. Precedence is: `--deployment-name`, then `PULSE_RAILWAY_DEPLOYMENT_NAME`, then `RailwayPlugin(deployment_name=...)`, then `prod`.
 
-You can also set `image_repository` on `RailwayPlugin` to provide the default backend image registry from app config. Precedence is: `--image-repository`, then `PULSE_RAILWAY_IMAGE_REPOSITORY`, then `RailwayPlugin(image_repository=...)`, then the zero-config `ttl.sh` fallback.
+You can also set `image_repository` on `RailwayPlugin` to provide the default backend image registry from app config. Precedence is: `--image-repository`, then `PULSE_RAILWAY_IMAGE_REPOSITORY`, then `RailwayPlugin(image_repository=...)`. If none is set, deploy uses source mode.
 
 If `--redis-url` is omitted, `pulse-railway init` creates the stable Redis service configured by `RailwayPlugin` in the Railway project.
 
@@ -53,7 +53,7 @@ If `--redis-url` is omitted, `pulse-railway init` creates the stable Redis servi
 
 User-managed app variables should live on the stable env service. Each new backend deployment references every non-Pulse-managed variable from `pulse-env`, so users can sync secrets into that service however they want: Railway UI, Shared Variables, Doppler, or another workflow.
 
-By default, `pulse-railway deploy` uses `--mode image`, and app deployment images are pushed to `ttl.sh` for a zero-config flow. For longer-lived app deployments, pass `--image-repository ghcr.io/<org>/<name>` or set `RailwayPlugin(image_repository="ghcr.io/<org>/<name>")` on the app. Use `--mode source` when you want Railway to build from uploaded source instead.
+By default, `pulse-railway deploy` uses source mode. Image deployments require `--image-repository ghcr.io/<org>/<name>`, `PULSE_RAILWAY_IMAGE_REPOSITORY`, or `RailwayPlugin(image_repository="ghcr.io/<org>/<name>")`.
 
 ## Model
 

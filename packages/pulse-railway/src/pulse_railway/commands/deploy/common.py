@@ -40,12 +40,6 @@ class ResolvedDeployCommand:
 
 def add_shared_deploy_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
-		"--mode",
-		choices=("image", "source"),
-		default=env("PULSE_RAILWAY_DEPLOY_MODE") or "image",
-		help="Deployment mode. `image` builds locally and deploys an image. `source` uploads source and lets Railway build it.",
-	)
-	parser.add_argument(
 		"--deployment-name",
 		default=None,
 		help="Deployment prefix used when generating deployment ids",
@@ -99,7 +93,7 @@ def add_shared_deploy_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
 		"--image-repository",
 		default=env("PULSE_RAILWAY_IMAGE_REPOSITORY"),
-		help="Registry repository for pushed images. Only used for `--mode image`.",
+		help="Registry repository for pushed images. Enables image deploys when set.",
 	)
 	parser.add_argument(
 		"--build-arg",
@@ -110,7 +104,7 @@ def add_shared_deploy_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
 		"--no-gitignore",
 		action="store_true",
-		help="Upload gitignored files too. Only used for `--mode source`.",
+		help="Upload gitignored files too. Only used for source deploys.",
 	)
 	parser.add_argument(
 		"--env",
@@ -170,12 +164,14 @@ def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployCommand:
 	)
 	if not project_id or not environment_id or not token:
 		raise ValueError("project id, environment id, and token are required")
-	if args.mode == "image" and args.no_gitignore:
-		raise ValueError("--no-gitignore requires --mode source")
 	env_vars = parse_kv_items(args.env, "--env")
 	validate_backend_env_vars(env_vars)
 	build_args = parse_kv_items(args.build_arg, "--build-arg")
-	if args.mode == "source":
+	image_repository = args.image_repository or deploy_target.image_repository
+	mode: DeployMode = "image" if image_repository else "source"
+	if mode == "image" and args.no_gitignore:
+		raise ValueError("--no-gitignore cannot be used with --image-repository")
+	if mode == "source":
 		check_reserved_source_build_args(build_args)
 	project = build_target_project(
 		args,
@@ -192,14 +188,10 @@ def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployCommand:
 		dockerfile_path=dockerfile_path,
 		context_path=context_path,
 		build_args=build_args,
-		image_repository=(
-			args.image_repository or deploy_target.image_repository
-			if args.mode == "image"
-			else None
-		),
+		image_repository=image_repository if mode == "image" else None,
 	)
 	return ResolvedDeployCommand(
-		mode=args.mode,
+		mode=mode,
 		project=project,
 		docker=docker,
 		deployment_name=deployment_name,

@@ -33,6 +33,8 @@ uv run pulse-railway deploy \
   --context .
 ```
 
+Passing `--image-repository ghcr.io/<org>/<name>` switches deploy to image mode.
+
 The app opts into `pulse_railway.RailwaySessionStore()`. Local runs can provide `PULSE_RAILWAY_REDIS_URL` directly. On Railway deploy, `pulse-railway` reads the stable service names from `RailwayPlugin` and injects that same env var so the shared Redis service backs deployment tracking and app sessions.
 
 `pulse-railway upgrade` is currently a no-op placeholder.

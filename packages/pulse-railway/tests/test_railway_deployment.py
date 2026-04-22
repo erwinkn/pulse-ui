@@ -229,6 +229,28 @@ async def test_deploy_up_rejects_managed_source_build_args_before_app_load(
 		)
 
 
+@pytest.mark.asyncio
+async def test_deploy_requires_image_repository(tmp_path) -> None:
+	dockerfile = tmp_path / "Dockerfile"
+	dockerfile.write_text("FROM scratch\n")
+	_write_app_fixture(tmp_path)
+
+	with pytest.raises(DeploymentError, match="image repository"):
+		await deploy(
+			project=RailwayProject(
+				project_id="project",
+				environment_id="env",
+				token="token",
+				service_name="pulse-router",
+			),
+			docker=DockerBuild(
+				dockerfile_path=dockerfile,
+				context_path=tmp_path,
+			),
+			deployment_id="prod-260402-120000",
+		)
+
+
 def test_railway_session_store_from_app_uses_declared_constructor(tmp_path) -> None:
 	app_file = tmp_path / "main.py"
 	app_file.write_text(
@@ -529,13 +551,13 @@ async def test_deploy_happy_path_on_ready_stack(monkeypatch, tmp_path) -> None:
 			router=StackServiceState(
 				service_id="svc-router",
 				service_name="pulse-router",
-				image="ttl.sh/router:24h",
+				image="ghcr.io/acme/router:24h",
 				domain="pulse-router-production.up.railway.app",
 			),
 			janitor=StackServiceState(
 				service_id="svc-janitor",
 				service_name="pulse-janitor",
-				image="ttl.sh/router:24h",
+				image="ghcr.io/acme/router:24h",
 			),
 			redis=StackServiceState(
 				service_id="svc-redis",
@@ -584,6 +606,7 @@ async def test_deploy_happy_path_on_ready_stack(monkeypatch, tmp_path) -> None:
 		docker=DockerBuild(
 			dockerfile_path=dockerfile,
 			context_path=tmp_path,
+			image_repository="ghcr.io/acme/app",
 		),
 		deployment_id="prod-260402-120000",
 		app_file="examples/aws-ecs/main.py",
@@ -774,13 +797,13 @@ async def test_deploy_up_happy_path_on_ready_stack(monkeypatch, tmp_path) -> Non
 			router=StackServiceState(
 				service_id="svc-router",
 				service_name="pulse-router",
-				image="ttl.sh/router:24h",
+				image="ghcr.io/acme/router:24h",
 				domain="pulse-router-production.up.railway.app",
 			),
 			janitor=StackServiceState(
 				service_id="svc-janitor",
 				service_name="pulse-janitor",
-				image="ttl.sh/router:24h",
+				image="ghcr.io/acme/router:24h",
 			),
 			redis=StackServiceState(
 				service_id="svc-redis",
@@ -990,12 +1013,12 @@ async def test_deploy_up_uses_railway_api_token_for_cli_when_present(
 				service_id="svc-router",
 				service_name="pulse-router",
 				domain="pulse-router-production.up.railway.app",
-				image="ttl.sh/router:24h",
+				image="ghcr.io/acme/router:24h",
 			),
 			janitor=StackServiceState(
 				service_id="svc-janitor",
 				service_name="pulse-janitor",
-				image="ttl.sh/router:24h",
+				image="ghcr.io/acme/router:24h",
 			),
 			redis=StackServiceState(
 				service_id="svc-redis",
@@ -1116,12 +1139,12 @@ async def test_deploy_up_uses_bearer_env_for_unmatched_explicit_account_token(
 				service_id="svc-router",
 				service_name="pulse-router",
 				domain="pulse-router-production.up.railway.app",
-				image="ttl.sh/router:24h",
+				image="ghcr.io/acme/router:24h",
 			),
 			janitor=StackServiceState(
 				service_id="svc-janitor",
 				service_name="pulse-janitor",
-				image="ttl.sh/router:24h",
+				image="ghcr.io/acme/router:24h",
 			),
 			redis=StackServiceState(
 				service_id="svc-redis",
@@ -1241,12 +1264,12 @@ async def test_deploy_up_uses_project_token_env_for_explicit_token_override(
 				service_id="svc-router",
 				service_name="pulse-router",
 				domain="pulse-router-production.up.railway.app",
-				image="ttl.sh/router:24h",
+				image="ghcr.io/acme/router:24h",
 			),
 			janitor=StackServiceState(
 				service_id="svc-janitor",
 				service_name="pulse-janitor",
-				image="ttl.sh/router:24h",
+				image="ghcr.io/acme/router:24h",
 			),
 			redis=StackServiceState(
 				service_id="svc-redis",
@@ -1345,12 +1368,12 @@ async def test_deploy_up_cleans_up_failed_source_service(
 				service_id="svc-router",
 				service_name="pulse-router",
 				domain="pulse-router-production.up.railway.app",
-				image="ttl.sh/router:24h",
+				image="ghcr.io/acme/router:24h",
 			),
 			janitor=StackServiceState(
 				service_id="svc-janitor",
 				service_name="pulse-janitor",
-				image="ttl.sh/router:24h",
+				image="ghcr.io/acme/router:24h",
 			),
 			redis=StackServiceState(
 				service_id="svc-redis",
@@ -1448,12 +1471,12 @@ async def test_deploy_up_keeps_service_when_post_build_polling_fails(
 				service_id="svc-router",
 				service_name="pulse-router",
 				domain="pulse-router-production.up.railway.app",
-				image="ttl.sh/router:24h",
+				image="ghcr.io/acme/router:24h",
 			),
 			janitor=StackServiceState(
 				service_id="svc-janitor",
 				service_name="pulse-janitor",
-				image="ttl.sh/router:24h",
+				image="ghcr.io/acme/router:24h",
 			),
 			redis=StackServiceState(
 				service_id="svc-redis",
@@ -1587,12 +1610,12 @@ async def test_deploy_up_waits_through_transient_stopped_build_state(
 				service_id="svc-router",
 				service_name="pulse-router",
 				domain="pulse-router-production.up.railway.app",
-				image="ttl.sh/router:24h",
+				image="ghcr.io/acme/router:24h",
 			),
 			janitor=StackServiceState(
 				service_id="svc-janitor",
 				service_name="pulse-janitor",
-				image="ttl.sh/router:24h",
+				image="ghcr.io/acme/router:24h",
 			),
 			redis=StackServiceState(
 				service_id="svc-redis",
@@ -1770,6 +1793,7 @@ async def test_deploy_ignores_ambient_redis_url_for_managed_session_store(
 		docker=DockerBuild(
 			dockerfile_path=dockerfile,
 			context_path=tmp_path,
+			image_repository="ghcr.io/acme/app",
 		),
 		deployment_id="next",
 	)
@@ -1828,6 +1852,7 @@ async def test_deploy_rejects_duplicate_deployment(monkeypatch, tmp_path) -> Non
 			docker=DockerBuild(
 				dockerfile_path=dockerfile,
 				context_path=tmp_path,
+				image_repository="ghcr.io/acme/app",
 			),
 			deployment_id="prod-260402-120000",
 		)
@@ -1875,6 +1900,7 @@ async def test_deploy_fails_when_stack_not_ready(monkeypatch, tmp_path) -> None:
 			docker=DockerBuild(
 				dockerfile_path=dockerfile,
 				context_path=tmp_path,
+				image_repository="ghcr.io/acme/app",
 			),
 			deployment_id="next",
 		)
@@ -2005,6 +2031,7 @@ async def test_deploy_always_injects_managed_railway_redis_url(
 		docker=DockerBuild(
 			dockerfile_path=dockerfile,
 			context_path=tmp_path,
+			image_repository="ghcr.io/acme/app",
 		),
 		deployment_id="next",
 	)

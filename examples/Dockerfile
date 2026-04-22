@@ -55,6 +55,7 @@ WORKDIR /app
 COPY --from=js-dev-deps /app /app
 COPY --from=codegen /app/${WEB_ROOT}/ /app/${WEB_ROOT}/
 ENV NODE_ENV=production
+RUN bun run build
 WORKDIR /app/${WEB_ROOT}
 RUN bun run build
 
@@ -67,6 +68,8 @@ COPY --from=oven/bun:latest /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=node:24-bookworm-slim /usr/local/bin/node /usr/local/bin/node
 COPY --from=python-deps /app/.venv /app/.venv
 COPY --from=js-prod-deps /app /app
+COPY --from=js-build /app/packages/pulse/js/dist /app/packages/pulse/js/dist
+COPY --from=js-build /app/packages/pulse-mantine/js/dist /app/packages/pulse-mantine/js/dist
 COPY --from=js-build /app/${WEB_ROOT}/build /app/${WEB_ROOT}/build
 COPY --from=js-build /app/${WEB_ROOT}/package.json /app/${WEB_ROOT}/package.json
 ENV PATH="/app/.venv/bin:$PATH"

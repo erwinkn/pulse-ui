@@ -35,7 +35,7 @@ from pulse_railway.errors import DeploymentError
 from pulse_railway.images import (
 	build_and_push_image,
 	build_router_image,
-	default_image_ref,
+	image_ref,
 )
 from pulse_railway.railway import (
 	RailwayGraphQLClient,
@@ -605,7 +605,7 @@ async def deploy(
 		project.service_prefix,
 		deployment_id,
 	)
-	backend_image = default_image_ref(
+	backend_image = image_ref(
 		image_repository=docker.image_repository,
 		prefix=deployment_id,
 	)

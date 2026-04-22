@@ -247,7 +247,7 @@ async def test_bootstrap_stack_fails_for_existing_stack(monkeypatch) -> None:
 		"pulse-router": ServiceRecord(
 			id="svc-router",
 			name="pulse-router",
-			image="ttl.sh/router:old",
+			image="ghcr.io/acme/router:old",
 			domains=[
 				ServiceDomain(
 					id="domain-1",

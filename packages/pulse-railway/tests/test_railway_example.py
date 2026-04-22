@@ -13,6 +13,7 @@ import httpx
 import pytest
 from pulse_railway import RailwayRedisSessionStore, RailwaySessionStore
 from pulse_railway.constants import PULSE_RAILWAY_REDIS_URL
+from redis_fakes import FakeRedisClient
 
 ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_PATH = ROOT / "examples/railway/main.py"
@@ -69,6 +70,19 @@ def _start_redis_server() -> tuple[subprocess.Popen[str], str]:
 	raise AssertionError("timed out waiting for redis-server")
 
 
+def _dockerfile_stage(dockerfile: str, stage_name: str) -> list[str]:
+	lines = dockerfile.splitlines()
+	start = next(
+		index
+		for index, line in enumerate(lines)
+		if line.startswith("FROM ") and line.endswith(f" AS {stage_name}")
+	)
+	for end in range(start + 1, len(lines)):
+		if lines[end].startswith("FROM "):
+			return lines[start:end]
+	return lines[start:]
+
+
 def test_railway_session_store_uses_redis_when_env_present() -> None:
 	module = load_example_module()
 	store = module.RailwaySessionStore(
@@ -86,30 +100,78 @@ def test_create_app_uses_railway_session_store_by_default() -> None:
 	assert isinstance(app.session_store, RailwayRedisSessionStore)
 
 
+def test_example_dockerfile_builds_workspace_packages_for_source_uploads() -> None:
+	dockerfile = (ROOT / "examples/Dockerfile").read_text()
+	js_build_stage = _dockerfile_stage(dockerfile, "js-build")
+	final_stage = _dockerfile_stage(dockerfile, "final")
+
+	workspace_build = js_build_stage.index("RUN bun run build")
+	web_workdir = js_build_stage.index("WORKDIR /app/${WEB_ROOT}")
+	web_build = js_build_stage.index("RUN bun run build", web_workdir)
+
+	assert workspace_build < web_build
+	assert any(" /app/packages/pulse/js/dist" in line for line in final_stage)
+	assert any(" /app/packages/pulse-mantine/js/dist" in line for line in final_stage)
+
+
+@pytest.mark.asyncio
+async def test_example_initial_snapshot_records_session_start(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	module = load_example_module()
+	shared_session_store = RailwaySessionStore(
+		client=FakeRedisClient(),
+		prefix=module.SESSION_PREFIX,
+	)
+
+	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
+	monkeypatch.setenv("PULSE_DEPLOYMENT_ID", "blue")
+	blue_app = module.create_app(session_store=shared_session_store)
+	blue_app.setup("http://testserver")
+	async with blue_app.fastapi_lifespan(blue_app.fastapi):
+		blue_transport = httpx.ASGITransport(app=blue_app.fastapi)
+		async with httpx.AsyncClient(
+			transport=blue_transport, base_url="http://testserver"
+		) as client:
+			initial_response = await client.get("/api/railway-example/session")
+			session_cookie = {
+				blue_app.cookie.name: client.cookies.get(blue_app.cookie.name, "")
+			}
+
+	assert initial_response.status_code == 200
+	initial_session = initial_response.json()
+	assert initial_session["counter"] == 0
+	assert initial_session["first_deployment_id"] == "blue"
+	assert initial_session["started_at"]
+	assert initial_session["last_updated_at"] == ""
+
+	monkeypatch.setenv("PULSE_DEPLOYMENT_ID", "green")
+	green_app = module.create_app(session_store=shared_session_store)
+	green_app.setup("http://testserver")
+	async with green_app.fastapi_lifespan(green_app.fastapi):
+		green_transport = httpx.ASGITransport(app=green_app.fastapi)
+		async with httpx.AsyncClient(
+			transport=green_transport,
+			base_url="http://testserver",
+			cookies=session_cookie,
+		) as client:
+			persisted_response = await client.get("/api/railway-example/session")
+
+	assert persisted_response.status_code == 200
+	persisted_session = persisted_response.json()
+	assert persisted_session["counter"] == 0
+	assert persisted_session["first_deployment_id"] == "blue"
+	assert persisted_session["started_at"] == initial_session["started_at"]
+	assert persisted_session["last_updated_at"] == ""
+
+
 @pytest.mark.asyncio
 async def test_example_preserves_session_across_app_instances(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-	class _FakeRedisClient:
-		def __init__(self) -> None:
-			self.data: dict[str, str] = {}
-
-		async def get(self, key: str) -> str | None:
-			return self.data.get(key)
-
-		async def set(self, key: str, value: str) -> bool:
-			self.data[key] = value
-			return True
-
-		async def delete(self, key: str) -> None:
-			self.data.pop(key, None)
-
-		async def aclose(self) -> None:
-			return None
-
 	module = load_example_module()
 	shared_session_store = RailwaySessionStore(
-		client=_FakeRedisClient(),
+		client=FakeRedisClient(),
 		prefix=module.SESSION_PREFIX,
 	)
 

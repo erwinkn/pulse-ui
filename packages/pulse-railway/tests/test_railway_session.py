@@ -5,6 +5,7 @@ from datetime import date
 import pytest
 from pulse_railway.constants import PULSE_RAILWAY_REDIS_URL
 from pulse_railway.session import RailwayRedisSessionStore, RailwaySessionStore
+from redis_fakes import FakeRedisClient
 
 
 def test_railway_session_store_env_name_is_dedicated() -> None:
@@ -28,25 +29,7 @@ def test_railway_session_store_requires_dedicated_env_var() -> None:
 
 @pytest.mark.asyncio
 async def test_railway_session_store_serializes_through_redis_client() -> None:
-	class _FakeRedisClient:
-		def __init__(self) -> None:
-			self.data: dict[str, str] = {}
-			self.closed = False
-
-		async def get(self, key: str) -> str | None:
-			return self.data.get(key)
-
-		async def set(self, key: str, value: str) -> bool:
-			self.data[key] = value
-			return True
-
-		async def delete(self, key: str) -> None:
-			self.data.pop(key, None)
-
-		async def aclose(self) -> None:
-			self.closed = True
-
-	client = _FakeRedisClient()
+	client = FakeRedisClient()
 	store = RailwayRedisSessionStore(
 		client=client,
 		prefix="pulse:test",

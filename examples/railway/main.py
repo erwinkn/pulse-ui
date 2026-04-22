@@ -31,36 +31,45 @@ def redis_target(env: Mapping[str, str] | None = None) -> str:
 	return values.get(PULSE_RAILWAY_REDIS_URL) or "unconfigured"
 
 
-def session_snapshot() -> dict[str, Any]:
+def ensure_session_start_metadata(session: dict[str, Any]) -> tuple[str, str]:
+	started_at = session.get("started_at")
+	if not started_at:
+		started_at = now_iso()
+		session["started_at"] = started_at
+	first_deployment_id = session.get("first_deployment_id")
+	if not first_deployment_id:
+		first_deployment_id = deployment_id()
+		session["first_deployment_id"] = first_deployment_id
+	return str(started_at), str(first_deployment_id)
+
+
+def session_state() -> dict[str, Any]:
 	ctx_session = ps.PulseContext.get().session
 	if ctx_session is None:
 		raise RuntimeError("Could not resolve current user session")
 	session = ps.session()
+	started_at, first_deployment_id = ensure_session_start_metadata(session)
 	return {
 		"sid": ctx_session.sid,
 		"counter": int(session.get("counter") or 0),
 		"behavior_version": BEHAVIOR_VERSION,
-		"started_at": session.get("started_at") or "",
+		"started_at": started_at,
 		"last_updated_at": session.get("last_updated_at") or "",
-		"first_deployment_id": session.get("first_deployment_id") or "",
+		"first_deployment_id": first_deployment_id,
 		"redis_target": redis_target(),
 	}
 
 
 def increment_session_counter() -> dict[str, Any]:
 	session = ps.session()
-	session["started_at"] = session.get("started_at") or now_iso()
-	session["first_deployment_id"] = (
-		session.get("first_deployment_id") or deployment_id()
-	)
 	session["counter"] = int(session.get("counter") or 0) + 1
 	session["last_updated_at"] = now_iso()
-	return session_snapshot()
+	return session_state()
 
 
 @ps.component
 def home():
-	session_info = session_snapshot()
+	session_info = session_state()
 
 	return ps.div(
 		ps.div(
@@ -134,12 +143,12 @@ def register_probe_routes(app: ps.App) -> None:
 		return {
 			"behavior_version": BEHAVIOR_VERSION,
 			"deployment_id": deployment_id(),
-			"session": session_snapshot(),
+			"session": session_state(),
 		}
 
 	@app.fastapi.get("/api/railway-example/session")
 	def railway_example_session():  # pyright: ignore[reportUnusedFunction]
-		return session_snapshot()
+		return session_state()
 
 	@app.fastapi.post("/api/railway-example/session/increment")
 	def railway_example_session_increment():  # pyright: ignore[reportUnusedFunction]

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import importlib.metadata
-import secrets
 import tempfile
 from pathlib import Path
 
@@ -28,10 +27,10 @@ async def _run_command(*args: str, cwd: Path | None = None) -> None:
 		)
 
 
-def default_image_ref(*, image_repository: str | None, prefix: str) -> str:
-	if image_repository:
-		return f"{image_repository}:{prefix}"
-	return f"ttl.sh/pulse-railway-{prefix}-{secrets.token_hex(4)}:24h"
+def image_ref(*, image_repository: str | None, prefix: str) -> str:
+	if not image_repository:
+		raise DeploymentError("image mode requires an image repository")
+	return f"{image_repository}:{prefix}"
 
 
 def package_version() -> str:
@@ -134,7 +133,7 @@ __all__ = [
 	"OFFICIAL_ROUTER_IMAGE_REPOSITORY",
 	"build_and_push_image",
 	"build_router_image",
-	"default_image_ref",
+	"image_ref",
 	"official_janitor_image_ref",
 	"official_router_image_ref",
 	"package_version",

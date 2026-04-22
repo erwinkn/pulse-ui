@@ -22,10 +22,11 @@ Remaining items after the `pulse-railway` plugin work in this repo.
   - do not depend on app-session `REDIS_URL`
   - let deploy reserve and inject `PULSE_RAILWAY_REDIS_URL`
 
-3. Configure a durable backend image repository
+3. Optional: configure a backend image repository
 
 - router and janitor now default to official GHCR images
-- app backend images still default to `ttl.sh` unless `--image-repository` is passed
+- app backend image deploys require `--image-repository`
+- without an app image repository, deploy uses Railway source builds
 - Stoneware deploy wrapper should use a durable registry, e.g. `ghcr.io/<org>/stoneware-v3`
 
 4. Set up the custom domain in Railway UI

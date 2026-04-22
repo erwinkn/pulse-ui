@@ -50,7 +50,6 @@ def _make_init_args(**overrides: Any) -> argparse.Namespace:
 
 def _make_deploy_args(**overrides: Any) -> argparse.Namespace:
 	values: dict[str, Any] = {
-		"mode": "image",
 		"deployment_name": None,
 		"deployment_id": None,
 		"project_id": "project",
@@ -62,7 +61,7 @@ def _make_deploy_args(**overrides: Any) -> argparse.Namespace:
 		"web_root": "web",
 		"dockerfile": "Dockerfile",
 		"context": ".",
-		"image_repository": None,
+		"image_repository": "ghcr.io/acme/app",
 		"build_arg": [],
 		"no_gitignore": False,
 		"env": [],
@@ -121,10 +120,10 @@ def _install_fake_deploy(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 			deployment_id="prod-260402-120000",
 			backend_service_id="svc-2",
 			backend_service_name="prod-260402-120000",
-			backend_image="ttl.sh/backend:24h",
+			backend_image="ghcr.io/acme/backend:24h",
 			router_service_id="svc-1",
 			router_service_name="pulse-router",
-			router_image="ttl.sh/router:24h",
+			router_image="ghcr.io/acme/router:24h",
 			router_domain="pulse-router-production.up.railway.app",
 			server_address="https://pulse-router-production.up.railway.app",
 			backend_deployment_id="deploy-svc-2",
@@ -148,7 +147,7 @@ def _install_fake_deploy_source(monkeypatch: pytest.MonkeyPatch) -> dict[str, An
 			backend_service_name="prod-260402-120000",
 			router_service_id="svc-1",
 			router_service_name="pulse-router",
-			router_image="ttl.sh/router:24h",
+			router_image="ghcr.io/acme/router:24h",
 			router_domain="pulse-router-production.up.railway.app",
 			server_address="https://pulse-router-production.up.railway.app",
 			backend_status="SUCCESS",
@@ -213,8 +212,8 @@ def test_deploy_parser_drops_stable_stack_flags(monkeypatch) -> None:
 	_add_deploy_args(parser)
 	args = parser.parse_args([])
 
-	assert args.mode == "image"
 	assert args.app_file == "examples/aws-ecs/main.py"
+	assert not hasattr(args, "mode")
 	assert not hasattr(args, "redis_url")
 	assert not hasattr(args, "janitor_cron_schedule")
 	assert not hasattr(args, "router_image")
@@ -236,7 +235,7 @@ def test_deploy_parser_uses_project_token_env_for_explicit_token(monkeypatch) ->
 	parser = argparse.ArgumentParser()
 
 	_add_deploy_args(parser)
-	args = parser.parse_args(["--mode", "source", "--token", "project-token"])
+	args = parser.parse_args(["--token", "project-token"])
 
 	assert args.token == "project-token"
 
@@ -246,14 +245,23 @@ def test_deploy_parser_reads_source_mode_flags(monkeypatch) -> None:
 	parser = argparse.ArgumentParser()
 
 	_add_deploy_args(parser)
-	args = parser.parse_args(["--mode", "source", "--no-gitignore"])
+	args = parser.parse_args(["--no-gitignore"])
 
-	assert args.mode == "source"
+	assert not hasattr(args, "mode")
 	assert args.no_gitignore is True
 	assert args.app_file == "examples/aws-ecs/main.py"
 	assert not hasattr(args, "redis_url")
 	assert not hasattr(args, "janitor_cron_schedule")
 	assert not hasattr(args, "router_image")
+
+
+def test_deploy_parser_removes_mode_flag() -> None:
+	parser = argparse.ArgumentParser()
+
+	_add_deploy_args(parser)
+
+	with pytest.raises(SystemExit):
+		parser.parse_args(["--mode", "source"])
 
 
 def test_janitor_parser_reads_service_env_defaults(monkeypatch) -> None:
@@ -687,6 +695,22 @@ async def test_run_deploy_reads_plugin_image_repository(monkeypatch, tmp_path) -
 
 
 @pytest.mark.asyncio
+async def test_run_deploy_defaults_to_source_without_image_repository(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	deploy_call = _install_fake_deploy_source(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_deploy(_make_deploy_args(image_repository=None))
+
+	assert result == 0
+	assert deploy_call["docker"].image_repository is None
+
+
+@pytest.mark.asyncio
 async def test_run_deploy_explicit_image_repository_overrides_plugin(
 	monkeypatch, tmp_path
 ) -> None:
@@ -773,9 +797,7 @@ async def test_run_deploy_source_resolves_paths_and_defaults(
 	deploy_call = _install_fake_deploy_source(monkeypatch)
 	monkeypatch.chdir(project_root)
 
-	result = await _run_deploy(
-		_make_deploy_args(mode="source", image_repository="ghcr.io/acme/ignored")
-	)
+	result = await _run_deploy(_make_deploy_args(image_repository=None))
 
 	assert result == 0
 	assert deploy_call["project"].service_prefix is None
@@ -809,7 +831,7 @@ async def test_run_deploy_source_reads_target_from_railway_plugin(
 
 	result = await _run_deploy(
 		_make_deploy_args(
-			mode="source",
+			image_repository=None,
 			project_id=None,
 			environment_id=None,
 			token="token",
@@ -839,7 +861,7 @@ async def test_run_deploy_source_keeps_api_token_env_for_default_token(
 
 	result = await _run_deploy(
 		_make_deploy_args(
-			mode="source",
+			image_repository=None,
 			project_id="project",
 			environment_id="env",
 			token="api-token",
@@ -864,7 +886,7 @@ async def test_run_deploy_source_defers_unmatched_explicit_token_env_name(
 
 	result = await _run_deploy(
 		_make_deploy_args(
-			mode="source",
+			image_repository=None,
 			project_id="project",
 			environment_id="env",
 			token="explicit-account-token",
@@ -887,7 +909,9 @@ async def test_run_deploy_source_requires_context_relative_app_paths(
 
 	with pytest.raises(ValueError, match="app-file must be relative"):
 		await _run_deploy(
-			_make_deploy_args(mode="source", app_file=str(project_root / "main.py"))
+			_make_deploy_args(
+				image_repository=None, app_file=str(project_root / "main.py")
+			)
 		)
 
 
@@ -902,11 +926,13 @@ async def test_run_deploy_source_rejects_managed_build_args(
 	monkeypatch.chdir(project_root)
 
 	with pytest.raises(DeploymentError, match="PORT"):
-		await _run_deploy(_make_deploy_args(mode="source", build_arg=["PORT=3000"]))
+		await _run_deploy(
+			_make_deploy_args(image_repository=None, build_arg=["PORT=3000"])
+		)
 
 
 @pytest.mark.asyncio
-async def test_run_deploy_rejects_source_only_flags_in_image_mode(
+async def test_run_deploy_rejects_no_gitignore_with_image_repository(
 	monkeypatch, tmp_path
 ) -> None:
 	project_root = tmp_path / "project"
@@ -915,7 +941,7 @@ async def test_run_deploy_rejects_source_only_flags_in_image_mode(
 	_install_fake_deploy(monkeypatch)
 	monkeypatch.chdir(project_root)
 
-	with pytest.raises(ValueError, match="--no-gitignore requires --mode source"):
+	with pytest.raises(ValueError, match="--no-gitignore cannot be used"):
 		await _run_deploy(_make_deploy_args(no_gitignore=True))
 
 

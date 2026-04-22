@@ -9,6 +9,7 @@
     "packages/pulse/js/",
     "packages/pulse-mantine/js",
     "examples/aws-ecs/web",
+    "examples/railway/web",
     "examples/web/",
     "examples/pulse-mantine/web",
     "tutorial/examples/web"

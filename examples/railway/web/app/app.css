@@ -1,0 +1,19 @@
+@import "tailwindcss" source("../..");
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
+html,
+body {
+  @apply min-h-screen bg-slate-100 text-slate-950;
+}
+
+.btn-primary {
+  @apply inline-flex items-center rounded-xl bg-slate-950 px-4 py-2 font-semibold text-white transition hover:bg-slate-800;
+}
+
+.btn-secondary {
+  @apply inline-flex items-center rounded-xl bg-white px-4 py-2 font-semibold text-slate-900 ring-1 ring-slate-300 transition hover:bg-slate-50;
+}

@@ -263,6 +263,46 @@ def test_prepare_web_dependencies_raises_on_conflict(tmp_path: Path):
 		)
 
 
+def test_build_web_command_uses_node_serve_in_prod(tmp_path: Path) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+
+	spec = cmd_mod.build_web_command(web_root=web_root, extra_args=[], mode="prod")
+
+	assert spec.args == [
+		"node",
+		"node_modules/@react-router/serve/dist/cli.js",
+		"./build/server/index.js",
+	]
+
+
+def test_build_web_command_sets_node_env_in_prod(tmp_path: Path) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+
+	spec = cmd_mod.build_web_command(web_root=web_root, extra_args=[], mode="prod")
+
+	assert spec.env["NODE_ENV"] == "production"
+
+
+def test_web_workspaces_using_pulse_ui_client_declare_ws() -> None:
+	root = Path(__file__).resolve().parents[4]
+	workspace_manifests = [
+		root / "examples/aws-ecs/web/package.json",
+		root / "examples/pulse-mantine/web/package.json",
+		root / "examples/railway/web/package.json",
+		root / "examples/web/package.json",
+		root / "tutorial/examples/web/package.json",
+	]
+
+	for manifest_path in workspace_manifests:
+		manifest = json.loads(manifest_path.read_text())
+		dependencies = manifest.get("dependencies", {})
+		if "pulse-ui-client" not in dependencies:
+			continue
+		assert dependencies.get("ws") == "^8.18.3", manifest_path
+
+
 @pytest.mark.parametrize(
 	"pep440_version,expected_semver",
 	[

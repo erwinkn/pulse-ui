@@ -81,7 +81,6 @@ from pulse.user_session import (
 )
 
 logger = logging.getLogger(__name__)
-
 T = TypeVar("T")
 FRAMEWORK_API_PREFIX = "/_pulse"
 
@@ -228,7 +227,7 @@ class App:
 		middleware: PulseMiddleware | Sequence[PulseMiddleware] | None = None,
 		plugins: Sequence[Plugin] | None = None,
 		cookie: Cookie | None = None,
-		session_store: SessionStore | None = None,
+		session_store: SessionStore | CookieSessionStore | None = None,
 		server_address: str | None = None,
 		dev_server_address: str = "http://localhost:8000",
 		internal_server_address: str | None = None,
@@ -1072,6 +1071,13 @@ class App:
 	def close_session_if_inactive(self, sid: str):
 		if len(self._user_to_render[sid]) == 0:
 			self.close_session(sid)
+
+	async def reload_connected_clients(self) -> int:
+		payload = list(serialize({"type": "reload"}))
+		socket_ids = list(self._socket_to_render.keys())
+		for socket_id in socket_ids:
+			await self.sio.emit("message", payload, to=socket_id)
+		return len(socket_ids)
 
 	async def close(self):
 		"""

@@ -3,7 +3,10 @@ from pulse.user_session import UserSession
 
 
 def test_app_prerender_queue_timeout_config():
-	app = ps.App(prerender_queue_timeout=12.5)
+	app = ps.App(
+		prerender_queue_timeout=12.5,
+		session_store=ps.CookieSessionStore(secret="test-secret"),
+	)
 	session = UserSession("test-session", {}, app)
 	render = app.create_render("test-render", session)
 	assert render.prerender_queue_timeout == 12.5

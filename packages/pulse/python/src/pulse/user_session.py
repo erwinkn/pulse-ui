@@ -232,7 +232,6 @@ class InMemorySessionStore(SessionStore):
 
 	@override
 	async def save(self, sid: str, session: dict[str, Any]) -> None:
-		# Should not matter as the session ReactiveDict is normally mutated directly
 		self._sessions[sid] = session
 
 	@override

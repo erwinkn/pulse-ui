@@ -496,8 +496,12 @@ def build_web_command(
 ) -> CommandSpec:
 	command_env = os.environ.copy()
 	if mode == "prod":
-		# Production: use built server
-		args = ["bun", "run", "start"]
+		args = [
+			"node",
+			"node_modules/@react-router/serve/dist/cli.js",
+			"./build/server/index.js",
+		]
+		command_env["NODE_ENV"] = "production"
 	else:
 		# Development: use dev server
 		args = ["bun", "run", "dev"]

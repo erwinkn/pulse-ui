@@ -262,8 +262,23 @@ class TestCodegen:
 			"const prerenderUrl = new URL(`${config.serverAddress}${config.apiPrefix}/prerender`);"
 			in layout_content
 		)
+		assert (
+			'const headers = new Headers({ "content-type": "application/json" });'
+			in layout_content
+		)
+		assert 'headers.set("x-pulse-client-loader", "1");' in layout_content
+		assert (
+			'headers.set("x-pulse-client-loader-location", args.request.url);'
+			in layout_content
+		)
 		assert "if (directives?.query) {" in layout_content
 		assert "prerenderUrl.searchParams.set(key, value as string);" in layout_content
+		assert 'redirect: "manual",' in layout_content
+		assert (
+			'if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400)) {'
+			in layout_content
+		)
+		assert "window.location.assign(args.request.url);" in layout_content
 
 		routes_ts_content = (pulse_app_dir / "routes.ts").read_text()
 		# routes.ts should be built from runtime route tree now

@@ -1,0 +1,25 @@
+[project]
+name = "pulse-railway"
+version = "0.1.0"
+description = "Railway deployment utilities for Pulse applications"
+readme = "README.md"
+authors = [{ name = "Erwin Kuhn", email = "erwin.kuhn@protonmail.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    "aiohttp>=3.12.15",
+    "fastapi>=0.116.1",
+    "httpx>=0.28.1",
+    "pulse-framework",
+    "redis>=6.4.0",
+    "uvicorn>=0.35.0",
+]
+
+[project.scripts]
+pulse-railway = "pulse_railway.cli:main"
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["uv_build>=0.9.4,<0.10.0"]
+build-backend = "uv_build"

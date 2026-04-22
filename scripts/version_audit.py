@@ -36,6 +36,11 @@ PACKAGE_CONFIG: list[tuple[str, str, list[str]]] = [
 	),
 	("pulse-msal", "packages/pulse-msal/pyproject.toml", ["packages/pulse-msal"]),
 	("pulse-aws", "packages/pulse-aws/pyproject.toml", ["packages/pulse-aws"]),
+	(
+		"pulse-railway",
+		"packages/pulse-railway/pyproject.toml",
+		["packages/pulse-railway"],
+	),
 ]
 
 

@@ -25,6 +25,7 @@ SUBSETS = {
 	"pulse-mantine": ["packages/pulse-mantine/python/src"],
 	"pulse-recharts": ["packages/pulse-recharts/src"],
 	"pulse-aws": ["packages/pulse-aws/src"],
+	"pulse-railway": ["packages/pulse-railway/src"],
 	"pulse-lucide": ["packages/pulse-lucide/src"],
 	"pulse-ag-grid": ["packages/pulse-ag-grid/src"],
 	"pulse-msal": ["packages/pulse-msal/src"],

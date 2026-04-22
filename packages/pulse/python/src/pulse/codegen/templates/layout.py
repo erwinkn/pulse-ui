@@ -64,12 +64,14 @@ export async function clientLoader(args: ClientLoaderFunctionArgs) {
     typeof window !== "undefined" && typeof sessionStorage !== "undefined"
       ? (JSON.parse(sessionStorage.getItem("__PULSE_DIRECTIVES") ?? "{}"))
       : {};
-  const headers: HeadersInit = { "content-type": "application/json" };
+  const headers = new Headers({ "content-type": "application/json" });
   if (directives?.headers) {
     for (const [key, value] of Object.entries(directives.headers)) {
-      headers[key] = value as string;
+      headers.set(key, value as string);
     }
   }
+  headers.set("x-pulse-client-loader", "1");
+  headers.set("x-pulse-client-loader-location", args.request.url);
   const prerenderUrl = new URL(`$${"{"}config.serverAddress}$${"{"}config.apiPrefix}/prerender`);
   if (directives?.query) {
     for (const [key, value] of Object.entries(directives.query)) {
@@ -80,8 +82,13 @@ export async function clientLoader(args: ClientLoaderFunctionArgs) {
     method: "POST",
     headers,
     credentials: "include",
+    redirect: "manual",
     body: JSON.stringify({ paths, routeInfo: extractServerRouteInfo(args) }),
   });
+  if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400)) {
+    window.location.assign(args.request.url);
+    throw new Error("Reloading due to stale Pulse deployment affinity.");
+  }
   if (!res.ok) throw new Error("Failed to prerender batch:" + res.status);
   const body = await res.json();
   if (body.redirect) return new Response(null, { status: 302, headers: { Location: body.redirect } });

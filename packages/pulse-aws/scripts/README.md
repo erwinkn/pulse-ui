@@ -16,6 +16,6 @@ AWS_PROFILE=brimstone-production AWS_REGION=us-east-2 uv run pulse-aws deploy \
   --domain test.stoneware.rocks \
   --app-file examples/aws-ecs/main.py \
   --web-root examples/aws-ecs/web \
-  --dockerfile examples/aws-ecs/Dockerfile \
+  --dockerfile examples/Dockerfile \
   --context .
 ```

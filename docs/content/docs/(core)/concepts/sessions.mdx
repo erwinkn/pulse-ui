@@ -178,18 +178,47 @@ def connection_info():
 
 ## Session storage in production
 
-By default, Pulse stores sessions in memory. This works well for development, but sessions are lost when the server restarts.
+By default, Pulse stores sessions in signed cookies. That's true in development and production unless you opt into a server-backed `ps.SessionStore`.
 
-For production, configure a persistent session store when creating your app:
+If you want sessions to live on the server, implement `ps.SessionStore` with your own backend:
 
 ```python
-from pulse.user_session import InMemorySessionStore
+import pulse as ps
+from redis import asyncio as redis
+import json
+
+
+class RedisSessionStore(ps.SessionStore):
+    async def init(self) -> None:
+        self.redis = redis.from_url("redis://localhost:6379/0", decode_responses=True)
+
+    async def close(self) -> None:
+        await self.redis.aclose()
+
+    async def get(self, sid: str) -> dict[str, object] | None:
+        payload = await self.redis.get(f"session:{sid}")
+        return None if payload is None else json.loads(payload)
+
+    async def create(self, sid: str) -> dict[str, object]:
+        session: dict[str, object] = {}
+        await self.save(sid, session)
+        return session
+
+    async def save(self, sid: str, session: dict[str, object]) -> None:
+        await self.redis.set(f"session:{sid}", json.dumps(session))
+
+    async def delete(self, sid: str) -> None:
+        await self.redis.delete(f"session:{sid}")
 
 app = ps.App(
     routes=[...],
-    session_store=InMemorySessionStore(),  # Or your custom store
+    session_store=RedisSessionStore(),
 )
 ```
+
+<Callout type="warn">
+If you opt into server-backed sessions, make sure every app instance can reach the same backend. Otherwise users can lose their sessions when traffic moves between processes or deployments.
+</Callout>
 
 ## Using sessions in middleware
 

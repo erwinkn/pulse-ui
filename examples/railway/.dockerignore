@@ -1,0 +1,13 @@
+.git
+.gitignore
+.DS_Store
+*.log
+__pycache__
+*.pyc
+.venv
+.env
+node_modules
+web/node_modules
+web/build
+dist
+build

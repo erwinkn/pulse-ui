@@ -31,6 +31,7 @@ PACKAGE_PATHS = {
 	"pulse-msal": "packages/pulse-msal/pyproject.toml",
 	"pulse-lucide": "packages/pulse-lucide/pyproject.toml",
 	"pulse-aws": "packages/pulse-aws/pyproject.toml",
+	"pulse-railway": "packages/pulse-railway/pyproject.toml",
 	"pulse-ag-grid": "packages/pulse-ag-grid/pyproject.toml",
 }
 

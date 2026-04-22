@@ -10,6 +10,7 @@ members = [
     "pulse-lucide",
     "pulse-mantine",
     "pulse-msal",
+    "pulse-railway",
     "pulse-recharts",
     "pulse-workspace",
 ]
@@ -1322,7 +1323,7 @@ requires-dist = [
 
 [[package]]
 name = "pulse-framework"
-version = "0.1.78"
+version = "0.1.79"
 source = { editable = "packages/pulse/python" }
 dependencies = [
     { name = "aiohttp" },
@@ -1416,6 +1417,29 @@ provides-extras = ["redis"]
 dev = [{ name = "redis", specifier = ">=6.4.0" }]
 
 [[package]]
+name = "pulse-railway"
+version = "0.1.0"
+source = { editable = "packages/pulse-railway" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "pulse-framework" },
+    { name = "redis" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = ">=3.12.15" },
+    { name = "fastapi", specifier = ">=0.116.1" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "pulse-framework", editable = "packages/pulse/python" },
+    { name = "redis", specifier = ">=6.4.0" },
+    { name = "uvicorn", specifier = ">=0.35.0" },
+]
+
+[[package]]
 name = "pulse-recharts"
 version = "0.1.5"
 source = { editable = "packages/pulse-recharts" }
@@ -1444,6 +1468,7 @@ dev = [
     { name = "pulse-lucide" },
     { name = "pulse-mantine" },
     { name = "pulse-msal" },
+    { name = "pulse-railway" },
     { name = "pulse-recharts" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -1466,6 +1491,7 @@ dev = [
     { name = "pulse-lucide", editable = "packages/pulse-lucide" },
     { name = "pulse-mantine", editable = "packages/pulse-mantine/python" },
     { name = "pulse-msal", editable = "packages/pulse-msal" },
+    { name = "pulse-railway", editable = "packages/pulse-railway" },
     { name = "pulse-recharts", editable = "packages/pulse-recharts" },
     { name = "pytest", specifier = ">=8.3.4" },
     { name = "pytest-asyncio", specifier = ">=1.1.0" },

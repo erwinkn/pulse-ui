@@ -9,8 +9,10 @@ from typing import Unpack
 from pulse_railway.auth import railway_access_token
 from pulse_railway.commands.common import (
 	RailwayProjectOverrides,
+	clean_optional,
 	env,
 	normalize_optional_service_prefix,
+	resolve_railway_target_ids,
 )
 from pulse_railway.commands.deploy import (
 	add_deploy_args as _add_deploy_args,
@@ -40,6 +42,7 @@ from pulse_railway.commands.upgrade import (
 	run_upgrade as _run_upgrade,
 )
 from pulse_railway.config import RailwayProject
+from pulse_railway.constants import DEFAULT_REDIS_PREFIX
 from pulse_railway.deployment import (
 	default_redis_service_name,
 	delete_deployment,
@@ -108,26 +111,20 @@ def _railway_project(
 	**overrides: Unpack[RailwayProjectOverrides],
 ) -> RailwayProject:
 	resolved_service_name = (
-		service_name or args.service or env("PULSE_RAILWAY_SERVICE") or "pulse-router"
+		service_name or getattr(args, "service", None) or "pulse-router"
 	)
-	resolved_service_prefix = (
-		service_prefix or args.service_prefix or env("PULSE_RAILWAY_SERVICE_PREFIX")
-	)
+	resolved_service_prefix = service_prefix or getattr(args, "service_prefix", None)
 	return RailwayProject(
-		project_id=project_id or args.project_id or env("RAILWAY_PROJECT_ID") or "",
-		environment_id=environment_id
-		or args.environment_id
-		or env("RAILWAY_ENVIRONMENT_ID")
-		or "",
-		token=token or args.token or railway_access_token() or "",
+		project_id=project_id or getattr(args, "project_id", None) or "",
+		environment_id=environment_id or getattr(args, "environment_id", None) or "",
+		token=token or getattr(args, "token", None) or railway_access_token() or "",
 		service_name=resolved_service_name,
 		service_prefix=normalize_optional_service_prefix(resolved_service_prefix),
-		redis_url=args.redis_url,
+		redis_url=getattr(args, "redis_url", None),
 		redis_service_name=redis_service_name
-		or args.redis_service
-		or env("PULSE_RAILWAY_REDIS_SERVICE")
+		or getattr(args, "redis_service", None)
 		or default_redis_service_name(resolved_service_name),
-		redis_prefix=args.redis_prefix,
+		redis_prefix=getattr(args, "redis_prefix", None) or DEFAULT_REDIS_PREFIX,
 		**overrides,
 	)
 
@@ -137,20 +134,28 @@ def _add_delete_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
 		"--deployment-id", required=True, help="Deployment id to delete"
 	)
-	parser.add_argument("--project-id", default=env("RAILWAY_PROJECT_ID"))
-	parser.add_argument("--environment-id", default=env("RAILWAY_ENVIRONMENT_ID"))
+	parser.add_argument(
+		"--project",
+		default=None,
+		help="Railway project name. Optional when using a project token.",
+	)
+	parser.add_argument(
+		"--environment",
+		default=None,
+		help="Railway environment name. Defaults to production.",
+	)
 	parser.add_argument("--token", default=railway_access_token())
-	parser.add_argument("--service-prefix", default=env("PULSE_RAILWAY_SERVICE_PREFIX"))
+	parser.add_argument("--service-prefix", default=None)
 	parser.add_argument(
 		"--keep-active-variable",
 		action="store_true",
 		help="Do not delete PULSE_ACTIVE_DEPLOYMENT when it points at the removed deployment",
 	)
-	parser.add_argument("--redis-url", default=env("REDIS_URL"))
-	parser.add_argument("--redis-service", default=env("PULSE_RAILWAY_REDIS_SERVICE"))
+	parser.add_argument("--redis-url", default=None)
+	parser.add_argument("--redis-service", default=None)
 	parser.add_argument(
 		"--redis-prefix",
-		default=env("PULSE_RAILWAY_REDIS_PREFIX") or "pulse:railway",
+		default=DEFAULT_REDIS_PREFIX,
 	)
 
 
@@ -161,20 +166,28 @@ def _add_remove_args(parser: argparse.ArgumentParser) -> None:
 		required=True,
 		help="Deployment name or exact deployment id to remove",
 	)
-	parser.add_argument("--project-id", default=env("RAILWAY_PROJECT_ID"))
-	parser.add_argument("--environment-id", default=env("RAILWAY_ENVIRONMENT_ID"))
+	parser.add_argument(
+		"--project",
+		default=None,
+		help="Railway project name. Optional when using a project token.",
+	)
+	parser.add_argument(
+		"--environment",
+		default=None,
+		help="Railway environment name. Defaults to production.",
+	)
 	parser.add_argument("--token", default=railway_access_token())
-	parser.add_argument("--service-prefix", default=env("PULSE_RAILWAY_SERVICE_PREFIX"))
+	parser.add_argument("--service-prefix", default=None)
 	parser.add_argument(
 		"--keep-active-variable",
 		action="store_true",
 		help="Do not delete PULSE_ACTIVE_DEPLOYMENT when it points at the removed deployment",
 	)
-	parser.add_argument("--redis-url", default=env("REDIS_URL"))
-	parser.add_argument("--redis-service", default=env("PULSE_RAILWAY_REDIS_SERVICE"))
+	parser.add_argument("--redis-url", default=None)
+	parser.add_argument("--redis-service", default=None)
 	parser.add_argument(
 		"--redis-prefix",
-		default=env("PULSE_RAILWAY_REDIS_PREFIX") or "pulse:railway",
+		default=DEFAULT_REDIS_PREFIX,
 	)
 
 
@@ -201,7 +214,7 @@ def _add_janitor_run_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument(
 		"--redis-prefix",
-		default=env("PULSE_RAILWAY_REDIS_PREFIX") or "pulse:railway",
+		default=env("PULSE_RAILWAY_REDIS_PREFIX") or DEFAULT_REDIS_PREFIX,
 	)
 	parser.add_argument(
 		"--drain-grace-seconds",
@@ -215,11 +228,27 @@ def _add_janitor_run_args(parser: argparse.ArgumentParser) -> None:
 	)
 
 
+async def _named_railway_project(args: argparse.Namespace) -> RailwayProject:
+	token = args.token or railway_access_token()
+	if not token:
+		raise ValueError("token is required")
+	project_id, environment_id = await resolve_railway_target_ids(
+		project_name=clean_optional(args.project),
+		environment_name=clean_optional(args.environment),
+		token=token,
+	)
+	return _railway_project(
+		args,
+		project_id=project_id,
+		environment_id=environment_id,
+		token=token,
+	)
+
+
 async def _run_delete(args: argparse.Namespace) -> int:
-	if not args.project_id or not args.environment_id or not args.token:
-		raise ValueError("project id, environment id, and token are required")
+	project = await _named_railway_project(args)
 	await delete_deployment(
-		project=_railway_project(args),
+		project=project,
 		deployment_id=validate_deployment_id(args.deployment_id),
 		clear_active=not args.keep_active_variable,
 	)
@@ -227,9 +256,7 @@ async def _run_delete(args: argparse.Namespace) -> int:
 
 
 async def _run_remove(args: argparse.Namespace) -> int:
-	if not args.project_id or not args.environment_id or not args.token:
-		raise ValueError("project id, environment id, and token are required")
-	project = _railway_project(args)
+	project = await _named_railway_project(args)
 	deployment_id = await resolve_deployment_id_by_name(
 		project=project,
 		deployment_name=args.deployment_name,

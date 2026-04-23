@@ -15,8 +15,8 @@ def test_railway_deploy_target_from_app() -> None:
 		routes=[],
 		plugins=[
 			RailwayPlugin(
-				project_id="project",
-				environment_id="environment",
+				project="stoneware",
+				environment="staging",
 				router_service="router",
 				janitor_service="janitor",
 				redis_service="redis",
@@ -28,8 +28,8 @@ def test_railway_deploy_target_from_app() -> None:
 	target = railway_deploy_target_from_app(app)
 
 	assert target == RailwayDeployTarget(
-		project_id="project",
-		environment_id="environment",
+		project="stoneware",
+		environment="staging",
 		deployment_name=None,
 		image_repository=None,
 		router_service_name="pulse-router",
@@ -39,12 +39,12 @@ def test_railway_deploy_target_from_app() -> None:
 	)
 
 
-def test_railway_deploy_target_allows_project_ids_to_come_from_elsewhere() -> None:
+def test_railway_deploy_target_allows_project_to_come_from_elsewhere() -> None:
 	app = ps.App(routes=[], plugins=[RailwayPlugin()])
 
 	assert railway_deploy_target_from_app(app) == RailwayDeployTarget(
-		project_id=None,
-		environment_id=None,
+		project=None,
+		environment=None,
 		deployment_name=None,
 		image_repository=None,
 		router_service_name="pulse-router",
@@ -61,8 +61,8 @@ def test_railway_deploy_target_does_not_prefix_stable_services_by_default() -> N
 	)
 
 	assert railway_deploy_target_from_app(app) == RailwayDeployTarget(
-		project_id=None,
-		environment_id=None,
+		project=None,
+		environment=None,
 		deployment_name=None,
 		image_repository=None,
 		router_service_name="api",
@@ -81,8 +81,8 @@ def test_railway_deploy_target_preserves_old_prefixing_for_default_service_names
 	)
 
 	assert railway_deploy_target_from_app(app) == RailwayDeployTarget(
-		project_id=None,
-		environment_id=None,
+		project=None,
+		environment=None,
 		deployment_name=None,
 		image_repository=None,
 		router_service_name="foo-router",
@@ -96,8 +96,8 @@ def test_railway_deploy_target_exposes_plugin_deployment_name() -> None:
 	app = ps.App(routes=[], plugins=[RailwayPlugin(deployment_name="staging")])
 
 	assert railway_deploy_target_from_app(app) == RailwayDeployTarget(
-		project_id=None,
-		environment_id=None,
+		project=None,
+		environment=None,
 		deployment_name="staging",
 		image_repository=None,
 		router_service_name="pulse-router",
@@ -114,8 +114,8 @@ def test_railway_deploy_target_exposes_plugin_image_repository() -> None:
 	)
 
 	assert railway_deploy_target_from_app(app) == RailwayDeployTarget(
-		project_id=None,
-		environment_id=None,
+		project=None,
+		environment=None,
 		deployment_name=None,
 		image_repository="ghcr.io/acme/stoneware-v3",
 		router_service_name="pulse-router",

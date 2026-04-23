@@ -19,7 +19,7 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 
 
 async def _run_deploy(args: argparse.Namespace) -> int:
-	command = resolve_deploy_command(args)
+	command = await resolve_deploy_command(args)
 	if command.mode == "image":
 		result = await run_deploy_image(command)
 	else:

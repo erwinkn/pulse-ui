@@ -41,11 +41,11 @@ Use the commands like this:
 
 `pulse-railway init` is template-first and fresh-only. On an empty target it deploys the published `pulse-baseline` template so the router, janitor, and Redis land on the Railway canvas with a stable layout, creates the stable env service in the template group, then writes runtime images, variables, domains, cron, and healthchecks. Router and janitor services use the official GHCR images for the installed `pulse-railway` version unless you pass explicit image overrides: `ghcr.io/erwinkn/pulse-railway-router:<version>` and `ghcr.io/erwinkn/pulse-railway-janitor:<version>`. When you pass `--redis-url`, init removes the managed Redis service plus any template-created Redis references, then rewrites the baseline to use the external URL. If any baseline service already exists, including partial leftovers from a failed run, delete those services and rerun init. A future `pulse-railway update` command will handle explicit stack reconciliation.
 
-If you omit `--project-id`, `pulse-railway init` creates a new Railway project first. That flow requires an account/workspace-capable Railway token plus `--workspace-id` (or `RAILWAY_WORKSPACE_ID`). The new project name defaults to the app file stem and can be overridden with `--project-name`.
+`pulse-railway init` and `pulse-railway deploy` target projects and environments by name. Use `--project <name>` or `RailwayPlugin(project="...")`; if project is omitted, the token must be a Railway project token so the project can be inferred. Use `--environment <name>` or `RailwayPlugin(environment="...")`; if environment is omitted with a project token, the token's environment is used. With a user/account token, omitted environment defaults to `production`. Project and environment IDs are resolved internally before Railway API calls.
 
-You can also set `deployment_name` on `RailwayPlugin` to provide the default deploy name from app config. Precedence is: `--deployment-name`, then `PULSE_RAILWAY_DEPLOYMENT_NAME`, then `RailwayPlugin(deployment_name=...)`, then `prod`.
+You can also set `deployment_name` on `RailwayPlugin` to provide the default deploy name from app config. Precedence is: `--deployment-name`, then `RailwayPlugin(deployment_name=...)`, then `prod`.
 
-You can also set `image_repository` on `RailwayPlugin` to provide the default backend image registry from app config. Precedence is: `--image-repository`, then `PULSE_RAILWAY_IMAGE_REPOSITORY`, then `RailwayPlugin(image_repository=...)`. If none is set, deploy uses source mode.
+You can also set `image_repository` on `RailwayPlugin` to provide the default backend image registry from app config. Precedence is: `--image-repository`, then `RailwayPlugin(image_repository=...)`. If none is set, deploy uses source mode.
 
 If `--redis-url` is omitted, `pulse-railway init` creates the stable Redis service configured by `RailwayPlugin` in the Railway project.
 
@@ -53,7 +53,7 @@ If `--redis-url` is omitted, `pulse-railway init` creates the stable Redis servi
 
 User-managed app variables should live on the stable env service. Each new backend deployment references every non-Pulse-managed variable from `pulse-env`, so users can sync secrets into that service however they want: Railway UI, Shared Variables, Doppler, or another workflow.
 
-By default, `pulse-railway deploy` uses source mode. Image deployments require `--image-repository ghcr.io/<org>/<name>`, `PULSE_RAILWAY_IMAGE_REPOSITORY`, or `RailwayPlugin(image_repository="ghcr.io/<org>/<name>")`.
+By default, `pulse-railway deploy` uses source mode. Image deployments require `--image-repository ghcr.io/<org>/<name>` or `RailwayPlugin(image_repository="ghcr.io/<org>/<name>")`.
 
 ## Model
 
@@ -102,8 +102,8 @@ To remove a deployment by the original deployment name prefix, use:
 pulse-railway remove \
   --service pulse-router \
   --deployment-name prod \
-  --project-id <project-id> \
-  --environment-id <environment-id> \
+  --project <project-name> \
+  --environment production \
   --token <project-token>
 ```
 

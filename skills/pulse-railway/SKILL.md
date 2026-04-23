@@ -54,8 +54,8 @@ app = ps.App(
     routes=[...],
     plugins=[
         RailwayPlugin(
-            project_id=os.environ.get("RAILWAY_PROJECT_ID"),
-            environment_id=os.environ.get("RAILWAY_ENVIRONMENT_ID"),
+            project="my-railway-project",
+            environment="production",
             deployment_name="prod",
             # Optional: default image deploy repo.
             # image_repository="ghcr.io/acme/my-app",
@@ -79,8 +79,8 @@ set -a; source .env; set +a
 
 uv run pulse-railway init \
   --app-file apps/my-app/main.py \
-  --project-id "$RAILWAY_PROJECT_ID" \
-  --environment-id "$RAILWAY_ENVIRONMENT_ID"
+  --project my-railway-project \
+  --environment production
 ```
 
 Deploy with Railway source builds by default:
@@ -108,8 +108,10 @@ uv run pulse-railway deploy \
 
 `deploy` precedence:
 
-- deployment name: `--deployment-name`, then `PULSE_RAILWAY_DEPLOYMENT_NAME`, then `RailwayPlugin(deployment_name=...)`, then `prod`
-- image repository: `--image-repository`, then `PULSE_RAILWAY_IMAGE_REPOSITORY`, then `RailwayPlugin(image_repository=...)`; absent means source deploy
+- project: `--project`, then `RailwayPlugin(project=...)`; absent means infer from a project token
+- environment: `--environment`, then `RailwayPlugin(environment=...)`, then the project token environment, then `production`
+- deployment name: `--deployment-name`, then `RailwayPlugin(deployment_name=...)`, then `prod`
+- image repository: `--image-repository`, then `RailwayPlugin(image_repository=...)`; absent means source deploy
 
 ## Path Rules
 

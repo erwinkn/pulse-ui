@@ -11,12 +11,15 @@ from pulse_railway.auth import (
 )
 from pulse_railway.commands.common import (
 	build_target_project,
-	env,
+	environment_name_from_sources,
 	load_deploy_target,
 	parse_kv_items,
+	project_name_from_sources,
 	resolve_path,
+	resolve_railway_target_ids,
 )
 from pulse_railway.config import DockerBuild, RailwayProject
+from pulse_railway.constants import DEFAULT_BACKEND_PORT
 from pulse_railway.deployment import (
 	check_reserved_source_build_args,
 	validate_backend_env_vars,
@@ -46,14 +49,18 @@ def add_shared_deploy_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument(
 		"--deployment-id",
-		default=env("PULSE_DEPLOYMENT_ID"),
+		default=None,
 		help="Explicit deployment id override",
 	)
-	parser.add_argument("--project-id", default=None, help="Railway project id")
 	parser.add_argument(
-		"--environment-id",
+		"--project",
 		default=None,
-		help="Railway environment id",
+		help="Railway project name. Optional when using a project token.",
+	)
+	parser.add_argument(
+		"--environment",
+		default=None,
+		help="Railway environment name. Defaults to production.",
 	)
 	parser.add_argument(
 		"--token",
@@ -67,32 +74,32 @@ def add_shared_deploy_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument(
 		"--server-address",
-		default=env("PULSE_SERVER_ADDRESS"),
+		default=None,
 		help="Public server address override. Defaults to the existing router service address.",
 	)
 	parser.add_argument(
 		"--app-file",
-		default=env("PULSE_RAILWAY_APP_FILE") or "main.py",
+		default="main.py",
 		help="App entry file for Docker build args and RailwayPlugin config",
 	)
 	parser.add_argument(
 		"--web-root",
-		default=env("PULSE_RAILWAY_WEB_ROOT") or "web",
+		default="web",
 		help="Web root for Docker build args",
 	)
 	parser.add_argument(
 		"--dockerfile",
-		default=env("PULSE_RAILWAY_DOCKERFILE") or "Dockerfile",
+		default="Dockerfile",
 		help="Path to Dockerfile",
 	)
 	parser.add_argument(
 		"--context",
-		default=env("PULSE_RAILWAY_CONTEXT") or ".",
+		default=".",
 		help="Build/upload context",
 	)
 	parser.add_argument(
 		"--image-repository",
-		default=env("PULSE_RAILWAY_IMAGE_REPOSITORY"),
+		default=None,
 		help="Registry repository for pushed images. Enables image deploys when set.",
 	)
 	parser.add_argument(
@@ -115,18 +122,18 @@ def add_shared_deploy_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
 		"--backend-port",
 		type=int,
-		default=int(env("PULSE_RAILWAY_BACKEND_PORT") or "8000"),
+		default=DEFAULT_BACKEND_PORT,
 		help="Backend container port",
 	)
 	parser.add_argument(
 		"--backend-replicas",
 		type=int,
-		default=int(env("PULSE_RAILWAY_BACKEND_REPLICAS") or "1"),
+		default=1,
 		help="Backend Railway replicas. Use 1 for Pulse session affinity.",
 	)
 
 
-def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployCommand:
+async def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployCommand:
 	invocation_cwd = Path.cwd()
 	dockerfile_path = resolve_path(invocation_cwd, args.dockerfile)
 	context_path = resolve_path(invocation_cwd, args.context)
@@ -145,25 +152,17 @@ def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployCommand:
 	web_root_path = resolve_path(context_path, args.web_root)
 	if not web_root_path.exists():
 		raise ValueError(f"Web root not found: {web_root_path}")
-	project_id = (
-		args.project_id or deploy_target.project_id or env("RAILWAY_PROJECT_ID")
-	)
-	environment_id = (
-		args.environment_id
-		or deploy_target.environment_id
-		or env("RAILWAY_ENVIRONMENT_ID")
-	)
 	resolved_token = resolve_railway_access_token(args.token)
 	token = resolved_token.value
 	cli_token_env_name = resolved_token.env_name
-	deployment_name = (
-		args.deployment_name
-		or env("PULSE_RAILWAY_DEPLOYMENT_NAME")
-		or deploy_target.deployment_name
-		or "prod"
+	deployment_name = args.deployment_name or deploy_target.deployment_name or "prod"
+	if not token:
+		raise ValueError("token is required")
+	project_id, environment_id = await resolve_railway_target_ids(
+		project_name=project_name_from_sources(args, deploy_target),
+		environment_name=environment_name_from_sources(args, deploy_target),
+		token=token,
 	)
-	if not project_id or not environment_id or not token:
-		raise ValueError("project id, environment id, and token are required")
 	env_vars = parse_kv_items(args.env, "--env")
 	validate_backend_env_vars(env_vars)
 	build_args = parse_kv_items(args.build_arg, "--build-arg")

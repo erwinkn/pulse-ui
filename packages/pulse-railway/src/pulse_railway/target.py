@@ -13,8 +13,8 @@ class RailwayDeployTargetError(ValueError):
 
 @dataclass(slots=True, frozen=True)
 class RailwayDeployTarget:
-	project_id: str | None
-	environment_id: str | None
+	project: str | None
+	environment: str | None
 	deployment_name: str | None
 	image_repository: str | None
 	router_service_name: str
@@ -31,8 +31,8 @@ def railway_deploy_target_from_app(app: ps.App) -> RailwayDeployTarget:
 		raise RailwayDeployTargetError("expected exactly one RailwayPlugin on app")
 	plugin = plugins[0]
 	return RailwayDeployTarget(
-		project_id=plugin.project_id,
-		environment_id=plugin.environment_id,
+		project=plugin.project,
+		environment=plugin.environment,
 		deployment_name=plugin.deployment_name,
 		image_repository=plugin.image_repository,
 		router_service_name=plugin.router_service_name,

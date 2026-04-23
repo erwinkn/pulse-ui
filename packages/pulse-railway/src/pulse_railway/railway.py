@@ -116,6 +116,18 @@ class EnvironmentRecord:
 	name: str
 
 
+@dataclass(slots=True)
+class ProjectRecord:
+	id: str
+	name: str
+
+
+@dataclass(slots=True)
+class ProjectTokenRecord:
+	project_id: str
+	environment_id: str
+
+
 class RailwayGraphQLClient:
 	def __init__(
 		self,
@@ -196,6 +208,33 @@ class RailwayGraphQLClient:
 	async def resolve_auth_mode(self) -> str:
 		return await self._ensure_auth_mode()
 
+	async def get_project_token(self) -> ProjectTokenRecord | None:
+		try:
+			payload = await self._post_graphql(
+				query="""
+				query {
+					projectToken {
+						projectId
+						environmentId
+					}
+				}
+				""",
+				auth_mode="project-token",
+			)
+		except (httpx.HTTPError, ValueError):
+			return None
+		project_token = (payload.get("data") or {}).get("projectToken")
+		if not isinstance(project_token, dict):
+			return None
+		project_id = project_token.get("projectId")
+		environment_id = project_token.get("environmentId")
+		if not isinstance(project_id, str) or not isinstance(environment_id, str):
+			return None
+		return ProjectTokenRecord(
+			project_id=project_id,
+			environment_id=environment_id,
+		)
+
 	async def graphql(
 		self,
 		query: str,
@@ -254,6 +293,44 @@ class RailwayGraphQLClient:
 		)
 		return data["projectCreate"]["id"]
 
+	async def get_project(self, *, project_id: str) -> ProjectRecord:
+		data = await self.graphql(
+			"""
+			query($id: String!) {
+				project(id: $id) {
+					id
+					name
+				}
+			}
+			""",
+			{"id": project_id},
+		)
+		project = data["project"]
+		return ProjectRecord(id=project["id"], name=project["name"])
+
+	async def list_projects(
+		self, *, workspace_id: str | None = None
+	) -> list[ProjectRecord]:
+		data = await self.graphql(
+			"""
+			query($workspaceId: String) {
+				projects(workspaceId: $workspaceId) {
+					edges {
+						node {
+							id
+							name
+						}
+					}
+				}
+			}
+			""",
+			{"workspaceId": workspace_id},
+		)
+		return [
+			ProjectRecord(id=edge["node"]["id"], name=edge["node"]["name"])
+			for edge in data["projects"]["edges"]
+		]
+
 	async def list_environments(self, *, project_id: str) -> list[EnvironmentRecord]:
 		data = await self.graphql(
 			"""
@@ -274,6 +351,21 @@ class RailwayGraphQLClient:
 			EnvironmentRecord(id=edge["node"]["id"], name=edge["node"]["name"])
 			for edge in data["environments"]["edges"]
 		]
+
+	async def get_environment(self, *, environment_id: str) -> EnvironmentRecord:
+		data = await self.graphql(
+			"""
+			query($id: String!) {
+				environment(id: $id) {
+					id
+					name
+				}
+			}
+			""",
+			{"id": environment_id},
+		)
+		environment = data["environment"]
+		return EnvironmentRecord(id=environment["id"], name=environment["name"])
 
 	async def get_environment_config(
 		self, *, project_id: str, environment_id: str
@@ -849,6 +941,8 @@ class RailwayResolver:
 __all__ = [
 	"ACTIVE_DEPLOYMENT_VARIABLE",
 	"EnvironmentRecord",
+	"ProjectRecord",
+	"ProjectTokenRecord",
 	"RailwayGraphQLClient",
 	"RailwayGraphQLError",
 	"RailwayResolver",

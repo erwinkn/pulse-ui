@@ -28,8 +28,8 @@ class RailwayPlugin(ps.Plugin):
 	"""Pulse plugin for Railway deployment affinity."""
 
 	priority: int = 100
-	project_id: str | None
-	environment_id: str | None
+	project: str | None
+	environment: str | None
 	deployment_name: str | None
 	image_repository: str | None
 	router_service: str
@@ -43,8 +43,8 @@ class RailwayPlugin(ps.Plugin):
 	def __init__(
 		self,
 		*,
-		project_id: str | None = None,
-		environment_id: str | None = None,
+		project: str | None = None,
+		environment: str | None = None,
 		deployment_name: str | None = None,
 		image_repository: str | None = None,
 		router_service: str = "pulse-router",
@@ -52,8 +52,8 @@ class RailwayPlugin(ps.Plugin):
 		redis_service: str = "pulse-redis",
 		service_prefix: str | None = None,
 	) -> None:
-		self.project_id = _clean_optional(project_id)
-		self.environment_id = _clean_optional(environment_id)
+		self.project = _clean_optional(project)
+		self.environment = _clean_optional(environment)
 		self.deployment_name = _clean_optional(deployment_name)
 		self.image_repository = _clean_optional(image_repository)
 		self.router_service = normalize_service_name(router_service)

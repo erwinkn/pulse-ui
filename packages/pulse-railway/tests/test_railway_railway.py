@@ -238,6 +238,43 @@ async def test_create_project_uses_bearer_auth() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_projects_filters_by_workspace_id() -> None:
+	request_payloads: list[dict[str, object]] = []
+
+	def handler(request: httpx.Request) -> httpx.Response:
+		payload = json.loads(request.read().decode())
+		if "projectToken" in str(payload["query"]):
+			return httpx.Response(403, json={"errors": [{"message": "forbidden"}]})
+		request_payloads.append(payload)
+		return httpx.Response(
+			200,
+			json={
+				"data": {
+					"projects": {
+						"edges": [{"node": {"id": "project-id", "name": "stoneware"}}]
+					}
+				}
+			},
+		)
+
+	client = RailwayGraphQLClient(token="token")
+	client._client = httpx.AsyncClient(
+		base_url=client.endpoint,
+		headers={"Content-Type": "application/json"},
+		transport=httpx.MockTransport(handler),
+		timeout=client._client.timeout,
+	)
+	try:
+		projects = await client.list_projects(workspace_id="workspace-id")
+	finally:
+		await client.aclose()
+
+	assert projects[0].id == "project-id"
+	assert request_payloads[0]["variables"] == {"workspaceId": "workspace-id"}
+	assert "projects(workspaceId: $workspaceId)" in str(request_payloads[0]["query"])
+
+
+@pytest.mark.asyncio
 async def test_get_service_latest_deployment_reads_environment_service_instances() -> (
 	None
 ):

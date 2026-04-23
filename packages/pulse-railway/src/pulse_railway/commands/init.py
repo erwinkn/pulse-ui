@@ -10,35 +10,41 @@ from typing import Any
 from pulse_railway.auth import railway_access_token
 from pulse_railway.commands.common import (
 	build_target_project,
-	env,
+	environment_name_from_sources,
 	load_deploy_target,
+	project_name_from_sources,
+	resolve_railway_target_ids,
 )
-from pulse_railway.constants import RAILWAY_API_TOKEN, RAILWAY_WORKSPACE_ID
-from pulse_railway.railway import RailwayGraphQLClient
+from pulse_railway.constants import (
+	DEFAULT_BACKEND_PORT,
+	DEFAULT_DRAIN_GRACE_SECONDS,
+	DEFAULT_JANITOR_CRON_SCHEDULE,
+	DEFAULT_MAX_DRAIN_AGE_SECONDS,
+	DEFAULT_REDIS_PREFIX,
+)
 from pulse_railway.stack import bootstrap_stack
 
 
 def _add_init_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
 		"--app-file",
-		default=env("PULSE_RAILWAY_APP_FILE") or "main.py",
+		default="main.py",
 		help="App entry file used to load RailwayPlugin config",
 	)
-	parser.add_argument("--project-id", default=None, help="Railway project id")
 	parser.add_argument(
-		"--environment-id",
+		"--project",
 		default=None,
-		help="Railway environment id",
+		help="Railway project name. Optional when using a project token.",
+	)
+	parser.add_argument(
+		"--environment",
+		default=None,
+		help="Railway environment name. Defaults to production.",
 	)
 	parser.add_argument(
 		"--workspace-id",
-		default=env(RAILWAY_WORKSPACE_ID),
-		help="Railway workspace id. Required when creating a new project.",
-	)
-	parser.add_argument(
-		"--project-name",
 		default=None,
-		help="Railway project name when creating a new project. Defaults to the app file stem.",
+		help="Railway workspace id used to disambiguate project lookup.",
 	)
 	parser.add_argument(
 		"--token",
@@ -52,138 +58,70 @@ def _add_init_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument(
 		"--redis-url",
-		default=env("REDIS_URL"),
+		default=None,
 		help="Explicit shared Redis URL. If omitted, pulse-railway manages a Redis service in Railway.",
 	)
 	parser.add_argument(
 		"--redis-prefix",
-		default=env("PULSE_RAILWAY_REDIS_PREFIX") or "pulse:railway",
+		default=DEFAULT_REDIS_PREFIX,
 		help="Redis key prefix for pulse-railway control-plane state.",
 	)
 	parser.add_argument(
 		"--router-image",
-		default=env("PULSE_RAILWAY_ROUTER_IMAGE"),
+		default=None,
 		help="Router image override. Defaults to the official pulse-railway router image for this package version.",
 	)
 	parser.add_argument(
 		"--janitor-image",
-		default=env("PULSE_RAILWAY_JANITOR_IMAGE"),
+		default=None,
 		help="Janitor image override. Defaults to the official pulse-railway janitor image for this package version.",
 	)
 	parser.add_argument(
 		"--janitor-cron-schedule",
-		default=env("PULSE_RAILWAY_JANITOR_CRON_SCHEDULE") or "*/5 * * * *",
+		default=DEFAULT_JANITOR_CRON_SCHEDULE,
 		help="Railway cron schedule for the janitor service. Defaults to every 5 minutes.",
 	)
 	parser.add_argument(
 		"--drain-grace-seconds",
 		type=int,
-		default=int(env("PULSE_RAILWAY_JANITOR_DRAIN_GRACE_SECONDS") or "60"),
+		default=DEFAULT_DRAIN_GRACE_SECONDS,
 		help="Minimum idle and drain duration before janitor cleanup.",
 	)
 	parser.add_argument(
 		"--max-drain-age-seconds",
 		type=int,
-		default=int(env("PULSE_RAILWAY_JANITOR_MAX_DRAIN_AGE_SECONDS") or "86400"),
+		default=DEFAULT_MAX_DRAIN_AGE_SECONDS,
 		help="Maximum time to keep a draining deployment before forced cleanup.",
 	)
 	parser.add_argument(
 		"--backend-port",
 		type=int,
-		default=int(env("PULSE_RAILWAY_BACKEND_PORT") or "8000"),
+		default=DEFAULT_BACKEND_PORT,
 		help="Backend container port used by the router and janitor.",
 	)
 	parser.add_argument(
 		"--router-replicas",
 		type=int,
-		default=int(env("PULSE_RAILWAY_ROUTER_REPLICAS") or "1"),
+		default=1,
 		help="Router Railway replicas",
 	)
 
 
-async def _resolve_init_target(
-	*,
-	app_path: Path,
-	deploy_target_project_id: str | None,
-	deploy_target_environment_id: str | None,
-	args: argparse.Namespace,
-	token: str | None,
-) -> tuple[str, str, str]:
-	project_id = (
-		args.project_id or deploy_target_project_id or env("RAILWAY_PROJECT_ID")
-	)
-	environment_id = (
-		args.environment_id
-		or deploy_target_environment_id
-		or env("RAILWAY_ENVIRONMENT_ID")
-	)
-	if project_id:
-		if not environment_id or not token:
-			raise ValueError("project id, environment id, and token are required")
-		return project_id, environment_id, token
-	if environment_id:
-		raise ValueError(
-			"environment id requires an existing project id; omit both to create a new project"
-		)
-	if not token:
-		raise ValueError("token is required")
-	workspace_id = args.workspace_id or env(RAILWAY_WORKSPACE_ID)
-	async with RailwayGraphQLClient(token=token) as client:
-		try:
-			data = await client.graphql(
-				"""
-				query {
-					projectToken {
-						projectId
-						environmentId
-					}
-				}
-				""",
-				auth_mode="project-token",
-			)
-		except Exception:
-			data = {}
-	project_token = data.get("projectToken") if isinstance(data, dict) else None
-	if isinstance(project_token, dict):
-		project_id = project_token.get("projectId")
-		environment_id = project_token.get("environmentId")
-		if project_id and environment_id:
-			return project_id, environment_id, token
-	if not workspace_id:
-		raise ValueError("workspace id is required when creating a new project")
-	create_token = args.token or env(RAILWAY_API_TOKEN) or token
-	project_name = (args.project_name or app_path.stem).strip()
-	if not project_name:
-		raise ValueError("project name must not be empty")
-	async with RailwayGraphQLClient(token=create_token) as client:
-		project_id = await client.create_project(
-			name=project_name,
-			workspace_id=workspace_id,
-		)
-		environments = await client.list_environments(project_id=project_id)
-	if not environments:
-		raise ValueError(
-			f"created Railway project {project_id} without any environments"
-		)
-	return project_id, environments[0].id, create_token
-
-
 async def _run_init(args: argparse.Namespace) -> int:
 	base_path = Path.cwd()
-	app_path, deploy_target = load_deploy_target(
+	_app_path, deploy_target = load_deploy_target(
 		app_file=args.app_file,
 		base_path=base_path,
 	)
 	token = args.token or railway_access_token()
-	project_id, environment_id, token = await _resolve_init_target(
-		app_path=app_path,
-		deploy_target_project_id=deploy_target.project_id,
-		deploy_target_environment_id=deploy_target.environment_id,
-		args=args,
-		token=token,
-	)
 	if not token:
 		raise ValueError("token is required")
+	project_id, environment_id = await resolve_railway_target_ids(
+		project_name=project_name_from_sources(args, deploy_target),
+		environment_name=environment_name_from_sources(args, deploy_target),
+		token=token,
+		workspace_id=args.workspace_id,
+	)
 	project = build_target_project(
 		args,
 		deploy_target=deploy_target,

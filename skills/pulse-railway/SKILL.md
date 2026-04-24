@@ -70,7 +70,7 @@ Use `RailwaySessionStore()` when the app needs server-backed sessions that survi
 
 ## CLI Workflow
 
-Use `RAILWAY_API_TOKEN` for local user/workspace tokens. Reserve `RAILWAY_TOKEN` for Railway project tokens, especially in CI.
+Use `RAILWAY_API_TOKEN` for local user/workspace tokens. Reserve `RAILWAY_TOKEN` for Railway project tokens, especially in CI. If neither is set, `pulse-railway` falls back to the local Railway CLI login session from `~/.railway/config*.json`.
 
 First-time setup:
 

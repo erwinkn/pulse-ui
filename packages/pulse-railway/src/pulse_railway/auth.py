@@ -75,6 +75,9 @@ def _load_railway_cli_config() -> RailwayCliConfig | None:
 
 
 def _write_railway_cli_config(config: RailwayCliConfig) -> None:
+	for key in ("token", "access_token", "refresh_token", "token_expires_at"):
+		if config.user.get(key) is None:
+			config.user.pop(key, None)
 	try:
 		config.path.write_text(json.dumps(config.payload, indent=2) + "\n")
 	except OSError as exc:
@@ -130,11 +133,11 @@ def _refresh_railway_cli_access_token(
 		config.user["refreshToken"] = rotated_refresh_token
 	token_expires_at = payload.get("token_expires_at")
 	if isinstance(token_expires_at, int | float):
-		config.user["tokenExpiresAt"] = token_expires_at
+		config.user["tokenExpiresAt"] = int(token_expires_at)
 	else:
 		expires_in = payload.get("expires_in")
 		if isinstance(expires_in, int | float):
-			config.user["tokenExpiresAt"] = time.time() + float(expires_in)
+			config.user["tokenExpiresAt"] = int(time.time() + float(expires_in))
 	_write_railway_cli_config(config)
 	return access_token
 

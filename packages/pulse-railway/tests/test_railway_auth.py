@@ -92,6 +92,7 @@ def test_resolve_railway_access_token_refreshes_expired_railway_cli_token(
 				"user": {
 					"accessToken": "expired-token",
 					"refreshToken": "refresh-token",
+					"token": None,
 					"tokenExpiresAt": 1,
 				}
 			}
@@ -128,7 +129,9 @@ def test_resolve_railway_access_token_refreshes_expired_railway_cli_token(
 	user = json.loads(config_path.read_text())["user"]
 	assert user["accessToken"] == "fresh-token"
 	assert user["refreshToken"] == "rotated-refresh-token"
-	assert user["tokenExpiresAt"] == 4600.0
+	assert "token" not in user
+	assert user["tokenExpiresAt"] == 4600
+	assert isinstance(user["tokenExpiresAt"], int)
 
 
 def test_resolve_railway_access_token_fails_when_expired_cli_token_cannot_refresh(

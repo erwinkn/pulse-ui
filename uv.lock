@@ -1418,7 +1418,7 @@ dev = [{ name = "redis", specifier = ">=6.4.0" }]
 
 [[package]]
 name = "pulse-railway"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "packages/pulse-railway" }
 dependencies = [
     { name = "aiohttp" },

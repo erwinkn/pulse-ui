@@ -4,7 +4,7 @@ Railway deployment utilities for Pulse applications.
 
 `pulse-railway` uses one stable public router service plus one Railway service per deployment. The router keeps older deployments alive and forwards HTTP and websocket traffic to the selected deployment based on `pulse_deployment`.
 
-For local CLI usage, prefer `RAILWAY_API_TOKEN` when you are using a user/account/workspace token. Reserve `RAILWAY_TOKEN` for Railway project tokens, especially in CI.
+For local CLI usage, prefer `RAILWAY_API_TOKEN` when you are using a user/account/workspace token. Reserve `RAILWAY_TOKEN` for Railway project tokens, especially in CI. If neither is set, `pulse-railway` falls back to the local Railway CLI login session from `~/.railway/config*.json`.
 
 ## Quick Start
 

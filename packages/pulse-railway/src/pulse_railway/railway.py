@@ -323,13 +323,76 @@ class RailwayGraphQLClient:
 					}
 				}
 			}
-			""",
+				""",
 			{"workspaceId": workspace_id},
 		)
-		return [
+		projects = [
 			ProjectRecord(id=edge["node"]["id"], name=edge["node"]["name"])
 			for edge in data["projects"]["edges"]
 		]
+		if projects or workspace_id is not None:
+			return projects
+		return await self._list_projects_from_workspaces()
+
+	async def _list_projects_from_workspaces(self) -> list[ProjectRecord]:
+		data = await self.graphql(
+			"""
+			query {
+				externalWorkspaces {
+					id
+					projects {
+						id
+						name
+					}
+				}
+				me {
+					workspaces {
+						id
+						projects(first: 500) {
+							edges {
+								node {
+									id
+									name
+								}
+							}
+						}
+					}
+				}
+			}
+			"""
+		)
+		seen: set[str] = set()
+		projects: list[ProjectRecord] = []
+		for workspace in data.get("me", {}).get("workspaces", []):
+			for edge in workspace.get("projects", {}).get("edges", []):
+				node = edge.get("node") or {}
+				project_id = node.get("id")
+				project_name = node.get("name")
+				if (
+					not isinstance(project_id, str)
+					or not project_id
+					or not isinstance(project_name, str)
+				):
+					continue
+				if project_id in seen:
+					continue
+				seen.add(project_id)
+				projects.append(ProjectRecord(id=project_id, name=project_name))
+		for workspace in data.get("externalWorkspaces", []):
+			for node in workspace.get("projects", []):
+				project_id = node.get("id")
+				project_name = node.get("name")
+				if (
+					not isinstance(project_id, str)
+					or not project_id
+					or not isinstance(project_name, str)
+				):
+					continue
+				if project_id in seen:
+					continue
+				seen.add(project_id)
+				projects.append(ProjectRecord(id=project_id, name=project_name))
+		return projects
 
 	async def list_environments(self, *, project_id: str) -> list[EnvironmentRecord]:
 		data = await self.graphql(

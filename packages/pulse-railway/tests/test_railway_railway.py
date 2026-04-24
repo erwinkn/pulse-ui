@@ -275,6 +275,60 @@ async def test_list_projects_filters_by_workspace_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_projects_falls_back_to_workspace_listing_when_empty() -> None:
+	request_payloads: list[dict[str, object]] = []
+
+	def handler(request: httpx.Request) -> httpx.Response:
+		payload = json.loads(request.read().decode())
+		query = str(payload["query"])
+		if "projectToken" in query:
+			return httpx.Response(403, json={"errors": [{"message": "forbidden"}]})
+		request_payloads.append(payload)
+		if "projects(workspaceId: $workspaceId)" in query:
+			return httpx.Response(200, json={"data": {"projects": {"edges": []}}})
+		return httpx.Response(
+			200,
+			json={
+				"data": {
+					"me": {
+						"workspaces": [
+							{
+								"id": "workspace-1",
+								"projects": {
+									"edges": [
+										{
+											"node": {
+												"id": "project-id",
+												"name": "pulse-sandbox",
+											}
+										}
+									]
+								},
+							}
+						]
+					},
+					"externalWorkspaces": [],
+				}
+			},
+		)
+
+	client = RailwayGraphQLClient(token="token")
+	client._client = httpx.AsyncClient(
+		base_url=client.endpoint,
+		headers={"Content-Type": "application/json"},
+		transport=httpx.MockTransport(handler),
+		timeout=client._client.timeout,
+	)
+	try:
+		projects = await client.list_projects()
+	finally:
+		await client.aclose()
+
+	assert [project.name for project in projects] == ["pulse-sandbox"]
+	assert len(request_payloads) == 2
+
+
+@pytest.mark.asyncio
 async def test_get_service_latest_deployment_reads_environment_service_instances() -> (
 	None
 ):

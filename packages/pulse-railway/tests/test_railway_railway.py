@@ -246,13 +246,42 @@ async def test_list_projects_filters_by_workspace_id() -> None:
 		if "projectToken" in str(payload["query"]):
 			return httpx.Response(403, json={"errors": [{"message": "forbidden"}]})
 		request_payloads.append(payload)
+		assert "externalWorkspaces" in str(payload["query"])
 		return httpx.Response(
 			200,
 			json={
 				"data": {
-					"projects": {
-						"edges": [{"node": {"id": "project-id", "name": "stoneware"}}]
-					}
+					"me": {
+						"workspaces": [
+							{
+								"id": "ignored-workspace",
+								"projects": {
+									"edges": [
+										{
+											"node": {
+												"id": "ignored-project",
+												"name": "ignored",
+											}
+										}
+									]
+								},
+							},
+							{
+								"id": "workspace-id",
+								"projects": {
+									"edges": [
+										{
+											"node": {
+												"id": "project-id",
+												"name": "stoneware",
+											}
+										}
+									]
+								},
+							},
+						]
+					},
+					"externalWorkspaces": [],
 				}
 			},
 		)
@@ -270,12 +299,13 @@ async def test_list_projects_filters_by_workspace_id() -> None:
 		await client.aclose()
 
 	assert projects[0].id == "project-id"
-	assert request_payloads[0]["variables"] == {"workspaceId": "workspace-id"}
-	assert "projects(workspaceId: $workspaceId)" in str(request_payloads[0]["query"])
+	assert len(request_payloads) == 1
 
 
 @pytest.mark.asyncio
-async def test_list_projects_falls_back_to_workspace_listing_when_empty() -> None:
+async def test_list_projects_falls_back_to_direct_query_when_workspace_listing_empty() -> (
+	None
+):
 	request_payloads: list[dict[str, object]] = []
 
 	def handler(request: httpx.Request) -> httpx.Response:
@@ -285,7 +315,61 @@ async def test_list_projects_falls_back_to_workspace_listing_when_empty() -> Non
 			return httpx.Response(403, json={"errors": [{"message": "forbidden"}]})
 		request_payloads.append(payload)
 		if "projects(workspaceId: $workspaceId)" in query:
-			return httpx.Response(200, json={"data": {"projects": {"edges": []}}})
+			return httpx.Response(
+				200,
+				json={
+					"data": {
+						"projects": {
+							"edges": [
+								{
+									"node": {
+										"id": "project-id",
+										"name": "pulse-sandbox",
+									}
+								}
+							]
+						}
+					}
+				},
+			)
+		return httpx.Response(
+			200,
+			json={
+				"data": {
+					"me": {"workspaces": []},
+					"externalWorkspaces": [],
+				}
+			},
+		)
+
+	client = RailwayGraphQLClient(token="token")
+	client._client = httpx.AsyncClient(
+		base_url=client.endpoint,
+		headers={"Content-Type": "application/json"},
+		transport=httpx.MockTransport(handler),
+		timeout=client._client.timeout,
+	)
+	try:
+		projects = await client.list_projects()
+	finally:
+		await client.aclose()
+
+	assert [project.name for project in projects] == ["pulse-sandbox"]
+	assert len(request_payloads) == 2
+
+
+@pytest.mark.asyncio
+async def test_list_projects_uses_workspace_listing_before_direct_query() -> None:
+	request_payloads: list[dict[str, object]] = []
+
+	def handler(request: httpx.Request) -> httpx.Response:
+		payload = json.loads(request.read().decode())
+		query = str(payload["query"])
+		if "projectToken" in query:
+			return httpx.Response(403, json={"errors": [{"message": "forbidden"}]})
+		request_payloads.append(payload)
+		if "projects(workspaceId: $workspaceId)" in query:
+			raise AssertionError("direct projects query should not run")
 		return httpx.Response(
 			200,
 			json={
@@ -299,7 +383,7 @@ async def test_list_projects_falls_back_to_workspace_listing_when_empty() -> Non
 										{
 											"node": {
 												"id": "project-id",
-												"name": "pulse-sandbox",
+												"name": "stoneware-v4",
 											}
 										}
 									]
@@ -324,8 +408,76 @@ async def test_list_projects_falls_back_to_workspace_listing_when_empty() -> Non
 	finally:
 		await client.aclose()
 
-	assert [project.name for project in projects] == ["pulse-sandbox"]
-	assert len(request_payloads) == 2
+	assert [project.name for project in projects] == ["stoneware-v4"]
+	assert len(request_payloads) == 1
+
+
+@pytest.mark.asyncio
+async def test_list_projects_filters_workspace_listing_by_workspace_id() -> None:
+	def handler(request: httpx.Request) -> httpx.Response:
+		payload = json.loads(request.read().decode())
+		query = str(payload["query"])
+		if "projectToken" in query:
+			return httpx.Response(403, json={"errors": [{"message": "forbidden"}]})
+		if "projects(workspaceId: $workspaceId)" in query:
+			return httpx.Response(
+				200,
+				json={"errors": [{"message": "Not Authorized"}]},
+			)
+		return httpx.Response(
+			200,
+			json={
+				"data": {
+					"me": {
+						"workspaces": [
+							{
+								"id": "workspace-1",
+								"projects": {
+									"edges": [
+										{
+											"node": {
+												"id": "project-1",
+												"name": "ignored",
+											}
+										}
+									]
+								},
+							},
+							{
+								"id": "workspace-2",
+								"projects": {
+									"edges": [
+										{
+											"node": {
+												"id": "project-2",
+												"name": "stoneware-v4",
+											}
+										}
+									]
+								},
+							},
+						]
+					},
+					"externalWorkspaces": [],
+				}
+			},
+		)
+
+	client = RailwayGraphQLClient(token="token")
+	client._client = httpx.AsyncClient(
+		base_url=client.endpoint,
+		headers={"Content-Type": "application/json"},
+		transport=httpx.MockTransport(handler),
+		timeout=client._client.timeout,
+	)
+	try:
+		projects = await client.list_projects(workspace_id="workspace-2")
+	finally:
+		await client.aclose()
+
+	assert [(project.id, project.name) for project in projects] == [
+		("project-2", "stoneware-v4")
+	]
 
 
 @pytest.mark.asyncio

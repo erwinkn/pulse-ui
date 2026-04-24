@@ -311,6 +311,24 @@ class RailwayGraphQLClient:
 	async def list_projects(
 		self, *, workspace_id: str | None = None
 	) -> list[ProjectRecord]:
+		try:
+			projects = await self._list_projects_from_workspaces(
+				workspace_id=workspace_id
+			)
+		except RailwayGraphQLError:
+			return await self._list_projects_direct(workspace_id=workspace_id)
+		if projects:
+			return projects
+		try:
+			return await self._list_projects_direct(workspace_id=workspace_id)
+		except RailwayGraphQLError as exc:
+			if "not authorized" not in str(exc).lower():
+				raise
+			return projects
+
+	async def _list_projects_direct(
+		self, *, workspace_id: str | None
+	) -> list[ProjectRecord]:
 		data = await self.graphql(
 			"""
 			query($workspaceId: String) {
@@ -326,15 +344,14 @@ class RailwayGraphQLClient:
 				""",
 			{"workspaceId": workspace_id},
 		)
-		projects = [
+		return [
 			ProjectRecord(id=edge["node"]["id"], name=edge["node"]["name"])
 			for edge in data["projects"]["edges"]
 		]
-		if projects or workspace_id is not None:
-			return projects
-		return await self._list_projects_from_workspaces()
 
-	async def _list_projects_from_workspaces(self) -> list[ProjectRecord]:
+	async def _list_projects_from_workspaces(
+		self, *, workspace_id: str | None
+	) -> list[ProjectRecord]:
 		data = await self.graphql(
 			"""
 			query {
@@ -364,6 +381,8 @@ class RailwayGraphQLClient:
 		seen: set[str] = set()
 		projects: list[ProjectRecord] = []
 		for workspace in data.get("me", {}).get("workspaces", []):
+			if workspace_id is not None and workspace.get("id") != workspace_id:
+				continue
 			for edge in workspace.get("projects", {}).get("edges", []):
 				node = edge.get("node") or {}
 				project_id = node.get("id")
@@ -379,6 +398,8 @@ class RailwayGraphQLClient:
 				seen.add(project_id)
 				projects.append(ProjectRecord(id=project_id, name=project_name))
 		for workspace in data.get("externalWorkspaces", []):
+			if workspace_id is not None and workspace.get("id") != workspace_id:
+				continue
 			for node in workspace.get("projects", []):
 				project_id = node.get("id")
 				project_name = node.get("name")

@@ -32,6 +32,7 @@ class RailwayPlugin(ps.Plugin):
 	environment: str | None
 	deployment_name: str | None
 	image_repository: str | None
+	dockerfile: str | None
 	router_service: str
 	janitor_service: str
 	redis_service: str
@@ -43,6 +44,7 @@ class RailwayPlugin(ps.Plugin):
 	def __init__(
 		self,
 		*,
+		dockerfile: str | os.PathLike[str] | None = None,
 		project: str | None = None,
 		environment: str | None = None,
 		deployment_name: str | None = None,
@@ -56,6 +58,9 @@ class RailwayPlugin(ps.Plugin):
 		self.environment = _clean_optional(environment)
 		self.deployment_name = _clean_optional(deployment_name)
 		self.image_repository = _clean_optional(image_repository)
+		self.dockerfile = _clean_optional(
+			os.fspath(dockerfile) if dockerfile is not None else None
+		)
 		self.router_service = normalize_service_name(router_service)
 		self.janitor_service = normalize_service_name(janitor_service)
 		self.redis_service = normalize_service_name(redis_service)

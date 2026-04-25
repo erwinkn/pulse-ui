@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pulse_railway import RailwayRedisSessionStore
 from pulse_railway.config import DockerBuild, RailwayProject
 from pulse_railway.constants import (
 	ACTIVE_DEPLOYMENT_VARIABLE,
@@ -22,14 +21,14 @@ from pulse_railway.deployment import (
 	DeploymentError,
 	_list_deployment_services,
 	_pulse_env_reference_variables,
-	_railway_session_store_from_app,
 	_run_command,
+	_uses_railway_session_store_from_app,
 	check_reserved_source_build_args,
 	default_service_prefix,
 	deploy,
-	deploy_up,
 	generate_deployment_id,
 	railway_up_command,
+	redeploy_deployment,
 	resolve_deployment_id_by_name,
 	validate_backend_env_vars,
 )
@@ -209,11 +208,11 @@ def test_check_reserved_source_build_args_allows_source_build_names() -> None:
 
 
 @pytest.mark.asyncio
-async def test_deploy_up_rejects_managed_source_build_args_before_app_load(
+async def test_deploy_source_rejects_managed_source_build_args_before_app_load(
 	tmp_path,
 ) -> None:
 	with pytest.raises(DeploymentError, match="PORT"):
-		await deploy_up(
+		await deploy(
 			project=RailwayProject(
 				project_id="project",
 				environment_id="env",
@@ -230,12 +229,12 @@ async def test_deploy_up_rejects_managed_source_build_args_before_app_load(
 
 
 @pytest.mark.asyncio
-async def test_deploy_requires_image_repository(tmp_path) -> None:
+async def test_deploy_rejects_no_gitignore_with_image_repository(tmp_path) -> None:
 	dockerfile = tmp_path / "Dockerfile"
 	dockerfile.write_text("FROM scratch\n")
 	_write_app_fixture(tmp_path)
 
-	with pytest.raises(DeploymentError, match="image repository"):
+	with pytest.raises(DeploymentError, match="--no-gitignore"):
 		await deploy(
 			project=RailwayProject(
 				project_id="project",
@@ -246,12 +245,16 @@ async def test_deploy_requires_image_repository(tmp_path) -> None:
 			docker=DockerBuild(
 				dockerfile_path=dockerfile,
 				context_path=tmp_path,
+				image_repository="ghcr.io/acme/app",
 			),
 			deployment_id="prod-260402-120000",
+			no_gitignore=True,
 		)
 
 
-def test_railway_session_store_from_app_uses_declared_constructor(tmp_path) -> None:
+def test_uses_railway_session_store_from_app_detects_declared_constructor(
+	tmp_path,
+) -> None:
 	app_file = tmp_path / "main.py"
 	app_file.write_text(
 		"import pulse as ps\n"
@@ -261,9 +264,11 @@ def test_railway_session_store_from_app_uses_declared_constructor(tmp_path) -> N
 		")\n"
 	)
 
-	spec = _railway_session_store_from_app("main.py", tmp_path)
+	uses_railway_session_store = _uses_railway_session_store_from_app(
+		"main.py", tmp_path
+	)
 
-	assert isinstance(spec, RailwayRedisSessionStore)
+	assert uses_railway_session_store is True
 
 
 @pytest.mark.asyncio
@@ -398,6 +403,112 @@ async def test_resolve_deployment_id_by_name_requires_unique_match(
 			),
 			deployment_name="redis-smoke",
 		)
+
+
+@pytest.mark.asyncio
+async def test_redeploy_deployment_defaults_to_active_deployment(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	calls: list[tuple[str, str]] = []
+
+	class _FakeClient:
+		def __init__(self, **_: object) -> None:
+			return None
+
+		async def __aenter__(self) -> "_FakeClient":
+			return self
+
+		async def __aexit__(self, *_: object) -> None:
+			return None
+
+		async def get_project_variables(
+			self, *, project_id: str, environment_id: str
+		) -> dict[str, str]:
+			assert project_id == "project"
+			assert environment_id == "env"
+			return {ACTIVE_DEPLOYMENT_VARIABLE: "prod-260402-120000"}
+
+		async def find_service_by_name(
+			self, *, project_id: str, environment_id: str, name: str
+		) -> ServiceRecord | None:
+			assert project_id == "project"
+			assert environment_id == "env"
+			assert name == "prod-260402-120000"
+			return ServiceRecord(id="svc-backend", name=name)
+
+		async def deploy_service(self, *, service_id: str, environment_id: str) -> str:
+			calls.append((service_id, environment_id))
+			return "deploy-backend"
+
+		async def wait_for_deployment(self, *, deployment_id: str) -> dict[str, str]:
+			assert deployment_id == "deploy-backend"
+			return {"id": deployment_id, "status": "SUCCESS"}
+
+	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
+
+	result = await redeploy_deployment(
+		project=RailwayProject(
+			project_id="project",
+			environment_id="env",
+			token="token",
+			service_name="pulse-router",
+		)
+	)
+
+	assert result.deployment_id == "prod-260402-120000"
+	assert result.backend_service_id == "svc-backend"
+	assert result.backend_deployment_id == "deploy-backend"
+	assert calls == [("svc-backend", "env")]
+
+
+@pytest.mark.asyncio
+async def test_redeploy_deployment_uses_explicit_deployment_id(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	looked_up_names: list[str] = []
+
+	class _FakeClient:
+		def __init__(self, **_: object) -> None:
+			return None
+
+		async def __aenter__(self) -> "_FakeClient":
+			return self
+
+		async def __aexit__(self, *_: object) -> None:
+			return None
+
+		async def get_project_variables(
+			self, *, project_id: str, environment_id: str
+		) -> dict[str, str]:
+			raise AssertionError("explicit deployment id should skip active lookup")
+
+		async def find_service_by_name(
+			self, *, project_id: str, environment_id: str, name: str
+		) -> ServiceRecord | None:
+			looked_up_names.append(name)
+			return ServiceRecord(id="svc-explicit", name=name)
+
+		async def deploy_service(self, *, service_id: str, environment_id: str) -> str:
+			return "deploy-explicit"
+
+		async def wait_for_deployment(self, *, deployment_id: str) -> dict[str, str]:
+			return {"id": deployment_id, "status": "SUCCESS"}
+
+	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
+
+	result = await redeploy_deployment(
+		project=RailwayProject(
+			project_id="project",
+			environment_id="env",
+			token="token",
+			service_name="pulse-router",
+			service_prefix="app-",
+		),
+		deployment_id="prod-260402-120000",
+	)
+
+	assert result.backend_service_name == "app-prod-260402-120000"
+	assert looked_up_names == ["app-prod-260402-120000"]
 
 
 @pytest.mark.asyncio
@@ -645,7 +756,7 @@ async def test_deploy_happy_path_on_ready_stack(monkeypatch, tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_deploy_up_happy_path_on_ready_stack(monkeypatch, tmp_path) -> None:
+async def test_deploy_source_happy_path_on_ready_stack(monkeypatch, tmp_path) -> None:
 	dockerfile = tmp_path / "examples" / "Dockerfile"
 	dockerfile.parent.mkdir(parents=True, exist_ok=True)
 	dockerfile.write_text("FROM scratch\n")
@@ -837,7 +948,7 @@ async def test_deploy_up_happy_path_on_ready_stack(monkeypatch, tmp_path) -> Non
 
 	monkeypatch.setattr("pulse_railway.deployment._run_command", fake_run_command)
 
-	result = await deploy_up(
+	result = await deploy(
 		project=RailwayProject(
 			project_id="project",
 			environment_id="env",
@@ -885,7 +996,7 @@ async def test_deploy_up_happy_path_on_ready_stack(monkeypatch, tmp_path) -> Non
 	assert build_time_service_variables == [
 		{
 			"PULSE_DEPLOYMENT_ID": "prod-260402-120000",
-			PULSE_INTERNAL_TOKEN: "secret-token",
+			PULSE_INTERNAL_TOKEN: "${{ shared.PULSE_RAILWAY_INTERNAL_TOKEN }}",
 			"PULSE_APP_FILE": "examples/aws-ecs/main.py",
 			"PULSE_SERVER_ADDRESS": "https://test.pulse.sc",
 			"PORT": "8000",
@@ -918,9 +1029,6 @@ async def test_deploy_up_happy_path_on_ready_stack(monkeypatch, tmp_path) -> Non
 	assert service_variables[result.backend_service_id]["PULSE_SERVER_ADDRESS"] == (
 		"https://test.pulse.sc"
 	)
-	assert service_variables[result.backend_service_id][PULSE_INTERNAL_TOKEN] == (
-		"secret-token"
-	)
 	assert service_variables[result.backend_service_id][PULSE_RAILWAY_REDIS_URL] == (
 		"redis://pulse-router-redis.railway.internal:6379"
 	)
@@ -940,7 +1048,7 @@ async def test_deploy_up_happy_path_on_ready_stack(monkeypatch, tmp_path) -> Non
 
 
 @pytest.mark.asyncio
-async def test_deploy_up_uses_railway_api_token_for_cli_when_present(
+async def test_deploy_source_uses_railway_api_token_for_cli_when_present(
 	monkeypatch,
 	tmp_path,
 ) -> None:
@@ -1042,7 +1150,7 @@ async def test_deploy_up_uses_railway_api_token_for_cli_when_present(
 
 	monkeypatch.setattr("pulse_railway.deployment._run_command", fake_run_command)
 
-	await deploy_up(
+	await deploy(
 		project=RailwayProject(
 			project_id="project",
 			environment_id="env",
@@ -1066,7 +1174,7 @@ async def test_deploy_up_uses_railway_api_token_for_cli_when_present(
 
 
 @pytest.mark.asyncio
-async def test_deploy_up_uses_bearer_env_for_unmatched_explicit_account_token(
+async def test_deploy_source_uses_bearer_env_for_unmatched_explicit_account_token(
 	monkeypatch,
 	tmp_path,
 ) -> None:
@@ -1167,7 +1275,7 @@ async def test_deploy_up_uses_bearer_env_for_unmatched_explicit_account_token(
 
 	monkeypatch.setattr("pulse_railway.deployment._run_command", fake_run_command)
 
-	await deploy_up(
+	await deploy(
 		project=RailwayProject(
 			project_id="project",
 			environment_id="env",
@@ -1191,7 +1299,7 @@ async def test_deploy_up_uses_bearer_env_for_unmatched_explicit_account_token(
 
 
 @pytest.mark.asyncio
-async def test_deploy_up_uses_project_token_env_for_explicit_token_override(
+async def test_deploy_source_uses_project_token_env_for_explicit_token_override(
 	monkeypatch,
 	tmp_path,
 ) -> None:
@@ -1293,7 +1401,7 @@ async def test_deploy_up_uses_project_token_env_for_explicit_token_override(
 
 	monkeypatch.setattr("pulse_railway.deployment._run_command", fake_run_command)
 
-	await deploy_up(
+	await deploy(
 		project=RailwayProject(
 			project_id="project",
 			environment_id="env",
@@ -1317,7 +1425,7 @@ async def test_deploy_up_uses_project_token_env_for_explicit_token_override(
 
 
 @pytest.mark.asyncio
-async def test_deploy_up_cleans_up_failed_source_service(
+async def test_deploy_source_cleans_up_failed_source_service(
 	monkeypatch,
 	tmp_path,
 ) -> None:
@@ -1397,7 +1505,7 @@ async def test_deploy_up_cleans_up_failed_source_service(
 	monkeypatch.setattr("pulse_railway.deployment._run_command", fake_run_command)
 
 	with pytest.raises(DeploymentError, match="railway up failed"):
-		await deploy_up(
+		await deploy(
 			project=RailwayProject(
 				project_id="project",
 				environment_id="env",
@@ -1420,7 +1528,7 @@ async def test_deploy_up_cleans_up_failed_source_service(
 
 
 @pytest.mark.asyncio
-async def test_deploy_up_keeps_service_when_post_build_polling_fails(
+async def test_deploy_source_keeps_service_when_post_build_polling_fails(
 	monkeypatch,
 	tmp_path,
 ) -> None:
@@ -1510,7 +1618,7 @@ async def test_deploy_up_keeps_service_when_post_build_polling_fails(
 	)
 
 	with pytest.raises(TimeoutError, match="build polling timed out"):
-		await deploy_up(
+		await deploy(
 			project=RailwayProject(
 				project_id="project",
 				environment_id="env",
@@ -1533,7 +1641,7 @@ async def test_deploy_up_keeps_service_when_post_build_polling_fails(
 
 
 @pytest.mark.asyncio
-async def test_deploy_up_waits_through_transient_stopped_build_state(
+async def test_deploy_source_waits_through_transient_stopped_build_state(
 	monkeypatch,
 	tmp_path,
 ) -> None:
@@ -1642,7 +1750,7 @@ async def test_deploy_up_waits_through_transient_stopped_build_state(
 	monkeypatch.setattr("pulse_railway.deployment._run_command", fake_run_command)
 	monkeypatch.setattr("pulse_railway.deployment.asyncio.sleep", fast_sleep)
 
-	result = await deploy_up(
+	result = await deploy(
 		project=RailwayProject(
 			project_id="project",
 			environment_id="env",

@@ -37,11 +37,16 @@ class ResolvedDeployCommand:
 	deployment_id: str | None
 	app_file: str
 	web_root: str
+	uses_railway_session_store: bool
 	cli_token_env_name: str | None
 	no_gitignore: bool
 
 
 def add_shared_deploy_args(parser: argparse.ArgumentParser) -> None:
+	parser.add_argument(
+		"app_file",
+		help="App entry file for Docker build args and RailwayPlugin config",
+	)
 	parser.add_argument(
 		"--deployment-name",
 		default=None,
@@ -75,22 +80,17 @@ def add_shared_deploy_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
 		"--server-address",
 		default=None,
-		help="Public server address override. Defaults to the existing router service address.",
-	)
-	parser.add_argument(
-		"--app-file",
-		default="main.py",
-		help="App entry file for Docker build args and RailwayPlugin config",
+		help="Public server address override. Defaults to App.server_address, then the existing router service address.",
 	)
 	parser.add_argument(
 		"--web-root",
-		default="web",
-		help="Web root for Docker build args",
+		default=None,
+		help="Web root override. Defaults to the app codegen web root.",
 	)
 	parser.add_argument(
 		"--dockerfile",
-		default="Dockerfile",
-		help="Path to Dockerfile",
+		default=None,
+		help="Dockerfile override. Defaults to RailwayPlugin(dockerfile=...).",
 	)
 	parser.add_argument(
 		"--context",
@@ -135,21 +135,37 @@ def add_shared_deploy_args(parser: argparse.ArgumentParser) -> None:
 
 async def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployCommand:
 	invocation_cwd = Path.cwd()
-	dockerfile_path = resolve_path(invocation_cwd, args.dockerfile)
 	context_path = resolve_path(invocation_cwd, args.context)
-	if not dockerfile_path.exists():
-		raise ValueError(f"Dockerfile not found: {dockerfile_path}")
 	if not context_path.exists():
 		raise ValueError(f"Context path not found: {context_path}")
 	if Path(args.app_file).is_absolute():
 		raise ValueError("app-file must be relative to the deploy context")
-	if Path(args.web_root).is_absolute():
-		raise ValueError("web-root must be relative to the deploy context")
 	app_path, deploy_target = load_deploy_target(
 		app_file=args.app_file,
 		base_path=context_path,
 	)
-	web_root_path = resolve_path(context_path, args.web_root)
+	dockerfile = args.dockerfile or deploy_target.dockerfile
+	if dockerfile is None:
+		raise ValueError(
+			"dockerfile is required. Pass --dockerfile or set RailwayPlugin(dockerfile=...)."
+		)
+	dockerfile_base = invocation_cwd if args.dockerfile else context_path
+	dockerfile_path = resolve_path(dockerfile_base, dockerfile)
+	if not dockerfile_path.exists():
+		raise ValueError(f"Dockerfile not found: {dockerfile_path}")
+	if args.web_root is None:
+		try:
+			web_root = deploy_target.web_root.resolve().relative_to(context_path)
+		except ValueError as exc:
+			raise ValueError(
+				"App web root must be inside the deploy context. "
+				+ "Pass --web-root to override it."
+			) from exc
+	else:
+		if Path(args.web_root).is_absolute():
+			raise ValueError("web-root must be relative to the deploy context")
+		web_root = Path(args.web_root)
+	web_root_path = resolve_path(context_path, web_root.as_posix())
 	if not web_root_path.exists():
 		raise ValueError(f"Web root not found: {web_root_path}")
 	resolved_token = resolve_railway_access_token(args.token)
@@ -181,7 +197,7 @@ async def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployComm
 		env_vars=env_vars,
 		backend_port=args.backend_port,
 		backend_replicas=args.backend_replicas,
-		server_address=args.server_address,
+		server_address=args.server_address or deploy_target.server_address,
 	)
 	docker = DockerBuild(
 		dockerfile_path=dockerfile_path,
@@ -196,7 +212,8 @@ async def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployComm
 		deployment_name=deployment_name,
 		deployment_id=args.deployment_id,
 		app_file=str(app_path.relative_to(context_path)),
-		web_root=args.web_root,
+		web_root=web_root.as_posix(),
+		uses_railway_session_store=deploy_target.uses_railway_session_store,
 		cli_token_env_name=cli_token_env_name,
 		no_gitignore=args.no_gitignore,
 	)

@@ -526,8 +526,8 @@ async def test_janitor_resolves_project_redis_when_url_missing(monkeypatch) -> N
 		lambda **kwargs: store_urls.append(kwargs["url"]) or fake_store,
 	)
 
-	async def fake_internal_token(*args: object, **kwargs: object) -> str:
-		return "secret-token"
+	async def fake_internal_token(*args: object, **kwargs: object) -> tuple[str, bool]:
+		return "secret-token", False
 
 	monkeypatch.setattr(
 		"pulse_railway.stack.resolve_or_create_internal_token",

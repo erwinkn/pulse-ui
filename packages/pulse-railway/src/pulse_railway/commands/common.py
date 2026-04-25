@@ -6,6 +6,14 @@ from pathlib import Path
 from typing import NotRequired, TypedDict, TypeVar, Unpack
 
 from pulse.cli.helpers import load_app_from_target
+from pulse.env import (
+	ENV_PULSE_APP_DIR,
+	ENV_PULSE_APP_FILE,
+	ENV_PULSE_ENV,
+)
+from pulse.env import (
+	env as pulse_env,
+)
 
 from pulse_railway.config import RailwayProject
 from pulse_railway.constants import DEFAULT_REDIS_PREFIX
@@ -97,11 +105,25 @@ def load_deploy_target(
 	app_path = resolve_path(base_path, app_file)
 	if not app_path.exists():
 		raise ValueError(f"App file not found: {app_path}")
-	app_ctx = load_app_from_target(str(app_path))
+	previous_env = {
+		ENV_PULSE_APP_DIR: os.environ.get(ENV_PULSE_APP_DIR),
+		ENV_PULSE_APP_FILE: os.environ.get(ENV_PULSE_APP_FILE),
+		ENV_PULSE_ENV: os.environ.get(ENV_PULSE_ENV),
+	}
 	try:
+		pulse_env.pulse_env = "ci"
+		pulse_env.pulse_app_file = str(app_path)
+		pulse_env.pulse_app_dir = str(app_path.parent)
+		app_ctx = load_app_from_target(str(app_path))
 		return app_path, railway_deploy_target_from_app(app_ctx.app)
 	except RailwayDeployTargetError as exc:
 		raise ValueError(str(exc)) from exc
+	finally:
+		for key, value in previous_env.items():
+			if value is None:
+				os.environ.pop(key, None)
+			else:
+				os.environ[key] = value
 
 
 def project_name_from_sources(
@@ -233,7 +255,9 @@ def build_target_project(
 	env_vars: dict[str, str] | None = None,
 	**overrides: Unpack[RailwayProjectOverrides],
 ) -> RailwayProject:
-	service_prefix = args.service_prefix or deploy_target.service_prefix
+	service_prefix = (
+		getattr(args, "service_prefix", None) or deploy_target.service_prefix
+	)
 	return RailwayProject(
 		project_id=project_id,
 		environment_id=environment_id,

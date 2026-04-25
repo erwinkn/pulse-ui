@@ -23,14 +23,20 @@ from pulse_railway.commands.deploy import (
 from pulse_railway.commands.deploy import (
 	run_deploy as _run_deploy,
 )
-from pulse_railway.commands.init import (
-	add_init_args as _add_init_args,
+from pulse_railway.commands.scaffold import (
+	add_ensure_args as _add_ensure_args,
 )
-from pulse_railway.commands.init import (
-	register as register_init,
+from pulse_railway.commands.scaffold import (
+	add_scaffold_args as _add_scaffold_args,
 )
-from pulse_railway.commands.init import (
-	run_init as _run_init,
+from pulse_railway.commands.scaffold import (
+	register as register_scaffold,
+)
+from pulse_railway.commands.scaffold import (
+	run_ensure as _run_ensure,
+)
+from pulse_railway.commands.scaffold import (
+	run_scaffold as _run_scaffold,
 )
 from pulse_railway.commands.upgrade import (
 	add_upgrade_args as _add_upgrade_args,
@@ -289,7 +295,7 @@ def main() -> None:
 	parser = argparse.ArgumentParser(prog="pulse-railway")
 	subparsers = parser.add_subparsers(dest="command", required=True)
 
-	register_init(subparsers)
+	register_scaffold(subparsers)
 	register_upgrade(subparsers)
 	register_deploy(subparsers)
 
@@ -314,8 +320,10 @@ def main() -> None:
 	_add_janitor_run_args(janitor_run_parser)
 
 	args = parser.parse_args()
-	if args.command == "init":
-		raise SystemExit(asyncio.run(_run_init(args)))
+	if args.command == "scaffold":
+		raise SystemExit(asyncio.run(_run_scaffold(args)))
+	if args.command == "ensure":
+		raise SystemExit(asyncio.run(_run_ensure(args)))
 	if args.command == "upgrade":
 		raise SystemExit(asyncio.run(_run_upgrade(args)))
 	if args.command == "deploy":
@@ -333,16 +341,18 @@ __all__ = [
 	"JANITOR_RUN_DESCRIPTION",
 	"JANITOR_RUN_RUNTIME_ERROR",
 	"_add_deploy_args",
-	"_add_init_args",
+	"_add_ensure_args",
 	"_add_janitor_run_args",
 	"_add_remove_args",
+	"_add_scaffold_args",
 	"_add_upgrade_args",
 	"_print_janitor_result",
 	"_run_delete",
 	"_run_deploy",
-	"_run_init",
+	"_run_ensure",
 	"_run_janitor_run",
 	"_run_remove",
+	"_run_scaffold",
 	"_run_upgrade",
 	"main",
 ]

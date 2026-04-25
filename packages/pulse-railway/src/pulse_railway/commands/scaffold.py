@@ -15,6 +15,7 @@ from pulse_railway.commands.common import (
 	project_name_from_sources,
 	resolve_railway_target_ids,
 )
+from pulse_railway.config import RailwayProject
 from pulse_railway.constants import (
 	DEFAULT_BACKEND_PORT,
 	DEFAULT_DRAIN_GRACE_SECONDS,
@@ -22,24 +23,14 @@ from pulse_railway.constants import (
 	DEFAULT_MAX_DRAIN_AGE_SECONDS,
 	DEFAULT_REDIS_PREFIX,
 )
-from pulse_railway.stack import bootstrap_stack
+from pulse_railway.stack import bootstrap_stack, ensure_stack
+from pulse_railway.target import RailwayDeployTarget
 
 
-def _add_init_args(parser: argparse.ArgumentParser) -> None:
+def _add_baseline_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
-		"--app-file",
-		default="main.py",
+		"app_file",
 		help="App entry file used to load RailwayPlugin config",
-	)
-	parser.add_argument(
-		"--project",
-		default=None,
-		help="Railway project name. Optional when using a project token.",
-	)
-	parser.add_argument(
-		"--environment",
-		default=None,
-		help="Railway environment name. Defaults to production.",
 	)
 	parser.add_argument(
 		"--workspace-id",
@@ -50,11 +41,6 @@ def _add_init_args(parser: argparse.ArgumentParser) -> None:
 		"--token",
 		default=None,
 		help="Railway project access token",
-	)
-	parser.add_argument(
-		"--service-prefix",
-		default=None,
-		help="Backend Railway service prefix. Defaults to the RailwayPlugin service prefix.",
 	)
 	parser.add_argument(
 		"--redis-url",
@@ -107,22 +93,15 @@ def _add_init_args(parser: argparse.ArgumentParser) -> None:
 	)
 
 
-async def _run_init(args: argparse.Namespace) -> int:
-	base_path = Path.cwd()
-	_app_path, deploy_target = load_deploy_target(
-		app_file=args.app_file,
-		base_path=base_path,
-	)
-	token = args.token or railway_access_token()
-	if not token:
-		raise ValueError("token is required")
-	project_id, environment_id = await resolve_railway_target_ids(
-		project_name=project_name_from_sources(args, deploy_target),
-		environment_name=environment_name_from_sources(args, deploy_target),
-		token=token,
-		workspace_id=args.workspace_id,
-	)
-	project = build_target_project(
+def _build_baseline_project(
+	args: argparse.Namespace,
+	*,
+	project_id: str,
+	environment_id: str,
+	token: str,
+	deploy_target: RailwayDeployTarget,
+) -> RailwayProject:
+	return build_target_project(
 		args,
 		deploy_target=deploy_target,
 		project_id=project_id,
@@ -137,22 +116,69 @@ async def _run_init(args: argparse.Namespace) -> int:
 		drain_grace_seconds=args.drain_grace_seconds,
 		max_drain_age_seconds=args.max_drain_age_seconds,
 	)
-	result = await bootstrap_stack(project=project)
+
+
+async def _run_baseline(
+	args: argparse.Namespace,
+	*,
+	ensure: bool,
+) -> int:
+	_app_path, deploy_target = load_deploy_target(
+		app_file=args.app_file,
+		base_path=Path.cwd(),
+	)
+	token = args.token or railway_access_token()
+	if not token:
+		raise ValueError("token is required")
+	project_id, environment_id = await resolve_railway_target_ids(
+		project_name=project_name_from_sources(args, deploy_target),
+		environment_name=environment_name_from_sources(args, deploy_target),
+		token=token,
+		workspace_id=args.workspace_id,
+	)
+	project = _build_baseline_project(
+		args,
+		project_id=project_id,
+		environment_id=environment_id,
+		token=token,
+		deploy_target=deploy_target,
+	)
+	if ensure:
+		result = await ensure_stack(project=project)
+	else:
+		result = await bootstrap_stack(project=project)
 	print(json.dumps(asdict(result), indent=2, sort_keys=True))
 	return 0
 
 
-add_init_args = _add_init_args
-run_init = _run_init
+async def _run_scaffold(args: argparse.Namespace) -> int:
+	return await _run_baseline(args, ensure=False)
+
+
+async def _run_ensure(args: argparse.Namespace) -> int:
+	return await _run_baseline(args, ensure=True)
+
+
+add_scaffold_args = _add_baseline_args
+add_ensure_args = _add_baseline_args
+run_scaffold = _run_scaffold
+run_ensure = _run_ensure
 
 
 def register(subparsers: Any) -> None:
-	init_parser = subparsers.add_parser(
-		"init",
+	scaffold_parser = subparsers.add_parser(
+		"scaffold",
 		help="Bootstrap the stable Railway router, redis, and janitor stack.",
 	)
-	_add_init_args(init_parser)
+	_add_baseline_args(scaffold_parser)
+	ensure_parser = subparsers.add_parser(
+		"ensure",
+		help="Create or reconcile the stable Railway baseline stack.",
+	)
+	_add_baseline_args(ensure_parser)
 
 
 def main(args: argparse.Namespace) -> int:
-	return asyncio.run(_run_init(args))
+	if args.command == "ensure":
+		return asyncio.run(_run_ensure(args))
+	return asyncio.run(_run_scaffold(args))

@@ -12,4 +12,5 @@ async def run_deploy_image(command: ResolvedDeployCommand) -> DeployResult:
 		deployment_id=command.deployment_id,
 		app_file=command.app_file,
 		web_root=command.web_root,
+		uses_railway_session_store=command.uses_railway_session_store,
 	)

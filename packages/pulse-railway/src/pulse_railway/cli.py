@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+from dataclasses import asdict
 from typing import Unpack
 
 from pulse_railway.auth import railway_access_token
@@ -52,6 +54,7 @@ from pulse_railway.constants import DEFAULT_REDIS_PREFIX
 from pulse_railway.deployment import (
 	default_redis_service_name,
 	delete_deployment,
+	redeploy_deployment,
 	resolve_deployment_id_by_name,
 )
 from pulse_railway.janitor import JanitorResult, run_janitor
@@ -135,11 +138,22 @@ def _railway_project(
 	)
 
 
-def _add_delete_args(parser: argparse.ArgumentParser) -> None:
-	parser.add_argument("--service", required=True, help="Stable router service name")
-	parser.add_argument(
-		"--deployment-id", required=True, help="Deployment id to delete"
-	)
+def _add_management_target_args(
+	parser: argparse.ArgumentParser,
+	*,
+	service_required: bool,
+	include_redis_args: bool,
+) -> None:
+	if service_required:
+		parser.add_argument(
+			"--service", required=True, help="Stable router service name"
+		)
+	else:
+		parser.add_argument(
+			"--service",
+			default="pulse-router",
+			help="Stable router service name",
+		)
 	parser.add_argument(
 		"--project",
 		default=None,
@@ -152,11 +166,8 @@ def _add_delete_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument("--token", default=railway_access_token())
 	parser.add_argument("--service-prefix", default=None)
-	parser.add_argument(
-		"--keep-active-variable",
-		action="store_true",
-		help="Do not delete PULSE_ACTIVE_DEPLOYMENT when it points at the removed deployment",
-	)
+	if not include_redis_args:
+		return
 	parser.add_argument("--redis-url", default=None)
 	parser.add_argument("--redis-service", default=None)
 	parser.add_argument(
@@ -165,35 +176,50 @@ def _add_delete_args(parser: argparse.ArgumentParser) -> None:
 	)
 
 
+def _add_delete_args(parser: argparse.ArgumentParser) -> None:
+	_add_management_target_args(
+		parser,
+		service_required=True,
+		include_redis_args=True,
+	)
+	parser.add_argument(
+		"--deployment-id", required=True, help="Deployment id to delete"
+	)
+	parser.add_argument(
+		"--keep-active-variable",
+		action="store_true",
+		help="Do not delete PULSE_ACTIVE_DEPLOYMENT when it points at the removed deployment",
+	)
+
+
 def _add_remove_args(parser: argparse.ArgumentParser) -> None:
-	parser.add_argument("--service", required=True, help="Stable router service name")
+	_add_management_target_args(
+		parser,
+		service_required=True,
+		include_redis_args=True,
+	)
 	parser.add_argument(
 		"--deployment-name",
 		required=True,
 		help="Deployment name or exact deployment id to remove",
 	)
 	parser.add_argument(
-		"--project",
-		default=None,
-		help="Railway project name. Optional when using a project token.",
-	)
-	parser.add_argument(
-		"--environment",
-		default=None,
-		help="Railway environment name. Defaults to production.",
-	)
-	parser.add_argument("--token", default=railway_access_token())
-	parser.add_argument("--service-prefix", default=None)
-	parser.add_argument(
 		"--keep-active-variable",
 		action="store_true",
 		help="Do not delete PULSE_ACTIVE_DEPLOYMENT when it points at the removed deployment",
 	)
-	parser.add_argument("--redis-url", default=None)
-	parser.add_argument("--redis-service", default=None)
+
+
+def _add_redeploy_args(parser: argparse.ArgumentParser) -> None:
+	_add_management_target_args(
+		parser,
+		service_required=False,
+		include_redis_args=False,
+	)
 	parser.add_argument(
-		"--redis-prefix",
-		default=DEFAULT_REDIS_PREFIX,
+		"--deployment-id",
+		default=None,
+		help="Pulse deployment id to redeploy. Defaults to PULSE_ACTIVE_DEPLOYMENT.",
 	)
 
 
@@ -276,6 +302,16 @@ async def _run_remove(args: argparse.Namespace) -> int:
 	return 0
 
 
+async def _run_redeploy(args: argparse.Namespace) -> int:
+	project = await _named_railway_project(args)
+	result = await redeploy_deployment(
+		project=project,
+		deployment_id=args.deployment_id,
+	)
+	print(json.dumps(asdict(result), indent=2, sort_keys=True))
+	return 0
+
+
 async def _run_janitor_run(args: argparse.Namespace) -> int:
 	_require_railway_runtime()
 	if not args.project_id or not args.environment_id or not args.token:
@@ -305,6 +341,12 @@ def main() -> None:
 	remove_parser = subparsers.add_parser("remove")
 	_add_remove_args(remove_parser)
 
+	redeploy_parser = subparsers.add_parser(
+		"redeploy",
+		help="Redeploy the active backend deployment or an explicit deployment id.",
+	)
+	_add_redeploy_args(redeploy_parser)
+
 	janitor_parser = subparsers.add_parser(
 		"janitor",
 		help="Janitor commands intended for the deployed Railway janitor service.",
@@ -332,6 +374,8 @@ def main() -> None:
 		raise SystemExit(asyncio.run(_run_delete(args)))
 	if args.command == "remove":
 		raise SystemExit(asyncio.run(_run_remove(args)))
+	if args.command == "redeploy":
+		raise SystemExit(asyncio.run(_run_redeploy(args)))
 	if args.command == "janitor" and args.janitor_command == "run":
 		raise SystemExit(asyncio.run(_run_janitor_run(args)))
 	raise SystemExit(1)
@@ -343,6 +387,7 @@ __all__ = [
 	"_add_deploy_args",
 	"_add_ensure_args",
 	"_add_janitor_run_args",
+	"_add_redeploy_args",
 	"_add_remove_args",
 	"_add_scaffold_args",
 	"_add_upgrade_args",
@@ -351,6 +396,7 @@ __all__ = [
 	"_run_deploy",
 	"_run_ensure",
 	"_run_janitor_run",
+	"_run_redeploy",
 	"_run_remove",
 	"_run_scaffold",
 	"_run_upgrade",

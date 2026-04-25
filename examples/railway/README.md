@@ -22,24 +22,20 @@ Deploy from the repository root so Docker uses the local workspace packages:
 ```bash
 set -a; source .env; set +a
 
-uv run pulse-railway init \
-  --app-file examples/railway/main.py
+uv run pulse-railway ensure \
+  examples/railway/main.py
 
 uv run pulse-railway deploy \
-  --deployment-name redis-smoke \
-  --app-file examples/railway/main.py \
-  --web-root examples/railway/web \
-  --dockerfile examples/Dockerfile \
-  --context .
+  examples/railway/main.py
 ```
 
 Passing `--image-repository ghcr.io/<org>/<name>` switches deploy to image mode.
 
-The app opts into `pulse_railway.RailwaySessionStore()`. Local runs can provide `PULSE_RAILWAY_REDIS_URL` directly. On Railway deploy, `pulse-railway` reads the stable service names from `RailwayPlugin` and injects that same env var so the shared Redis service backs deployment tracking and app sessions.
+The app opts into `pulse_railway.RailwaySessionStore()`. Local runs can provide `PULSE_RAILWAY_REDIS_URL` directly. On Railway deploy, `pulse-railway` reads the Dockerfile path from `RailwayPlugin`, reads the web root from the app codegen config, and injects that same env var so the shared Redis service backs deployment tracking and app sessions.
 
 `pulse-railway upgrade` is currently a no-op placeholder.
 
-`pulse-railway deploy` now assumes the baseline stack already exists. If you skip `init`, deploy fails fast and points you back to `init`. If a previous init left partial baseline services behind, delete those services before rerunning `init`.
+`pulse-railway deploy` assumes the baseline stack already exists. If you skip `ensure`, deploy fails fast and points you back to `ensure`.
 
 ## Verify
 

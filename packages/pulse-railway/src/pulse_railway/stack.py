@@ -90,6 +90,17 @@ class ResolvedRedis:
 	created: bool
 
 
+@dataclass(slots=True)
+class BaselineServiceInput:
+	record: ServiceRecord | None
+	created: bool
+	image: str | None = None
+
+
+def shared_variable_reference(name: str) -> str:
+	return "${{ shared." + name + " }}"
+
+
 def _baseline_service_names(project: RailwayProject) -> dict[str, str]:
 	names = {
 		"router": project.service_name,
@@ -119,9 +130,8 @@ def _raise_for_existing_baseline(found_names: list[str]) -> None:
 	raise DeploymentError(
 		"baseline stack already exists: "
 		+ found_text
-		+ ". `pulse-railway init` only creates a fresh baseline. "
-		+ "Delete these baseline services and rerun `pulse-railway init`; "
-		+ "use `pulse-railway update` once stack reconciliation is implemented."
+		+ ". `pulse-railway scaffold` only creates a fresh baseline. "
+		+ "Run `pulse-railway ensure` to reconcile existing baseline services."
 	)
 
 
@@ -320,7 +330,10 @@ async def _ensure_service(
 	environment_id: str,
 	name: str,
 	image: str | None = None,
+	existing_service: ServiceRecord | None = None,
 ) -> tuple[ServiceRecord, bool]:
+	if existing_service is not None:
+		return existing_service, False
 	service = await client.find_service_by_name(
 		project_id=project_id,
 		environment_id=environment_id,
@@ -349,6 +362,7 @@ async def _ensure_env_service(
 	*,
 	project: RailwayProject,
 	router_service: ServiceRecord | None = None,
+	existing_service: ServiceRecord | None = None,
 ) -> ServiceRecord:
 	service_name = default_env_service_name(project.service_name)
 	service, created = await _ensure_service(
@@ -356,6 +370,7 @@ async def _ensure_env_service(
 		project_id=project.project_id,
 		environment_id=project.environment_id,
 		name=service_name,
+		existing_service=existing_service,
 	)
 	if created and router_service is not None:
 		await _place_service_in_router_group(
@@ -444,11 +459,11 @@ def _effective_redis_url(
 	janitor_redis_url = janitor_variables.get(REDIS_URL)
 	if not router_redis_url or not janitor_redis_url:
 		raise DeploymentError(
-			"baseline stack is missing REDIS_URL; run `pulse-railway init`"
+			"baseline stack is missing REDIS_URL; run `pulse-railway ensure`"
 		)
 	if router_redis_url != janitor_redis_url:
 		raise DeploymentError(
-			"router and janitor REDIS_URL values differ; run `pulse-railway init`"
+			"router and janitor REDIS_URL values differ; run `pulse-railway ensure`"
 		)
 	return router_redis_url
 
@@ -468,6 +483,32 @@ async def _deploy_service_and_wait(
 	if deployment["status"] != "SUCCESS":
 		raise DeploymentError(error_message)
 	return deployment_id, deployment["status"]
+
+
+async def upsert_service_variables(
+	client: RailwayGraphQLClient,
+	*,
+	project: RailwayProject,
+	service_id: str,
+	variables: dict[str, str],
+	concurrency: int = 8,
+) -> None:
+	semaphore = asyncio.Semaphore(concurrency)
+
+	async def upsert_one(name: str, value: str) -> None:
+		async with semaphore:
+			await client.upsert_variable(
+				project_id=project.project_id,
+				environment_id=project.environment_id,
+				service_id=service_id,
+				name=name,
+				value=value,
+				skip_deploys=True,
+			)
+
+	await asyncio.gather(
+		*[upsert_one(name, value) for name, value in variables.items()]
+	)
 
 
 async def _ensure_router_domain(
@@ -534,8 +575,9 @@ async def _ensure_router_service(
 	*,
 	project: RailwayProject,
 	internals: RailwayInternals,
-	router_image: str,
+	router_image: str | None,
 	router_instance: ServiceInstanceConfig,
+	existing_service: ServiceRecord | None = None,
 ) -> tuple[ServiceRecord, str, str]:
 	service, _created = await _ensure_service(
 		client,
@@ -543,6 +585,7 @@ async def _ensure_router_service(
 		environment_id=project.environment_id,
 		name=project.service_name,
 		image=router_image,
+		existing_service=existing_service,
 	)
 	router_variables = {
 		RAILWAY_TOKEN: project.token,
@@ -562,15 +605,12 @@ async def _ensure_router_service(
 		router_variables[PULSE_WEBSOCKET_TTL_SECONDS] = str(
 			project.websocket_ttl_seconds
 		)
-	for key, value in router_variables.items():
-		await client.upsert_variable(
-			project_id=project.project_id,
-			environment_id=project.environment_id,
-			service_id=service.id,
-			name=key,
-			value=value,
-			skip_deploys=True,
-		)
+	await upsert_service_variables(
+		client,
+		project=project,
+		service_id=service.id,
+		variables=router_variables,
+	)
 	await client.update_service_instance(
 		service_id=service.id,
 		environment_id=project.environment_id,
@@ -602,7 +642,8 @@ async def _ensure_janitor_service(
 	*,
 	project: RailwayProject,
 	internals: RailwayInternals,
-	janitor_image: str,
+	janitor_image: str | None,
+	existing_service: ServiceRecord | None = None,
 ) -> tuple[ServiceRecord, str]:
 	service_name = project.janitor_service_name or default_janitor_service_name(
 		project.service_name
@@ -613,6 +654,7 @@ async def _ensure_janitor_service(
 		environment_id=project.environment_id,
 		name=service_name,
 		image=janitor_image,
+		existing_service=existing_service,
 	)
 	if not internals.redis_url:
 		raise DeploymentError("redis_url is required for janitor service creation")
@@ -620,7 +662,7 @@ async def _ensure_janitor_service(
 		RAILWAY_TOKEN: project.token,
 		RAILWAY_PROJECT_ID: project.project_id,
 		RAILWAY_ENVIRONMENT_ID: project.environment_id,
-		PULSE_INTERNAL_TOKEN: internals.internal_token,
+		PULSE_INTERNAL_TOKEN: shared_variable_reference(PULSE_INTERNAL_TOKEN),
 		REDIS_URL: internals.redis_url,
 		PULSE_REDIS_PREFIX: project.redis_prefix,
 		PULSE_JANITOR_DRAIN_GRACE_SECONDS: str(project.drain_grace_seconds),
@@ -630,15 +672,12 @@ async def _ensure_janitor_service(
 	}
 	if internals.service_prefix is not None:
 		janitor_variables[PULSE_SERVICE_PREFIX] = internals.service_prefix
-	for key, value in janitor_variables.items():
-		await client.upsert_variable(
-			project_id=project.project_id,
-			environment_id=project.environment_id,
-			service_id=service.id,
-			name=key,
-			value=value,
-			skip_deploys=True,
-		)
+	await upsert_service_variables(
+		client,
+		project=project,
+		service_id=service.id,
+		variables=janitor_variables,
+	)
 	await client.update_service_instance(
 		service_id=service.id,
 		environment_id=project.environment_id,
@@ -661,16 +700,20 @@ async def resolve_or_create_redis(
 	client: RailwayGraphQLClient,
 	*,
 	project: RailwayProject,
+	existing_service: ServiceRecord | None = None,
+	existing_created: bool = False,
 ) -> ResolvedRedis:
 	service_name = project.redis_service_name or default_redis_service_name(
 		project.service_name
 	)
-	service = await client.find_service_by_name(
-		project_id=project.project_id,
-		environment_id=project.environment_id,
-		name=service_name,
-	)
-	created = False
+	service = existing_service
+	created = existing_created
+	if service is None:
+		service = await client.find_service_by_name(
+			project_id=project.project_id,
+			environment_id=project.environment_id,
+			name=service_name,
+		)
 	if service is None:
 		template = await client.get_template_by_code(
 			code=project.redis_template_code or DEFAULT_REDIS_TEMPLATE_CODE
@@ -728,26 +771,99 @@ async def resolve_or_create_internal_token(
 	return internal_token, True
 
 
-async def resolve_project_internals(
-	client: RailwayGraphQLClient,
-	*,
+def _railway_internals(
 	project: RailwayProject,
-	redis_url: str | None = None,
+	*,
+	internal_token: str,
+	redis_url: str | None,
 ) -> RailwayInternals:
-	redis_url = redis_url or project.redis_url
-	if redis_url is None:
-		resolved_redis = await resolve_or_create_redis(client, project=project)
-		redis_url = resolved_redis.internal_url
 	return RailwayInternals(
 		service_prefix=(
 			normalize_service_prefix(project.service_prefix)
 			if project.service_prefix is not None and project.service_prefix.strip()
 			else None
 		),
-		internal_token=(
-			await resolve_or_create_internal_token(client, project=project)
-		)[0],
+		internal_token=internal_token,
 		redis_url=redis_url,
+	)
+
+
+async def _resolve_project_internals(
+	client: RailwayGraphQLClient,
+	*,
+	project: RailwayProject,
+	redis_url: str | None = None,
+	redis_service: ServiceRecord | None = None,
+	redis_created: bool = False,
+) -> tuple[ResolvedRedis | None, bool, RailwayInternals]:
+	effective_redis_url = redis_url or project.redis_url
+	resolved_redis: ResolvedRedis | None = None
+	redis_task: asyncio.Task[ResolvedRedis] | None = None
+	token_task = asyncio.create_task(
+		resolve_or_create_internal_token(client, project=project)
+	)
+	if effective_redis_url is None:
+		redis_task = asyncio.create_task(
+			resolve_or_create_redis(
+				client,
+				project=project,
+				existing_service=redis_service,
+				existing_created=redis_created,
+			)
+		)
+	try:
+		if redis_task is None:
+			internal_token, token_created = await token_task
+		else:
+			resolved_redis, token_result = await asyncio.gather(redis_task, token_task)
+			internal_token, token_created = token_result
+	except Exception:
+		token_task.cancel()
+		if redis_task is not None:
+			redis_task.cancel()
+		await asyncio.gather(
+			*[task for task in (redis_task, token_task) if task is not None],
+			return_exceptions=True,
+		)
+		raise
+	return (
+		resolved_redis,
+		token_created,
+		_railway_internals(
+			project,
+			internal_token=internal_token,
+			redis_url=effective_redis_url
+			or (resolved_redis.internal_url if resolved_redis is not None else None),
+		),
+	)
+
+
+async def resolve_project_internals(
+	client: RailwayGraphQLClient,
+	*,
+	project: RailwayProject,
+	redis_url: str | None = None,
+) -> RailwayInternals:
+	_resolved_redis, _token_created, internals = await _resolve_project_internals(
+		client,
+		project=project,
+		redis_url=redis_url,
+	)
+	return internals
+
+
+async def _resolve_baseline_internals(
+	client: RailwayGraphQLClient,
+	*,
+	project: RailwayProject,
+	redis_service: ServiceRecord | None = None,
+	redis_created: bool = False,
+) -> tuple[ResolvedRedis | None, bool, RailwayInternals]:
+	return await _resolve_project_internals(
+		client,
+		project=project,
+		redis_service=redis_service,
+		redis_created=redis_created,
 	)
 
 
@@ -840,12 +956,107 @@ def _stack_service_state(
 	)
 
 
-async def bootstrap_stack(
+def _redis_stack_result(
+	resolved_redis: ResolvedRedis | None,
+) -> StackServiceResult | None:
+	if resolved_redis is None:
+		return None
+	return StackServiceResult(
+		service_id=resolved_redis.service.id,
+		service_name=resolved_redis.service.name,
+		image=resolved_redis.service.image,
+		created=resolved_redis.created,
+	)
+
+
+async def _reconcile_baseline_services(
+	client: RailwayGraphQLClient,
+	*,
+	project: RailwayProject,
+	internals: RailwayInternals,
+	resolved_redis: ResolvedRedis | None,
+	token_created: bool,
+	router_instance: ServiceInstanceConfig = DEFAULT_ROUTER_INSTANCE,
+	router: BaselineServiceInput,
+	janitor: BaselineServiceInput,
+	env_service: ServiceRecord | None = None,
+) -> InitResult:
+	router_task = asyncio.create_task(
+		_ensure_router_service(
+			client,
+			project=project,
+			internals=internals,
+			router_image=router.image,
+			router_instance=router_instance,
+			existing_service=router.record,
+		)
+	)
+	janitor_task = asyncio.create_task(
+		_ensure_janitor_service(
+			client,
+			project=project,
+			internals=internals,
+			janitor_image=janitor.image,
+			existing_service=janitor.record,
+		)
+	)
+	try:
+		router_service, router_domain, router_deployment_id = await router_task
+		env_service = await _ensure_env_service(
+			client,
+			project=project,
+			router_service=router_service,
+			existing_service=env_service,
+		)
+		server_address = await _resolve_router_server_address(
+			client,
+			project_id=project.project_id,
+			environment_id=project.environment_id,
+			service_id=router_service.id,
+			fallback_domain=router_domain,
+		)
+		janitor_service, janitor_deployment_id = await janitor_task
+	except Exception:
+		for task in (router_task, janitor_task):
+			if not task.done():
+				task.cancel()
+		await asyncio.gather(router_task, janitor_task, return_exceptions=True)
+		raise
+	return InitResult(
+		router=StackServiceResult(
+			service_id=router_service.id,
+			service_name=router_service.name,
+			image=router.image or router_service.image,
+			domain=router_domain,
+			created=router.created,
+			deployed=True,
+			deployment_id=router_deployment_id,
+			status="SUCCESS",
+		),
+		janitor=StackServiceResult(
+			service_id=janitor_service.id,
+			service_name=janitor_service.name,
+			image=janitor.image or janitor_service.image,
+			created=janitor.created,
+			deployed=True,
+			deployment_id=janitor_deployment_id,
+			status="SUCCESS",
+		),
+		redis=_redis_stack_result(resolved_redis),
+		internal_token_created=token_created,
+		redis_url=internals.redis_url or "",
+		server_address=server_address,
+	)
+
+
+async def _bootstrap_stack_with_client(
+	client: RailwayGraphQLClient,
 	*,
 	project: RailwayProject,
 	router_instance: ServiceInstanceConfig = DEFAULT_ROUTER_INSTANCE,
+	check_existing: bool,
 ) -> InitResult:
-	async with RailwayGraphQLClient(token=project.token) as client:
+	if check_existing:
 		leftover_service_names = _baseline_leftover_service_names(project)
 		leftover_services = await asyncio.gather(
 			*[
@@ -863,13 +1074,95 @@ async def bootstrap_stack(
 		if found_leftovers:
 			_raise_for_existing_baseline(found_leftovers)
 
-		template_services = await _deploy_baseline_template(client, project=project)
-		router_service = template_services["pulse-router"]
-		janitor_service = template_services["pulse-janitor"]
-		env_service = await _ensure_env_service(
+	template_services = await _deploy_baseline_template(client, project=project)
+	router_service = template_services["pulse-router"]
+	janitor_service = template_services["pulse-janitor"]
+	env_service = await _ensure_env_service(
+		client,
+		project=project,
+		router_service=router_service,
+	)
+	if project.redis_url is not None:
+		await _remove_managed_redis_from_baseline(
 			client,
 			project=project,
 			router_service=router_service,
+			janitor_service=janitor_service,
+			env_service=env_service,
+		)
+	resolved_redis, token_created, internals = await _resolve_baseline_internals(
+		client,
+		project=project,
+		redis_service=template_services.get("pulse-redis"),
+		redis_created=project.redis_url is None,
+	)
+	return await _reconcile_baseline_services(
+		client,
+		project=project,
+		internals=internals,
+		resolved_redis=resolved_redis,
+		token_created=token_created,
+		router_instance=router_instance,
+		router=BaselineServiceInput(
+			record=router_service,
+			created=True,
+			image=project.router_image or official_router_image_ref(),
+		),
+		janitor=BaselineServiceInput(
+			record=janitor_service,
+			created=True,
+			image=project.janitor_image or official_janitor_image_ref(),
+		),
+		env_service=env_service,
+	)
+
+
+async def bootstrap_stack(
+	*,
+	project: RailwayProject,
+	router_instance: ServiceInstanceConfig = DEFAULT_ROUTER_INSTANCE,
+) -> InitResult:
+	async with RailwayGraphQLClient(token=project.token) as client:
+		return await _bootstrap_stack_with_client(
+			client,
+			project=project,
+			router_instance=router_instance,
+			check_existing=True,
+		)
+
+
+async def ensure_stack(
+	*,
+	project: RailwayProject,
+	router_instance: ServiceInstanceConfig = DEFAULT_ROUTER_INSTANCE,
+) -> InitResult:
+	async with RailwayGraphQLClient(token=project.token) as client:
+		baseline_names = _baseline_leftover_service_names(project)
+		service_by_name = {
+			service.name: service
+			for service in await client.list_services(
+				project_id=project.project_id,
+				environment_id=project.environment_id,
+			)
+		}
+		existing_services = [
+			service_by_name.get(name) for name in baseline_names.values()
+		]
+		if not any(service is not None for service in existing_services):
+			return await _bootstrap_stack_with_client(
+				client,
+				project=project,
+				router_instance=router_instance,
+				check_existing=False,
+			)
+
+		router_service = service_by_name.get(project.service_name)
+		janitor_name = project.janitor_service_name or default_janitor_service_name(
+			project.service_name
+		)
+		janitor_service = service_by_name.get(janitor_name)
+		env_service = service_by_name.get(
+			default_env_service_name(project.service_name)
 		)
 		if project.redis_url is not None:
 			await _remove_managed_redis_from_baseline(
@@ -879,87 +1172,39 @@ async def bootstrap_stack(
 				janitor_service=janitor_service,
 				env_service=env_service,
 			)
-		resolved_redis: ResolvedRedis | None = None
-		if project.redis_url is None:
-			resolved_redis = await resolve_or_create_redis(client, project=project)
-		internal_token, token_created = await resolve_or_create_internal_token(
-			client, project=project
+		redis_name = project.redis_service_name or default_redis_service_name(
+			project.service_name
 		)
-		internals = RailwayInternals(
-			service_prefix=(
-				normalize_service_prefix(project.service_prefix)
-				if project.service_prefix is not None and project.service_prefix.strip()
-				else None
-			),
-			internal_token=internal_token,
-			redis_url=project.redis_url
-			or (resolved_redis.internal_url if resolved_redis is not None else None),
+		resolved_redis, token_created, internals = await _resolve_baseline_internals(
+			client,
+			project=project,
+			redis_service=service_by_name.get(redis_name),
 		)
 
-		redis_result = (
-			StackServiceResult(
-				service_id=resolved_redis.service.id,
-				service_name=resolved_redis.service.name,
-				image=resolved_redis.service.image,
-				created=True,
-			)
-			if resolved_redis is not None
-			else None
-		)
-
-		router_image = project.router_image or official_router_image_ref()
-		janitor_image = project.janitor_image or official_janitor_image_ref()
-		(
-			router_service,
-			router_domain,
-			router_deployment_id,
-		) = await _ensure_router_service(
+		router_image = project.router_image
+		if router_image is None and router_service is None:
+			router_image = official_router_image_ref()
+		janitor_image = project.janitor_image
+		if janitor_image is None and janitor_service is None:
+			janitor_image = official_janitor_image_ref()
+		return await _reconcile_baseline_services(
 			client,
 			project=project,
 			internals=internals,
-			router_image=router_image,
+			resolved_redis=resolved_redis,
+			token_created=token_created,
 			router_instance=router_instance,
-		)
-		router_result = StackServiceResult(
-			service_id=router_service.id,
-			service_name=router_service.name,
-			image=router_image,
-			domain=router_domain,
-			created=True,
-			deployed=True,
-			deployment_id=router_deployment_id,
-			status="SUCCESS",
-		)
-		server_address = await _resolve_router_server_address(
-			client,
-			project_id=project.project_id,
-			environment_id=project.environment_id,
-			service_id=router_service.id,
-			fallback_domain=router_domain,
-		)
-		janitor_service, janitor_deployment_id = await _ensure_janitor_service(
-			client,
-			project=project,
-			internals=internals,
-			janitor_image=janitor_image,
-		)
-		janitor_result = StackServiceResult(
-			service_id=janitor_service.id,
-			service_name=janitor_service.name,
-			image=janitor_image,
-			created=True,
-			deployed=True,
-			deployment_id=janitor_deployment_id,
-			status="SUCCESS",
-		)
-
-		return InitResult(
-			router=router_result,
-			janitor=janitor_result,
-			redis=redis_result,
-			internal_token_created=token_created,
-			redis_url=internals.redis_url or "",
-			server_address=server_address,
+			router=BaselineServiceInput(
+				record=router_service,
+				created=router_service is None,
+				image=router_image,
+			),
+			janitor=BaselineServiceInput(
+				record=janitor_service,
+				created=janitor_service is None,
+				image=janitor_image,
+			),
+			env_service=env_service,
 		)
 
 
@@ -967,7 +1212,7 @@ async def require_ready_stack(*, project: RailwayProject) -> StackState:
 	if project.redis_url is not None:
 		raise DeploymentError(
 			"`pulse-railway deploy` does not accept an explicit redis url; "
-			+ "run `pulse-railway init` to manage baseline infra"
+			+ "run `pulse-railway ensure` to manage baseline infra"
 		)
 	async with RailwayGraphQLClient(token=project.token) as client:
 		router_service = await client.find_service_by_name(
@@ -978,7 +1223,7 @@ async def require_ready_stack(*, project: RailwayProject) -> StackState:
 		if router_service is None:
 			raise DeploymentError(
 				f"router service {project.service_name} not found; "
-				+ "run `pulse-railway init`"
+				+ "run `pulse-railway ensure`"
 			)
 		janitor_name = project.janitor_service_name or default_janitor_service_name(
 			project.service_name
@@ -991,7 +1236,7 @@ async def require_ready_stack(*, project: RailwayProject) -> StackState:
 		if janitor_service is None:
 			raise DeploymentError(
 				f"janitor service {janitor_name} not found; "
-				+ "run `pulse-railway init`"
+				+ "run `pulse-railway ensure`"
 			)
 		env_name = default_env_service_name(project.service_name)
 		env_service = await client.find_service_by_name(
@@ -1001,7 +1246,7 @@ async def require_ready_stack(*, project: RailwayProject) -> StackState:
 		)
 		if env_service is None:
 			raise DeploymentError(
-				f"env service {env_name} not found; " + "run `pulse-railway init`"
+				f"env service {env_name} not found; " + "run `pulse-railway ensure`"
 			)
 		project_variables = await client.get_project_variables(
 			project_id=project.project_id,
@@ -1011,7 +1256,7 @@ async def require_ready_stack(*, project: RailwayProject) -> StackState:
 		if not internal_token:
 			raise DeploymentError(
 				"project is missing PULSE_RAILWAY_INTERNAL_TOKEN; "
-				+ "run `pulse-railway init`"
+				+ "run `pulse-railway ensure`"
 			)
 		router_variables = await client.get_service_variables_for_deployment(
 			project_id=project.project_id,
@@ -1028,14 +1273,14 @@ async def require_ready_stack(*, project: RailwayProject) -> StackState:
 			project=project,
 			service=router_service,
 			require_redis=True,
-			command="init",
+			command="ensure",
 			variables=router_variables,
 		)
 		await _validate_janitor_service(
 			client,
 			project=project,
 			service=janitor_service,
-			command="init",
+			command="ensure",
 			variables=janitor_variables,
 		)
 		redis_url = _effective_redis_url(
@@ -1082,7 +1327,9 @@ __all__ = [
 	"default_env_service_name",
 	"default_janitor_service_name",
 	"default_redis_service_name",
+	"ensure_stack",
 	"require_ready_stack",
 	"resolve_or_create_redis",
 	"resolve_project_internals",
+	"shared_variable_reference",
 ]

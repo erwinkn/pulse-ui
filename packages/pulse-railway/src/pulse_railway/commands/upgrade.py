@@ -7,7 +7,7 @@ from typing import Any
 
 def _add_upgrade_args(parser: argparse.ArgumentParser) -> None:
 	parser.description = (
-		"No-op placeholder. Run `pulse-railway init` to manage the baseline stack."
+		"No-op placeholder. Run `pulse-railway ensure` to manage the baseline stack."
 	)
 
 

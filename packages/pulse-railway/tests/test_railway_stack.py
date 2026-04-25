@@ -24,6 +24,7 @@ from pulse_railway.stack import (
 	JANITOR_START_COMMAND,
 	ROUTER_START_COMMAND,
 	bootstrap_stack,
+	ensure_stack,
 	require_ready_stack,
 )
 
@@ -239,6 +240,141 @@ async def test_bootstrap_stack_creates_baseline_from_empty_project(monkeypatch) 
 		PULSE_JANITOR_MAX_DRAIN_AGE_SECONDS
 		in service_variables[result.janitor.service_id]
 	)
+
+
+@pytest.mark.asyncio
+async def test_ensure_stack_reconciles_existing_baseline(monkeypatch) -> None:
+	service_state: dict[str, ServiceRecord] = {
+		"pulse-router": ServiceRecord(
+			id="svc-router",
+			name="pulse-router",
+			domains=[
+				ServiceDomain(
+					id="domain-1",
+					domain="pulse-router-production.up.railway.app",
+					target_port=8000,
+				)
+			],
+		),
+		"pulse-redis": ServiceRecord(id="svc-redis", name="pulse-redis"),
+		"pulse-janitor": ServiceRecord(id="svc-janitor", name="pulse-janitor"),
+		"pulse-env": ServiceRecord(id="svc-env", name="pulse-env"),
+	}
+	service_variables: dict[str, dict[str, str]] = {}
+	project_variables: dict[str, str] = {PULSE_INTERNAL_TOKEN: "internal-token"}
+	service_updates: list[dict[str, Any]] = []
+	deployed_services: list[str] = []
+
+	class _FakeClient:
+		def __init__(self, **_: object) -> None:
+			return None
+
+		async def __aenter__(self) -> "_FakeClient":
+			return self
+
+		async def __aexit__(self, *_: object) -> None:
+			return None
+
+		async def find_service_by_name(
+			self, *, project_id: str, environment_id: str, name: str
+		) -> ServiceRecord | None:
+			assert project_id == "project"
+			assert environment_id == "env"
+			return service_state.get(name)
+
+		async def list_services(
+			self, *, project_id: str, environment_id: str
+		) -> list[ServiceRecord]:
+			assert project_id == "project"
+			assert environment_id == "env"
+			return list(service_state.values())
+
+		async def get_service_variables_for_deployment(
+			self, *, project_id: str, environment_id: str, service_id: str
+		) -> dict[str, str]:
+			assert project_id == "project"
+			assert environment_id == "env"
+			service = next(
+				record for record in service_state.values() if record.id == service_id
+			)
+			if service.name == "pulse-redis":
+				return {"REDIS_URL": "redis://pulse-redis.railway.internal:6379"}
+			variables = dict(service_variables.get(service_id, {}))
+			if service.name == "pulse-router":
+				variables["RAILWAY_PUBLIC_DOMAIN"] = "test.pulse.sc"
+			return variables
+
+		async def get_project_variables(
+			self, *, project_id: str, environment_id: str
+		) -> dict[str, str]:
+			assert project_id == "project"
+			assert environment_id == "env"
+			return dict(project_variables)
+
+		async def upsert_variable(
+			self,
+			*,
+			project_id: str,
+			environment_id: str,
+			name: str,
+			value: str,
+			service_id: str | None = None,
+			skip_deploys: bool = True,
+		) -> None:
+			assert project_id == "project"
+			assert environment_id == "env"
+			assert skip_deploys is True
+			if service_id is None:
+				project_variables[name] = value
+				return
+			service_variables.setdefault(service_id, {})[name] = value
+
+		async def create_service(self, **_: object) -> str:
+			raise AssertionError("existing baseline should not create services")
+
+		async def update_service_instance(self, **kwargs: Any) -> None:
+			service_updates.append(kwargs)
+
+		async def deploy_service(self, *, service_id: str, environment_id: str) -> str:
+			assert environment_id == "env"
+			deployed_services.append(service_id)
+			return f"deploy-{service_id}"
+
+		async def wait_for_deployment(self, *, deployment_id: str) -> dict[str, str]:
+			return {"id": deployment_id, "status": "SUCCESS"}
+
+		async def create_service_domain(self, **_: object) -> str:
+			raise AssertionError("existing router domain should be reused")
+
+	monkeypatch.setattr("pulse_railway.stack.RailwayGraphQLClient", _FakeClient)
+
+	result = await ensure_stack(
+		project=RailwayProject(
+			project_id="project",
+			environment_id="env",
+			token="token",
+			service_name="pulse-router",
+			redis_service_name="pulse-redis",
+			janitor_service_name="pulse-janitor",
+		)
+	)
+
+	assert result.router.created is False
+	assert result.router.deployed is True
+	assert result.janitor.created is False
+	assert result.redis is not None
+	assert result.redis.created is False
+	assert result.internal_token_created is False
+	assert result.redis_url == "redis://pulse-redis.railway.internal:6379"
+	assert result.server_address == "https://test.pulse.sc"
+	assert deployed_services == ["svc-router", "svc-janitor"]
+	assert service_variables["svc-router"][REDIS_URL] == (
+		"redis://pulse-redis.railway.internal:6379"
+	)
+	assert service_variables["svc-janitor"][PULSE_INTERNAL_TOKEN] == (
+		"${{ shared.PULSE_RAILWAY_INTERNAL_TOKEN }}"
+	)
+	assert len(service_updates) == 2
 
 
 @pytest.mark.asyncio

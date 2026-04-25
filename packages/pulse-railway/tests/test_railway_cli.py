@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -9,31 +10,36 @@ import pytest
 from pulse_railway.cli import (
 	JANITOR_RUN_RUNTIME_ERROR,
 	_add_deploy_args,
-	_add_init_args,
+	_add_ensure_args,
 	_add_janitor_run_args,
+	_add_redeploy_args,
+	_add_scaffold_args,
 	_add_upgrade_args,
 	_run_delete,
 	_run_deploy,
-	_run_init,
+	_run_ensure,
 	_run_janitor_run,
+	_run_redeploy,
 	_run_remove,
+	_run_scaffold,
 	_run_upgrade,
 	main,
 )
-from pulse_railway.deployment import DeploymentError, DeployResult, DeployUpResult
+from pulse_railway.deployment import (
+	DeploymentError,
+	DeployResult,
+	RedeployResult,
+)
 from pulse_railway.janitor import JanitorResult
 from pulse_railway.railway import EnvironmentRecord, ProjectRecord, ProjectTokenRecord
 from pulse_railway.stack import InitResult, StackServiceResult
 
 
-def _make_init_args(**overrides: Any) -> argparse.Namespace:
+def _make_scaffold_args(**overrides: Any) -> argparse.Namespace:
 	values: dict[str, Any] = {
 		"app_file": "main.py",
-		"project": "project",
-		"environment": "env",
 		"workspace_id": None,
 		"token": "token",
-		"service_prefix": None,
 		"redis_url": None,
 		"redis_prefix": "pulse:railway",
 		"router_image": None,
@@ -58,8 +64,8 @@ def _make_deploy_args(**overrides: Any) -> argparse.Namespace:
 		"service_prefix": None,
 		"server_address": None,
 		"app_file": "main.py",
-		"web_root": "web",
-		"dockerfile": "Dockerfile",
+		"web_root": None,
+		"dockerfile": None,
 		"context": ".",
 		"image_repository": "ghcr.io/acme/app",
 		"build_arg": [],
@@ -72,54 +78,81 @@ def _make_deploy_args(**overrides: Any) -> argparse.Namespace:
 	return argparse.Namespace(**values)
 
 
-def _install_fake_init(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-	init_call: dict[str, Any] = {}
+def _baseline_result(*, created: bool) -> InitResult:
+	return InitResult(
+		router=StackServiceResult(
+			service_id="svc-router",
+			service_name="pulse-router",
+			domain="pulse-router-production.up.railway.app",
+			created=created,
+			deployed=True,
+			deployment_id="deploy-router",
+			status="SUCCESS",
+		),
+		janitor=StackServiceResult(
+			service_id="svc-janitor",
+			service_name="pulse-janitor",
+			created=created,
+			deployed=True,
+			deployment_id="deploy-janitor",
+			status="SUCCESS",
+		),
+		redis=StackServiceResult(
+			service_id="svc-redis",
+			service_name="pulse-redis",
+			created=created,
+		),
+		internal_token_created=created,
+		redis_url=(
+			"redis://pulse-router-redis.railway.internal:6379"
+			if created
+			else "redis://pulse-redis.railway.internal:6379"
+		),
+		server_address="https://pulse-router-production.up.railway.app",
+	)
+
+
+def _install_fake_baseline(
+	monkeypatch: pytest.MonkeyPatch,
+	*,
+	stack_function: str,
+	created: bool,
+) -> dict[str, Any]:
+	baseline_call: dict[str, Any] = {}
 
 	async def fake_resolve_railway_target_ids(**kwargs: Any) -> tuple[str, str]:
-		init_call["target"] = kwargs
+		baseline_call["target"] = kwargs
 		return kwargs["project_name"] or "project-from-token", kwargs[
 			"environment_name"
 		] or "env-from-token"
 
 	monkeypatch.setattr(
-		"pulse_railway.commands.init.resolve_railway_target_ids",
+		"pulse_railway.commands.scaffold.resolve_railway_target_ids",
 		fake_resolve_railway_target_ids,
 	)
 
-	async def fake_bootstrap_stack(**kwargs: Any) -> InitResult:
-		init_call.update(kwargs)
-		return InitResult(
-			router=StackServiceResult(
-				service_id="svc-router",
-				service_name="pulse-router",
-				domain="pulse-router-production.up.railway.app",
-				created=True,
-				deployed=True,
-				deployment_id="deploy-router",
-				status="SUCCESS",
-			),
-			janitor=StackServiceResult(
-				service_id="svc-janitor",
-				service_name="pulse-janitor",
-				created=True,
-				deployed=True,
-				deployment_id="deploy-janitor",
-				status="SUCCESS",
-			),
-			redis=StackServiceResult(
-				service_id="svc-redis",
-				service_name="pulse-redis",
-				created=True,
-			),
-			internal_token_created=True,
-			redis_url="redis://pulse-router-redis.railway.internal:6379",
-			server_address="https://pulse-router-production.up.railway.app",
-		)
+	async def fake_stack(**kwargs: Any) -> InitResult:
+		baseline_call.update(kwargs)
+		return _baseline_result(created=created)
 
-	monkeypatch.setattr(
-		"pulse_railway.commands.init.bootstrap_stack", fake_bootstrap_stack
+	monkeypatch.setattr(f"pulse_railway.commands.scaffold.{stack_function}", fake_stack)
+	return baseline_call
+
+
+def _install_fake_scaffold(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+	return _install_fake_baseline(
+		monkeypatch,
+		stack_function="bootstrap_stack",
+		created=True,
 	)
-	return init_call
+
+
+def _install_fake_ensure(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+	return _install_fake_baseline(
+		monkeypatch,
+		stack_function="ensure_stack",
+		created=False,
+	)
 
 
 def _install_fake_deploy(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
@@ -172,12 +205,14 @@ def _install_fake_deploy_source(monkeypatch: pytest.MonkeyPatch) -> dict[str, An
 		fake_resolve_railway_target_ids,
 	)
 
-	async def fake_deploy_up(**kwargs: Any) -> DeployUpResult:
+	async def fake_deploy_source(**kwargs: Any) -> DeployResult:
 		deploy_call.update(kwargs)
-		return DeployUpResult(
+		return DeployResult(
 			deployment_id="prod-260402-120000",
 			backend_service_id="svc-2",
 			backend_service_name="prod-260402-120000",
+			backend_image=None,
+			backend_deployment_id="deploy-source",
 			router_service_id="svc-1",
 			router_service_name="pulse-router",
 			router_image="ghcr.io/acme/router:24h",
@@ -191,7 +226,7 @@ def _install_fake_deploy_source(monkeypatch: pytest.MonkeyPatch) -> dict[str, An
 		)
 
 	monkeypatch.setattr(
-		"pulse_railway.commands.deploy.source.deploy_up", fake_deploy_up
+		"pulse_railway.commands.deploy.source.deploy", fake_deploy_source
 	)
 	return deploy_call
 
@@ -202,31 +237,58 @@ def _write_deploy_fixture(root: Path) -> None:
 	(root / "main.py").write_text(
 		"import pulse as ps\n"
 		"from pulse_railway import RailwayPlugin\n"
-		"app = ps.App(routes=[], plugins=[RailwayPlugin()])\n"
+		'app = ps.App(routes=[], plugins=[RailwayPlugin(dockerfile="Dockerfile")])\n'
 	)
 
 
-def test_init_parser_uses_static_defaults(monkeypatch) -> None:
+def test_scaffold_parser_uses_static_defaults(monkeypatch) -> None:
 	monkeypatch.setenv("PULSE_RAILWAY_APP_FILE", "examples/aws-ecs/main.py")
 	monkeypatch.setenv("PULSE_RAILWAY_JANITOR_CRON_SCHEDULE", "0 */6 * * *")
 	parser = argparse.ArgumentParser()
 
-	_add_init_args(parser)
-	args = parser.parse_args([])
+	_add_scaffold_args(parser)
+	args = parser.parse_args(["main.py"])
 
 	assert args.app_file == "main.py"
 	assert args.janitor_cron_schedule == "*/5 * * * *"
 	assert args.redis_url is None
+	assert not hasattr(args, "project")
+	assert not hasattr(args, "environment")
+	assert not hasattr(args, "service_prefix")
 
 
-def test_init_parser_ignores_workspace_env_default(monkeypatch) -> None:
+def test_scaffold_parser_ignores_workspace_env_default(monkeypatch) -> None:
 	monkeypatch.setenv("RAILWAY_WORKSPACE_ID", "workspace")
 	parser = argparse.ArgumentParser()
 
-	_add_init_args(parser)
-	args = parser.parse_args([])
+	_add_scaffold_args(parser)
+	args = parser.parse_args(["main.py"])
 
 	assert args.workspace_id is None
+
+
+def test_scaffold_parser_rejects_project_and_environment_flags() -> None:
+	parser = argparse.ArgumentParser()
+
+	_add_scaffold_args(parser)
+
+	with pytest.raises(SystemExit):
+		parser.parse_args(["main.py", "--project", "project"])
+
+	with pytest.raises(SystemExit):
+		parser.parse_args(["main.py", "--environment", "env"])
+
+
+def test_ensure_parser_rejects_project_and_environment_flags() -> None:
+	parser = argparse.ArgumentParser()
+
+	_add_ensure_args(parser)
+
+	with pytest.raises(SystemExit):
+		parser.parse_args(["main.py", "--project", "project"])
+
+	with pytest.raises(SystemExit):
+		parser.parse_args(["main.py", "--environment", "env"])
 
 
 def test_upgrade_parser_is_noop_placeholder() -> None:
@@ -243,7 +305,7 @@ def test_deploy_parser_drops_stable_stack_flags(monkeypatch) -> None:
 	parser = argparse.ArgumentParser()
 
 	_add_deploy_args(parser)
-	args = parser.parse_args([])
+	args = parser.parse_args(["main.py"])
 
 	assert args.app_file == "main.py"
 	assert not hasattr(args, "mode")
@@ -258,7 +320,7 @@ def test_deploy_parser_prefers_railway_token(monkeypatch) -> None:
 	parser = argparse.ArgumentParser()
 
 	_add_deploy_args(parser)
-	args = parser.parse_args([])
+	args = parser.parse_args(["main.py"])
 
 	assert args.token == "project-token"
 
@@ -268,7 +330,7 @@ def test_deploy_parser_uses_project_token_env_for_explicit_token(monkeypatch) ->
 	parser = argparse.ArgumentParser()
 
 	_add_deploy_args(parser)
-	args = parser.parse_args(["--token", "project-token"])
+	args = parser.parse_args(["main.py", "--token", "project-token"])
 
 	assert args.token == "project-token"
 
@@ -278,7 +340,7 @@ def test_deploy_parser_reads_source_mode_flags(monkeypatch) -> None:
 	parser = argparse.ArgumentParser()
 
 	_add_deploy_args(parser)
-	args = parser.parse_args(["--no-gitignore"])
+	args = parser.parse_args(["main.py", "--no-gitignore"])
 
 	assert not hasattr(args, "mode")
 	assert args.no_gitignore is True
@@ -294,7 +356,25 @@ def test_deploy_parser_removes_mode_flag() -> None:
 	_add_deploy_args(parser)
 
 	with pytest.raises(SystemExit):
-		parser.parse_args(["--mode", "source"])
+		parser.parse_args(["main.py", "--mode", "source"])
+
+
+def test_deploy_parser_requires_app_file() -> None:
+	parser = argparse.ArgumentParser()
+
+	_add_deploy_args(parser)
+
+	with pytest.raises(SystemExit):
+		parser.parse_args([])
+
+
+def test_redeploy_parser_rejects_dead_redis_flags() -> None:
+	parser = argparse.ArgumentParser()
+
+	_add_redeploy_args(parser)
+
+	with pytest.raises(SystemExit):
+		parser.parse_args(["--redis-url", "redis://example"])
 
 
 def test_janitor_parser_reads_service_env_defaults(monkeypatch) -> None:
@@ -325,7 +405,9 @@ def test_janitor_parser_prefers_railway_token(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_init_reads_target_from_railway_plugin(monkeypatch, tmp_path) -> None:
+async def test_run_scaffold_reads_target_from_railway_plugin(
+	monkeypatch, tmp_path
+) -> None:
 	project_root = tmp_path / "project"
 	project_root.mkdir()
 	_write_deploy_fixture(project_root)
@@ -335,17 +417,15 @@ async def test_run_init_reads_target_from_railway_plugin(monkeypatch, tmp_path) 
 		"app = ps.App(\n"
 		"    routes=[],\n"
 		"    plugins=[\n"
-		'        RailwayPlugin(project="stoneware", environment="staging")\n'
+		'        RailwayPlugin(dockerfile="Dockerfile", project="stoneware", environment="staging", router_service="api", service_prefix="foo-")\n'
 		"    ],\n"
 		")\n"
 	)
-	init_call = _install_fake_init(monkeypatch)
+	init_call = _install_fake_scaffold(monkeypatch)
 	monkeypatch.chdir(project_root)
 
-	result = await _run_init(
-		_make_init_args(
-			project=None,
-			environment=None,
+	result = await _run_scaffold(
+		_make_scaffold_args(
 			token="token",
 		)
 	)
@@ -355,30 +435,29 @@ async def test_run_init_reads_target_from_railway_plugin(monkeypatch, tmp_path) 
 	assert init_call["target"]["environment_name"] == "staging"
 	assert init_call["project"].project_id == "stoneware"
 	assert init_call["project"].environment_id == "staging"
-	assert init_call["project"].service_name == "pulse-router"
-	assert init_call["project"].redis_service_name == "pulse-redis"
-	assert init_call["project"].janitor_service_name == "pulse-janitor"
+	assert init_call["project"].service_name == "foo-api"
+	assert init_call["project"].service_prefix == "foo-"
+	assert init_call["project"].redis_service_name == "foo-redis"
+	assert init_call["project"].janitor_service_name == "foo-janitor"
 
 
 @pytest.mark.asyncio
-async def test_run_init_passes_omitted_environment_to_resolver(
+async def test_run_scaffold_passes_omitted_environment_to_resolver(
 	monkeypatch, tmp_path
 ) -> None:
 	project_root = tmp_path / "project"
 	project_root.mkdir()
 	_write_deploy_fixture(project_root)
-	init_call = _install_fake_init(monkeypatch)
 	(project_root / "main.py").write_text(
 		"import pulse as ps\n"
 		"from pulse_railway import RailwayPlugin\n"
-		'app = ps.App(routes=[], plugins=[RailwayPlugin(project="stoneware")])\n'
+		'app = ps.App(routes=[], plugins=[RailwayPlugin(dockerfile="Dockerfile", project="stoneware")])\n'
 	)
+	init_call = _install_fake_scaffold(monkeypatch)
 	monkeypatch.chdir(project_root)
 
-	result = await _run_init(
-		_make_init_args(
-			project=None,
-			environment=None,
+	result = await _run_scaffold(
+		_make_scaffold_args(
 			token="token",
 		)
 	)
@@ -389,17 +468,17 @@ async def test_run_init_passes_omitted_environment_to_resolver(
 
 
 @pytest.mark.asyncio
-async def test_run_init_allows_project_token_inference(monkeypatch, tmp_path) -> None:
+async def test_run_scaffold_allows_project_token_inference(
+	monkeypatch, tmp_path
+) -> None:
 	project_root = tmp_path / "project"
 	project_root.mkdir()
 	_write_deploy_fixture(project_root)
-	init_call = _install_fake_init(monkeypatch)
+	init_call = _install_fake_scaffold(monkeypatch)
 	monkeypatch.chdir(project_root)
 
-	result = await _run_init(
-		_make_init_args(
-			project=None,
-			environment=None,
+	result = await _run_scaffold(
+		_make_scaffold_args(
 			token="token",
 		)
 	)
@@ -409,6 +488,35 @@ async def test_run_init_allows_project_token_inference(monkeypatch, tmp_path) ->
 	assert init_call["target"]["environment_name"] is None
 	assert init_call["project"].project_id == "project-from-token"
 	assert init_call["project"].environment_id == "env-from-token"
+
+
+@pytest.mark.asyncio
+async def test_run_ensure_reads_target_from_railway_plugin(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	(project_root / "main.py").write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import RailwayPlugin\n"
+		'app = ps.App(routes=[], plugins=[RailwayPlugin(dockerfile="Dockerfile", project="stoneware", environment="staging")])\n'
+	)
+	ensure_call = _install_fake_ensure(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_ensure(
+		_make_scaffold_args(
+			token="token",
+		)
+	)
+
+	assert result == 0
+	assert ensure_call["target"]["project_name"] == "stoneware"
+	assert ensure_call["target"]["environment_name"] == "staging"
+	assert ensure_call["project"].project_id == "stoneware"
+	assert ensure_call["project"].environment_id == "staging"
+	assert ensure_call["project"].service_name == "pulse-router"
 
 
 @pytest.mark.asyncio
@@ -688,6 +796,129 @@ async def test_run_deploy_resolves_paths_and_defaults(monkeypatch, tmp_path) -> 
 	assert deploy_call["project"].janitor_service_name == "pulse-janitor"
 	assert deploy_call["docker"].dockerfile_path == (project_root / "Dockerfile")
 	assert deploy_call["docker"].context_path == project_root
+	assert deploy_call["web_root"] == "web"
+
+
+@pytest.mark.asyncio
+async def test_run_deploy_reads_dockerfile_from_railway_plugin(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	(project_root / "Custom.Dockerfile").write_text("FROM scratch\n")
+	(project_root / "main.py").write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import RailwayPlugin\n"
+		'app = ps.App(routes=[], plugins=[RailwayPlugin(dockerfile="Custom.Dockerfile")])\n'
+	)
+	deploy_call = _install_fake_deploy(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_deploy(_make_deploy_args(dockerfile=None))
+
+	assert result == 0
+	assert deploy_call["docker"].dockerfile_path == (project_root / "Custom.Dockerfile")
+
+
+@pytest.mark.asyncio
+async def test_run_deploy_requires_dockerfile_from_cli_or_plugin(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	(project_root / "web").mkdir()
+	(project_root / "main.py").write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import RailwayPlugin\n"
+		"app = ps.App(routes=[], plugins=[RailwayPlugin()])\n"
+	)
+	monkeypatch.chdir(project_root)
+
+	with pytest.raises(ValueError, match="dockerfile is required"):
+		await _run_deploy(_make_deploy_args(dockerfile=None))
+
+
+@pytest.mark.asyncio
+async def test_run_deploy_passes_loaded_session_store_config(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	(project_root / "main.py").write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import RailwayPlugin, RailwaySessionStore\n"
+		"app = ps.App(\n"
+		"    routes=[],\n"
+		"    plugins=[RailwayPlugin(dockerfile='Dockerfile')],\n"
+		"    session_store=RailwaySessionStore(),\n"
+		")\n"
+	)
+	deploy_call = _install_fake_deploy(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_deploy(_make_deploy_args(dockerfile=None))
+
+	assert result == 0
+	assert deploy_call["uses_railway_session_store"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_deploy_reads_web_root_from_app_file(monkeypatch, tmp_path) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	(project_root / "frontend").mkdir()
+	(project_root / "main.py").write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import RailwayPlugin\n"
+		"app = ps.App(\n"
+		"    codegen=ps.CodegenConfig(web_dir='frontend'),\n"
+		"    routes=[],\n"
+		'    plugins=[RailwayPlugin(dockerfile="Dockerfile")],\n'
+		")\n"
+	)
+	deploy_call = _install_fake_deploy(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_deploy(_make_deploy_args(web_root=None))
+
+	assert result == 0
+	assert deploy_call["web_root"] == "frontend"
+
+
+@pytest.mark.asyncio
+async def test_run_deploy_flags_override_app_paths(monkeypatch, tmp_path) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	(project_root / "frontend").mkdir()
+	(project_root / "Override.Dockerfile").write_text("FROM scratch\n")
+	(project_root / "main.py").write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import RailwayPlugin\n"
+		"app = ps.App(\n"
+		"    codegen=ps.CodegenConfig(web_dir='frontend'),\n"
+		"    routes=[],\n"
+		'    plugins=[RailwayPlugin(dockerfile="Dockerfile")],\n'
+		")\n"
+	)
+	deploy_call = _install_fake_deploy(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_deploy(
+		_make_deploy_args(
+			dockerfile="Override.Dockerfile",
+			web_root="web",
+		)
+	)
+
+	assert result == 0
+	assert deploy_call["docker"].dockerfile_path == (
+		project_root / "Override.Dockerfile"
+	)
+	assert deploy_call["web_root"] == "web"
 
 
 @pytest.mark.asyncio
@@ -743,7 +974,7 @@ async def test_run_deploy_reads_target_from_railway_plugin(
 		"app = ps.App(\n"
 		"    routes=[],\n"
 		"    plugins=[\n"
-		'        RailwayPlugin(project="project", environment="env", deployment_name="staging")\n'
+		'        RailwayPlugin(dockerfile="Dockerfile", project="project", environment="env", deployment_name="staging")\n'
 		"    ],\n"
 		")\n"
 	)
@@ -770,6 +1001,89 @@ async def test_run_deploy_reads_target_from_railway_plugin(
 
 
 @pytest.mark.asyncio
+async def test_run_deploy_reads_server_address_from_app_file(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	(project_root / "main.py").write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import RailwayPlugin\n"
+		"app = ps.App(\n"
+		"    routes=[],\n"
+		'    plugins=[RailwayPlugin(dockerfile="Dockerfile")],\n'
+		'    server_address="https://app.example.com",\n'
+		")\n"
+	)
+	deploy_call = _install_fake_deploy(monkeypatch)
+	monkeypatch.setenv("PULSE_ENV", "dev")
+	monkeypatch.chdir(project_root)
+
+	result = await _run_deploy(_make_deploy_args(server_address=None))
+
+	assert result == 0
+	assert deploy_call["project"].server_address == "https://app.example.com"
+	assert os.environ["PULSE_ENV"] == "dev"
+
+
+@pytest.mark.asyncio
+async def test_run_deploy_reads_env_server_address_from_app_file(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	(project_root / "main.py").write_text(
+		"import os\n"
+		"import pulse as ps\n"
+		"from pulse_railway import RailwayPlugin\n"
+		"app = ps.App(\n"
+		"    routes=[],\n"
+		'    plugins=[RailwayPlugin(dockerfile="Dockerfile")],\n'
+		'    server_address=os.environ.get("PULSE_SERVER_ADDRESS"),\n'
+		")\n"
+	)
+	deploy_call = _install_fake_deploy(monkeypatch)
+	monkeypatch.setenv("PULSE_SERVER_ADDRESS", "https://env.example.com")
+	monkeypatch.delenv("PULSE_ENV", raising=False)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_deploy(_make_deploy_args(server_address=None))
+
+	assert result == 0
+	assert deploy_call["project"].server_address == "https://env.example.com"
+	assert "PULSE_ENV" not in os.environ
+
+
+@pytest.mark.asyncio
+async def test_run_deploy_server_address_flag_overrides_app_file(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	(project_root / "main.py").write_text(
+		"import pulse as ps\n"
+		"from pulse_railway import RailwayPlugin\n"
+		"app = ps.App(\n"
+		"    routes=[],\n"
+		'    plugins=[RailwayPlugin(dockerfile="Dockerfile")],\n'
+		'    server_address="https://app.example.com",\n'
+		")\n"
+	)
+	deploy_call = _install_fake_deploy(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_deploy(
+		_make_deploy_args(server_address="https://override.example.com")
+	)
+
+	assert result == 0
+	assert deploy_call["project"].server_address == "https://override.example.com"
+
+
+@pytest.mark.asyncio
 async def test_run_deploy_flag_overrides_plugin_deployment_name(
 	monkeypatch, tmp_path
 ) -> None:
@@ -779,7 +1093,7 @@ async def test_run_deploy_flag_overrides_plugin_deployment_name(
 	(project_root / "main.py").write_text(
 		"import pulse as ps\n"
 		"from pulse_railway import RailwayPlugin\n"
-		'app = ps.App(routes=[], plugins=[RailwayPlugin(deployment_name="staging")])\n'
+		'app = ps.App(routes=[], plugins=[RailwayPlugin(dockerfile="Dockerfile", deployment_name="staging")])\n'
 	)
 	deploy_call = _install_fake_deploy(monkeypatch)
 	monkeypatch.chdir(project_root)
@@ -798,7 +1112,7 @@ async def test_run_deploy_reads_plugin_image_repository(monkeypatch, tmp_path) -
 	(project_root / "main.py").write_text(
 		"import pulse as ps\n"
 		"from pulse_railway import RailwayPlugin\n"
-		'app = ps.App(routes=[], plugins=[RailwayPlugin(image_repository="ghcr.io/acme/stoneware-v3")])\n'
+		'app = ps.App(routes=[], plugins=[RailwayPlugin(dockerfile="Dockerfile", image_repository="ghcr.io/acme/stoneware-v3")])\n'
 	)
 	deploy_call = _install_fake_deploy(monkeypatch)
 	monkeypatch.chdir(project_root)
@@ -835,7 +1149,7 @@ async def test_run_deploy_explicit_image_repository_overrides_plugin(
 	(project_root / "main.py").write_text(
 		"import pulse as ps\n"
 		"from pulse_railway import RailwayPlugin\n"
-		'app = ps.App(routes=[], plugins=[RailwayPlugin(image_repository="ghcr.io/acme/stoneware-v3")])\n'
+		'app = ps.App(routes=[], plugins=[RailwayPlugin(dockerfile="Dockerfile", image_repository="ghcr.io/acme/stoneware-v3")])\n'
 	)
 	deploy_call = _install_fake_deploy(monkeypatch)
 	monkeypatch.chdir(project_root)
@@ -858,7 +1172,7 @@ async def test_run_deploy_uses_literal_stable_service_names_without_prefix(
 	(project_root / "main.py").write_text(
 		"import pulse as ps\n"
 		"from pulse_railway import RailwayPlugin\n"
-		"app = ps.App(routes=[], plugins=[RailwayPlugin(router_service='api')])\n"
+		'app = ps.App(routes=[], plugins=[RailwayPlugin(dockerfile="Dockerfile", router_service="api")])\n'
 	)
 	deploy_call = _install_fake_deploy(monkeypatch)
 	monkeypatch.chdir(project_root)
@@ -937,7 +1251,7 @@ async def test_run_deploy_source_reads_target_from_railway_plugin(
 		"app = ps.App(\n"
 		"    routes=[],\n"
 		"    plugins=[\n"
-		'        RailwayPlugin(project="project", environment="env", deployment_name="staging")\n'
+		'        RailwayPlugin(dockerfile="Dockerfile", project="project", environment="env", deployment_name="staging")\n'
 		"    ],\n"
 		")\n"
 	)
@@ -1148,6 +1462,56 @@ async def test_run_remove_resolves_name_then_deletes(
 	assert delete_call["deployment_id"] == "redis-smoke-260405-120000"
 	assert delete_call["project"].redis_service_name == "pulse-router-redis"
 	assert capsys.readouterr().out == "redis-smoke-260405-120000\n"
+
+
+@pytest.mark.asyncio
+async def test_run_redeploy_defaults_to_active_deployment(
+	monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+	redeploy_call: dict[str, Any] = {}
+
+	async def fake_redeploy_deployment(**kwargs: Any) -> RedeployResult:
+		redeploy_call.update(kwargs)
+		return RedeployResult(
+			deployment_id="prod-260402-120000",
+			backend_service_id="svc-backend",
+			backend_service_name="prod-260402-120000",
+			backend_deployment_id="deploy-backend",
+			backend_status="SUCCESS",
+		)
+
+	async def fake_resolve_railway_target_ids(**kwargs: Any) -> tuple[str, str]:
+		assert kwargs["project_name"] == "project"
+		assert kwargs["environment_name"] == "env"
+		return "project", "env"
+
+	monkeypatch.setattr(
+		"pulse_railway.cli.resolve_railway_target_ids",
+		fake_resolve_railway_target_ids,
+	)
+	monkeypatch.setattr(
+		"pulse_railway.cli.redeploy_deployment",
+		fake_redeploy_deployment,
+	)
+
+	result = await _run_redeploy(
+		argparse.Namespace(
+			service="pulse-router",
+			deployment_id=None,
+			project="project",
+			environment="env",
+			token="token",
+			service_prefix=None,
+			redis_url=None,
+			redis_service=None,
+			redis_prefix="pulse:railway",
+		)
+	)
+
+	assert result == 0
+	assert redeploy_call["deployment_id"] is None
+	assert redeploy_call["project"].redis_service_name == "pulse-router-redis"
+	assert '"backend_deployment_id": "deploy-backend"' in capsys.readouterr().out
 
 
 @pytest.mark.asyncio

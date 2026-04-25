@@ -11,45 +11,45 @@ For local CLI usage, prefer `RAILWAY_API_TOKEN` when you are using a user/accoun
 ```bash
 set -a; source .env; set +a
 
-uv run pulse-railway init \
-  --app-file examples/railway/main.py
+uv run pulse-railway ensure \
+  examples/railway/main.py
 
 uv run pulse-railway deploy \
-  --deployment-name prod \
-  --app-file examples/railway/main.py \
-  --web-root examples/railway/web \
-  --dockerfile examples/Dockerfile \
-  --context .
+  examples/railway/main.py
 
 uv run pulse-railway deploy \
-  --deployment-name prod \
-  --app-file examples/railway/main.py \
-  --web-root examples/railway/web \
-  --dockerfile examples/Dockerfile \
-  --context . \
+  examples/railway/main.py \
   --image-repository ghcr.io/<org>/<name>
 ```
 
 Use the commands like this:
 
-- `pulse-railway init` bootstraps the stable router, env, Redis, and janitor stack into an empty Railway project.
+- `pulse-railway scaffold` bootstraps the stable router, env, Redis, and janitor stack into an empty Railway project.
+- `pulse-railway ensure` creates or reconciles that baseline stack and is safe to run from CI before deploy.
 - `pulse-railway upgrade` is currently a no-op placeholder.
 - `pulse-railway deploy` builds and rolls out a new backend service on top of an already-initialized stack.
   By default it uploads source and uses `railway up` to build on Railway. Passing an image repository switches deploy to the local `docker buildx build --push` path.
+- `pulse-railway redeploy` redeploys the active backend service. Pass `--deployment-id <id>` to redeploy a specific Pulse deployment.
 
-`init` and `deploy` read the stable router, Redis, and janitor service names from `RailwayPlugin` on the target app. By default those are `pulse-router`, `pulse-redis`, and `pulse-janitor` without extra prefixing. The baseline also includes a stable env service named `pulse-env` that acts as the canonical source for user-managed deployment variables. Backend deployment services also default to no prefix, so their Railway service names match the generated deployment id unless you pass `--service-prefix`.
+`scaffold <app-file>` bootstraps the baseline from `RailwayPlugin` config and defaults. Stable router, Redis, janitor, and backend service names come from the app plugin. The baseline also includes a stable env service that acts as the canonical source for user-managed deployment variables.
 
-`pulse-railway init` is template-first and fresh-only. On an empty target it deploys the published `pulse-baseline` template so the router, janitor, and Redis land on the Railway canvas with a stable layout, creates the stable env service in the template group, then writes runtime images, variables, domains, cron, and healthchecks. Router and janitor services use the official GHCR images for the installed `pulse-railway` version unless you pass explicit image overrides: `ghcr.io/erwinkn/pulse-railway-router:<version>` and `ghcr.io/erwinkn/pulse-railway-janitor:<version>`. When you pass `--redis-url`, init removes the managed Redis service plus any template-created Redis references, then rewrites the baseline to use the external URL. If any baseline service already exists, including partial leftovers from a failed run, delete those services and rerun init. A future `pulse-railway update` command will handle explicit stack reconciliation.
+`ensure` uses the same target/options as `scaffold`, but it is idempotent. On an empty project it creates the baseline; on an existing or partial baseline it creates missing services and rewrites Pulse-managed runtime config. Existing router and janitor images are preserved unless you pass `--router-image` or `--janitor-image`.
 
-`pulse-railway init` and `pulse-railway deploy` target projects and environments by name. Use `--project <name>` or `RailwayPlugin(project="...")`; if project is omitted, the token must be a Railway project token so the project can be inferred. Use `--environment <name>` or `RailwayPlugin(environment="...")`; if environment is omitted with a project token, the token's environment is used. With a user/account token, omitted environment defaults to `production`. Project and environment IDs are resolved internally before Railway API calls.
+`deploy` reads app configuration from `RailwayPlugin` on the target app. Provide the Dockerfile with `RailwayPlugin(dockerfile=...)` or `--dockerfile`.
+
+`pulse-railway scaffold` is template-first and fresh-only. On an empty target it deploys the published `pulse-baseline` template so the router, janitor, and Redis land on the Railway canvas with a stable layout, creates the stable env service in the template group, then writes runtime images, variables, domains, cron, and healthchecks. Router and janitor services use the official GHCR images for the installed `pulse-railway` version unless you pass explicit image overrides: `ghcr.io/erwinkn/pulse-railway-router:<version>` and `ghcr.io/erwinkn/pulse-railway-janitor:<version>`. When you pass `--redis-url`, scaffold removes the managed Redis service plus any template-created Redis references, then rewrites the baseline to use the external URL. If any baseline service already exists, rerun with `pulse-railway ensure`.
+
+`pulse-railway scaffold <app-file>`, `pulse-railway ensure <app-file>`, and `pulse-railway deploy <app-file>` load the app to read `RailwayPlugin`. For `scaffold` and `ensure`, set `RailwayPlugin(project="...", environment="...")`; if project or environment is omitted, the token must provide enough scope to infer them. For `deploy`, CLI `--project` / `--environment` override plugin config. Project and environment IDs are resolved internally before Railway API calls.
 
 You can also set `deployment_name` on `RailwayPlugin` to provide the default deploy name from app config. Precedence is: `--deployment-name`, then `RailwayPlugin(deployment_name=...)`, then `prod`.
 
 You can also set `image_repository` on `RailwayPlugin` to provide the default backend image registry from app config. Precedence is: `--image-repository`, then `RailwayPlugin(image_repository=...)`. If none is set, deploy uses source mode.
 
-If `--redis-url` is omitted, `pulse-railway init` creates the stable Redis service configured by `RailwayPlugin` in the Railway project.
+`pulse-railway deploy <app-file>` reads `server_address` and web root from the target `ps.App`, and the Dockerfile path from `RailwayPlugin(dockerfile=...)`. Precedence is: explicit CLI override, then app/plugin config, then the initialized router service address for `server_address`.
 
-`pulse-railway deploy` is now strict. It does not create or repair the stable baseline stack. If the router, env, Redis, or janitor baseline is missing or outdated, run `pulse-railway init` first.
+If `--redis-url` is omitted, `pulse-railway scaffold` and `pulse-railway ensure` create the stable Redis service in the Railway project.
+
+`pulse-railway deploy` is strict. It does not create or repair the stable baseline stack. If the router, env, Redis, or janitor baseline is missing or outdated, run `pulse-railway ensure` first.
 
 User-managed app variables should live on the stable env service. Each new backend deployment references every non-Pulse-managed variable from `pulse-env`, so users can sync secrets into that service however they want: Railway UI, Shared Variables, Doppler, or another workflow.
 
@@ -71,7 +71,7 @@ By default, `pulse-railway deploy` uses source mode. Image deployments require `
 
 ## Runtime
 
-Backend services must set `PULSE_DEPLOYMENT_ID`. `RailwayPlugin` injects the affinity query into Pulse prerender and websocket directives and exposes `/_pulse/meta` for verification.
+Backend services must set `PULSE_DEPLOYMENT_ID`. `RailwayPlugin` injects the affinity query into Pulse prerender and websocket directives and exposes `/_pulse/meta` for verification. Internal janitor endpoints receive `PULSE_RAILWAY_INTERNAL_TOKEN` through Railway reference variables using `${{ shared.PULSE_RAILWAY_INTERNAL_TOKEN }}`.
 
 If your app opts into `pulse_railway.RailwaySessionStore()`:
 
@@ -94,6 +94,25 @@ If you need to trigger cleanup manually, run the command from inside the deploye
 
 ```bash
 pulse-railway janitor run
+```
+
+To rerun Railway's build/deploy for the active backend deployment, use:
+
+```bash
+pulse-railway redeploy \
+  --project <project-name> \
+  --environment production \
+  --token <project-token>
+```
+
+To redeploy a specific Pulse deployment id:
+
+```bash
+pulse-railway redeploy \
+  --deployment-id prod-260402-120000 \
+  --project <project-name> \
+  --environment production \
+  --token <project-token>
 ```
 
 To remove a deployment by the original deployment name prefix, use:

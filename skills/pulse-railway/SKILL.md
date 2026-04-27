@@ -143,7 +143,7 @@ Use `scaffold` for fresh-only template setup. Use `ensure` for CI and repeated s
 - stable env service, default `pulse-env`, for user-managed app variables
 - stable Redis service, default `pulse-redis`, unless `--redis-url` is supplied
 - janitor cron service, default `pulse-janitor`
-- official router/janitor GHCR images for the installed `pulse-railway` version
+- latest published official router/janitor GHCR image tags
 
 `scaffold` is fresh-only. If baseline services or partial leftovers already exist, run `ensure`. `deploy` is strict and will not repair missing baseline services.
 

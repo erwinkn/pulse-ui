@@ -55,12 +55,12 @@ def _add_baseline_args(parser: argparse.ArgumentParser) -> None:
 	parser.add_argument(
 		"--router-image",
 		default=None,
-		help="Router image override. Defaults to the official pulse-railway router image for this package version.",
+		help="Router image override. Defaults to the official pulse-railway router image.",
 	)
 	parser.add_argument(
 		"--janitor-image",
 		default=None,
-		help="Janitor image override. Defaults to the official pulse-railway janitor image for this package version.",
+		help="Janitor image override. Defaults to the official pulse-railway janitor image.",
 	)
 	parser.add_argument(
 		"--janitor-cron-schedule",

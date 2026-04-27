@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib.metadata
 import tempfile
 from pathlib import Path
 
@@ -11,6 +10,7 @@ from pulse_railway.errors import DeploymentError
 
 OFFICIAL_JANITOR_IMAGE_REPOSITORY = "ghcr.io/erwinkn/pulse-railway-janitor"
 OFFICIAL_ROUTER_IMAGE_REPOSITORY = "ghcr.io/erwinkn/pulse-railway-router"
+OFFICIAL_RUNTIME_IMAGE_VERSION = "0.1.0"
 
 
 async def _run_command(*args: str, cwd: Path | None = None) -> None:
@@ -33,16 +33,12 @@ def image_ref(*, image_repository: str | None, prefix: str) -> str:
 	return f"{image_repository}:{prefix}"
 
 
-def package_version() -> str:
-	return importlib.metadata.version("pulse-railway")
-
-
 def official_router_image_ref(*, version: str | None = None) -> str:
-	return f"{OFFICIAL_ROUTER_IMAGE_REPOSITORY}:{version or package_version()}"
+	return f"{OFFICIAL_ROUTER_IMAGE_REPOSITORY}:{version or OFFICIAL_RUNTIME_IMAGE_VERSION}"
 
 
 def official_janitor_image_ref(*, version: str | None = None) -> str:
-	return f"{OFFICIAL_JANITOR_IMAGE_REPOSITORY}:{version or package_version()}"
+	return f"{OFFICIAL_JANITOR_IMAGE_REPOSITORY}:{version or OFFICIAL_RUNTIME_IMAGE_VERSION}"
 
 
 async def build_and_push_image(
@@ -130,11 +126,11 @@ async def build_router_image(*, image_ref: str) -> str:
 
 __all__ = [
 	"OFFICIAL_JANITOR_IMAGE_REPOSITORY",
+	"OFFICIAL_RUNTIME_IMAGE_VERSION",
 	"OFFICIAL_ROUTER_IMAGE_REPOSITORY",
 	"build_and_push_image",
 	"build_router_image",
 	"image_ref",
 	"official_janitor_image_ref",
 	"official_router_image_ref",
-	"package_version",
 ]

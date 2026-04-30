@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import aiohttp
 from pulse.cli.helpers import load_app_from_target
 
 from pulse_railway.auth import (
@@ -20,16 +21,22 @@ from pulse_railway.config import (
 	ServiceInstanceConfig,
 )
 from pulse_railway.constants import (
-	ACTIVE_DEPLOYMENT_VARIABLE,
-	DEPLOYMENT_STATE_ACTIVE,
 	DEPLOYMENT_STATE_DRAINING,
+	INTERNAL_API_PREFIX,
+	INTERNAL_TOKEN_HEADER,
 	PULSE_DEPLOYMENT_ID,
 	PULSE_DEPLOYMENT_STATE,
 	PULSE_DRAIN_STARTED_AT,
-	PULSE_INTERNAL_TOKEN,
-	PULSE_RAILWAY_REDIS_URL,
 	RAILWAY_API_TOKEN,
 	RAILWAY_TOKEN,
+)
+from pulse_railway.env import (
+	backend_build_env,
+	backend_env,
+	backend_session_env,
+	check_reserved_source_build_args,
+	pulse_env_user_references,
+	validate_backend_env_vars,
 )
 from pulse_railway.errors import DeploymentError
 from pulse_railway.images import (
@@ -48,15 +55,15 @@ from pulse_railway.stack import (
 	JANITOR_START_COMMAND,
 	ROUTER_START_COMMAND,
 	ResolvedRedis,
-	_deploy_service_and_wait,
 	default_env_service_name,
 	default_janitor_service_name,
 	default_redis_service_name,
+	deploy_service_and_wait,
+	place_service_in_router_group,
 	require_ready_stack,
 	resolve_or_create_internal_token,
 	resolve_or_create_redis,
 	resolve_project_internals,
-	shared_variable_reference,
 	upsert_service_variables,
 )
 
@@ -103,47 +110,35 @@ class DeploymentServiceRecord:
 	drain_started_at: float | None = None
 
 
-RESERVED_BACKEND_ENV_VARS: frozenset[str] = frozenset(
-	{
-		PULSE_DEPLOYMENT_ID,
-		PULSE_DEPLOYMENT_STATE,
-		PULSE_DRAIN_STARTED_AT,
-		PULSE_INTERNAL_TOKEN,
-		PULSE_RAILWAY_REDIS_URL,
-		"PULSE_APP_FILE",
-		"PULSE_SERVER_ADDRESS",
-		"PORT",
-	}
-)
-RESERVED_ENV_REFERENCE_VARS: frozenset[str] = RESERVED_BACKEND_ENV_VARS.union(
-	{"APP_FILE", "WEB_ROOT", "RAILWAY_DOCKERFILE_PATH"}
-)
+def validate_deployment_service_records(
+	services: list[DeploymentServiceRecord],
+	active_deployment_id: str | None,
+) -> tuple[DeploymentServiceRecord | None, list[DeploymentServiceRecord]]:
+	seen: dict[str, DeploymentServiceRecord] = {}
+	for service in services:
+		existing = seen.get(service.deployment_id)
+		if existing is not None:
+			raise DeploymentError(
+				f"duplicate PULSE_DEPLOYMENT_ID {service.deployment_id!r} "
+				+ f"on services {existing.service_name!r} and {service.service_name!r}"
+			)
+		seen[service.deployment_id] = service
 
-
-def _is_user_managed_env_var(name: str) -> bool:
-	return not name.startswith("RAILWAY_") and name not in RESERVED_ENV_REFERENCE_VARS
-
-
-def validate_backend_env_vars(
-	env_vars: dict[str, str],
-) -> None:
-	reserved = sorted(key for key in env_vars if key in RESERVED_BACKEND_ENV_VARS)
-	if reserved:
+	if not services:
+		return None, []
+	if active_deployment_id is None:
 		raise DeploymentError(
-			"backend env vars cannot override pulse-railway managed variables: "
-			+ ", ".join(reserved)
+			"active deployment id is missing while backend services exist"
 		)
-
-
-def check_reserved_source_build_args(
-	build_args: dict[str, str],
-) -> None:
-	reserved = sorted(key for key in build_args if key in RESERVED_BACKEND_ENV_VARS)
-	if reserved:
+	active = seen.get(active_deployment_id)
+	if active is None:
 		raise DeploymentError(
-			"source build args cannot override pulse-railway managed variables: "
-			+ ", ".join(reserved)
+			f"active deployment id {active_deployment_id!r} "
+			+ "does not match any backend service"
 		)
+	return active, [
+		service for service in services if service.deployment_id != active_deployment_id
+	]
 
 
 def pulse_start_command() -> str:
@@ -211,58 +206,6 @@ def _resolve_uses_railway_session_store(
 	return _uses_railway_session_store_from_app(app_file, context_path)
 
 
-def _backend_session_env(
-	uses_railway_session_store: bool,
-	*,
-	redis_url: str | None,
-) -> dict[str, str]:
-	if not uses_railway_session_store:
-		return {}
-	if redis_url is None:
-		raise DeploymentError("redis_url is required for Railway session store wiring")
-	return {PULSE_RAILWAY_REDIS_URL: redis_url}
-
-
-def _backend_service_variables(
-	*,
-	deployment_id: str,
-	app_file: str,
-	server_address: str,
-	backend_port: int,
-	backend_session_env: dict[str, str],
-	project_env_vars: dict[str, str],
-) -> dict[str, str]:
-	return {
-		PULSE_DEPLOYMENT_ID: deployment_id,
-		PULSE_INTERNAL_TOKEN: shared_variable_reference(PULSE_INTERNAL_TOKEN),
-		"PULSE_APP_FILE": app_file,
-		"PULSE_SERVER_ADDRESS": server_address,
-		"PORT": str(backend_port),
-		**backend_session_env,
-		**project_env_vars,
-	}
-
-
-def _backend_build_variables(
-	*,
-	build_args: dict[str, str],
-	server_address: str,
-	dockerfile_path: Path,
-	context_path: Path,
-) -> dict[str, str]:
-	railway_build_vars = dict(build_args)
-	railway_build_vars.setdefault("PULSE_SERVER_ADDRESS", server_address)
-	try:
-		dockerfile_relative = dockerfile_path.relative_to(context_path)
-	except ValueError as exc:
-		raise DeploymentError(
-			"dockerfile must be inside the build context for railway up"
-		) from exc
-	if dockerfile_relative.as_posix() != "Dockerfile":
-		railway_build_vars["RAILWAY_DOCKERFILE_PATH"] = dockerfile_relative.as_posix()
-	return railway_build_vars
-
-
 async def _pulse_env_reference_variables(
 	client: RailwayGraphQLClient,
 	*,
@@ -279,7 +222,7 @@ async def _pulse_env_reference_variables(
 		if env_service is None:
 			raise DeploymentError(
 				f"env service {env_service_name} not found; "
-				+ "run `pulse-railway ensure`"
+				+ "run `pulse-railway scaffold`"
 			)
 		env_service_id = env_service.id
 	variables = await client.get_project_variables(
@@ -288,11 +231,10 @@ async def _pulse_env_reference_variables(
 		service_id=env_service_id,
 		unrendered=True,
 	)
-	return {
-		name: "${{" + f"{env_service_name}.{name}" + "}}"
-		for name in variables
-		if _is_user_managed_env_var(name)
-	}
+	return pulse_env_user_references(
+		env_service_name=env_service_name,
+		env_vars=variables,
+	)
 
 
 async def _run_command(
@@ -323,52 +265,88 @@ async def _promote_deployment(
 	client: RailwayGraphQLClient,
 	*,
 	project: RailwayProject,
-	backend_service_id: str,
+	server_address: str,
+	internal_token: str,
+	backend_service_name: str,
 	deployment_id: str,
 ) -> None:
-	project_variables = await client.get_project_variables(
-		project_id=project.project_id,
-		environment_id=project.environment_id,
-	)
-	previous_active_deployment_id = project_variables.get(ACTIVE_DEPLOYMENT_VARIABLE)
 	deployment_services = await _list_deployment_service_records(
 		client,
 		project=project,
 	)
 	drain_started_at = datetime.now(UTC).timestamp()
-	await _set_deployment_service_state(
-		client,
-		project=project,
-		service_id=backend_service_id,
-		state=DEPLOYMENT_STATE_ACTIVE,
-		drain_started_at=None,
+	await _router_control_request(
+		server_address=server_address,
+		internal_token=internal_token,
+		path="promote",
+		json_payload={
+			"active": {
+				"deployment_id": deployment_id,
+				"service_name": backend_service_name,
+			},
+			"draining": [
+				{
+					"deployment_id": service.deployment_id,
+					"service_name": service.service_name,
+					"drain_started_at": (
+						service.drain_started_at
+						if service.state == DEPLOYMENT_STATE_DRAINING
+						and service.drain_started_at is not None
+						else drain_started_at
+					),
+				}
+				for service in deployment_services
+				if service.deployment_id != deployment_id
+			],
+		},
 	)
-	await asyncio.gather(
-		*[
-			_set_deployment_service_state(
-				client,
-				project=project,
-				service_id=service.service_id,
-				state=DEPLOYMENT_STATE_DRAINING,
-				drain_started_at=(
-					service.drain_started_at
-					if service.state == DEPLOYMENT_STATE_DRAINING
-					and service.deployment_id != previous_active_deployment_id
-					and service.drain_started_at is not None
-					else drain_started_at
-				),
-			)
-			for service in deployment_services
-			if service.deployment_id != deployment_id
-		]
+
+
+async def _router_control_request(
+	*,
+	server_address: str,
+	internal_token: str,
+	path: str,
+	method: str = "POST",
+	json_payload: dict[str, object] | None = None,
+) -> dict[str, object]:
+	url = f"{server_address.rstrip('/')}{INTERNAL_API_PREFIX}/railway/{path}"
+	async with aiohttp.ClientSession(
+		timeout=aiohttp.ClientTimeout(total=30, sock_connect=10)
+	) as session:
+		async with session.request(
+			method,
+			url,
+			headers={INTERNAL_TOKEN_HEADER: internal_token},
+			json=json_payload,
+		) as response:
+			payload = await response.json(content_type=None)
+			if response.status >= 400:
+				raise DeploymentError(
+					f"router control request failed ({response.status}): {payload}"
+				)
+			if not isinstance(payload, dict):
+				raise DeploymentError("router control request returned invalid JSON")
+			return payload
+
+
+async def _get_active_deployment_from_router(
+	*,
+	server_address: str,
+	internal_token: str,
+) -> str | None:
+	payload = await _router_control_request(
+		server_address=server_address,
+		internal_token=internal_token,
+		path="active",
+		method="GET",
 	)
-	await client.upsert_variable(
-		project_id=project.project_id,
-		environment_id=project.environment_id,
-		name=ACTIVE_DEPLOYMENT_VARIABLE,
-		value=deployment_id,
-		skip_deploys=True,
-	)
+	deployment_id = payload.get("deployment_id")
+	if deployment_id is None:
+		return None
+	if not isinstance(deployment_id, str):
+		raise DeploymentError("router returned invalid active deployment")
+	return deployment_id
 
 
 def railway_up_command(
@@ -424,28 +402,6 @@ async def _wait_for_latest_service_deployment(
 	)
 
 
-async def _place_backend_in_router_group(
-	client: RailwayGraphQLClient,
-	*,
-	project: RailwayProject,
-	router_service_id: str,
-	backend_service_id: str,
-) -> None:
-	config = await client.get_environment_config(
-		project_id=project.project_id,
-		environment_id=project.environment_id,
-	)
-	router_config = (config.get("services") or {}).get(router_service_id) or {}
-	group_id = router_config.get("groupId")
-	if not isinstance(group_id, str) or not group_id:
-		return
-	await client.set_service_group_id(
-		environment_id=project.environment_id,
-		service_id=backend_service_id,
-		group_id=group_id,
-	)
-
-
 def _parse_optional_float(value: str | None) -> float | None:
 	if value is None or not value:
 		return None
@@ -489,34 +445,7 @@ async def _list_deployment_service_records(
 	return deployments
 
 
-async def _set_deployment_service_state(
-	client: RailwayGraphQLClient,
-	*,
-	project: RailwayProject,
-	service_id: str,
-	state: str,
-	drain_started_at: float | None,
-) -> None:
-	await client.upsert_variable(
-		project_id=project.project_id,
-		environment_id=project.environment_id,
-		service_id=service_id,
-		name=PULSE_DEPLOYMENT_STATE,
-		value=state,
-		skip_deploys=True,
-	)
-	await client.upsert_variable(
-		project_id=project.project_id,
-		environment_id=project.environment_id,
-		service_id=service_id,
-		name=PULSE_DRAIN_STARTED_AT,
-		value="" if drain_started_at is None else str(drain_started_at),
-		skip_deploys=True,
-	)
-
-
 list_deployment_service_records = _list_deployment_service_records
-set_deployment_service_state = _set_deployment_service_state
 
 
 async def _list_deployment_services(
@@ -566,14 +495,14 @@ async def redeploy_deployment(
 	project: RailwayProject,
 	deployment_id: str | None = None,
 ) -> RedeployResult:
+	resolved_deployment_id = deployment_id
+	if resolved_deployment_id is None:
+		stack_state = await require_ready_stack(project=project)
+		resolved_deployment_id = await _get_active_deployment_from_router(
+			server_address=project.server_address or stack_state.server_address,
+			internal_token=stack_state.internal_token,
+		)
 	async with RailwayGraphQLClient(token=project.token) as client:
-		resolved_deployment_id = deployment_id
-		if resolved_deployment_id is None:
-			variables = await client.get_project_variables(
-				project_id=project.project_id,
-				environment_id=project.environment_id,
-			)
-			resolved_deployment_id = variables.get(ACTIVE_DEPLOYMENT_VARIABLE)
 		if resolved_deployment_id is None:
 			raise DeploymentError("no active deployment found")
 		resolved_deployment_id = validate_deployment_id(resolved_deployment_id)
@@ -588,7 +517,7 @@ async def redeploy_deployment(
 		)
 		if backend_service is None:
 			raise DeploymentError(f"service {backend_service_name} not found")
-		backend_deployment_id, backend_status = await _deploy_service_and_wait(
+		backend_deployment_id, backend_status = await deploy_service_and_wait(
 			client,
 			service_id=backend_service.id,
 			environment_id=project.environment_id,
@@ -672,8 +601,15 @@ async def deploy(
 				stack_state.env.service_id if stack_state.env is not None else None
 			),
 		)
-		build_args.setdefault("PULSE_SERVER_ADDRESS", server_address)
-		backend_session_env = _backend_session_env(
+		build_args = backend_build_env(
+			build_args=build_args,
+			app_file=app_file,
+			web_root=web_root,
+			server_address=server_address,
+			dockerfile_path=docker.dockerfile_path,
+			context_path=docker.context_path,
+		)
+		session_env = backend_session_env(
 			resolved_uses_railway_session_store,
 			redis_url=stack_state.redis_url,
 		)
@@ -688,23 +624,24 @@ async def deploy(
 			name=backend_service_name,
 			image=backend_image,
 		)
-		await _place_backend_in_router_group(
+		await place_service_in_router_group(
 			client,
 			project=project,
 			router_service_id=stack_state.router.service_id,
-			backend_service_id=backend_service_id,
+			service_id=backend_service_id,
 		)
 		await upsert_service_variables(
 			client,
 			project=project,
 			service_id=backend_service_id,
-			variables=_backend_service_variables(
+			variables=backend_env(
 				deployment_id=deployment_id,
+				internal_token=stack_state.internal_token,
 				app_file=app_file,
 				server_address=server_address,
 				backend_port=project.backend_port,
-				backend_session_env=backend_session_env,
-				project_env_vars={**reference_env_vars, **project.env_vars},
+				session_env=session_env,
+				user_env={**reference_env_vars, **project.env_vars},
 			),
 		)
 		await client.update_service_instance(
@@ -729,7 +666,9 @@ async def deploy(
 		await _promote_deployment(
 			client,
 			project=project,
-			backend_service_id=backend_service_id,
+			server_address=server_address,
+			internal_token=stack_state.internal_token,
+			backend_service_name=backend_service_name,
 			deployment_id=deployment_id,
 		)
 		return DeployResult(
@@ -797,7 +736,7 @@ async def _deploy_source(
 				)
 			stack_state = await require_ready_stack(project=project)
 			server_address = project.server_address or stack_state.server_address
-			backend_session_env = _backend_session_env(
+			session_env = backend_session_env(
 				resolved_uses_railway_session_store,
 				redis_url=stack_state.redis_url,
 			)
@@ -808,16 +747,19 @@ async def _deploy_source(
 					stack_state.env.service_id if stack_state.env is not None else None
 				),
 			)
-			runtime_vars = _backend_service_variables(
+			runtime_vars = backend_env(
 				deployment_id=deployment_id,
+				internal_token=stack_state.internal_token,
 				app_file=app_file,
 				server_address=server_address,
 				backend_port=project.backend_port,
-				backend_session_env=backend_session_env,
-				project_env_vars={**reference_env_vars, **project.env_vars},
+				session_env=session_env,
+				user_env={**reference_env_vars, **project.env_vars},
 			)
-			build_vars = _backend_build_variables(
+			build_vars = backend_build_env(
 				build_args=dict(docker.build_args),
+				app_file=app_file,
+				web_root=web_root,
 				server_address=server_address,
 				dockerfile_path=docker.dockerfile_path,
 				context_path=docker.context_path,
@@ -827,11 +769,11 @@ async def _deploy_source(
 				environment_id=project.environment_id,
 				name=backend_service_name,
 			)
-			await _place_backend_in_router_group(
+			await place_service_in_router_group(
 				client,
 				project=project,
 				router_service_id=stack_state.router.service_id,
-				backend_service_id=backend_service_id,
+				service_id=backend_service_id,
 			)
 			await upsert_service_variables(
 				client,
@@ -884,7 +826,9 @@ async def _deploy_source(
 			await _promote_deployment(
 				client,
 				project=project,
-				backend_service_id=backend_service_id,
+				server_address=server_address,
+				internal_token=stack_state.internal_token,
+				backend_service_name=backend_service_name,
 				deployment_id=deployment_id,
 			)
 			promoted = True
@@ -926,7 +870,6 @@ async def delete_deployment(
 	*,
 	project: RailwayProject,
 	deployment_id: str,
-	clear_active: bool = True,
 ) -> None:
 	service_name = service_name_for_deployment(
 		project.service_prefix,
@@ -940,22 +883,29 @@ async def delete_deployment(
 		)
 		if service is None:
 			raise DeploymentError(f"service {service_name} not found")
+		stack_state = await require_ready_stack(project=project)
+		active_deployment_id = await _get_active_deployment_from_router(
+			server_address=project.server_address or stack_state.server_address,
+			internal_token=stack_state.internal_token,
+		)
+		if active_deployment_id is None:
+			raise DeploymentError(
+				"no active deployment found; refusing to delete backend service"
+			)
+		if active_deployment_id == deployment_id:
+			raise DeploymentError(
+				"cannot delete active deployment; deploy or promote another deployment first"
+			)
+		await _router_control_request(
+			server_address=project.server_address or stack_state.server_address,
+			internal_token=stack_state.internal_token,
+			path="delete",
+			json_payload={"deployment_id": deployment_id},
+		)
 		await client.delete_service(
 			service_id=service.id,
 			environment_id=project.environment_id,
 		)
-		if not clear_active:
-			return
-		variables = await client.get_project_variables(
-			project_id=project.project_id,
-			environment_id=project.environment_id,
-		)
-		if variables.get(ACTIVE_DEPLOYMENT_VARIABLE) == deployment_id:
-			await client.delete_variable(
-				project_id=project.project_id,
-				environment_id=project.environment_id,
-				name=ACTIVE_DEPLOYMENT_VARIABLE,
-			)
 
 
 __all__ = [
@@ -982,5 +932,5 @@ __all__ = [
 	"resolve_or_create_redis",
 	"resolve_or_create_internal_token",
 	"resolve_project_internals",
-	"set_deployment_service_state",
+	"validate_deployment_service_records",
 ]

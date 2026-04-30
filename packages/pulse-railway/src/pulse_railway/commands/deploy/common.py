@@ -10,17 +10,22 @@ from pulse_railway.auth import (
 	resolve_railway_access_token,
 )
 from pulse_railway.commands.common import (
+	add_railway_target_args,
 	build_target_project,
+	environment_id_from_sources,
 	environment_name_from_sources,
 	load_deploy_target,
 	parse_kv_items,
+	project_id_from_sources,
 	project_name_from_sources,
 	resolve_path,
 	resolve_railway_target_ids,
+	workspace_id_from_sources,
+	workspace_name_from_sources,
 )
 from pulse_railway.config import DockerBuild, RailwayProject
 from pulse_railway.constants import DEFAULT_BACKEND_PORT
-from pulse_railway.deployment import (
+from pulse_railway.env import (
 	check_reserved_source_build_args,
 	validate_backend_env_vars,
 )
@@ -57,16 +62,7 @@ def add_shared_deploy_args(parser: argparse.ArgumentParser) -> None:
 		default=None,
 		help="Explicit deployment id override",
 	)
-	parser.add_argument(
-		"--project",
-		default=None,
-		help="Railway project name. Optional when using a project token.",
-	)
-	parser.add_argument(
-		"--environment",
-		default=None,
-		help="Railway environment name. Defaults to production.",
-	)
+	add_railway_target_args(parser)
 	parser.add_argument(
 		"--token",
 		default=railway_access_token(),
@@ -168,8 +164,12 @@ async def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployComm
 		raise ValueError("token is required")
 	project_id, environment_id = await resolve_railway_target_ids(
 		project_name=project_name_from_sources(args, deploy_target),
+		project_id=project_id_from_sources(args),
 		environment_name=environment_name_from_sources(args, deploy_target),
+		environment_id=environment_id_from_sources(args),
 		token=token,
+		workspace_name=workspace_name_from_sources(args),
+		workspace_id=workspace_id_from_sources(args),
 	)
 	env_vars = parse_kv_items(args.env, "--env")
 	validate_backend_env_vars(env_vars)

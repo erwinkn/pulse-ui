@@ -22,10 +22,14 @@ app = ps.App(
 
 ```bash
 uv run pulse-railway ensure \
-  apps/my-app/main.py
+  apps/my-app/main.py \
+  --project my-railway-project \
+  --environment production
 
 uv run pulse-railway deploy \
-  apps/my-app/main.py
+  apps/my-app/main.py \
+  --project my-railway-project \
+  --environment production
 
 uv run pulse-railway redeploy
 ```
@@ -116,10 +120,16 @@ uv run pulse-railway redeploy \
 
 Use `scaffold` for fresh-only template setup. Use `ensure` for CI and repeated setup; it creates or reconciles the baseline. Existing router and janitor images are preserved unless `--router-image` or `--janitor-image` is passed.
 
+Target flags are shared by local commands:
+
+- workspace: `--workspace` or `--workspace-id`; only needed to disambiguate project lookup by name
+- project: `--project-id`, then `--project`, then `RailwayPlugin(project=...)`; absent means infer from a project token
+- environment: `--environment-id`, then `--environment`, then `RailwayPlugin(environment=...)`, then the project token environment, then `production`
+
+Use either the name or ID form for each target, not both.
+
 `deploy` precedence:
 
-- project: `--project`, then `RailwayPlugin(project=...)`; absent means infer from a project token
-- environment: `--environment`, then `RailwayPlugin(environment=...)`, then the project token environment, then `production`
 - deployment name: `--deployment-name`, then `RailwayPlugin(deployment_name=...)`, then `prod`
 - image repository: `--image-repository`, then `RailwayPlugin(image_repository=...)`; absent means source deploy
 - server address: `--server-address`, then `App(server_address=...)`, then the initialized router service address
@@ -183,6 +193,5 @@ For a local repo example, inspect `examples/railway/` and `packages/pulse-railwa
 - The router can run multiple replicas because routing state lives in request affinity plus Redis.
 - `pulse-railway janitor run` is for the deployed janitor service only and fails outside Railway.
 - The janitor should run every 5 minutes or slower; Railway cron does not run more frequently.
-- `pulse-railway upgrade` is currently a no-op placeholder.
-- `pulse-railway redeploy` defaults to `PULSE_ACTIVE_DEPLOYMENT`; use `--deployment-id` for a specific Pulse deployment.
+- `pulse-railway redeploy` defaults to the active deployment in Redis; use `--deployment-id` for a specific Pulse deployment.
 - If a deployment name matches multiple generated ids, `pulse-railway remove` fails and prints matches; retry with `pulse-railway delete --deployment-id ...`.

@@ -22,6 +22,7 @@ from pulse_railway.railway import (
 	ProjectRecord,
 	ProjectTokenRecord,
 	RailwayGraphQLClient,
+	WorkspaceRecord,
 )
 from pulse_railway.target import (
 	RailwayDeployTarget,
@@ -34,6 +35,7 @@ RailwayNameRecord = TypeVar(
 	"RailwayNameRecord",
 	ProjectRecord,
 	EnvironmentRecord,
+	WorkspaceRecord,
 )
 
 
@@ -74,6 +76,39 @@ def normalize_optional_service_prefix(value: str | None) -> str | None:
 	if not candidate:
 		return None
 	return normalize_service_prefix(candidate)
+
+
+def add_railway_target_args(parser: argparse.ArgumentParser) -> None:
+	parser.add_argument(
+		"--workspace",
+		default=None,
+		help="Railway workspace name used to disambiguate project lookup.",
+	)
+	parser.add_argument(
+		"--workspace-id",
+		default=None,
+		help="Railway workspace id used to disambiguate project lookup.",
+	)
+	parser.add_argument(
+		"--project",
+		default=None,
+		help="Railway project name. Optional when using a project token.",
+	)
+	parser.add_argument(
+		"--project-id",
+		default=None,
+		help="Railway project id. Optional when using a project token.",
+	)
+	parser.add_argument(
+		"--environment",
+		default=None,
+		help="Railway environment name. Defaults to production.",
+	)
+	parser.add_argument(
+		"--environment-id",
+		default=None,
+		help="Railway environment id. Optional when using a project token.",
+	)
 
 
 def parse_kv_items(items: list[str] | None, label: str) -> dict[str, str]:
@@ -142,6 +177,22 @@ def environment_name_from_sources(
 	)
 
 
+def project_id_from_sources(args: argparse.Namespace) -> str | None:
+	return clean_optional(getattr(args, "project_id", None))
+
+
+def environment_id_from_sources(args: argparse.Namespace) -> str | None:
+	return clean_optional(getattr(args, "environment_id", None))
+
+
+def workspace_name_from_sources(args: argparse.Namespace) -> str | None:
+	return clean_optional(getattr(args, "workspace", None))
+
+
+def workspace_id_from_sources(args: argparse.Namespace) -> str | None:
+	return clean_optional(getattr(args, "workspace_id", None))
+
+
 def _match_record_by_name(
 	records: list[RailwayNameRecord],
 	*,
@@ -159,13 +210,51 @@ def _match_record_by_name(
 	raise ValueError(f"multiple Railway {label}s named {name}")
 
 
+def _reject_name_and_id(
+	*,
+	name: str | None,
+	record_id: str | None,
+	label: str,
+) -> None:
+	if name is not None and record_id is not None:
+		raise ValueError(f"use either Railway {label} name or {label} id, not both")
+
+
+async def _resolve_workspace_id(
+	client: RailwayGraphQLClient,
+	*,
+	workspace_name: str | None,
+	workspace_id: str | None,
+) -> str | None:
+	_reject_name_and_id(name=workspace_name, record_id=workspace_id, label="workspace")
+	if workspace_id is not None:
+		return workspace_id
+	if workspace_name is None:
+		return None
+	workspaces = await client.list_workspaces()
+	return _match_record_by_name(
+		workspaces,
+		name=workspace_name,
+		label="workspace",
+	).id
+
+
 async def _resolve_project_id(
 	client: RailwayGraphQLClient,
 	*,
 	project_name: str | None,
+	project_id: str | None,
 	project_token: ProjectTokenRecord | None,
 	workspace_id: str | None,
 ) -> str:
+	_reject_name_and_id(name=project_name, record_id=project_id, label="project")
+	if project_id is not None:
+		if project_token is not None and project_token.project_id != project_id:
+			project = await client.get_project(project_id=project_token.project_id)
+			raise ValueError(
+				f"project token is scoped to Railway project {project.name}, not {project_id}"
+			)
+		return project_id
 	if project_name is None:
 		if project_token is None:
 			raise ValueError(
@@ -192,8 +281,27 @@ async def _resolve_environment_id(
 	*,
 	project_id: str,
 	environment_name: str | None,
+	environment_id: str | None,
 	project_token_environment_id: str | None,
 ) -> str:
+	_reject_name_and_id(
+		name=environment_name,
+		record_id=environment_id,
+		label="environment",
+	)
+	if environment_id is not None:
+		if (
+			project_token_environment_id is not None
+			and project_token_environment_id != environment_id
+		):
+			environment = await client.get_environment(
+				environment_id=project_token_environment_id
+			)
+			raise ValueError(
+				"project token is scoped to Railway environment "
+				+ f"{environment.name}, not {environment_id}"
+			)
+		return environment_id
 	if project_token_environment_id is not None:
 		if environment_name is None:
 			return project_token_environment_id
@@ -217,18 +325,27 @@ async def _resolve_environment_id(
 
 async def resolve_railway_target_ids(
 	*,
-	project_name: str | None,
-	environment_name: str | None,
 	token: str,
+	project_name: str | None = None,
+	project_id: str | None = None,
+	environment_name: str | None = None,
+	environment_id: str | None = None,
+	workspace_name: str | None = None,
 	workspace_id: str | None = None,
 ) -> tuple[str, str]:
 	async with RailwayGraphQLClient(token=token) as client:
 		project_token = await client.get_project_token()
+		resolved_workspace_id = await _resolve_workspace_id(
+			client,
+			workspace_name=workspace_name,
+			workspace_id=workspace_id,
+		)
 		project_id = await _resolve_project_id(
 			client,
 			project_name=project_name,
+			project_id=project_id,
 			project_token=project_token,
-			workspace_id=workspace_id,
+			workspace_id=resolved_workspace_id,
 		)
 		project_token_environment_id = (
 			project_token.environment_id
@@ -239,6 +356,7 @@ async def resolve_railway_target_ids(
 			client,
 			project_id=project_id,
 			environment_name=environment_name,
+			environment_id=environment_id,
 			project_token_environment_id=project_token_environment_id,
 		)
 	return project_id, environment_id

@@ -1,12 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from pulse_railway.constants import (
-	ACTIVE_DEPLOYMENT_VARIABLE,
-	PULSE_DEPLOYMENT_ID,
-	PULSE_KV_KIND,
-	PULSE_KV_URL,
-)
+from pulse_railway.constants import PULSE_DEPLOYMENT_ID, PULSE_KV_KIND, PULSE_KV_URL
 from pulse_railway.railway import RailwayResolver, ServiceRecord
 from pulse_railway.store import (
 	DeploymentStore,
@@ -26,22 +21,7 @@ async def test_resolver_skips_service_refresh_when_active_deployment_is_unchange
 
 	class _FakeClient:
 		def __init__(self) -> None:
-			self.variable_calls = 0
 			self.service_calls = 0
-			self.active_deployment = "v1"
-
-		async def get_project_variables(
-			self,
-			*,
-			project_id: str,
-			environment_id: str,
-			service_id: str | None = None,
-		) -> dict[str, str]:
-			assert project_id == "project"
-			assert environment_id == "env"
-			assert service_id is None
-			self.variable_calls += 1
-			return {ACTIVE_DEPLOYMENT_VARIABLE: self.active_deployment}
 
 		async def list_services(
 			self, *, project_id: str, environment_id: str
@@ -66,11 +46,14 @@ async def test_resolver_skips_service_refresh_when_active_deployment_is_unchange
 			return {}
 
 	client = _FakeClient()
+	store = DeploymentStore(InMemoryKVStore())
+	await store.mark_active(deployment_id="v1", service_name="pulse-v1")
 	resolver = RailwayResolver(
 		client=client,
 		project_id="project",
 		environment_id="env",
 		service_prefix="pulse",
+		store=store,
 		cache_ttl_seconds=5.0,
 	)
 
@@ -81,25 +64,22 @@ async def test_resolver_skips_service_refresh_when_active_deployment_is_unchange
 	assert first.deployment_id == "v1"
 	assert second is not None
 	assert second.deployment_id == "v1"
-	assert client.variable_calls == 1
-	assert client.service_calls == 1
+	assert client.service_calls == 0
 
 	now = 106.0
 	third = await resolver.resolve_active()
 
 	assert third is not None
 	assert third.deployment_id == "v1"
-	assert client.variable_calls == 2
-	assert client.service_calls == 1
+	assert client.service_calls == 0
 
 	now = 112.0
-	client.active_deployment = "v2"
+	await store.mark_active(deployment_id="v2", service_name="pulse-v2")
 	fourth = await resolver.resolve_active()
 
 	assert fourth is not None
 	assert fourth.deployment_id == "v2"
-	assert client.variable_calls == 3
-	assert client.service_calls == 2
+	assert client.service_calls == 0
 
 
 @pytest.mark.asyncio

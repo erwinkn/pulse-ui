@@ -26,7 +26,6 @@ Use the commands like this:
 
 - `pulse-railway scaffold` bootstraps the stable router, env, Redis, and janitor stack into an empty Railway project.
 - `pulse-railway ensure` creates or reconciles that baseline stack and is safe to run from CI before deploy.
-- `pulse-railway upgrade` is currently a no-op placeholder.
 - `pulse-railway deploy` builds and rolls out a new backend service on top of an already-initialized stack.
   By default it uploads source and uses `railway up` to build on Railway. Passing an image repository switches deploy to the local `docker buildx build --push` path.
 - `pulse-railway redeploy` redeploys the active backend service. Pass `--deployment-id <id>` to redeploy a specific Pulse deployment.
@@ -37,9 +36,30 @@ Use the commands like this:
 
 `deploy` reads app configuration from `RailwayPlugin` on the target app. Provide the Dockerfile with `RailwayPlugin(dockerfile=...)`.
 
-`pulse-railway scaffold` is template-first and fresh-only. On an empty target it deploys the published `pulse-baseline` template so the router, janitor, and Redis land on the Railway canvas with a stable layout, creates the stable env service in the template group, then writes runtime images, variables, domains, cron, and healthchecks. Router and janitor services use the latest published official GHCR image tags unless you pass explicit image overrides: `ghcr.io/erwinkn/pulse-railway-router:<version>` and `ghcr.io/erwinkn/pulse-railway-janitor:<version>`. When you pass `--redis-url`, scaffold removes the managed Redis service plus any template-created Redis references, then rewrites the baseline to use the external URL. If any baseline service already exists, rerun with `pulse-railway ensure`.
+`pulse-railway scaffold` is template-first and fresh-only. On an empty target it deploys the published `pulse-baseline` template so the router, janitor, and Redis land on the Railway canvas with a stable layout, creates the stable env service in the template group, then writes runtime images, variables, domains, cron, and healthchecks. Router and janitor services use the latest published official GHCR image tags unless you pass explicit image overrides: `ghcr.io/erwinkn/pulse-railway-router:<version>` and `ghcr.io/erwinkn/pulse-railway-janitor:<version>`. When you pass `--redis-url`, scaffold removes the managed Redis service created by the template and rewrites the baseline to use the external URL. If any baseline service already exists, delete the baseline services and rerun `pulse-railway scaffold`.
 
-`pulse-railway scaffold <app-file>`, `pulse-railway ensure <app-file>`, and `pulse-railway deploy <app-file>` load the app to read `RailwayPlugin`. For `scaffold` and `ensure`, set `RailwayPlugin(project="...", environment="...")`; if project or environment is omitted, the token must provide enough scope to infer them. For `deploy`, CLI `--project` / `--environment` override plugin config. Project and environment IDs are resolved internally before Railway API calls.
+`pulse-railway scaffold <app-file>`, `pulse-railway ensure <app-file>`, and `pulse-railway deploy <app-file>` load the app to read `RailwayPlugin`. For `scaffold` and `ensure`, set `RailwayPlugin(project="...", environment="...")`; if project or environment is omitted, the token must provide enough scope to infer them. CLI target flags override plugin config. Project and environment IDs are resolved internally before Railway API calls.
+
+All local target commands accept Railway target names and IDs:
+
+```bash
+uv run pulse-railway scaffold examples/railway/main.py \
+  --workspace <workspace-name> \
+  --project <project-name> \
+  --environment <environment-name>
+
+uv run pulse-railway ensure examples/railway/main.py \
+  --workspace <workspace-name> \
+  --project <project-name> \
+  --environment <environment-name>
+
+uv run pulse-railway deploy examples/railway/main.py \
+  --workspace-id <workspace-id> \
+  --project-id <project-id> \
+  --environment-id <environment-id>
+```
+
+Use either the name or ID form for each target, not both. `--workspace` and `--workspace-id` are only needed to disambiguate project lookup by name.
 
 You can also set `deployment_name` on `RailwayPlugin` to provide the default deploy name from app config. Precedence is: `--deployment-name`, then `RailwayPlugin(deployment_name=...)`, then `prod`.
 
@@ -62,7 +82,7 @@ By default, `pulse-railway deploy` uses source mode. Image deployments require `
 - One Railway backend service per deployment
 - Stable Railway Redis service unless you pass `--redis-url`
 - Optional Railway cron job for janitor cleanup
-- Active deployment stored in `PULSE_ACTIVE_DEPLOYMENT`
+- Active deployment stored in Redis
 - Explicit affinity via `pulse_deployment` query param or `x-pulse-deployment` header
 - Websockets proxied through the router to the selected backend service
 - Draining and cleanup state stored in Redis
@@ -71,7 +91,7 @@ By default, `pulse-railway deploy` uses source mode. Image deployments require `
 
 ## Runtime
 
-Backend services must set `PULSE_DEPLOYMENT_ID`. `RailwayPlugin` injects the affinity query into Pulse prerender and websocket directives and exposes `/_pulse/meta` for verification. Internal janitor endpoints receive `PULSE_RAILWAY_INTERNAL_TOKEN` through Railway reference variables using `${{ shared.PULSE_RAILWAY_INTERNAL_TOKEN }}`.
+Backend services must set `PULSE_DEPLOYMENT_ID`. `RailwayPlugin` injects the affinity query into Pulse prerender and websocket directives and exposes `/_pulse/meta` for verification. Internal janitor endpoints receive `PULSE_RAILWAY_INTERNAL_TOKEN` directly on each service that needs it.
 
 If your app opts into `pulse_railway.RailwaySessionStore()`:
 
@@ -131,5 +151,5 @@ If the name matches multiple generated deployment ids, the command fails and pri
 ## Notes
 
 - Backend services should run with `1` replica. Railway does not provide replica-level sticky routing, so deployment affinity alone is only safe with a single backend replica when sessions are stored in memory.
-- The router can run with multiple replicas because routing state lives in the request query/header plus the active deployment variable.
+- The router can run with multiple replicas because routing state lives in the request query/header plus Redis.
 - Healthchecks remain for crash recovery only. Deployment cleanup is handled by the janitor cron job, not by failing healthchecks on drained services.

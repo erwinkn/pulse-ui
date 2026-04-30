@@ -481,6 +481,51 @@ async def test_list_projects_filters_workspace_listing_by_workspace_id() -> None
 
 
 @pytest.mark.asyncio
+async def test_list_workspaces_reads_owned_and_external_workspaces() -> None:
+	def handler(request: httpx.Request) -> httpx.Response:
+		payload = json.loads(request.read().decode())
+		query = str(payload["query"])
+		if "projectToken" in query:
+			return httpx.Response(403, json={"errors": [{"message": "forbidden"}]})
+		assert "externalWorkspaces" in query
+		return httpx.Response(
+			200,
+			json={
+				"data": {
+					"me": {
+						"workspaces": [
+							{"id": "workspace-1", "name": "Personal"},
+							{"id": "workspace-2", "name": "Team"},
+						]
+					},
+					"externalWorkspaces": [
+						{"id": "workspace-2", "name": "Team"},
+						{"id": "workspace-3", "name": "External"},
+					],
+				}
+			},
+		)
+
+	client = RailwayGraphQLClient(token="token")
+	client._client = httpx.AsyncClient(
+		base_url=client.endpoint,
+		headers={"Content-Type": "application/json"},
+		transport=httpx.MockTransport(handler),
+		timeout=client._client.timeout,
+	)
+	try:
+		workspaces = await client.list_workspaces()
+	finally:
+		await client.aclose()
+
+	assert [(workspace.id, workspace.name) for workspace in workspaces] == [
+		("workspace-1", "Personal"),
+		("workspace-2", "Team"),
+		("workspace-3", "External"),
+	]
+
+
+@pytest.mark.asyncio
 async def test_get_service_latest_deployment_reads_environment_service_instances() -> (
 	None
 ):

@@ -9,7 +9,6 @@ import aiohttp
 
 from pulse_railway.config import RailwayInternals, RailwayProject
 from pulse_railway.constants import (
-	ACTIVE_DEPLOYMENT_VARIABLE,
 	DEFAULT_JANITOR_LOCK_TTL_SECONDS,
 	DEPLOYMENT_STATE_DRAINING,
 	INTERNAL_RELOAD_PATH,
@@ -17,9 +16,8 @@ from pulse_railway.constants import (
 	INTERNAL_TOKEN_HEADER,
 )
 from pulse_railway.deployment import (
-	DeploymentServiceRecord,
 	list_deployment_service_records,
-	set_deployment_service_state,
+	validate_deployment_service_records,
 )
 from pulse_railway.railway import RailwayGraphQLClient, service_name_for_deployment
 from pulse_railway.stack import resolve_project_internals
@@ -189,39 +187,44 @@ async def run_janitor(
 				return JanitorResult(lock_acquired=False)
 
 			timestamp = time.time() if now is None else now
-			project_variables = await client.get_project_variables(
-				project_id=project.project_id,
-				environment_id=project.environment_id,
-			)
-			active_deployment_id = project_variables.get(ACTIVE_DEPLOYMENT_VARIABLE)
 			deployment_services = await list_deployment_service_records(
 				client,
 				project=project,
 			)
-			draining: list[DeploymentServiceRecord] = []
-			for service in deployment_services:
-				if service.deployment_id == active_deployment_id:
-					continue
-				if service.state != DEPLOYMENT_STATE_DRAINING:
-					service.state = DEPLOYMENT_STATE_DRAINING
-					service.drain_started_at = service.drain_started_at or timestamp
-					await set_deployment_service_state(
-						client,
-						project=project,
-						service_id=service.service_id,
-						state=service.state,
-						drain_started_at=service.drain_started_at,
+			active_deployment_id = await store.get_active_deployment()
+			active_service, draining = validate_deployment_service_records(
+				deployment_services,
+				active_deployment_id,
+			)
+			if active_service is not None:
+				await store.mark_active(
+					deployment_id=active_service.deployment_id,
+					service_name=active_service.service_name,
+					now=timestamp,
+				)
+			for service in draining:
+				stored = await store.get_deployment(deployment_id=service.deployment_id)
+				if (
+					stored is None
+					or stored.state != DEPLOYMENT_STATE_DRAINING
+					or stored.drain_started_at is None
+				):
+					await store.mark_draining(
+						deployment_id=service.deployment_id,
+						service_name=service.service_name,
+						now=(
+							service.drain_started_at
+							if service.state == DEPLOYMENT_STATE_DRAINING
+							and service.drain_started_at is not None
+							else timestamp
+						),
 					)
-				elif service.drain_started_at is None:
-					service.drain_started_at = timestamp
-					await set_deployment_service_state(
-						client,
-						project=project,
-						service_id=service.service_id,
-						state=service.state,
-						drain_started_at=service.drain_started_at,
+					stored = await store.get_deployment(
+						deployment_id=service.deployment_id
 					)
-				draining.append(service)
+				assert stored is not None
+				service.state = stored.state
+				service.drain_started_at = stored.drain_started_at
 			result = JanitorResult(lock_acquired=True, scanned_count=len(draining))
 			draining_service_ids = {
 				service.service_name: service.service_id for service in draining

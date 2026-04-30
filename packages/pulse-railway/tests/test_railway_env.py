@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from pulse_railway.constants import (
+	PULSE_DRAIN_GRACE_SECONDS,
+	PULSE_INTERNAL_TOKEN,
+	PULSE_MAX_DRAIN_AGE_SECONDS,
+	PULSE_RAILWAY_REDIS_URL,
+	PULSE_REDIS_PREFIX,
+	PULSE_SERVICE_PREFIX,
+	PULSE_WEBSOCKET_HEARTBEAT_SECONDS,
+	PULSE_WEBSOCKET_TTL_SECONDS,
+	RAILWAY_TOKEN,
+	REDIS_URL,
+)
+from pulse_railway.env import (
+	PORT,
+	PULSE_APP_FILE,
+	PULSE_BACKEND_PORT,
+	PULSE_SERVER_ADDRESS,
+	PULSE_WEB_ROOT,
+	RAILWAY_DOCKERFILE_PATH,
+	backend_build_env,
+	backend_env,
+	backend_session_env,
+	janitor_env,
+	pulse_env_user_references,
+	router_env,
+)
+
+
+def test_router_env_includes_websocket_vars_without_active_deployment() -> None:
+	assert router_env(
+		token="token",
+		backend_port=8000,
+		router_port=9000,
+		service_prefix="pulse-",
+		redis_url="redis://internal",
+		redis_prefix="pulse:railway",
+		websocket_heartbeat_seconds=15,
+		websocket_ttl_seconds=45,
+	) == {
+		RAILWAY_TOKEN: "token",
+		PULSE_BACKEND_PORT: "8000",
+		PORT: "9000",
+		PULSE_SERVICE_PREFIX: "pulse-",
+		REDIS_URL: "redis://internal",
+		PULSE_REDIS_PREFIX: "pulse:railway",
+		PULSE_WEBSOCKET_HEARTBEAT_SECONDS: "15",
+		PULSE_WEBSOCKET_TTL_SECONDS: "45",
+	}
+
+
+def test_janitor_env_excludes_websocket_vars() -> None:
+	env = janitor_env(
+		token="token",
+		internal_token="secret",
+		redis_url="redis://internal",
+		redis_prefix="pulse:railway",
+		service_prefix=None,
+		drain_grace_seconds=60,
+		max_drain_age_seconds=86400,
+	)
+
+	assert env == {
+		RAILWAY_TOKEN: "token",
+		PULSE_INTERNAL_TOKEN: "secret",
+		REDIS_URL: "redis://internal",
+		PULSE_REDIS_PREFIX: "pulse:railway",
+		PULSE_DRAIN_GRACE_SECONDS: "60",
+		PULSE_MAX_DRAIN_AGE_SECONDS: "86400",
+	}
+	assert PULSE_WEBSOCKET_HEARTBEAT_SECONDS not in env
+	assert PULSE_WEBSOCKET_TTL_SECONDS not in env
+
+
+def test_backend_env_sets_direct_token_and_no_active_deployment() -> None:
+	env = backend_env(
+		deployment_id="prod",
+		internal_token="secret",
+		app_file="main.py",
+		server_address="https://example.com",
+		backend_port=8000,
+		session_env=backend_session_env(True, redis_url="redis://internal"),
+		user_env={"FEATURE_FLAG": "on"},
+	)
+
+	assert env == {
+		"PULSE_DEPLOYMENT_ID": "prod",
+		PULSE_INTERNAL_TOKEN: "secret",
+		PULSE_APP_FILE: "main.py",
+		PULSE_SERVER_ADDRESS: "https://example.com",
+		PORT: "8000",
+		PULSE_RAILWAY_REDIS_URL: "redis://internal",
+		"FEATURE_FLAG": "on",
+	}
+	assert "PULSE_ACTIVE_DEPLOYMENT" not in env
+
+
+def test_backend_build_env_uses_prefixed_names(tmp_path: Path) -> None:
+	dockerfile = tmp_path / "examples" / "Dockerfile"
+	dockerfile.parent.mkdir()
+	dockerfile.write_text("FROM scratch\n")
+
+	assert backend_build_env(
+		build_args={"FEATURE_BUILD": "on"},
+		app_file="examples/main.py",
+		web_root="examples/web",
+		server_address="https://example.com",
+		dockerfile_path=dockerfile,
+		context_path=tmp_path,
+	) == {
+		"FEATURE_BUILD": "on",
+		PULSE_APP_FILE: "examples/main.py",
+		PULSE_WEB_ROOT: "examples/web",
+		PULSE_SERVER_ADDRESS: "https://example.com",
+		RAILWAY_DOCKERFILE_PATH: "examples/Dockerfile",
+	}
+
+
+def test_pulse_env_user_references_filters_managed_vars() -> None:
+	assert pulse_env_user_references(
+		env_service_name="pulse-env",
+		env_vars={
+			"USER_SECRET": "secret",
+			"PULSE_APP_FILE": "managed",
+			"RAILWAY_PRIVATE_DOMAIN": "managed",
+		},
+	) == {"USER_SECRET": "${{pulse-env.USER_SECRET}}"}

@@ -106,13 +106,13 @@ def test_example_dockerfile_builds_workspace_packages_for_source_uploads() -> No
 	final_stage = _dockerfile_stage(dockerfile, "final")
 
 	workspace_build = js_build_stage.index("RUN bun run build")
-	web_workdir = js_build_stage.index("WORKDIR /app/examples/railway/web")
+	web_workdir = js_build_stage.index("WORKDIR /app/${PULSE_WEB_ROOT}")
 	web_build = js_build_stage.index("RUN bun run build", web_workdir)
 
 	assert workspace_build < web_build
 	assert any(" /app/packages/pulse/js/dist" in line for line in final_stage)
 	assert any(" /app/packages/pulse-mantine/js/dist" in line for line in final_stage)
-	assert any(" /app/examples/railway/web/build" in line for line in final_stage)
+	assert any(" /app/${PULSE_WEB_ROOT}/build" in line for line in final_stage)
 
 
 @pytest.mark.asyncio

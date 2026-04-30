@@ -9,11 +9,11 @@ from typing import Any, cast
 import httpx
 
 from pulse_railway.constants import (
-	ACTIVE_DEPLOYMENT_VARIABLE,
 	DEFAULT_BACKEND_PORT,
 	PULSE_DEPLOYMENT_ID,
 	RAILWAY_API_ENDPOINT,
 )
+from pulse_railway.store import DeploymentStore
 
 DEPLOYMENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,23}$")
 DEFAULT_RAILWAY_GRAPHQL_TIMEOUT = 120.0
@@ -118,6 +118,12 @@ class EnvironmentRecord:
 
 @dataclass(slots=True)
 class ProjectRecord:
+	id: str
+	name: str
+
+
+@dataclass(slots=True)
+class WorkspaceRecord:
 	id: str
 	name: str
 
@@ -325,6 +331,53 @@ class RailwayGraphQLClient:
 			if "not authorized" not in str(exc).lower():
 				raise
 			return projects
+
+	async def list_workspaces(self) -> list[WorkspaceRecord]:
+		data = await self.graphql(
+			"""
+			query {
+				externalWorkspaces {
+					id
+					name
+				}
+				me {
+					workspaces {
+						id
+						name
+					}
+				}
+			}
+			"""
+		)
+		seen: set[str] = set()
+		workspaces: list[WorkspaceRecord] = []
+		for workspace in data.get("me", {}).get("workspaces", []):
+			workspace_id = workspace.get("id")
+			workspace_name = workspace.get("name")
+			if (
+				not isinstance(workspace_id, str)
+				or not workspace_id
+				or not isinstance(workspace_name, str)
+			):
+				continue
+			if workspace_id in seen:
+				continue
+			seen.add(workspace_id)
+			workspaces.append(WorkspaceRecord(id=workspace_id, name=workspace_name))
+		for workspace in data.get("externalWorkspaces", []):
+			workspace_id = workspace.get("id")
+			workspace_name = workspace.get("name")
+			if (
+				not isinstance(workspace_id, str)
+				or not workspace_id
+				or not isinstance(workspace_name, str)
+			):
+				continue
+			if workspace_id in seen:
+				continue
+			seen.add(workspace_id)
+			workspaces.append(WorkspaceRecord(id=workspace_id, name=workspace_name))
+		return workspaces
 
 	async def _list_projects_direct(
 		self, *, workspace_id: str | None
@@ -939,6 +992,7 @@ class RailwayResolver:
 		project_id: str,
 		environment_id: str,
 		service_prefix: str | None,
+		store: DeploymentStore | None = None,
 		backend_port: int = DEFAULT_BACKEND_PORT,
 		cache_ttl_seconds: float = 5.0,
 	) -> None:
@@ -950,6 +1004,7 @@ class RailwayResolver:
 			if service_prefix is not None and service_prefix.strip()
 			else None
 		)
+		self.store: DeploymentStore | None = store
 		self.backend_port: int = backend_port
 		self.cache_ttl_seconds: float = cache_ttl_seconds
 		self._cached_active_deployment_id: str | None = None
@@ -962,11 +1017,10 @@ class RailwayResolver:
 	async def _refresh_active_deployment(self) -> str | None:
 		if time.monotonic() - self._active_cached_at < self.cache_ttl_seconds:
 			return self._cached_active_deployment_id
-		variables = await self.client.get_project_variables(
-			project_id=self.project_id,
-			environment_id=self.environment_id,
-		)
-		self._cached_active_deployment_id = variables.get(ACTIVE_DEPLOYMENT_VARIABLE)
+		if self.store is None:
+			self._cached_active_deployment_id = None
+		else:
+			self._cached_active_deployment_id = await self.store.get_active_deployment()
 		self._active_cached_at = time.monotonic()
 		return self._cached_active_deployment_id
 
@@ -997,6 +1051,13 @@ class RailwayResolver:
 
 	async def resolve(self, deployment_id: str) -> RouteTarget | None:
 		service_name = service_name_for_deployment(self.service_prefix, deployment_id)
+		if self.store is not None:
+			deployment = await self.store.get_deployment(deployment_id=deployment_id)
+			if deployment is not None and deployment.service_name == service_name:
+				return RouteTarget(
+					deployment_id=deployment_id,
+					base_url=f"http://{service_name}.railway.internal:{self.backend_port}",
+				)
 		await self._refresh_services()
 		if self._cached_deployment_service_names.get(deployment_id) != service_name:
 			return None
@@ -1023,7 +1084,6 @@ class RailwayResolver:
 
 
 __all__ = [
-	"ACTIVE_DEPLOYMENT_VARIABLE",
 	"EnvironmentRecord",
 	"ProjectRecord",
 	"ProjectTokenRecord",

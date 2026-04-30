@@ -87,6 +87,9 @@ class DeploymentStore:
 	def _lock_key(self) -> str:
 		return f"{self.prefix}:janitor:lock"
 
+	def _active_key(self) -> str:
+		return f"{self.prefix}:active"
+
 	async def close(self) -> None:
 		if self.owns_store:
 			await self.store.close()
@@ -118,6 +121,7 @@ class DeploymentStore:
 		service_name: str,
 		now: float | None = None,
 	) -> None:
+		await self.store.set(self._active_key(), deployment_id)
 		await self._save_deployment(
 			StoredDeployment(
 				deployment_id=deployment_id,
@@ -127,6 +131,13 @@ class DeploymentStore:
 				drain_started_at=None,
 			)
 		)
+
+	async def get_active_deployment(self) -> str | None:
+		return await self.store.get(self._active_key())
+
+	async def clear_active_deployment(self, *, deployment_id: str) -> None:
+		if await self.get_active_deployment() == deployment_id:
+			await self.store.delete(self._active_key())
 
 	async def mark_draining(
 		self,

@@ -7,7 +7,6 @@ from typing import Any
 import pytest
 from pulse_railway.config import DockerBuild, RailwayProject
 from pulse_railway.constants import (
-	ACTIVE_DEPLOYMENT_VARIABLE,
 	DEPLOYMENT_STATE_ACTIVE,
 	DEPLOYMENT_STATE_DRAINING,
 	PULSE_DEPLOYMENT_ID,
@@ -23,13 +22,16 @@ from pulse_railway.deployment import (
 	_pulse_env_reference_variables,
 	_run_command,
 	_uses_railway_session_store_from_app,
-	check_reserved_source_build_args,
 	default_service_prefix,
+	delete_deployment,
 	deploy,
 	generate_deployment_id,
 	railway_up_command,
 	redeploy_deployment,
 	resolve_deployment_id_by_name,
+)
+from pulse_railway.env import (
+	check_reserved_source_build_args,
 	validate_backend_env_vars,
 )
 from pulse_railway.railway import ServiceRecord
@@ -65,6 +67,23 @@ def _stub_pulse_env_reference_variables(monkeypatch: pytest.MonkeyPatch) -> None
 		"pulse_railway.deployment._pulse_env_reference_variables",
 		fake_pulse_env_reference_variables,
 	)
+
+
+@pytest.fixture(autouse=True)
+def router_control_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+	calls: list[dict[str, Any]] = []
+
+	async def fake_router_control_request(**kwargs: Any) -> dict[str, object]:
+		calls.append(kwargs)
+		if kwargs["path"] == "active":
+			return {"deployment_id": "prod-260402-120000"}
+		return {"ok": True}
+
+	monkeypatch.setattr(
+		"pulse_railway.deployment._router_control_request",
+		fake_router_control_request,
+	)
+	return calls
 
 
 def test_generate_deployment_id_and_prefix() -> None:
@@ -423,20 +442,26 @@ async def test_redeploy_deployment_defaults_to_active_deployment(
 		async def __aexit__(self, *_: object) -> None:
 			return None
 
-		async def get_project_variables(
-			self, *, project_id: str, environment_id: str
-		) -> dict[str, str]:
-			assert project_id == "project"
-			assert environment_id == "env"
-			return {ACTIVE_DEPLOYMENT_VARIABLE: "prod-260402-120000"}
-
 		async def find_service_by_name(
 			self, *, project_id: str, environment_id: str, name: str
 		) -> ServiceRecord | None:
 			assert project_id == "project"
 			assert environment_id == "env"
+			if name == "pulse-router":
+				return ServiceRecord(id="svc-router", name=name)
+			if name == "pulse-router-janitor":
+				return ServiceRecord(id="svc-janitor", name=name)
 			assert name == "prod-260402-120000"
 			return ServiceRecord(id="svc-backend", name=name)
+
+		async def get_service_variables_for_deployment(
+			self, *, project_id: str, environment_id: str, service_id: str
+		) -> dict[str, str]:
+			assert project_id == "project"
+			assert environment_id == "env"
+			if service_id == "svc-router":
+				return {}
+			return {}
 
 		async def deploy_service(self, *, service_id: str, environment_id: str) -> str:
 			calls.append((service_id, environment_id))
@@ -447,6 +472,21 @@ async def test_redeploy_deployment_defaults_to_active_deployment(
 			return {"id": deployment_id, "status": "SUCCESS"}
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
+
+	async def fake_require_ready_stack(**_: Any) -> StackState:
+		return StackState(
+			router=StackServiceState("svc-router", "pulse-router"),
+			janitor=StackServiceState("svc-janitor", "pulse-janitor"),
+			redis=StackServiceState("svc-redis", "pulse-redis"),
+			internal_token="secret-token",
+			redis_url="redis://pulse-redis.railway.internal:6379",
+			server_address="https://test.pulse.sc",
+		)
+
+	monkeypatch.setattr(
+		"pulse_railway.deployment.require_ready_stack",
+		fake_require_ready_stack,
+	)
 
 	result = await redeploy_deployment(
 		project=RailwayProject(
@@ -514,7 +554,204 @@ async def test_redeploy_deployment_uses_explicit_deployment_id(
 
 
 @pytest.mark.asyncio
-async def test_deploy_happy_path_on_ready_stack(monkeypatch, tmp_path) -> None:
+async def test_delete_deployment_rejects_active_before_service_delete(
+	monkeypatch: pytest.MonkeyPatch,
+	router_control_calls: list[dict[str, Any]],
+) -> None:
+	class _FakeClient:
+		def __init__(self, **_: object) -> None:
+			return None
+
+		async def __aenter__(self) -> "_FakeClient":
+			return self
+
+		async def __aexit__(self, *_: object) -> None:
+			return None
+
+		async def find_service_by_name(
+			self, *, project_id: str, environment_id: str, name: str
+		) -> ServiceRecord | None:
+			assert name == "prod-260402-120000"
+			return ServiceRecord(id="svc-active", name=name)
+
+		async def delete_service(self, **_: object) -> None:
+			raise AssertionError("active service should not be deleted")
+
+	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
+
+	async def fake_require_ready_stack(**_: Any) -> StackState:
+		return StackState(
+			router=StackServiceState("svc-router", "pulse-router"),
+			janitor=StackServiceState("svc-janitor", "pulse-janitor"),
+			redis=StackServiceState("svc-redis", "pulse-redis"),
+			internal_token="secret-token",
+			redis_url="redis://pulse-redis.railway.internal:6379",
+			server_address="https://test.pulse.sc",
+		)
+
+	monkeypatch.setattr(
+		"pulse_railway.deployment.require_ready_stack",
+		fake_require_ready_stack,
+	)
+
+	with pytest.raises(DeploymentError, match="cannot delete active deployment"):
+		await delete_deployment(
+			project=RailwayProject(
+				project_id="project",
+				environment_id="env",
+				token="token",
+				service_name="pulse-router",
+			),
+			deployment_id="prod-260402-120000",
+		)
+
+	assert [call["path"] for call in router_control_calls] == ["active"]
+
+
+@pytest.mark.asyncio
+async def test_delete_deployment_clears_router_state_then_deletes_inactive_service(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	events: list[tuple[str, str]] = []
+	router_control_calls: list[dict[str, Any]] = []
+
+	async def fake_router_control_request(**kwargs: Any) -> dict[str, object]:
+		router_control_calls.append(kwargs)
+		if kwargs["path"] == "active":
+			return {"deployment_id": "prod-260402-120000"}
+		events.append(("router_delete", kwargs["json_payload"]["deployment_id"]))
+		return {"ok": True}
+
+	monkeypatch.setattr(
+		"pulse_railway.deployment._router_control_request",
+		fake_router_control_request,
+	)
+
+	class _FakeClient:
+		def __init__(self, **_: object) -> None:
+			return None
+
+		async def __aenter__(self) -> "_FakeClient":
+			return self
+
+		async def __aexit__(self, *_: object) -> None:
+			return None
+
+		async def find_service_by_name(
+			self, *, project_id: str, environment_id: str, name: str
+		) -> ServiceRecord | None:
+			assert project_id == "project"
+			assert environment_id == "env"
+			assert name == "prod-old"
+			return ServiceRecord(id="svc-old", name=name)
+
+		async def delete_service(self, *, service_id: str, environment_id: str) -> None:
+			events.append(("delete_service", service_id))
+
+	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
+
+	async def fake_require_ready_stack(**_: Any) -> StackState:
+		return StackState(
+			router=StackServiceState("svc-router", "pulse-router"),
+			janitor=StackServiceState("svc-janitor", "pulse-janitor"),
+			redis=StackServiceState("svc-redis", "pulse-redis"),
+			internal_token="secret-token",
+			redis_url="redis://pulse-redis.railway.internal:6379",
+			server_address="https://test.pulse.sc",
+		)
+
+	monkeypatch.setattr(
+		"pulse_railway.deployment.require_ready_stack",
+		fake_require_ready_stack,
+	)
+
+	await delete_deployment(
+		project=RailwayProject(
+			project_id="project",
+			environment_id="env",
+			token="token",
+			service_name="pulse-router",
+		),
+		deployment_id="prod-old",
+	)
+
+	assert [call["path"] for call in router_control_calls] == ["active", "delete"]
+	assert router_control_calls[-1]["json_payload"] == {"deployment_id": "prod-old"}
+	assert events == [("router_delete", "prod-old"), ("delete_service", "svc-old")]
+
+
+@pytest.mark.asyncio
+async def test_delete_deployment_keeps_service_when_router_state_delete_fails(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	deleted_services: list[str] = []
+
+	class _FakeClient:
+		def __init__(self, **_: object) -> None:
+			return None
+
+		async def __aenter__(self) -> "_FakeClient":
+			return self
+
+		async def __aexit__(self, *_: object) -> None:
+			return None
+
+		async def find_service_by_name(
+			self, *, project_id: str, environment_id: str, name: str
+		) -> ServiceRecord | None:
+			assert project_id == "project"
+			assert environment_id == "env"
+			assert name == "prod-old"
+			return ServiceRecord(id="svc-old", name=name)
+
+		async def delete_service(self, *, service_id: str, environment_id: str) -> None:
+			deleted_services.append(service_id)
+
+	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
+
+	async def fake_require_ready_stack(**_: Any) -> StackState:
+		return StackState(
+			router=StackServiceState("svc-router", "pulse-router"),
+			janitor=StackServiceState("svc-janitor", "pulse-janitor"),
+			redis=StackServiceState("svc-redis", "pulse-redis"),
+			internal_token="secret-token",
+			redis_url="redis://pulse-redis.railway.internal:6379",
+			server_address="https://test.pulse.sc",
+		)
+
+	monkeypatch.setattr(
+		"pulse_railway.deployment.require_ready_stack",
+		fake_require_ready_stack,
+	)
+
+	async def fake_router_control_request(**kwargs: Any) -> dict[str, object]:
+		if kwargs["path"] == "active":
+			return {"deployment_id": "prod-260402-120000"}
+		raise DeploymentError("router delete failed")
+
+	monkeypatch.setattr(
+		"pulse_railway.deployment._router_control_request",
+		fake_router_control_request,
+	)
+
+	with pytest.raises(DeploymentError, match="router delete failed"):
+		await delete_deployment(
+			project=RailwayProject(
+				project_id="project",
+				environment_id="env",
+				token="token",
+				service_name="pulse-router",
+			),
+			deployment_id="prod-old",
+		)
+
+	assert deleted_services == []
+
+
+@pytest.mark.asyncio
+async def test_deploy_happy_path_on_ready_stack(
+	monkeypatch, tmp_path, router_control_calls
+) -> None:
 	dockerfile = tmp_path / "Dockerfile"
 	dockerfile.write_text("FROM scratch\n")
 	_write_app_fixture(tmp_path, relative_path="examples/aws-ecs/main.py")
@@ -534,7 +771,7 @@ async def test_deploy_happy_path_on_ready_stack(monkeypatch, tmp_path) -> None:
 			PULSE_DEPLOYMENT_STATE: DEPLOYMENT_STATE_ACTIVE,
 		},
 	}
-	project_variables = {ACTIVE_DEPLOYMENT_VARIABLE: "prod-old"}
+	project_variables: dict[str, str] = {}
 	variables: list[tuple[str | None, str, str]] = []
 	deleted_variables: list[tuple[str, str, str]] = []
 	group_updates: list[tuple[str, str, str]] = []
@@ -734,7 +971,25 @@ async def test_deploy_happy_path_on_ready_stack(monkeypatch, tmp_path) -> None:
 	assert result.janitor_deployment_id is None
 	assert result.server_address == "https://test.pulse.sc"
 	assert group_updates == [("env", result.backend_service_id, "group-baseline")]
-	assert (None, ACTIVE_DEPLOYMENT_VARIABLE, "prod-260402-120000") in variables
+	assert router_control_calls[-1]["path"] == "promote"
+	assert router_control_calls[-1]["server_address"] == "https://test.pulse.sc"
+	assert router_control_calls[-1]["internal_token"] == "secret-token"
+	payload = router_control_calls[-1]["json_payload"]
+	assert payload["active"] == {
+		"deployment_id": "prod-260402-120000",
+		"service_name": "prod-260402-120000",
+	}
+	draining = {item["deployment_id"]: item for item in payload["draining"]}
+	assert draining["prod-prev"] == {
+		"deployment_id": "prod-prev",
+		"service_name": "pulse-prod-prev",
+		"drain_started_at": 123.0,
+	}
+	assert draining["prod-old"]["service_name"] == "pulse-prod-old"
+	assert draining["prod-old"]["drain_started_at"] > 0
+	assert not any(
+		name == "PULSE_ACTIVE_DEPLOYMENT" for _service_id, name, _value in variables
+	)
 	assert not any(
 		service_id == result.backend_service_id and key == REDIS_URL
 		for service_id, key, _value in variables
@@ -742,23 +997,14 @@ async def test_deploy_happy_path_on_ready_stack(monkeypatch, tmp_path) -> None:
 	assert service_variables[result.backend_service_id]["EXTERNAL_KEY"] == (
 		"${{pulse-env.EXTERNAL_KEY}}"
 	)
-	assert (
-		service_variables[result.backend_service_id][PULSE_DEPLOYMENT_STATE]
-		== DEPLOYMENT_STATE_ACTIVE
-	)
-	assert service_variables[result.backend_service_id][PULSE_DRAIN_STARTED_AT] == ""
-	assert service_variables["svc-old-1"][PULSE_DEPLOYMENT_STATE] == (
-		DEPLOYMENT_STATE_DRAINING
-	)
-	assert service_variables["svc-old-2"][PULSE_DEPLOYMENT_STATE] == (
-		DEPLOYMENT_STATE_DRAINING
-	)
-	assert service_variables["svc-old-1"][PULSE_DRAIN_STARTED_AT] == "123.0"
-	assert service_variables["svc-old-2"][PULSE_DRAIN_STARTED_AT]
+	assert PULSE_DEPLOYMENT_STATE not in service_variables[result.backend_service_id]
+	assert PULSE_DRAIN_STARTED_AT not in service_variables[result.backend_service_id]
 
 
 @pytest.mark.asyncio
-async def test_deploy_source_happy_path_on_ready_stack(monkeypatch, tmp_path) -> None:
+async def test_deploy_source_happy_path_on_ready_stack(
+	monkeypatch, tmp_path, router_control_calls
+) -> None:
 	dockerfile = tmp_path / "examples" / "Dockerfile"
 	dockerfile.parent.mkdir(parents=True, exist_ok=True)
 	dockerfile.write_text("FROM scratch\n")
@@ -784,7 +1030,7 @@ async def test_deploy_source_happy_path_on_ready_stack(monkeypatch, tmp_path) ->
 			PULSE_DEPLOYMENT_STATE: DEPLOYMENT_STATE_ACTIVE,
 		},
 	}
-	project_variables = {ACTIVE_DEPLOYMENT_VARIABLE: "prod-old"}
+	project_variables: dict[str, str] = {}
 	variables: list[tuple[str | None, str, str]] = []
 	group_updates: list[tuple[str, str, str]] = []
 	build_time_service_variables: list[dict[str, str]] = []
@@ -998,7 +1244,7 @@ async def test_deploy_source_happy_path_on_ready_stack(monkeypatch, tmp_path) ->
 	assert build_time_service_variables == [
 		{
 			"PULSE_DEPLOYMENT_ID": "prod-260402-120000",
-			PULSE_INTERNAL_TOKEN: "${{ shared.PULSE_RAILWAY_INTERNAL_TOKEN }}",
+			PULSE_INTERNAL_TOKEN: "secret-token",
 			"PULSE_APP_FILE": "examples/aws-ecs/main.py",
 			"PULSE_SERVER_ADDRESS": "https://test.pulse.sc",
 			"PORT": "8000",
@@ -1008,10 +1254,27 @@ async def test_deploy_source_happy_path_on_ready_stack(monkeypatch, tmp_path) ->
 			"EXTERNAL_KEY": "${{pulse-env.EXTERNAL_KEY}}",
 			"FEATURE_FLAG": "enabled",
 			"FEATURE_BUILD": "on",
+			"PULSE_WEB_ROOT": "examples/aws-ecs/web",
 			"RAILWAY_DOCKERFILE_PATH": "examples/Dockerfile",
 		}
 	]
-	assert (None, ACTIVE_DEPLOYMENT_VARIABLE, "prod-260402-120000") in variables
+	assert router_control_calls[-1]["path"] == "promote"
+	payload = router_control_calls[-1]["json_payload"]
+	assert payload["active"] == {
+		"deployment_id": "prod-260402-120000",
+		"service_name": "prod-260402-120000",
+	}
+	draining = {item["deployment_id"]: item for item in payload["draining"]}
+	assert draining["prod-prev"] == {
+		"deployment_id": "prod-prev",
+		"service_name": "pulse-prod-prev",
+		"drain_started_at": 123.0,
+	}
+	assert draining["prod-old"]["service_name"] == "pulse-prod-old"
+	assert draining["prod-old"]["drain_started_at"] > 0
+	assert not any(
+		name == "PULSE_ACTIVE_DEPLOYMENT" for _service_id, name, _value in variables
+	)
 	assert service_variables[result.backend_service_id]["RAILWAY_DOCKERFILE_PATH"] == (
 		"examples/Dockerfile"
 	)
@@ -1028,19 +1291,8 @@ async def test_deploy_source_happy_path_on_ready_stack(monkeypatch, tmp_path) ->
 	assert service_variables[result.backend_service_id][PULSE_RAILWAY_REDIS_URL] == (
 		"redis://pulse-router-redis.railway.internal:6379"
 	)
-	assert (
-		service_variables[result.backend_service_id][PULSE_DEPLOYMENT_STATE]
-		== DEPLOYMENT_STATE_ACTIVE
-	)
-	assert service_variables[result.backend_service_id][PULSE_DRAIN_STARTED_AT] == ""
-	assert service_variables["svc-old-1"][PULSE_DEPLOYMENT_STATE] == (
-		DEPLOYMENT_STATE_DRAINING
-	)
-	assert service_variables["svc-old-2"][PULSE_DEPLOYMENT_STATE] == (
-		DEPLOYMENT_STATE_DRAINING
-	)
-	assert service_variables["svc-old-1"][PULSE_DRAIN_STARTED_AT] == "123.0"
-	assert service_variables["svc-old-2"][PULSE_DRAIN_STARTED_AT]
+	assert PULSE_DEPLOYMENT_STATE not in service_variables[result.backend_service_id]
+	assert PULSE_DRAIN_STARTED_AT not in service_variables[result.backend_service_id]
 
 
 @pytest.mark.asyncio
@@ -2147,8 +2399,5 @@ async def test_deploy_always_injects_managed_railway_redis_url(
 		service_variables[backend_service.id][PULSE_RAILWAY_REDIS_URL]
 		== "redis://project-public:6379"
 	)
-	assert (
-		service_variables[backend_service.id][PULSE_DEPLOYMENT_STATE]
-		== DEPLOYMENT_STATE_ACTIVE
-	)
-	assert service_variables[backend_service.id][PULSE_DRAIN_STARTED_AT] == ""
+	assert PULSE_DEPLOYMENT_STATE not in service_variables[backend_service.id]
+	assert PULSE_DRAIN_STARTED_AT not in service_variables[backend_service.id]

@@ -9,11 +9,16 @@ from typing import Any
 
 from pulse_railway.auth import railway_access_token
 from pulse_railway.commands.common import (
+	add_railway_target_args,
 	build_target_project,
+	environment_id_from_sources,
 	environment_name_from_sources,
 	load_deploy_target,
+	project_id_from_sources,
 	project_name_from_sources,
 	resolve_railway_target_ids,
+	workspace_id_from_sources,
+	workspace_name_from_sources,
 )
 from pulse_railway.config import RailwayProject
 from pulse_railway.constants import (
@@ -32,11 +37,7 @@ def _add_baseline_args(parser: argparse.ArgumentParser) -> None:
 		"app_file",
 		help="App entry file used to load RailwayPlugin config",
 	)
-	parser.add_argument(
-		"--workspace-id",
-		default=None,
-		help="Railway workspace id used to disambiguate project lookup.",
-	)
+	add_railway_target_args(parser)
 	parser.add_argument(
 		"--token",
 		default=None,
@@ -132,9 +133,12 @@ async def _run_baseline(
 		raise ValueError("token is required")
 	project_id, environment_id = await resolve_railway_target_ids(
 		project_name=project_name_from_sources(args, deploy_target),
+		project_id=project_id_from_sources(args),
 		environment_name=environment_name_from_sources(args, deploy_target),
+		environment_id=environment_id_from_sources(args),
 		token=token,
-		workspace_id=args.workspace_id,
+		workspace_name=workspace_name_from_sources(args),
+		workspace_id=workspace_id_from_sources(args),
 	)
 	project = _build_baseline_project(
 		args,

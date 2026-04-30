@@ -14,7 +14,6 @@ from pulse_railway.cli import (
 	_add_janitor_run_args,
 	_add_redeploy_args,
 	_add_scaffold_args,
-	_add_upgrade_args,
 	_run_delete,
 	_run_deploy,
 	_run_ensure,
@@ -22,7 +21,6 @@ from pulse_railway.cli import (
 	_run_redeploy,
 	_run_remove,
 	_run_scaffold,
-	_run_upgrade,
 	main,
 )
 from pulse_railway.deployment import (
@@ -38,7 +36,12 @@ from pulse_railway.stack import InitResult, StackServiceResult
 def _make_scaffold_args(**overrides: Any) -> argparse.Namespace:
 	values: dict[str, Any] = {
 		"app_file": "main.py",
+		"workspace": None,
 		"workspace_id": None,
+		"project": None,
+		"project_id": None,
+		"environment": None,
+		"environment_id": None,
 		"token": "token",
 		"redis_url": None,
 		"redis_prefix": "pulse:railway",
@@ -58,8 +61,12 @@ def _make_deploy_args(**overrides: Any) -> argparse.Namespace:
 	values: dict[str, Any] = {
 		"deployment_name": None,
 		"deployment_id": None,
+		"workspace": None,
+		"workspace_id": None,
 		"project": "project",
+		"project_id": None,
 		"environment": "env",
+		"environment_id": None,
 		"token": "token",
 		"service_prefix": None,
 		"server_address": None,
@@ -121,9 +128,10 @@ def _install_fake_baseline(
 
 	async def fake_resolve_railway_target_ids(**kwargs: Any) -> tuple[str, str]:
 		baseline_call["target"] = kwargs
-		return kwargs["project_name"] or "project-from-token", kwargs[
-			"environment_name"
-		] or "env-from-token"
+		return (
+			kwargs["project_id"] or kwargs["project_name"] or "project-from-token",
+			kwargs["environment_id"] or kwargs["environment_name"] or "env-from-token",
+		)
 
 	monkeypatch.setattr(
 		"pulse_railway.commands.scaffold.resolve_railway_target_ids",
@@ -159,9 +167,10 @@ def _install_fake_deploy(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 	async def fake_resolve_railway_target_ids(**kwargs: Any) -> tuple[str, str]:
 		deploy_call["target"] = kwargs
-		return kwargs["project_name"] or "project-from-token", kwargs[
-			"environment_name"
-		] or "env-from-token"
+		return (
+			kwargs["project_id"] or kwargs["project_name"] or "project-from-token",
+			kwargs["environment_id"] or kwargs["environment_name"] or "env-from-token",
+		)
 
 	monkeypatch.setattr(
 		"pulse_railway.commands.deploy.common.resolve_railway_target_ids",
@@ -195,9 +204,10 @@ def _install_fake_deploy_source(monkeypatch: pytest.MonkeyPatch) -> dict[str, An
 
 	async def fake_resolve_railway_target_ids(**kwargs: Any) -> tuple[str, str]:
 		deploy_call["target"] = kwargs
-		return kwargs["project_name"] or "project-from-token", kwargs[
-			"environment_name"
-		] or "env-from-token"
+		return (
+			kwargs["project_id"] or kwargs["project_name"] or "project-from-token",
+			kwargs["environment_id"] or kwargs["environment_name"] or "env-from-token",
+		)
 
 	monkeypatch.setattr(
 		"pulse_railway.commands.deploy.common.resolve_railway_target_ids",
@@ -251,8 +261,12 @@ def test_scaffold_parser_uses_static_defaults(monkeypatch) -> None:
 	assert args.app_file == "main.py"
 	assert args.janitor_cron_schedule == "*/5 * * * *"
 	assert args.redis_url is None
-	assert not hasattr(args, "project")
-	assert not hasattr(args, "environment")
+	assert args.workspace is None
+	assert args.workspace_id is None
+	assert args.project is None
+	assert args.project_id is None
+	assert args.environment is None
+	assert args.environment_id is None
 	assert not hasattr(args, "service_prefix")
 
 
@@ -266,37 +280,67 @@ def test_scaffold_parser_ignores_workspace_env_default(monkeypatch) -> None:
 	assert args.workspace_id is None
 
 
-def test_scaffold_parser_rejects_project_and_environment_flags() -> None:
+def test_scaffold_parser_reads_target_flags() -> None:
 	parser = argparse.ArgumentParser()
 
 	_add_scaffold_args(parser)
+	args = parser.parse_args(
+		[
+			"main.py",
+			"--workspace",
+			"team",
+			"--project",
+			"project",
+			"--environment",
+			"env",
+		]
+	)
 
-	with pytest.raises(SystemExit):
-		parser.parse_args(["main.py", "--project", "project"])
-
-	with pytest.raises(SystemExit):
-		parser.parse_args(["main.py", "--environment", "env"])
+	assert args.workspace == "team"
+	assert args.project == "project"
+	assert args.environment == "env"
 
 
-def test_ensure_parser_rejects_project_and_environment_flags() -> None:
+def test_scaffold_parser_reads_target_id_flags() -> None:
+	parser = argparse.ArgumentParser()
+
+	_add_scaffold_args(parser)
+	args = parser.parse_args(
+		[
+			"main.py",
+			"--workspace-id",
+			"workspace-id",
+			"--project-id",
+			"project-id",
+			"--environment-id",
+			"env-id",
+		]
+	)
+
+	assert args.workspace_id == "workspace-id"
+	assert args.project_id == "project-id"
+	assert args.environment_id == "env-id"
+
+
+def test_ensure_parser_reads_target_flags() -> None:
 	parser = argparse.ArgumentParser()
 
 	_add_ensure_args(parser)
+	args = parser.parse_args(
+		[
+			"main.py",
+			"--workspace",
+			"team",
+			"--project",
+			"project",
+			"--environment",
+			"env",
+		]
+	)
 
-	with pytest.raises(SystemExit):
-		parser.parse_args(["main.py", "--project", "project"])
-
-	with pytest.raises(SystemExit):
-		parser.parse_args(["main.py", "--environment", "env"])
-
-
-def test_upgrade_parser_is_noop_placeholder() -> None:
-	parser = argparse.ArgumentParser()
-
-	_add_upgrade_args(parser)
-	args = parser.parse_args([])
-
-	assert vars(args) == {}
+	assert args.workspace == "team"
+	assert args.project == "project"
+	assert args.environment == "env"
 
 
 def test_deploy_parser_drops_stable_stack_flags(monkeypatch) -> None:
@@ -311,6 +355,22 @@ def test_deploy_parser_drops_stable_stack_flags(monkeypatch) -> None:
 	assert not hasattr(args, "redis_url")
 	assert not hasattr(args, "janitor_cron_schedule")
 	assert not hasattr(args, "router_image")
+
+
+def test_main_help_excludes_baseline_repair_commands(
+	monkeypatch: pytest.MonkeyPatch,
+	capsys: pytest.CaptureFixture[str],
+) -> None:
+	monkeypatch.setattr(sys, "argv", ["pulse-railway", "--help"])
+
+	with pytest.raises(SystemExit) as exc_info:
+		main()
+
+	assert exc_info.value.code == 0
+	help_text = capsys.readouterr().out
+	assert "scaffold" in help_text
+	assert "ensure" in help_text
+	assert "upgrade" not in help_text
 
 
 def test_deploy_parser_prefers_railway_token(monkeypatch) -> None:
@@ -490,7 +550,7 @@ async def test_run_scaffold_allows_project_token_inference(
 
 
 @pytest.mark.asyncio
-async def test_run_ensure_reads_target_from_railway_plugin(
+async def test_run_scaffold_prefers_cli_target_over_plugin(
 	monkeypatch, tmp_path
 ) -> None:
 	project_root = tmp_path / "project"
@@ -499,23 +559,99 @@ async def test_run_ensure_reads_target_from_railway_plugin(
 	(project_root / "main.py").write_text(
 		"import pulse as ps\n"
 		"from pulse_railway import RailwayPlugin\n"
-		'app = ps.App(routes=[], plugins=[RailwayPlugin(dockerfile="Dockerfile", project="stoneware", environment="staging")])\n'
+		'app = ps.App(routes=[], plugins=[RailwayPlugin(dockerfile="Dockerfile", project="plugin-project", environment="plugin-env")])\n'
 	)
-	ensure_call = _install_fake_ensure(monkeypatch)
+	init_call = _install_fake_scaffold(monkeypatch)
 	monkeypatch.chdir(project_root)
 
-	result = await _run_ensure(
+	result = await _run_scaffold(
 		_make_scaffold_args(
+			project="cli-project",
+			environment="cli-env",
+			workspace="team",
 			token="token",
 		)
 	)
 
 	assert result == 0
-	assert ensure_call["target"]["project_name"] == "stoneware"
-	assert ensure_call["target"]["environment_name"] == "staging"
-	assert ensure_call["project"].project_id == "stoneware"
-	assert ensure_call["project"].environment_id == "staging"
-	assert ensure_call["project"].service_name == "pulse-router"
+	assert init_call["target"]["workspace_name"] == "team"
+	assert init_call["target"]["project_name"] == "cli-project"
+	assert init_call["target"]["environment_name"] == "cli-env"
+
+
+@pytest.mark.asyncio
+async def test_run_scaffold_uses_cli_target_ids(monkeypatch, tmp_path) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	init_call = _install_fake_scaffold(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_scaffold(
+		_make_scaffold_args(
+			project_id="project-id",
+			environment_id="env-id",
+			workspace_id="workspace-id",
+			token="token",
+		)
+	)
+
+	assert result == 0
+	assert init_call["target"]["workspace_id"] == "workspace-id"
+	assert init_call["target"]["project_id"] == "project-id"
+	assert init_call["target"]["environment_id"] == "env-id"
+	assert init_call["project"].project_id == "project-id"
+	assert init_call["project"].environment_id == "env-id"
+
+
+@pytest.mark.asyncio
+async def test_run_ensure_reads_target_flags(monkeypatch, tmp_path) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	ensure_call = _install_fake_ensure(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_ensure(
+		_make_scaffold_args(
+			project="cli-project",
+			environment="cli-env",
+			workspace="team",
+			token="token",
+		)
+	)
+
+	assert result == 0
+	assert ensure_call["target"]["workspace_name"] == "team"
+	assert ensure_call["target"]["project_name"] == "cli-project"
+	assert ensure_call["target"]["environment_name"] == "cli-env"
+	assert ensure_call["project"].project_id == "cli-project"
+	assert ensure_call["project"].environment_id == "cli-env"
+
+
+@pytest.mark.asyncio
+async def test_run_ensure_uses_cli_target_ids(monkeypatch, tmp_path) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	ensure_call = _install_fake_ensure(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_ensure(
+		_make_scaffold_args(
+			project_id="project-id",
+			environment_id="env-id",
+			workspace_id="workspace-id",
+			token="token",
+		)
+	)
+
+	assert result == 0
+	assert ensure_call["target"]["workspace_id"] == "workspace-id"
+	assert ensure_call["target"]["project_id"] == "project-id"
+	assert ensure_call["target"]["environment_id"] == "env-id"
+	assert ensure_call["project"].project_id == "project-id"
+	assert ensure_call["project"].environment_id == "env-id"
 
 
 @pytest.mark.asyncio
@@ -563,6 +699,145 @@ async def test_resolve_railway_target_ids_resolves_names(monkeypatch) -> None:
 
 	assert project_id == "project-id"
 	assert environment_id == "env-staging"
+
+
+@pytest.mark.asyncio
+async def test_resolve_railway_target_ids_resolves_workspace_name(monkeypatch) -> None:
+	from pulse_railway.commands.common import resolve_railway_target_ids
+	from pulse_railway.railway import WorkspaceRecord
+
+	class _FakeClient:
+		def __init__(self, **_: object) -> None:
+			return None
+
+		async def __aenter__(self) -> "_FakeClient":
+			return self
+
+		async def __aexit__(self, *_: object) -> None:
+			return None
+
+		async def get_project_token(self) -> None:
+			return None
+
+		async def list_workspaces(self) -> list[WorkspaceRecord]:
+			return [WorkspaceRecord(id="workspace-id", name="team")]
+
+		async def list_projects(
+			self, *, workspace_id: str | None = None
+		) -> list[ProjectRecord]:
+			assert workspace_id == "workspace-id"
+			return [ProjectRecord(id="project-id", name="stoneware")]
+
+		async def list_environments(
+			self, *, project_id: str
+		) -> list[EnvironmentRecord]:
+			assert project_id == "project-id"
+			return [EnvironmentRecord(id="env-id", name="production")]
+
+	monkeypatch.setattr(
+		"pulse_railway.commands.common.RailwayGraphQLClient", _FakeClient
+	)
+
+	project_id, environment_id = await resolve_railway_target_ids(
+		workspace_name="team",
+		project_name="stoneware",
+		environment_name="production",
+		token="token",
+	)
+
+	assert project_id == "project-id"
+	assert environment_id == "env-id"
+
+
+@pytest.mark.asyncio
+async def test_resolve_railway_target_ids_uses_explicit_ids(monkeypatch) -> None:
+	from pulse_railway.commands.common import resolve_railway_target_ids
+
+	class _FakeClient:
+		def __init__(self, **_: object) -> None:
+			return None
+
+		async def __aenter__(self) -> "_FakeClient":
+			return self
+
+		async def __aexit__(self, *_: object) -> None:
+			return None
+
+		async def get_project_token(self) -> None:
+			return None
+
+		async def list_workspaces(self) -> list[object]:
+			raise AssertionError("ids should not require workspace lookup")
+
+		async def list_projects(
+			self, *, workspace_id: str | None = None
+		) -> list[ProjectRecord]:
+			raise AssertionError("ids should not require project lookup")
+
+		async def list_environments(
+			self, *, project_id: str
+		) -> list[EnvironmentRecord]:
+			raise AssertionError("ids should not require environment lookup")
+
+	monkeypatch.setattr(
+		"pulse_railway.commands.common.RailwayGraphQLClient", _FakeClient
+	)
+
+	project_id, environment_id = await resolve_railway_target_ids(
+		project_id="project-id",
+		environment_id="env-id",
+		token="token",
+	)
+
+	assert project_id == "project-id"
+	assert environment_id == "env-id"
+
+
+@pytest.mark.asyncio
+async def test_resolve_railway_target_ids_rejects_name_and_id_pairs(
+	monkeypatch,
+) -> None:
+	from pulse_railway.commands.common import resolve_railway_target_ids
+
+	class _FakeClient:
+		def __init__(self, **_: object) -> None:
+			return None
+
+		async def __aenter__(self) -> "_FakeClient":
+			return self
+
+		async def __aexit__(self, *_: object) -> None:
+			return None
+
+		async def get_project_token(self) -> None:
+			return None
+
+	monkeypatch.setattr(
+		"pulse_railway.commands.common.RailwayGraphQLClient", _FakeClient
+	)
+
+	with pytest.raises(ValueError, match="project name or project id"):
+		await resolve_railway_target_ids(
+			project_name="stoneware",
+			project_id="project-id",
+			token="token",
+		)
+
+	with pytest.raises(ValueError, match="environment name or environment id"):
+		await resolve_railway_target_ids(
+			project_id="project-id",
+			environment_name="production",
+			environment_id="env-id",
+			token="token",
+		)
+
+	with pytest.raises(ValueError, match="workspace name or workspace id"):
+		await resolve_railway_target_ids(
+			workspace_name="team",
+			workspace_id="workspace-id",
+			project_name="stoneware",
+			token="token",
+		)
 
 
 @pytest.mark.asyncio
@@ -769,13 +1044,6 @@ async def test_resolve_railway_target_ids_fails_without_project_or_project_token
 			environment_name="production",
 			token="token",
 		)
-
-
-@pytest.mark.asyncio
-async def test_run_upgrade_is_noop() -> None:
-	result = await _run_upgrade(argparse.Namespace())
-
-	assert result == 0
 
 
 @pytest.mark.asyncio
@@ -1414,7 +1682,6 @@ async def test_run_delete_builds_shared_project_defaults(monkeypatch) -> None:
 			environment="env",
 			token="token",
 			service_prefix="Custom",
-			keep_active_variable=False,
 			redis_url=None,
 			redis_service=None,
 			redis_prefix="pulse:railway",
@@ -1424,7 +1691,7 @@ async def test_run_delete_builds_shared_project_defaults(monkeypatch) -> None:
 	assert result == 0
 	assert delete_call["project"].service_prefix == "custom-"
 	assert delete_call["project"].redis_service_name == "pulse-router-redis"
-	assert delete_call["clear_active"] is True
+	assert "clear_active" not in delete_call
 
 
 @pytest.mark.asyncio
@@ -1464,7 +1731,6 @@ async def test_run_remove_resolves_name_then_deletes(
 			environment="env",
 			token="token",
 			service_prefix=None,
-			keep_active_variable=False,
 			redis_url=None,
 			redis_service=None,
 			redis_prefix="pulse:railway",

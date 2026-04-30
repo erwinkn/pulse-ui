@@ -88,11 +88,6 @@ def add_shared_deploy_args(parser: argparse.ArgumentParser) -> None:
 		help="Web root override. Defaults to the app codegen web root.",
 	)
 	parser.add_argument(
-		"--dockerfile",
-		default=None,
-		help="Dockerfile override. Defaults to RailwayPlugin(dockerfile=...).",
-	)
-	parser.add_argument(
 		"--context",
 		default=".",
 		help="Build/upload context",
@@ -144,13 +139,10 @@ async def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployComm
 		app_file=args.app_file,
 		base_path=context_path,
 	)
-	dockerfile = args.dockerfile or deploy_target.dockerfile
+	dockerfile = deploy_target.dockerfile
 	if dockerfile is None:
-		raise ValueError(
-			"dockerfile is required. Pass --dockerfile or set RailwayPlugin(dockerfile=...)."
-		)
-	dockerfile_base = invocation_cwd if args.dockerfile else context_path
-	dockerfile_path = resolve_path(dockerfile_base, dockerfile)
+		raise ValueError("dockerfile is required. Set RailwayPlugin(dockerfile=...).")
+	dockerfile_path = resolve_path(context_path, dockerfile)
 	if not dockerfile_path.exists():
 		raise ValueError(f"Dockerfile not found: {dockerfile_path}")
 	if args.web_root is None:

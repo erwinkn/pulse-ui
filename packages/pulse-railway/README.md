@@ -35,7 +35,7 @@ Use the commands like this:
 
 `ensure` uses the same target/options as `scaffold`, but it is idempotent. On an empty project it creates the baseline; on an existing or partial baseline it creates missing services and rewrites Pulse-managed runtime config. Existing router and janitor images are preserved unless you pass `--router-image` or `--janitor-image`.
 
-`deploy` reads app configuration from `RailwayPlugin` on the target app. Provide the Dockerfile with `RailwayPlugin(dockerfile=...)` or `--dockerfile`.
+`deploy` reads app configuration from `RailwayPlugin` on the target app. Provide the Dockerfile with `RailwayPlugin(dockerfile=...)`.
 
 `pulse-railway scaffold` is template-first and fresh-only. On an empty target it deploys the published `pulse-baseline` template so the router, janitor, and Redis land on the Railway canvas with a stable layout, creates the stable env service in the template group, then writes runtime images, variables, domains, cron, and healthchecks. Router and janitor services use the latest published official GHCR image tags unless you pass explicit image overrides: `ghcr.io/erwinkn/pulse-railway-router:<version>` and `ghcr.io/erwinkn/pulse-railway-janitor:<version>`. When you pass `--redis-url`, scaffold removes the managed Redis service plus any template-created Redis references, then rewrites the baseline to use the external URL. If any baseline service already exists, rerun with `pulse-railway ensure`.
 
@@ -45,7 +45,7 @@ You can also set `deployment_name` on `RailwayPlugin` to provide the default dep
 
 You can also set `image_repository` on `RailwayPlugin` to provide the default backend image registry from app config. Precedence is: `--image-repository`, then `RailwayPlugin(image_repository=...)`. If none is set, deploy uses source mode.
 
-`pulse-railway deploy <app-file>` reads `server_address` and web root from the target `ps.App`, and the Dockerfile path from `RailwayPlugin(dockerfile=...)`. Precedence is: explicit CLI override, then app/plugin config, then the initialized router service address for `server_address`.
+`pulse-railway deploy <app-file>` reads `server_address` and web root from the target `ps.App`, and the Dockerfile path from `RailwayPlugin(dockerfile=...)`. The deploy context is the invocation directory unless `--context` is provided. Dockerfile and web root paths are resolved from that context. `--server-address` and `--web-root` can override app config; Dockerfile is only configured on the plugin.
 
 If `--redis-url` is omitted, `pulse-railway scaffold` and `pulse-railway ensure` create the stable Redis service in the Railway project.
 

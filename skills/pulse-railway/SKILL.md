@@ -41,7 +41,7 @@ uv run pulse-railway redeploy
 
 ## App Integration
 
-Add `RailwayPlugin(...)` to the app. It injects `pulse_deployment` into prerender and Socket.IO directives and exposes `/_pulse/meta`. Set `dockerfile=...` there, or pass `--dockerfile` during deploy.
+Add `RailwayPlugin(...)` to the app. It injects `pulse_deployment` into prerender and Socket.IO directives and exposes `/_pulse/meta`. Set `dockerfile=...` there.
 
 ```python
 import os
@@ -123,7 +123,7 @@ Use `scaffold` for fresh-only template setup. Use `ensure` for CI and repeated s
 - deployment name: `--deployment-name`, then `RailwayPlugin(deployment_name=...)`, then `prod`
 - image repository: `--image-repository`, then `RailwayPlugin(image_repository=...)`; absent means source deploy
 - server address: `--server-address`, then `App(server_address=...)`, then the initialized router service address
-- Dockerfile: `--dockerfile`, then `RailwayPlugin(dockerfile=...)`; one is required for deploy
+- Dockerfile: `RailwayPlugin(dockerfile=...)`; one is required for deploy
 - web root: `--web-root`, then `App(..., codegen=CodegenConfig(web_dir=...))`
 
 ## Path Rules

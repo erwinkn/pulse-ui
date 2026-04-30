@@ -246,15 +246,11 @@ def _backend_service_variables(
 def _backend_build_variables(
 	*,
 	build_args: dict[str, str],
-	app_file: str,
-	web_root: str,
 	server_address: str,
 	dockerfile_path: Path,
 	context_path: Path,
 ) -> dict[str, str]:
 	railway_build_vars = dict(build_args)
-	railway_build_vars.setdefault("APP_FILE", app_file)
-	railway_build_vars.setdefault("WEB_ROOT", web_root)
 	railway_build_vars.setdefault("PULSE_SERVER_ADDRESS", server_address)
 	try:
 		dockerfile_relative = dockerfile_path.relative_to(context_path)
@@ -676,8 +672,6 @@ async def deploy(
 				stack_state.env.service_id if stack_state.env is not None else None
 			),
 		)
-		build_args.setdefault("APP_FILE", app_file)
-		build_args.setdefault("WEB_ROOT", web_root)
 		build_args.setdefault("PULSE_SERVER_ADDRESS", server_address)
 		backend_session_env = _backend_session_env(
 			resolved_uses_railway_session_store,
@@ -824,8 +818,6 @@ async def _deploy_source(
 			)
 			build_vars = _backend_build_variables(
 				build_args=dict(docker.build_args),
-				app_file=app_file,
-				web_root=web_root,
 				server_address=server_address,
 				dockerfile_path=docker.dockerfile_path,
 				context_path=docker.context_path,

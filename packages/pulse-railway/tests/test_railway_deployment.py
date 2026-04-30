@@ -150,6 +150,8 @@ async def test_pulse_env_reference_variables_only_uses_unrendered_user_vars() ->
 			return {
 				"SANDBOX_THEME": "amber",
 				"SANDBOX_MESSAGE": "from-pulse-env",
+				"APP_FILE": "managed-by-user",
+				"WEB_ROOT": "managed-by-user",
 				"RAILWAY_PRIVATE_DOMAIN": "pulse-env.railway.internal",
 				"PORT": "8000",
 			}
@@ -695,8 +697,8 @@ async def test_deploy_happy_path_on_ready_stack(monkeypatch, tmp_path) -> None:
 	)
 
 	async def fake_build_and_push_image(*, docker: DockerBuild, image_ref: str) -> str:
-		assert docker.build_args["APP_FILE"] == "examples/aws-ecs/main.py"
-		assert docker.build_args["WEB_ROOT"] == "examples/aws-ecs/web"
+		assert "APP_FILE" not in docker.build_args
+		assert "WEB_ROOT" not in docker.build_args
 		assert docker.build_args["PULSE_SERVER_ADDRESS"] == "https://test.pulse.sc"
 		return image_ref
 
@@ -1005,8 +1007,6 @@ async def test_deploy_source_happy_path_on_ready_stack(monkeypatch, tmp_path) ->
 			),
 			"EXTERNAL_KEY": "${{pulse-env.EXTERNAL_KEY}}",
 			"FEATURE_FLAG": "enabled",
-			"APP_FILE": "examples/aws-ecs/main.py",
-			"WEB_ROOT": "examples/aws-ecs/web",
 			"FEATURE_BUILD": "on",
 			"RAILWAY_DOCKERFILE_PATH": "examples/Dockerfile",
 		}
@@ -1015,12 +1015,8 @@ async def test_deploy_source_happy_path_on_ready_stack(monkeypatch, tmp_path) ->
 	assert service_variables[result.backend_service_id]["RAILWAY_DOCKERFILE_PATH"] == (
 		"examples/Dockerfile"
 	)
-	assert service_variables[result.backend_service_id]["APP_FILE"] == (
-		"examples/aws-ecs/main.py"
-	)
-	assert service_variables[result.backend_service_id]["WEB_ROOT"] == (
-		"examples/aws-ecs/web"
-	)
+	assert "APP_FILE" not in service_variables[result.backend_service_id]
+	assert "WEB_ROOT" not in service_variables[result.backend_service_id]
 	assert service_variables[result.backend_service_id]["FEATURE_BUILD"] == "on"
 	assert service_variables[result.backend_service_id]["EXTERNAL_KEY"] == (
 		"${{pulse-env.EXTERNAL_KEY}}"

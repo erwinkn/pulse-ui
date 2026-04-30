@@ -65,7 +65,6 @@ def _make_deploy_args(**overrides: Any) -> argparse.Namespace:
 		"server_address": None,
 		"app_file": "main.py",
 		"web_root": None,
-		"dockerfile": None,
 		"context": ".",
 		"image_repository": "ghcr.io/acme/app",
 		"build_arg": [],
@@ -800,6 +799,23 @@ async def test_run_deploy_resolves_paths_and_defaults(monkeypatch, tmp_path) -> 
 
 
 @pytest.mark.asyncio
+async def test_run_deploy_resolves_dockerfile_from_context(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	deploy_call = _install_fake_deploy(monkeypatch)
+	monkeypatch.chdir(tmp_path)
+
+	result = await _run_deploy(_make_deploy_args(context="project"))
+
+	assert result == 0
+	assert deploy_call["docker"].dockerfile_path == (project_root / "Dockerfile")
+	assert deploy_call["docker"].context_path == project_root
+
+
+@pytest.mark.asyncio
 async def test_run_deploy_reads_dockerfile_from_railway_plugin(
 	monkeypatch, tmp_path
 ) -> None:
@@ -815,14 +831,14 @@ async def test_run_deploy_reads_dockerfile_from_railway_plugin(
 	deploy_call = _install_fake_deploy(monkeypatch)
 	monkeypatch.chdir(project_root)
 
-	result = await _run_deploy(_make_deploy_args(dockerfile=None))
+	result = await _run_deploy(_make_deploy_args())
 
 	assert result == 0
 	assert deploy_call["docker"].dockerfile_path == (project_root / "Custom.Dockerfile")
 
 
 @pytest.mark.asyncio
-async def test_run_deploy_requires_dockerfile_from_cli_or_plugin(
+async def test_run_deploy_requires_dockerfile_from_plugin(
 	monkeypatch, tmp_path
 ) -> None:
 	project_root = tmp_path / "project"
@@ -836,7 +852,7 @@ async def test_run_deploy_requires_dockerfile_from_cli_or_plugin(
 	monkeypatch.chdir(project_root)
 
 	with pytest.raises(ValueError, match="dockerfile is required"):
-		await _run_deploy(_make_deploy_args(dockerfile=None))
+		await _run_deploy(_make_deploy_args())
 
 
 @pytest.mark.asyncio
@@ -858,7 +874,7 @@ async def test_run_deploy_passes_loaded_session_store_config(
 	deploy_call = _install_fake_deploy(monkeypatch)
 	monkeypatch.chdir(project_root)
 
-	result = await _run_deploy(_make_deploy_args(dockerfile=None))
+	result = await _run_deploy(_make_deploy_args())
 
 	assert result == 0
 	assert deploy_call["uses_railway_session_store"] is True
@@ -889,12 +905,13 @@ async def test_run_deploy_reads_web_root_from_app_file(monkeypatch, tmp_path) ->
 
 
 @pytest.mark.asyncio
-async def test_run_deploy_flags_override_app_paths(monkeypatch, tmp_path) -> None:
+async def test_run_deploy_web_root_flag_overrides_app_path(
+	monkeypatch, tmp_path
+) -> None:
 	project_root = tmp_path / "project"
 	project_root.mkdir()
 	_write_deploy_fixture(project_root)
 	(project_root / "frontend").mkdir()
-	(project_root / "Override.Dockerfile").write_text("FROM scratch\n")
 	(project_root / "main.py").write_text(
 		"import pulse as ps\n"
 		"from pulse_railway import RailwayPlugin\n"
@@ -909,15 +926,12 @@ async def test_run_deploy_flags_override_app_paths(monkeypatch, tmp_path) -> Non
 
 	result = await _run_deploy(
 		_make_deploy_args(
-			dockerfile="Override.Dockerfile",
 			web_root="web",
 		)
 	)
 
 	assert result == 0
-	assert deploy_call["docker"].dockerfile_path == (
-		project_root / "Override.Dockerfile"
-	)
+	assert deploy_call["docker"].dockerfile_path == (project_root / "Dockerfile")
 	assert deploy_call["web_root"] == "web"
 
 

@@ -288,7 +288,6 @@ async def test_bootstrap_stack_fails_for_existing_stack(monkeypatch) -> None:
 		"svc-router": {
 			"RAILWAY_TOKEN": "token",
 			PULSE_INTERNAL_TOKEN: "secret-token",
-			"PULSE_BACKEND_PORT": "8000",
 			"PORT": "8000",
 			REDIS_URL: "redis://pulse-redis.railway.internal:6379",
 			PULSE_REDIS_PREFIX: "pulse:railway",
@@ -735,7 +734,6 @@ async def test_require_ready_stack_accepts_external_redis_baseline(
 		"svc-router": {
 			"RAILWAY_TOKEN": "token",
 			PULSE_INTERNAL_TOKEN: "secret-token",
-			"PULSE_BACKEND_PORT": "8000",
 			"PORT": "8000",
 			REDIS_URL: redis_url,
 			PULSE_REDIS_PREFIX: "pulse:railway",

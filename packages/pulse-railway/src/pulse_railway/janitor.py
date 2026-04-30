@@ -9,6 +9,7 @@ import aiohttp
 
 from pulse_railway.config import RailwayInternals, RailwayProject
 from pulse_railway.constants import (
+	DEFAULT_BACKEND_PORT,
 	DEFAULT_JANITOR_LOCK_TTL_SECONDS,
 	DEPLOYMENT_STATE_DRAINING,
 	INTERNAL_RELOAD_PATH,
@@ -120,7 +121,7 @@ async def _fetch_deployment_session_status(
 	internals: RailwayInternals,
 ) -> DeploymentSessionStatus:
 	url = (
-		f"http://{service_name}.railway.internal:{project.backend_port}"
+		f"http://{service_name}.railway.internal:{DEFAULT_BACKEND_PORT}"
 		f"{INTERNAL_SESSIONS_PATH}"
 	)
 	async with session.get(
@@ -145,7 +146,7 @@ async def _signal_deployment_reload(
 	internals: RailwayInternals,
 ) -> int:
 	url = (
-		f"http://{service_name}.railway.internal:{project.backend_port}"
+		f"http://{service_name}.railway.internal:{DEFAULT_BACKEND_PORT}"
 		f"{INTERNAL_RELOAD_PATH}"
 	)
 	async with session.post(

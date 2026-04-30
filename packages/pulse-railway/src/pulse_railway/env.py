@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from pulse_railway.constants import (
+	DEFAULT_BACKEND_PORT,
 	DEFAULT_REDIS_PREFIX,
 	PULSE_DEPLOYMENT_ID,
 	PULSE_DEPLOYMENT_STATE,
@@ -23,7 +24,6 @@ from pulse_railway.constants import (
 from pulse_railway.errors import DeploymentError
 
 PULSE_APP_FILE = "PULSE_APP_FILE"
-PULSE_BACKEND_PORT = "PULSE_BACKEND_PORT"
 PULSE_SERVER_ADDRESS = "PULSE_SERVER_ADDRESS"
 PULSE_WEB_ROOT = "PULSE_WEB_ROOT"
 PORT = "PORT"
@@ -83,7 +83,6 @@ def pulse_env_user_references(
 def router_env(
 	*,
 	token: str,
-	backend_port: int,
 	router_port: int,
 	service_prefix: str | None,
 	redis_url: str | None,
@@ -93,7 +92,6 @@ def router_env(
 ) -> dict[str, str]:
 	env = {
 		RAILWAY_TOKEN: token,
-		PULSE_BACKEND_PORT: str(backend_port),
 		PORT: str(router_port),
 	}
 	if service_prefix is not None:
@@ -147,7 +145,6 @@ def backend_env(
 	internal_token: str,
 	app_file: str,
 	server_address: str,
-	backend_port: int,
 	session_env: dict[str, str],
 	user_env: dict[str, str],
 ) -> dict[str, str]:
@@ -156,7 +153,7 @@ def backend_env(
 		PULSE_INTERNAL_TOKEN: internal_token,
 		PULSE_APP_FILE: app_file,
 		PULSE_SERVER_ADDRESS: server_address,
-		PORT: str(backend_port),
+		PORT: str(DEFAULT_BACKEND_PORT),
 		**session_env,
 		**user_env,
 	}
@@ -188,7 +185,6 @@ def backend_build_env(
 
 __all__ = [
 	"PULSE_APP_FILE",
-	"PULSE_BACKEND_PORT",
 	"PULSE_SERVER_ADDRESS",
 	"PULSE_WEB_ROOT",
 	"PORT",

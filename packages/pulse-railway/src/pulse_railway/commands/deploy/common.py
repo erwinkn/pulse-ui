@@ -24,7 +24,6 @@ from pulse_railway.commands.common import (
 	workspace_name_from_sources,
 )
 from pulse_railway.config import DockerBuild, RailwayProject
-from pulse_railway.constants import DEFAULT_BACKEND_PORT
 from pulse_railway.env import (
 	check_reserved_source_build_args,
 	validate_backend_env_vars,
@@ -111,12 +110,6 @@ def add_shared_deploy_args(parser: argparse.ArgumentParser) -> None:
 		help="Extra backend service env var KEY=VALUE (repeatable)",
 	)
 	parser.add_argument(
-		"--backend-port",
-		type=int,
-		default=DEFAULT_BACKEND_PORT,
-		help="Backend container port",
-	)
-	parser.add_argument(
 		"--backend-replicas",
 		type=int,
 		default=1,
@@ -187,7 +180,6 @@ async def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployComm
 		environment_id=environment_id,
 		token=token,
 		env_vars=env_vars,
-		backend_port=args.backend_port,
 		backend_replicas=args.backend_replicas,
 		server_address=args.server_address or deploy_target.server_address,
 	)

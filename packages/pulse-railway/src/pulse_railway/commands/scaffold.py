@@ -22,7 +22,6 @@ from pulse_railway.commands.common import (
 )
 from pulse_railway.config import RailwayProject
 from pulse_railway.constants import (
-	DEFAULT_BACKEND_PORT,
 	DEFAULT_DRAIN_GRACE_SECONDS,
 	DEFAULT_JANITOR_CRON_SCHEDULE,
 	DEFAULT_MAX_DRAIN_AGE_SECONDS,
@@ -81,12 +80,6 @@ def _add_baseline_args(parser: argparse.ArgumentParser) -> None:
 		help="Maximum time to keep a draining deployment before forced cleanup.",
 	)
 	parser.add_argument(
-		"--backend-port",
-		type=int,
-		default=DEFAULT_BACKEND_PORT,
-		help="Backend container port used by the router and janitor.",
-	)
-	parser.add_argument(
 		"--router-replicas",
 		type=int,
 		default=1,
@@ -109,7 +102,6 @@ def _build_baseline_project(
 		environment_id=environment_id,
 		token=token,
 		redis_url=args.redis_url,
-		backend_port=args.backend_port,
 		router_replicas=args.router_replicas,
 		router_image=args.router_image,
 		janitor_image=args.janitor_image,

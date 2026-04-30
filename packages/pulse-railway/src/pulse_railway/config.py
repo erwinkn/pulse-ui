@@ -7,7 +7,6 @@ from pathlib import Path
 
 from pulse_railway.constants import (
 	DEFAULT_BACKEND_HEALTH_PATH,
-	DEFAULT_BACKEND_PORT,
 	DEFAULT_DRAIN_GRACE_SECONDS,
 	DEFAULT_JANITOR_CRON_SCHEDULE,
 	DEFAULT_MAX_DRAIN_AGE_SECONDS,
@@ -40,7 +39,6 @@ class RailwayProject:
 	token: str
 	service_name: str
 	service_prefix: str | None = None
-	backend_port: int = DEFAULT_BACKEND_PORT
 	backend_replicas: int = 1
 	router_port: int = DEFAULT_ROUTER_PORT
 	router_replicas: int = 1

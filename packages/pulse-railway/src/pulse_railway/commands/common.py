@@ -40,7 +40,6 @@ RailwayNameRecord = TypeVar(
 
 
 class RailwayProjectOverrides(TypedDict):
-	backend_port: NotRequired[int]
 	backend_replicas: NotRequired[int]
 	router_port: NotRequired[int]
 	router_replicas: NotRequired[int]

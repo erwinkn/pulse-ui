@@ -525,9 +525,7 @@ def build_app_from_env() -> FastAPI:
 		environment_id=environment_id,
 		service_prefix=os.environ.get(PULSE_SERVICE_PREFIX),
 		store=store,
-		backend_port=int(
-			os.environ.get("PULSE_BACKEND_PORT", str(DEFAULT_BACKEND_PORT))
-		),
+		backend_port=DEFAULT_BACKEND_PORT,
 	)
 	return build_app(
 		resolver,

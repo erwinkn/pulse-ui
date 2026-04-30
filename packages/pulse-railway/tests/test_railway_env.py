@@ -17,7 +17,6 @@ from pulse_railway.constants import (
 from pulse_railway.env import (
 	PORT,
 	PULSE_APP_FILE,
-	PULSE_BACKEND_PORT,
 	PULSE_SERVER_ADDRESS,
 	PULSE_WEB_ROOT,
 	RAILWAY_DOCKERFILE_PATH,
@@ -33,7 +32,6 @@ from pulse_railway.env import (
 def test_router_env_includes_websocket_vars_without_active_deployment() -> None:
 	assert router_env(
 		token="token",
-		backend_port=8000,
 		router_port=9000,
 		service_prefix="pulse-",
 		redis_url="redis://internal",
@@ -42,7 +40,6 @@ def test_router_env_includes_websocket_vars_without_active_deployment() -> None:
 		websocket_ttl_seconds=45,
 	) == {
 		RAILWAY_TOKEN: "token",
-		PULSE_BACKEND_PORT: "8000",
 		PORT: "9000",
 		PULSE_SERVICE_PREFIX: "pulse-",
 		REDIS_URL: "redis://internal",
@@ -81,7 +78,6 @@ def test_backend_env_sets_direct_token_and_no_active_deployment() -> None:
 		internal_token="secret",
 		app_file="main.py",
 		server_address="https://example.com",
-		backend_port=8000,
 		session_env=backend_session_env(True, redis_url="redis://internal"),
 		user_env={"FEATURE_FLAG": "on"},
 	)

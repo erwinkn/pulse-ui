@@ -50,7 +50,6 @@ def _make_scaffold_args(**overrides: Any) -> argparse.Namespace:
 		"janitor_cron_schedule": "*/5 * * * *",
 		"drain_grace_seconds": 60,
 		"max_drain_age_seconds": 86400,
-		"backend_port": 8000,
 		"router_replicas": 1,
 	}
 	values.update(overrides)
@@ -77,7 +76,6 @@ def _make_deploy_args(**overrides: Any) -> argparse.Namespace:
 		"build_arg": [],
 		"no_gitignore": False,
 		"env": [],
-		"backend_port": 8000,
 		"backend_replicas": 1,
 	}
 	values.update(overrides)
@@ -268,6 +266,7 @@ def test_scaffold_parser_uses_static_defaults(monkeypatch) -> None:
 	assert args.environment is None
 	assert args.environment_id is None
 	assert not hasattr(args, "service_prefix")
+	assert not hasattr(args, "backend_port")
 
 
 def test_scaffold_parser_ignores_workspace_env_default(monkeypatch) -> None:
@@ -355,6 +354,7 @@ def test_deploy_parser_drops_stable_stack_flags(monkeypatch) -> None:
 	assert not hasattr(args, "redis_url")
 	assert not hasattr(args, "janitor_cron_schedule")
 	assert not hasattr(args, "router_image")
+	assert not hasattr(args, "backend_port")
 
 
 def test_main_help_excludes_baseline_repair_commands(
@@ -407,6 +407,7 @@ def test_deploy_parser_reads_source_mode_flags(monkeypatch) -> None:
 	assert not hasattr(args, "redis_url")
 	assert not hasattr(args, "janitor_cron_schedule")
 	assert not hasattr(args, "router_image")
+	assert not hasattr(args, "backend_port")
 
 
 def test_deploy_parser_removes_mode_flag() -> None:
@@ -416,6 +417,15 @@ def test_deploy_parser_removes_mode_flag() -> None:
 
 	with pytest.raises(SystemExit):
 		parser.parse_args(["main.py", "--mode", "source"])
+
+
+def test_deploy_parser_removes_backend_port_flag() -> None:
+	parser = argparse.ArgumentParser()
+
+	_add_deploy_args(parser)
+
+	with pytest.raises(SystemExit):
+		parser.parse_args(["main.py", "--backend-port", "9000"])
 
 
 def test_deploy_parser_requires_app_file() -> None:

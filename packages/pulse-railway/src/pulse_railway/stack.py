@@ -25,7 +25,6 @@ from pulse_railway.constants import (
 )
 from pulse_railway.env import (
 	PORT,
-	PULSE_BACKEND_PORT,
 	janitor_env,
 	router_env,
 )
@@ -587,7 +586,6 @@ async def _configure_router_service(
 			PULSE_INTERNAL_TOKEN: internals.internal_token,
 			**router_env(
 				token=project.token,
-				backend_port=project.backend_port,
 				router_port=project.router_port,
 				service_prefix=internals.service_prefix,
 				redis_url=internals.redis_url,
@@ -874,7 +872,6 @@ async def _validate_router_service(
 		)
 	names = (
 		RAILWAY_TOKEN,
-		PULSE_BACKEND_PORT,
 		PORT,
 	)
 	if require_redis:

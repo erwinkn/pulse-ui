@@ -639,7 +639,6 @@ async def deploy(
 				internal_token=stack_state.internal_token,
 				app_file=app_file,
 				server_address=server_address,
-				backend_port=project.backend_port,
 				session_env=session_env,
 				user_env={**reference_env_vars, **project.env_vars},
 			),
@@ -752,7 +751,6 @@ async def _deploy_source(
 				internal_token=stack_state.internal_token,
 				app_file=app_file,
 				server_address=server_address,
-				backend_port=project.backend_port,
 				session_env=session_env,
 				user_env={**reference_env_vars, **project.env_vars},
 			)

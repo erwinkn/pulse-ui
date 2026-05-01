@@ -279,6 +279,45 @@ async def test_create_project_uses_bearer_auth() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_template_by_code_uses_public_auth() -> None:
+	request_headers: list[httpx.Headers] = []
+
+	def handler(request: httpx.Request) -> httpx.Response:
+		request_headers.append(request.headers)
+		assert "Authorization" not in request.headers
+		assert "Project-Access-Token" not in request.headers
+		return httpx.Response(
+			200,
+			json={
+				"data": {
+					"template": {
+						"id": "template-id",
+						"code": "pulse-baseline",
+						"serializedConfig": {"services": {}},
+					}
+				}
+			},
+		)
+
+	client = RailwayGraphQLClient(token="token")
+	client._client = httpx.AsyncClient(
+		base_url=client.endpoint,
+		headers={"Content-Type": "application/json"},
+		transport=httpx.MockTransport(handler),
+		timeout=client._client.timeout,
+	)
+	try:
+		template = await client.get_template_by_code(code="pulse-baseline")
+	finally:
+		await client.aclose()
+
+	assert template.id == "template-id"
+	assert template.code == "pulse-baseline"
+	assert template.serialized_config == {"services": {}}
+	assert len(request_headers) == 1
+
+
+@pytest.mark.asyncio
 async def test_list_projects_filters_by_workspace_id() -> None:
 	request_payloads: list[dict[str, object]] = []
 

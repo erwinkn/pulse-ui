@@ -182,6 +182,8 @@ class RailwayGraphQLClient:
 		await self.aclose()
 
 	def _headers_for_auth_mode(self, auth_mode: str) -> dict[str, str]:
+		if auth_mode == "public":
+			return {}
 		if auth_mode == "project-token":
 			return {"Project-Access-Token": self.token}
 		if auth_mode == "bearer":
@@ -840,6 +842,7 @@ class RailwayGraphQLClient:
 			}
 			""",
 			{"code": code},
+			auth_mode="public",
 		)
 		template = data["template"]
 		return TemplateRecord(

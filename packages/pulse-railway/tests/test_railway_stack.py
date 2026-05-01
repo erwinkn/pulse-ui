@@ -7,6 +7,7 @@ import pytest
 from pulse_railway.config import RailwayProject
 from pulse_railway.constants import (
 	DEFAULT_PULSE_BASELINE_TEMPLATE_CODE,
+	PULSE_DEPLOYMENT_ID,
 	PULSE_DRAIN_TTL_SECONDS,
 	PULSE_INTERNAL_TOKEN,
 	PULSE_REDIS_PREFIX,
@@ -39,7 +40,11 @@ class RailwayHarness:
 	variable_collections: list[tuple[str, dict[str, str]]] = field(default_factory=list)
 	created_services: list[str] = field(default_factory=list)
 	group_assignments: list[tuple[str, str]] = field(default_factory=list)
+	service_groups: dict[str, str] = field(default_factory=dict)
 	domain_creations: list[str] = field(default_factory=list)
+	environment_config_reads: int = 0
+	router_group_available_after_config_reads: int = 0
+	router_group_id: str | None = "group-baseline"
 	service_counter: int = 0
 	public_domain: str = "test.pulse.sc"
 
@@ -50,6 +55,7 @@ class RailwayHarness:
 		service_id: str | None = None,
 		image: str | None = None,
 		domain: str | None = None,
+		group_id: str | None = None,
 		variables: dict[str, str] | None = None,
 		unrendered_variables: dict[str, str] | None = None,
 	) -> ServiceRecord:
@@ -66,6 +72,8 @@ class RailwayHarness:
 		self.services[name] = service
 		self.variables[service_id] = dict(variables or {})
 		self.unrendered_variables[service_id] = dict(unrendered_variables or {})
+		if group_id is not None:
+			self.service_groups[service_id] = group_id
 		return service
 
 
@@ -196,15 +204,32 @@ def _install_client(monkeypatch: pytest.MonkeyPatch, harness: RailwayHarness) ->
 			assert project_id == "project"
 			assert environment_id == "env"
 			router = harness.services.get("pulse-router")
-			return {
-				"services": {router.id: {"groupId": "group-baseline"} if router else {}}
+			harness.environment_config_reads += 1
+			if (
+				router is None
+				or harness.router_group_id is None
+				or harness.environment_config_reads
+				<= harness.router_group_available_after_config_reads
+			):
+				return {
+					"services": {
+						service_id: {"groupId": group_id}
+						for service_id, group_id in harness.service_groups.items()
+					}
+				}
+			services = {
+				service_id: {"groupId": group_id}
+				for service_id, group_id in harness.service_groups.items()
 			}
+			services[router.id] = {"groupId": harness.router_group_id}
+			return {"services": services}
 
 		async def set_service_group_id(
 			self, *, environment_id: str, service_id: str, group_id: str
 		) -> None:
 			assert environment_id == "env"
 			harness.group_assignments.append((service_id, group_id))
+			harness.service_groups[service_id] = group_id
 
 		async def get_service_variables_for_deployment(
 			self, *, project_id: str, environment_id: str, service_id: str
@@ -420,6 +445,26 @@ async def test_create_stack_creates_fresh_managed_baseline(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_stack_waits_for_router_group_before_creating_env(
+	monkeypatch,
+) -> None:
+	harness = RailwayHarness(router_group_available_after_config_reads=1)
+	sleep_delays: list[float] = []
+	_install_client(monkeypatch, harness)
+
+	async def fast_sleep(delay: float) -> None:
+		sleep_delays.append(delay)
+
+	monkeypatch.setattr("pulse_railway.railway.ops.asyncio.sleep", fast_sleep)
+
+	await create_stack(project=_project())
+
+	assert harness.environment_config_reads == 2
+	assert sleep_delays == [2.0]
+	assert harness.group_assignments == [("svc-4", "group-baseline")]
+
+
+@pytest.mark.asyncio
 async def test_create_stack_omits_redis_for_external_url(
 	monkeypatch,
 ) -> None:
@@ -550,6 +595,17 @@ async def test_reconcile_stack_updates_runtime_config_without_creating_services(
 	)
 	harness.add_service("pulse-env", service_id="svc-env")
 	harness.add_service("pulse-redis", service_id="svc-redis")
+	harness.add_service(
+		"pulse-prod-260501-120000",
+		service_id="svc-backend",
+		variables={PULSE_DEPLOYMENT_ID: "prod-260501-120000"},
+	)
+	harness.add_service(
+		"pulse-prod-260501-121000",
+		service_id="svc-grouped-backend",
+		group_id="group-baseline",
+		variables={PULSE_DEPLOYMENT_ID: "prod-260501-121000"},
+	)
 	_install_client(monkeypatch, harness)
 
 	result = await reconcile_stack(
@@ -563,6 +619,12 @@ async def test_reconcile_stack_updates_runtime_config_without_creating_services(
 	assert result.internal_token_created is False
 	assert harness.created_services == []
 	assert harness.deployed_templates == []
+	assert harness.group_assignments == [
+		("svc-janitor", "group-baseline"),
+		("svc-env", "group-baseline"),
+		("svc-backend", "group-baseline"),
+		("svc-redis", "group-baseline"),
+	]
 	router_update = next(
 		update for update in harness.updates if update["service_id"] == "svc-router"
 	)
@@ -573,6 +635,35 @@ async def test_reconcile_stack_updates_runtime_config_without_creating_services(
 	assert router_update["num_replicas"] == 3
 	assert janitor_update["source_image"] == official_janitor_image_ref()
 	assert harness.variables["svc-janitor"][PULSE_DRAIN_TTL_SECONDS] == "120"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_stack_ignores_grouping_when_router_has_no_group(
+	monkeypatch,
+) -> None:
+	harness = RailwayHarness(router_group_id=None)
+	router_vars, janitor_vars = _runtime_variables()
+	harness.add_service(
+		"pulse-router",
+		service_id="svc-router",
+		domain="pulse-router-production.up.railway.app",
+		variables=router_vars,
+	)
+	harness.add_service(
+		"pulse-janitor", service_id="svc-janitor", variables=janitor_vars
+	)
+	harness.add_service("pulse-env", service_id="svc-env")
+	harness.add_service("pulse-redis", service_id="svc-redis")
+	harness.add_service(
+		"pulse-prod-260501-120000",
+		service_id="svc-backend",
+		variables={PULSE_DEPLOYMENT_ID: "prod-260501-120000"},
+	)
+	_install_client(monkeypatch, harness)
+
+	await reconcile_stack(project=_project())
+
+	assert harness.group_assignments == []
 
 
 @pytest.mark.asyncio

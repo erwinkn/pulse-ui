@@ -427,25 +427,62 @@ async def configure_service_and_deploy(
 	)
 
 
+async def place_services_in_router_group(
+	client: RailwayGraphQLClient,
+	*,
+	project: RailwayProject,
+	router_service_id: str,
+	service_ids: list[str],
+	timeout: float = 0.0,
+	poll_interval: float = 2.0,
+) -> None:
+	loop = asyncio.get_running_loop()
+	deadline = loop.time() + timeout
+	while True:
+		config: dict[str, Any] = await client.get_environment_config(
+			project_id=project.project_id,
+			environment_id=project.environment_id,
+		)
+		services_config = config.get("services") or {}
+		router_config = services_config.get(router_service_id) or {}
+		group_id = router_config.get("groupId")
+		if isinstance(group_id, str) and group_id:
+			break
+		if loop.time() >= deadline:
+			return
+		await asyncio.sleep(poll_interval)
+
+	seen: set[str] = set()
+	for service_id in service_ids:
+		if service_id == router_service_id or service_id in seen:
+			continue
+		seen.add(service_id)
+		service_config = services_config.get(service_id) or {}
+		if service_config.get("groupId") == group_id:
+			continue
+		await client.set_service_group_id(
+			environment_id=project.environment_id,
+			service_id=service_id,
+			group_id=group_id,
+		)
+
+
 async def place_service_in_router_group(
 	client: RailwayGraphQLClient,
 	*,
 	project: RailwayProject,
 	router_service_id: str,
 	service_id: str,
+	timeout: float = 0.0,
+	poll_interval: float = 2.0,
 ) -> None:
-	config: dict[str, Any] = await client.get_environment_config(
-		project_id=project.project_id,
-		environment_id=project.environment_id,
-	)
-	router_config = (config.get("services") or {}).get(router_service_id) or {}
-	group_id = router_config.get("groupId")
-	if not isinstance(group_id, str) or not group_id:
-		return
-	await client.set_service_group_id(
-		environment_id=project.environment_id,
-		service_id=service_id,
-		group_id=group_id,
+	await place_services_in_router_group(
+		client,
+		project=project,
+		router_service_id=router_service_id,
+		service_ids=[service_id],
+		timeout=timeout,
+		poll_interval=poll_interval,
 	)
 
 
@@ -456,6 +493,7 @@ async def create_service_in_router_group(
 	router_service_id: str,
 	name: str,
 	image: str | None = None,
+	group_timeout: float = 0.0,
 ) -> ServiceRecord:
 	service_id = await client.create_service(
 		project_id=project.project_id,
@@ -468,6 +506,7 @@ async def create_service_in_router_group(
 		project=project,
 		router_service_id=router_service_id,
 		service_id=service_id,
+		timeout=group_timeout,
 	)
 	return ServiceRecord(id=service_id, name=name, image=image)
 
@@ -561,6 +600,7 @@ __all__ = [
 	"list_deployment_service_records",
 	"list_services_with_variables",
 	"place_service_in_router_group",
+	"place_services_in_router_group",
 	"pulse_env_reference_variables",
 	"raise_if_service_exists",
 	"require_service_by_name",

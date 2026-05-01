@@ -7,6 +7,10 @@ from pulse_railway.config import (
 )
 from pulse_railway.images import official_janitor_image_ref, official_router_image_ref
 from pulse_railway.railway.client import RailwayGraphQLClient
+from pulse_railway.railway.ops import (
+	list_deployment_service_records,
+	place_services_in_router_group,
+)
 from pulse_railway.stack.common import (
 	StackChange,
 	StackServiceChange,
@@ -28,6 +32,21 @@ async def _reconcile_stack_with_client(
 		client,
 		project=project,
 		command="ensure",
+	)
+	assert stack.env is not None
+	deployments = await list_deployment_service_records(client, project=project)
+	group_service_ids = [
+		stack.janitor.id,
+		stack.env.id,
+		*[deployment.service_id for deployment in deployments],
+	]
+	if stack.redis is not None:
+		group_service_ids.append(stack.redis.id)
+	await place_services_in_router_group(
+		client,
+		project=project,
+		router_service_id=stack.router.id,
+		service_ids=group_service_ids,
 	)
 	internals = stack_internals(
 		project,

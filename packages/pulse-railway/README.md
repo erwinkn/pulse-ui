@@ -25,14 +25,14 @@ uv run pulse-railway deploy \
 Use the commands like this:
 
 - `pulse-railway scaffold` bootstraps the stable router, env, Redis, and janitor stack into an empty Railway project.
-- `pulse-railway ensure` creates the baseline on an empty project or reconciles mutable runtime config on a complete baseline.
+- `pulse-railway ensure` creates the baseline on an empty project or reconciles mutable runtime and canvas config on a complete baseline.
 - `pulse-railway deploy` builds and rolls out a new backend service on top of an already-initialized stack.
   By default it uploads source and uses `railway up` to build on Railway. Passing an image repository switches deploy to the local `docker buildx build --push` path.
 - `pulse-railway redeploy` redeploys the active backend service. Pass `--deployment-id <id>` to redeploy a specific Pulse deployment.
 
 `scaffold <app-file>` bootstraps the baseline from `RailwayPlugin` config and defaults. Stable router, Redis, janitor, and backend service names come from the app plugin. The baseline also includes a stable env service that acts as the canonical source for user-managed deployment variables.
 
-`ensure` uses the same target/options as `scaffold`, but it is strict about topology. On an empty project it creates the baseline. On a complete baseline it rewrites Pulse-managed runtime config such as images, variables, replica counts, healthchecks, cron, and janitor drain settings. On a partial baseline it fails; delete the baseline services and rerun `scaffold`.
+`ensure` uses the same target/options as `scaffold`, but it is strict about topology. On an empty project it creates the baseline. On a complete baseline it rewrites Pulse-managed runtime config such as images, variables, replica counts, healthchecks, cron, and janitor drain settings. If the router is in a Railway canvas group, it also moves Pulse baseline and deployment services into that group. On a partial baseline it fails; delete the baseline services and rerun `scaffold`.
 
 `deploy` reads app configuration from `RailwayPlugin` on the target app. Provide the Dockerfile with `RailwayPlugin(dockerfile=...)`.
 

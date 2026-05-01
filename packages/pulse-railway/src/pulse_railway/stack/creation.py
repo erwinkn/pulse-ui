@@ -96,6 +96,7 @@ async def _create_env_service(
 		project=project,
 		router_service_id=router.id,
 		name=project.env_service_name,
+		group_timeout=60.0,
 	)
 
 

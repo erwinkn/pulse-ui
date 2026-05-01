@@ -96,22 +96,16 @@ class BaselineServiceInput:
 	created: bool
 
 
-def _baseline_service_names(project: RailwayProject) -> dict[str, str]:
-	names = {
-		"router": project.service_name,
-		"janitor": project.janitor_service_name,
-		"env": project.env_service_name,
-	}
-	if project.redis_url is None:
-		names["redis"] = project.redis_service_name
-	return names
-
-
-def _baseline_leftover_service_names(project: RailwayProject) -> dict[str, str]:
-	names = dict(_baseline_service_names(project))
-	names["redis"] = project.redis_service_name
-	if names["redis"] != "pulse-redis":
-		names["template_redis"] = "pulse-redis"
+def _baseline_service_names(project: RailwayProject) -> list[str]:
+	"""Names that identify baseline services, including template Redis leftovers."""
+	names = [
+		project.service_name,
+		project.janitor_service_name,
+		project.env_service_name,
+		project.redis_service_name,
+	]
+	if project.redis_service_name != "pulse-redis":
+		names.append("pulse-redis")
 	return names
 
 
@@ -988,22 +982,22 @@ async def _bootstrap_stack_with_client(
 	check_existing: bool,
 ) -> InitResult:
 	if check_existing:
-		leftover_service_names = _baseline_leftover_service_names(project)
-		leftover_services = await asyncio.gather(
+		baseline_names = _baseline_service_names(project)
+		baseline_services = await asyncio.gather(
 			*[
 				client.find_service_by_name(
 					project_id=project.project_id,
 					environment_id=project.environment_id,
 					name=name,
 				)
-				for name in leftover_service_names.values()
+				for name in baseline_names
 			]
 		)
-		found_leftovers = [
-			service.name for service in leftover_services if service is not None
+		found_baseline = [
+			service.name for service in baseline_services if service is not None
 		]
-		if found_leftovers:
-			_raise_for_existing_baseline(found_leftovers)
+		if found_baseline:
+			_raise_for_existing_baseline(found_baseline)
 
 	template_services = await deploy_template(client, project=project)
 	router_service = template_services["pulse-router"]
@@ -1068,7 +1062,7 @@ async def ensure_stack(
 	router_instance: ServiceInstanceConfig = DEFAULT_ROUTER_INSTANCE,
 ) -> InitResult:
 	async with RailwayGraphQLClient(token=project.token) as client:
-		baseline_names = _baseline_leftover_service_names(project)
+		baseline_names = _baseline_service_names(project)
 		service_by_name = {
 			service.name: service
 			for service in await client.list_services(
@@ -1076,9 +1070,7 @@ async def ensure_stack(
 				environment_id=project.environment_id,
 			)
 		}
-		existing_services = [
-			service_by_name.get(name) for name in baseline_names.values()
-		]
+		existing_services = [service_by_name.get(name) for name in baseline_names]
 		if not any(service is not None for service in existing_services):
 			return await _bootstrap_stack_with_client(
 				client,

@@ -20,10 +20,48 @@ from pulse_railway.railway import ServiceDomain, ServiceRecord, TemplateRecord
 from pulse_railway.stack import (
 	JANITOR_START_COMMAND,
 	ROUTER_START_COMMAND,
+	_baseline_service_names,
 	bootstrap_stack,
 	require_ready_stack,
 	upsert_service_variables,
 )
+
+
+def test_baseline_service_names_use_resolved_project_names() -> None:
+	project = RailwayProject(
+		project_id="project",
+		environment_id="env",
+		token="token",
+		service_name="pulse-router",
+		janitor_service_name="pulse-janitor",
+		env_service_name="pulse-env",
+		redis_service_name="pulse-cache",
+	)
+
+	assert _baseline_service_names(project) == [
+		"pulse-router",
+		"pulse-janitor",
+		"pulse-env",
+		"pulse-cache",
+		"pulse-redis",
+	]
+
+
+def test_baseline_service_names_omit_duplicate_template_redis() -> None:
+	project = RailwayProject(
+		project_id="project",
+		environment_id="env",
+		token="token",
+		service_name="pulse-router",
+		redis_service_name="pulse-redis",
+	)
+
+	assert _baseline_service_names(project) == [
+		"pulse-router",
+		"pulse-router-janitor",
+		"pulse-env",
+		"pulse-redis",
+	]
 
 
 @pytest.mark.asyncio

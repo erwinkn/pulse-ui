@@ -14,7 +14,7 @@ from pulse_railway.commands.common import (
 	build_target_project,
 	environment_id_from_sources,
 	environment_name_from_sources,
-	load_deploy_target,
+	load_railway_plugin,
 	parse_kv_items,
 	project_id_from_sources,
 	project_name_from_sources,
@@ -124,11 +124,11 @@ async def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployComm
 		raise ValueError(f"Context path not found: {context_path}")
 	if Path(args.app_file).is_absolute():
 		raise ValueError("app-file must be relative to the deploy context")
-	app_path, deploy_target = load_deploy_target(
+	app_path, plugin = load_railway_plugin(
 		app_file=args.app_file,
 		base_path=context_path,
 	)
-	dockerfile = deploy_target.dockerfile
+	dockerfile = plugin.dockerfile
 	if dockerfile is None:
 		raise ValueError("dockerfile is required. Set RailwayPlugin(dockerfile=...).")
 	dockerfile_path = resolve_path(context_path, dockerfile)
@@ -136,7 +136,7 @@ async def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployComm
 		raise ValueError(f"Dockerfile not found: {dockerfile_path}")
 	if args.web_root is None:
 		try:
-			web_root = deploy_target.web_root.resolve().relative_to(context_path)
+			web_root = plugin.web_root.resolve().relative_to(context_path)
 		except ValueError as exc:
 			raise ValueError(
 				"App web root must be inside the deploy context. "
@@ -152,13 +152,13 @@ async def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployComm
 	resolved_token = resolve_railway_access_token(args.token)
 	token = resolved_token.value
 	cli_token_env_name = resolved_token.env_name
-	deployment_name = args.deployment_name or deploy_target.deployment_name or "prod"
+	deployment_name = args.deployment_name or plugin.deployment_name or "prod"
 	if not token:
 		raise ValueError("token is required")
 	project_id, environment_id = await resolve_railway_target_ids(
-		project_name=project_name_from_sources(args, deploy_target),
+		project_name=project_name_from_sources(args, plugin),
 		project_id=project_id_from_sources(args),
-		environment_name=environment_name_from_sources(args, deploy_target),
+		environment_name=environment_name_from_sources(args, plugin),
 		environment_id=environment_id_from_sources(args),
 		token=token,
 		workspace_name=workspace_name_from_sources(args),
@@ -167,7 +167,7 @@ async def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployComm
 	env_vars = parse_kv_items(args.env, "--env")
 	validate_backend_env_vars(env_vars)
 	build_args = parse_kv_items(args.build_arg, "--build-arg")
-	image_repository = args.image_repository or deploy_target.image_repository
+	image_repository = args.image_repository or plugin.image_repository
 	mode: DeployMode = "image" if image_repository else "source"
 	if mode == "image" and args.no_gitignore:
 		raise ValueError("--no-gitignore cannot be used with --image-repository")
@@ -175,13 +175,13 @@ async def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployComm
 		check_reserved_source_build_args(build_args)
 	project = build_target_project(
 		args,
-		deploy_target=deploy_target,
+		plugin=plugin,
 		project_id=project_id,
 		environment_id=environment_id,
 		token=token,
 		env_vars=env_vars,
 		backend_replicas=args.backend_replicas,
-		server_address=args.server_address or deploy_target.server_address,
+		server_address=args.server_address or plugin.server_address,
 	)
 	docker = DockerBuild(
 		dockerfile_path=dockerfile_path,
@@ -197,7 +197,7 @@ async def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployComm
 		deployment_id=args.deployment_id,
 		app_file=str(app_path.relative_to(context_path)),
 		web_root=web_root.as_posix(),
-		uses_railway_session_store=deploy_target.uses_railway_session_store,
+		uses_railway_session_store=plugin.uses_railway_session_store,
 		cli_token_env_name=cli_token_env_name,
 		no_gitignore=args.no_gitignore,
 	)

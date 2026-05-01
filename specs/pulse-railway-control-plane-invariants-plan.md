@@ -75,7 +75,7 @@ Harden the current Redis-backed Railway control plane. This is a hard cutoff: no
 - Reject duplicate draining ids.
 - Reject active deployment id appearing in draining list.
 - Reject malformed `drain_started_at` values instead of letting `float(...)` raise an unshaped server error.
-- Only call `mark_active` / `mark_draining` after full payload validation.
+- Only call `set_active` / `mark_draining` after full payload validation.
 
 [ ] Add promote endpoint tests.
 

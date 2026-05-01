@@ -180,7 +180,7 @@ async def test_router_control_endpoint_promotes_deployment() -> None:
 @pytest.mark.asyncio
 async def test_router_promote_rejects_active_deployment_in_draining() -> None:
 	store = MemoryDeploymentStore()
-	await store.mark_active(deployment_id="prod-current", service_name="pulse-current")
+	await store.set_active(deployment_id="prod-current", service_name="pulse-current")
 	app = build_app(
 		StaticResolver(backends={}),
 		store=store,
@@ -217,7 +217,7 @@ async def test_router_promote_rejects_active_deployment_in_draining() -> None:
 @pytest.mark.asyncio
 async def test_router_promote_rejects_duplicate_draining_deployment_ids() -> None:
 	store = MemoryDeploymentStore()
-	await store.mark_active(deployment_id="prod-current", service_name="pulse-current")
+	await store.set_active(deployment_id="prod-current", service_name="pulse-current")
 	app = build_app(
 		StaticResolver(backends={}),
 		store=store,
@@ -258,7 +258,7 @@ async def test_router_promote_rejects_duplicate_draining_deployment_ids() -> Non
 @pytest.mark.asyncio
 async def test_router_promote_rejects_invalid_drain_started_at() -> None:
 	store = MemoryDeploymentStore()
-	await store.mark_active(deployment_id="prod-current", service_name="pulse-current")
+	await store.set_active(deployment_id="prod-current", service_name="pulse-current")
 	app = build_app(
 		StaticResolver(backends={}),
 		store=store,
@@ -296,7 +296,7 @@ async def test_router_promote_rejects_invalid_drain_started_at() -> None:
 @pytest.mark.asyncio
 async def test_router_control_endpoint_deletes_inactive_deployment_state() -> None:
 	store = MemoryDeploymentStore()
-	await store.mark_active(deployment_id="prod-new", service_name="pulse-prod-new")
+	await store.set_active(deployment_id="prod-new", service_name="pulse-prod-new")
 	await store.mark_draining(
 		deployment_id="prod-old",
 		service_name="pulse-prod-old",
@@ -326,7 +326,7 @@ async def test_router_control_endpoint_deletes_inactive_deployment_state() -> No
 @pytest.mark.asyncio
 async def test_router_control_endpoint_rejects_active_deployment_delete() -> None:
 	store = MemoryDeploymentStore()
-	await store.mark_active(deployment_id="prod-active", service_name="pulse-active")
+	await store.set_active(deployment_id="prod-active", service_name="pulse-active")
 	app = build_app(
 		StaticResolver(backends={}),
 		store=store,

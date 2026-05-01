@@ -46,8 +46,7 @@ def _make_scaffold_args(**overrides: Any) -> argparse.Namespace:
 		"redis_url": None,
 		"redis_prefix": "pulse:railway",
 		"janitor_cron_schedule": "*/5 * * * *",
-		"drain_grace_seconds": 60,
-		"max_drain_age_seconds": 86400,
+		"drain_ttl_seconds": 86400,
 		"router_replicas": 1,
 	}
 	values.update(overrides)
@@ -1837,8 +1836,7 @@ async def test_run_janitor_run_invokes_janitor(monkeypatch) -> None:
 			redis_url=None,
 			redis_service=None,
 			redis_prefix="pulse:railway",
-			drain_grace_seconds=60,
-			max_drain_age_seconds=86400,
+			drain_ttl_seconds=86400,
 		)
 	)
 
@@ -1862,8 +1860,7 @@ async def test_run_janitor_run_fails_outside_railway(monkeypatch) -> None:
 				redis_url=None,
 				redis_service=None,
 				redis_prefix="pulse:railway",
-				drain_grace_seconds=60,
-				max_drain_age_seconds=86400,
+				drain_ttl_seconds=86400,
 			)
 		)
 
@@ -1916,7 +1913,7 @@ def test_print_janitor_result_timeline(capsys: pytest.CaptureFixture[str]) -> No
 	assert capsys.readouterr().out == (
 		"scan start; draining=3\n"
 		"delete deploy9; reason=drainable\n"
-		"delete deploy8; reason=max_drain_age\n"
+		"delete deploy8; reason=drain_ttl\n"
 		"keep deploy7; reason=still_active\n"
 		"scan complete; deleted=2 skipped=1\n"
 	)

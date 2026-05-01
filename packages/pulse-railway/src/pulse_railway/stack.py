@@ -14,12 +14,9 @@ from pulse_railway.config import (
 from pulse_railway.constants import (
 	DEFAULT_PULSE_BASELINE_TEMPLATE_CODE,
 	DEFAULT_REDIS_TEMPLATE_CODE,
-	PULSE_DRAIN_GRACE_SECONDS,
+	PULSE_DRAIN_TTL_SECONDS,
 	PULSE_INTERNAL_TOKEN,
-	PULSE_MAX_DRAIN_AGE_SECONDS,
 	PULSE_REDIS_PREFIX,
-	PULSE_WEBSOCKET_HEARTBEAT_SECONDS,
-	PULSE_WEBSOCKET_TTL_SECONDS,
 	RAILWAY_TOKEN,
 	REDIS_URL,
 )
@@ -588,8 +585,6 @@ async def _configure_router_service(
 				service_prefix=internals.service_prefix,
 				redis_url=internals.redis_url,
 				redis_prefix=project.redis_prefix,
-				websocket_heartbeat_seconds=project.websocket_heartbeat_seconds,
-				websocket_ttl_seconds=project.websocket_ttl_seconds,
 			),
 		},
 	)
@@ -638,8 +633,7 @@ async def _configure_janitor_service(
 			redis_url=internals.redis_url,
 			redis_prefix=project.redis_prefix,
 			service_prefix=internals.service_prefix,
-			drain_grace_seconds=project.drain_grace_seconds,
-			max_drain_age_seconds=project.max_drain_age_seconds,
+			drain_ttl_seconds=project.drain_ttl_seconds,
 		),
 	)
 	await client.update_service_instance(
@@ -875,8 +869,6 @@ async def _validate_router_service(
 		names = names + (
 			REDIS_URL,
 			PULSE_REDIS_PREFIX,
-			PULSE_WEBSOCKET_HEARTBEAT_SECONDS,
-			PULSE_WEBSOCKET_TTL_SECONDS,
 		)
 	_require_variables(
 		service_name=service.name,
@@ -915,8 +907,7 @@ async def _validate_janitor_service(
 			PULSE_INTERNAL_TOKEN,
 			REDIS_URL,
 			PULSE_REDIS_PREFIX,
-			PULSE_DRAIN_GRACE_SECONDS,
-			PULSE_MAX_DRAIN_AGE_SECONDS,
+			PULSE_DRAIN_TTL_SECONDS,
 		),
 		command=command,
 	)

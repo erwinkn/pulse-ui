@@ -43,9 +43,9 @@ from pulse_railway.commands.scaffold import (
 )
 from pulse_railway.config import RailwayProject
 from pulse_railway.constants import (
+	DEFAULT_DRAIN_TTL_SECONDS,
 	DEFAULT_REDIS_PREFIX,
-	PULSE_DRAIN_GRACE_SECONDS,
-	PULSE_MAX_DRAIN_AGE_SECONDS,
+	PULSE_DRAIN_TTL_SECONDS,
 )
 from pulse_railway.deployment import (
 	default_redis_service_name,
@@ -92,7 +92,7 @@ def _print_janitor_result(result: JanitorResult) -> None:
 	print(f"scan start; draining={result.scanned_count}")
 	for deployment_id in result.deleted_deployments:
 		if deployment_id in result.force_deleted_deployments:
-			print(f"delete {deployment_id}; reason=max_drain_age")
+			print(f"delete {deployment_id}; reason=drain_ttl")
 			continue
 		print(f"delete {deployment_id}; reason=drainable")
 	for deployment_id in result.skipped_deployments:
@@ -226,14 +226,9 @@ def _add_janitor_run_args(parser: argparse.ArgumentParser) -> None:
 		default=env("PULSE_RAILWAY_REDIS_PREFIX") or DEFAULT_REDIS_PREFIX,
 	)
 	parser.add_argument(
-		"--drain-grace-seconds",
+		"--drain-ttl-seconds",
 		type=int,
-		default=int(env(PULSE_DRAIN_GRACE_SECONDS) or "60"),
-	)
-	parser.add_argument(
-		"--max-drain-age-seconds",
-		type=int,
-		default=int(env(PULSE_MAX_DRAIN_AGE_SECONDS) or "86400"),
+		default=int(env(PULSE_DRAIN_TTL_SECONDS) or str(DEFAULT_DRAIN_TTL_SECONDS)),
 	)
 
 
@@ -298,8 +293,7 @@ async def _run_janitor_run(args: argparse.Namespace) -> int:
 	result = await run_janitor(
 		project=_railway_project(
 			args,
-			drain_grace_seconds=args.drain_grace_seconds,
-			max_drain_age_seconds=args.max_drain_age_seconds,
+			drain_ttl_seconds=args.drain_ttl_seconds,
 		)
 	)
 	_print_janitor_result(result)

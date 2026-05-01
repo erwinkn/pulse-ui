@@ -106,8 +106,7 @@ def _project() -> RailwayProject:
 		token="token",
 		service_name="pulse-router",
 		service_prefix="pulse-",
-		drain_grace_seconds=60,
-		max_drain_age_seconds=600,
+		drain_ttl_seconds=600,
 	)
 
 
@@ -143,10 +142,9 @@ async def test_janitor_rejects_active_id_missing_from_backend_services(
 	monkeypatch,
 ) -> None:
 	store = MemoryDeploymentStore()
-	await store.mark_active(
+	await store.set_active(
 		deployment_id="missing",
 		service_name="pulse-missing",
-		now=0,
 	)
 	created_clients: list[_FakeClient] = []
 
@@ -173,10 +171,9 @@ async def test_janitor_rejects_active_id_missing_from_backend_services(
 @pytest.mark.asyncio
 async def test_janitor_rejects_duplicate_deployment_ids(monkeypatch) -> None:
 	store = MemoryDeploymentStore()
-	await store.mark_active(
+	await store.set_active(
 		deployment_id="deploy1",
 		service_name="pulse-deploy1",
-		now=0,
 	)
 
 	class _DuplicateClient(_FakeClient):
@@ -250,10 +247,9 @@ async def test_janitor_returns_empty_success_without_backend_services_or_active(
 @pytest.mark.asyncio
 async def test_janitor_deletes_idle_draining_deployments(monkeypatch) -> None:
 	store = MemoryDeploymentStore()
-	await store.mark_active(
+	await store.set_active(
 		deployment_id="active",
 		service_name="pulse-active",
-		now=0,
 	)
 	await store.mark_draining(
 		deployment_id="deploy1",
@@ -278,10 +274,7 @@ async def test_janitor_deletes_idle_draining_deployments(monkeypatch) -> None:
 
 	async def fake_status(*args: object, **kwargs: object) -> DeploymentSessionStatus:
 		return DeploymentSessionStatus(
-			deployment_id="deploy1",
-			connected_render_count=0,
-			resumable_render_count=0,
-			drainable=True,
+			render_session_count=0,
 		)
 
 	monkeypatch.setattr(
@@ -295,8 +288,7 @@ async def test_janitor_deletes_idle_draining_deployments(monkeypatch) -> None:
 			token="token",
 			service_name="pulse-router",
 			service_prefix="pulse-",
-			drain_grace_seconds=60,
-			max_drain_age_seconds=600,
+			drain_ttl_seconds=600,
 		),
 		store=store,
 		now=120,
@@ -308,14 +300,13 @@ async def test_janitor_deletes_idle_draining_deployments(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_janitor_keeps_draining_deployments_with_live_websockets(
+async def test_janitor_keeps_draining_deployments_with_render_sessions(
 	monkeypatch,
 ) -> None:
 	store = MemoryDeploymentStore()
-	await store.mark_active(
+	await store.set_active(
 		deployment_id="active",
 		service_name="pulse-active",
-		now=0,
 	)
 	await store.mark_draining(
 		deployment_id="deploy1",
@@ -338,10 +329,7 @@ async def test_janitor_keeps_draining_deployments_with_live_websockets(
 
 	async def fake_status(*args: object, **kwargs: object) -> DeploymentSessionStatus:
 		return DeploymentSessionStatus(
-			deployment_id="deploy1",
-			connected_render_count=0,
-			resumable_render_count=1,
-			drainable=False,
+			render_session_count=1,
 		)
 
 	monkeypatch.setattr(
@@ -355,8 +343,7 @@ async def test_janitor_keeps_draining_deployments_with_live_websockets(
 			token="token",
 			service_name="pulse-router",
 			service_prefix="pulse-",
-			drain_grace_seconds=60,
-			max_drain_age_seconds=600,
+			drain_ttl_seconds=600,
 		),
 		store=store,
 		now=120,
@@ -367,22 +354,19 @@ async def test_janitor_keeps_draining_deployments_with_live_websockets(
 
 
 @pytest.mark.asyncio
-async def test_janitor_force_deletes_when_max_drain_age_is_exceeded(
+async def test_janitor_force_deletes_when_drain_ttl_is_exceeded(
 	monkeypatch,
 ) -> None:
 	store = MemoryDeploymentStore()
-	await store.mark_active(
+	await store.set_active(
 		deployment_id="active",
 		service_name="pulse-active",
-		now=0,
 	)
 	await store.mark_draining(
 		deployment_id="deploy1",
 		service_name="pulse-deploy1",
 		now=0,
 	)
-	await store.record_request(deployment_id="deploy1", now=119)
-
 	created_clients: list[_FakeClient] = []
 
 	def fake_client(**_: object) -> _FakeClient:
@@ -410,8 +394,7 @@ async def test_janitor_force_deletes_when_max_drain_age_is_exceeded(
 			token="token",
 			service_name="pulse-router",
 			service_prefix="pulse-",
-			drain_grace_seconds=60,
-			max_drain_age_seconds=60,
+			drain_ttl_seconds=60,
 		),
 		store=store,
 		now=120,
@@ -426,10 +409,9 @@ async def test_janitor_force_deletes_when_max_drain_age_is_exceeded(
 @pytest.mark.asyncio
 async def test_janitor_signals_reload_before_delete(monkeypatch) -> None:
 	store = MemoryDeploymentStore()
-	await store.mark_active(
+	await store.set_active(
 		deployment_id="active",
 		service_name="pulse-active",
-		now=0,
 	)
 	await store.mark_draining(
 		deployment_id="deploy1",
@@ -467,10 +449,7 @@ async def test_janitor_signals_reload_before_delete(monkeypatch) -> None:
 
 	async def fake_status(*args: object, **kwargs: object) -> DeploymentSessionStatus:
 		return DeploymentSessionStatus(
-			deployment_id="deploy1",
-			connected_render_count=0,
-			resumable_render_count=0,
-			drainable=True,
+			render_session_count=0,
 		)
 
 	monkeypatch.setattr(
@@ -484,8 +463,7 @@ async def test_janitor_signals_reload_before_delete(monkeypatch) -> None:
 			token="token",
 			service_name="pulse-router",
 			service_prefix="pulse-",
-			drain_grace_seconds=60,
-			max_drain_age_seconds=600,
+			drain_ttl_seconds=600,
 		),
 		store=store,
 		now=120,
@@ -508,20 +486,18 @@ async def test_janitor_lists_services_once_and_probes_concurrently(
 	]
 	for deployment_id in deployment_ids:
 		service_name = f"pulse-{deployment_id}"
-		await store.mark_active(
+		await store.set_active(
 			deployment_id=deployment_id,
 			service_name=service_name,
-			now=0,
 		)
 		await store.mark_draining(
 			deployment_id=deployment_id,
 			service_name=service_name,
 			now=0,
 		)
-	await store.mark_active(
+	await store.set_active(
 		deployment_id="active",
 		service_name="pulse-active",
-		now=0,
 	)
 
 	class _CountingClient(_FakeClient):
@@ -585,7 +561,7 @@ async def test_janitor_lists_services_once_and_probes_concurrently(
 
 	async def fake_status(*args: object, **kwargs: object) -> DeploymentSessionStatus:
 		nonlocal started, in_flight, max_in_flight
-		deployment_id = kwargs["deployment_id"]
+		deployment_id = str(kwargs["service_name"]).removeprefix("pulse-")
 		started += 1
 		in_flight += 1
 		max_in_flight = max(max_in_flight, in_flight)
@@ -595,10 +571,7 @@ async def test_janitor_lists_services_once_and_probes_concurrently(
 		await asyncio.sleep(0)
 		in_flight -= 1
 		return DeploymentSessionStatus(
-			deployment_id=deployment_id,
-			connected_render_count=0,
-			resumable_render_count=0,
-			drainable=deployment_id != skipped_deployment,
+			render_session_count=0 if deployment_id != skipped_deployment else 1,
 		)
 
 	monkeypatch.setattr(
@@ -612,8 +585,7 @@ async def test_janitor_lists_services_once_and_probes_concurrently(
 			token="token",
 			service_name="pulse-router",
 			service_prefix="pulse-",
-			drain_grace_seconds=60,
-			max_drain_age_seconds=600,
+			drain_ttl_seconds=600,
 		),
 		store=store,
 		now=120,

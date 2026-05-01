@@ -26,8 +26,6 @@ from pulse_railway.constants import (
 	PULSE_INTERNAL_TOKEN,
 	PULSE_REDIS_PREFIX,
 	PULSE_SERVICE_PREFIX,
-	PULSE_WEBSOCKET_HEARTBEAT_SECONDS,
-	PULSE_WEBSOCKET_TTL_SECONDS,
 	RAILWAY_ENVIRONMENT_ID,
 	RAILWAY_PROJECT_ID,
 	RAILWAY_TOKEN,
@@ -35,6 +33,7 @@ from pulse_railway.constants import (
 )
 from pulse_railway.railway import RailwayGraphQLClient, RailwayResolver, RouteTarget
 from pulse_railway.store import (
+	ActiveDeploymentError,
 	DeploymentStore,
 	kv_store_spec_from_env,
 )
@@ -97,12 +96,10 @@ class AffinityRouter:
 		resolver: Resolver,
 		store: DeploymentStore | None = None,
 		internal_token: str = "",
-		websocket_heartbeat_seconds: int = 15,
 	) -> None:
 		self.resolver: Resolver = resolver
 		self.store: DeploymentStore | None = store
 		self.internal_token: str = internal_token
-		self.websocket_heartbeat_seconds: int = websocket_heartbeat_seconds
 		self._session: aiohttp.ClientSession | None = None
 		self._active_websockets: set[aiohttp.ClientWebSocketResponse] = set()
 		self._tasks: set[asyncio.Task[Any]] = set()
@@ -248,7 +245,7 @@ class AffinityRouter:
 			draining_records.append(
 				(deployment_id, service_name, drain_started_at_float)
 			)
-		await self.store.mark_active(
+		await self.store.set_active(
 			deployment_id=active_deployment_id,
 			service_name=active_service_name,
 		)
@@ -268,12 +265,13 @@ class AffinityRouter:
 		deployment_id = payload.get("deployment_id")
 		if not isinstance(deployment_id, str):
 			raise HTTPException(status_code=400, detail="deployment_id required")
-		if await self.store.get_active_deployment() == deployment_id:
+		try:
+			await self.store.delete_inactive_deployment(deployment_id=deployment_id)
+		except ActiveDeploymentError as exc:
 			raise HTTPException(
 				status_code=400,
 				detail="active deployment cannot be deleted",
-			)
-		await self.store.clear_deployment(deployment_id=deployment_id)
+			) from exc
 		return JSONResponse({"ok": True})
 
 	@staticmethod
@@ -303,8 +301,6 @@ class AffinityRouter:
 					status_code=409,
 				)
 			raise
-		if self.store is not None:
-			await self.store.record_request(deployment_id=target.deployment_id)
 		url = target.base_url.rstrip("/")
 		if path:
 			url += "/" + path
@@ -371,11 +367,6 @@ class AffinityRouter:
 			autoclose=True,
 			autoping=True,
 		)
-		lease_id: str | None = None
-		if self.store is not None:
-			lease_id = await self.store.create_websocket_lease(
-				deployment_id=target.deployment_id
-			)
 		self._active_websockets.add(backend_ws)
 		await websocket.accept(subprotocol=backend_ws.protocol)
 
@@ -407,22 +398,10 @@ class AffinityRouter:
 				elif message.type == aiohttp.WSMsgType.ERROR:
 					raise RuntimeError("backend websocket error")
 
-		async def websocket_heartbeat() -> None:
-			if self.store is None or lease_id is None:
-				return
-			while True:
-				await asyncio.sleep(self.websocket_heartbeat_seconds)
-				await self.store.refresh_websocket_lease(
-					deployment_id=target.deployment_id,
-					lease_id=lease_id,
-				)
-
 		tasks = [
 			asyncio.create_task(client_to_backend()),
 			asyncio.create_task(backend_to_client()),
 		]
-		if self.store is not None and lease_id is not None:
-			tasks.append(asyncio.create_task(websocket_heartbeat()))
 		for task in tasks:
 			self._track_task(task)
 		try:
@@ -437,12 +416,6 @@ class AffinityRouter:
 					raise exc
 		finally:
 			self._active_websockets.discard(backend_ws)
-			if self.store is not None and lease_id is not None:
-				with suppress(Exception):
-					await self.store.remove_websocket_lease(
-						deployment_id=target.deployment_id,
-						lease_id=lease_id,
-					)
 			with suppress(Exception):
 				await backend_ws.close()
 			with suppress(Exception):
@@ -453,13 +426,11 @@ def build_app(
 	resolver: Resolver,
 	store: DeploymentStore | None = None,
 	internal_token: str = "",
-	websocket_heartbeat_seconds: int = 15,
 ) -> FastAPI:
 	router = AffinityRouter(
 		resolver,
 		store=store,
 		internal_token=internal_token,
-		websocket_heartbeat_seconds=websocket_heartbeat_seconds,
 	)
 
 	@asynccontextmanager
@@ -515,7 +486,6 @@ def build_app_from_env() -> FastAPI:
 	store = DeploymentStore(
 		store=spec,
 		prefix=os.environ.get(PULSE_REDIS_PREFIX, DEFAULT_REDIS_PREFIX),
-		websocket_ttl_seconds=int(os.environ.get(PULSE_WEBSOCKET_TTL_SECONDS, "45")),
 		owns_store=True,
 	)
 	client = RailwayGraphQLClient(token=token)
@@ -531,9 +501,6 @@ def build_app_from_env() -> FastAPI:
 		resolver,
 		store=store,
 		internal_token=os.environ.get(PULSE_INTERNAL_TOKEN, ""),
-		websocket_heartbeat_seconds=int(
-			os.environ.get(PULSE_WEBSOCKET_HEARTBEAT_SECONDS, "15")
-		),
 	)
 
 

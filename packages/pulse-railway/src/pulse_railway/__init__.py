@@ -38,6 +38,9 @@ from pulse_railway.janitor import (
 from pulse_railway.plugin import (
 	RailwayPlugin as RailwayPlugin,
 )
+from pulse_railway.plugin import (
+	RailwayPluginError as RailwayPluginError,
+)
 from pulse_railway.session import (
 	RailwayRedisSessionStore as RailwayRedisSessionStore,
 )
@@ -49,13 +52,4 @@ from pulse_railway.store import (
 )
 from pulse_railway.store import (
 	StoredDeployment as StoredDeployment,
-)
-from pulse_railway.target import (
-	RailwayDeployTarget as RailwayDeployTarget,
-)
-from pulse_railway.target import (
-	RailwayDeployTargetError as RailwayDeployTargetError,
-)
-from pulse_railway.target import (
-	railway_deploy_target_from_app as railway_deploy_target_from_app,
 )

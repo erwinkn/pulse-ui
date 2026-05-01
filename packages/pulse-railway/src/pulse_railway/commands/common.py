@@ -17,17 +17,13 @@ from pulse.env import (
 
 from pulse_railway.config import RailwayProject
 from pulse_railway.constants import DEFAULT_REDIS_PREFIX
+from pulse_railway.plugin import RailwayPlugin, RailwayPluginError
 from pulse_railway.railway import (
 	EnvironmentRecord,
 	ProjectRecord,
 	ProjectTokenRecord,
 	RailwayGraphQLClient,
 	WorkspaceRecord,
-)
-from pulse_railway.target import (
-	RailwayDeployTarget,
-	RailwayDeployTargetError,
-	railway_deploy_target_from_app,
 )
 
 DEFAULT_RAILWAY_ENVIRONMENT_NAME = "production"
@@ -47,10 +43,7 @@ class RailwayProjectOverrides(TypedDict):
 	redis_template_code: NotRequired[str]
 	janitor_replicas: NotRequired[int]
 	janitor_cron_schedule: NotRequired[str]
-	drain_grace_seconds: NotRequired[int]
-	max_drain_age_seconds: NotRequired[int]
-	websocket_heartbeat_seconds: NotRequired[int]
-	websocket_ttl_seconds: NotRequired[int]
+	drain_ttl_seconds: NotRequired[int]
 
 
 def env(name: str) -> str | None:
@@ -129,11 +122,11 @@ def resolve_path(base: Path, raw: str) -> Path:
 	return (base / path).resolve()
 
 
-def load_deploy_target(
+def load_railway_plugin(
 	*,
 	app_file: str,
 	base_path: Path,
-) -> tuple[Path, RailwayDeployTarget]:
+) -> tuple[Path, RailwayPlugin]:
 	app_path = resolve_path(base_path, app_file)
 	if not app_path.exists():
 		raise ValueError(f"App file not found: {app_path}")
@@ -142,15 +135,20 @@ def load_deploy_target(
 		ENV_PULSE_APP_FILE: os.environ.get(ENV_PULSE_APP_FILE),
 		ENV_PULSE_ENV: os.environ.get(ENV_PULSE_ENV),
 	}
+	previous_cwd = Path.cwd()
 	try:
+		os.chdir(base_path)
 		pulse_env.pulse_env = "ci"
 		pulse_env.pulse_app_file = str(app_path)
 		pulse_env.pulse_app_dir = str(app_path.parent)
 		app_ctx = load_app_from_target(str(app_path))
-		return app_path, railway_deploy_target_from_app(app_ctx.app)
-	except RailwayDeployTargetError as exc:
+		if app_ctx.app.codegen.cfg.base_dir is None:
+			app_ctx.app.codegen.cfg.base_dir = app_path.parent
+		return app_path, RailwayPlugin.from_app(app_ctx.app)
+	except RailwayPluginError as exc:
 		raise ValueError(str(exc)) from exc
 	finally:
+		os.chdir(previous_cwd)
 		for key, value in previous_env.items():
 			if value is None:
 				os.environ.pop(key, None)
@@ -160,18 +158,16 @@ def load_deploy_target(
 
 def project_name_from_sources(
 	args: argparse.Namespace,
-	deploy_target: RailwayDeployTarget,
+	plugin: RailwayPlugin,
 ) -> str | None:
-	return clean_optional(getattr(args, "project", None) or deploy_target.project)
+	return clean_optional(getattr(args, "project", None) or plugin.project)
 
 
 def environment_name_from_sources(
 	args: argparse.Namespace,
-	deploy_target: RailwayDeployTarget,
+	plugin: RailwayPlugin,
 ) -> str | None:
-	return clean_optional(
-		getattr(args, "environment", None) or deploy_target.environment
-	)
+	return clean_optional(getattr(args, "environment", None) or plugin.environment)
 
 
 def project_id_from_sources(args: argparse.Namespace) -> str | None:
@@ -362,7 +358,7 @@ async def resolve_railway_target_ids(
 def build_target_project(
 	args: argparse.Namespace,
 	*,
-	deploy_target: RailwayDeployTarget,
+	plugin: RailwayPlugin,
 	project_id: str,
 	environment_id: str,
 	token: str,
@@ -370,19 +366,17 @@ def build_target_project(
 	env_vars: dict[str, str] | None = None,
 	**overrides: Unpack[RailwayProjectOverrides],
 ) -> RailwayProject:
-	service_prefix = (
-		getattr(args, "service_prefix", None) or deploy_target.service_prefix
-	)
+	service_prefix = getattr(args, "service_prefix", None) or plugin.service_prefix
 	return RailwayProject(
 		project_id=project_id,
 		environment_id=environment_id,
 		token=token,
-		service_name=deploy_target.router_service_name,
+		service_name=plugin.router_service_name,
 		service_prefix=normalize_optional_service_prefix(service_prefix),
 		redis_url=redis_url,
-		redis_service_name=deploy_target.redis_service_name,
+		redis_service_name=plugin.redis_service_name,
 		redis_prefix=getattr(args, "redis_prefix", None) or DEFAULT_REDIS_PREFIX,
-		janitor_service_name=deploy_target.janitor_service_name,
+		janitor_service_name=plugin.janitor_service_name,
 		env_vars={} if env_vars is None else env_vars,
 		**overrides,
 	)

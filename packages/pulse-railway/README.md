@@ -102,9 +102,9 @@ When the baseline stack has Redis configured:
 
 - deploy marks the new deployment `active`
 - previous active deployments become `draining`
-- the router records HTTP activity and websocket leases in Redis
-- the janitor signals connected browsers to reload before deleting a drained deployment
-- the janitor cron job deletes drained deployments after they are idle
+- the janitor probes draining backends for active Pulse render sessions
+- the janitor deletes drained deployments with no render sessions
+- after the drain TTL, the janitor signals connected browsers to reload and deletes the deployment anyway
 
 The janitor job runs as a Railway cron service, not a permanent always-on process. Use a cadence of 5 minutes or slower; Railway does not run cron jobs more frequently than that.
 

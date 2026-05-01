@@ -6,12 +6,9 @@ import pytest
 from pulse_railway.config import RailwayProject
 from pulse_railway.constants import (
 	DEFAULT_PULSE_BASELINE_TEMPLATE_CODE,
-	PULSE_DRAIN_GRACE_SECONDS,
+	PULSE_DRAIN_TTL_SECONDS,
 	PULSE_INTERNAL_TOKEN,
-	PULSE_MAX_DRAIN_AGE_SECONDS,
 	PULSE_REDIS_PREFIX,
-	PULSE_WEBSOCKET_HEARTBEAT_SECONDS,
-	PULSE_WEBSOCKET_TTL_SECONDS,
 	REDIS_URL,
 )
 from pulse_railway.errors import DeploymentError
@@ -254,15 +251,7 @@ async def test_bootstrap_stack_creates_baseline_from_empty_project(monkeypatch) 
 	assert janitor_update["restart_policy_type"] == "NEVER"
 	assert REDIS_URL in service_variables[result.router.service_id]
 	assert PULSE_REDIS_PREFIX in service_variables[result.router.service_id]
-	assert PULSE_DRAIN_GRACE_SECONDS in service_variables[result.janitor.service_id]
-	assert PULSE_MAX_DRAIN_AGE_SECONDS in service_variables[result.janitor.service_id]
-	assert (
-		PULSE_WEBSOCKET_HEARTBEAT_SECONDS
-		not in service_variables[result.janitor.service_id]
-	)
-	assert (
-		PULSE_WEBSOCKET_TTL_SECONDS not in service_variables[result.janitor.service_id]
-	)
+	assert PULSE_DRAIN_TTL_SECONDS in service_variables[result.janitor.service_id]
 
 
 @pytest.mark.asyncio
@@ -299,8 +288,7 @@ async def test_bootstrap_stack_fails_for_existing_stack(monkeypatch) -> None:
 			PULSE_INTERNAL_TOKEN: "secret-token",
 			REDIS_URL: "redis://pulse-redis.railway.internal:6379",
 			PULSE_REDIS_PREFIX: "pulse:railway",
-			PULSE_DRAIN_GRACE_SECONDS: "60",
-			PULSE_MAX_DRAIN_AGE_SECONDS: "86400",
+			PULSE_DRAIN_TTL_SECONDS: "86400",
 		},
 	}
 	create_calls: list[str] = []
@@ -737,8 +725,6 @@ async def test_require_ready_stack_accepts_external_redis_baseline(
 			"PORT": "8000",
 			REDIS_URL: redis_url,
 			PULSE_REDIS_PREFIX: "pulse:railway",
-			PULSE_WEBSOCKET_HEARTBEAT_SECONDS: "15",
-			PULSE_WEBSOCKET_TTL_SECONDS: "45",
 			"RAILWAY_PUBLIC_DOMAIN": "test.pulse.sc",
 		},
 		"svc-janitor": {
@@ -746,8 +732,7 @@ async def test_require_ready_stack_accepts_external_redis_baseline(
 			PULSE_INTERNAL_TOKEN: "secret-token",
 			REDIS_URL: redis_url,
 			PULSE_REDIS_PREFIX: "pulse:railway",
-			PULSE_DRAIN_GRACE_SECONDS: "60",
-			PULSE_MAX_DRAIN_AGE_SECONDS: "86400",
+			PULSE_DRAIN_TTL_SECONDS: "86400",
 		},
 	}
 

@@ -3,14 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from pulse_railway.constants import (
-	PULSE_DRAIN_GRACE_SECONDS,
+	PULSE_DRAIN_TTL_SECONDS,
 	PULSE_INTERNAL_TOKEN,
-	PULSE_MAX_DRAIN_AGE_SECONDS,
 	PULSE_RAILWAY_REDIS_URL,
 	PULSE_REDIS_PREFIX,
 	PULSE_SERVICE_PREFIX,
-	PULSE_WEBSOCKET_HEARTBEAT_SECONDS,
-	PULSE_WEBSOCKET_TTL_SECONDS,
 	RAILWAY_TOKEN,
 	REDIS_URL,
 )
@@ -29,35 +26,30 @@ from pulse_railway.env import (
 )
 
 
-def test_router_env_includes_websocket_vars_without_active_deployment() -> None:
+def test_router_env_includes_redis_vars() -> None:
 	assert router_env(
 		token="token",
 		router_port=9000,
 		service_prefix="pulse-",
 		redis_url="redis://internal",
 		redis_prefix="pulse:railway",
-		websocket_heartbeat_seconds=15,
-		websocket_ttl_seconds=45,
 	) == {
 		RAILWAY_TOKEN: "token",
 		PORT: "9000",
 		PULSE_SERVICE_PREFIX: "pulse-",
 		REDIS_URL: "redis://internal",
 		PULSE_REDIS_PREFIX: "pulse:railway",
-		PULSE_WEBSOCKET_HEARTBEAT_SECONDS: "15",
-		PULSE_WEBSOCKET_TTL_SECONDS: "45",
 	}
 
 
-def test_janitor_env_excludes_websocket_vars() -> None:
+def test_janitor_env_sets_drain_ttl() -> None:
 	env = janitor_env(
 		token="token",
 		internal_token="secret",
 		redis_url="redis://internal",
 		redis_prefix="pulse:railway",
 		service_prefix=None,
-		drain_grace_seconds=60,
-		max_drain_age_seconds=86400,
+		drain_ttl_seconds=86400,
 	)
 
 	assert env == {
@@ -65,11 +57,8 @@ def test_janitor_env_excludes_websocket_vars() -> None:
 		PULSE_INTERNAL_TOKEN: "secret",
 		REDIS_URL: "redis://internal",
 		PULSE_REDIS_PREFIX: "pulse:railway",
-		PULSE_DRAIN_GRACE_SECONDS: "60",
-		PULSE_MAX_DRAIN_AGE_SECONDS: "86400",
+		PULSE_DRAIN_TTL_SECONDS: "86400",
 	}
-	assert PULSE_WEBSOCKET_HEARTBEAT_SECONDS not in env
-	assert PULSE_WEBSOCKET_TTL_SECONDS not in env
 
 
 def test_backend_env_sets_direct_token_and_no_active_deployment() -> None:

@@ -9,15 +9,12 @@ from pulse_railway.constants import (
 	DEFAULT_REDIS_PREFIX,
 	PULSE_DEPLOYMENT_ID,
 	PULSE_DEPLOYMENT_STATE,
-	PULSE_DRAIN_GRACE_SECONDS,
 	PULSE_DRAIN_STARTED_AT,
+	PULSE_DRAIN_TTL_SECONDS,
 	PULSE_INTERNAL_TOKEN,
-	PULSE_MAX_DRAIN_AGE_SECONDS,
 	PULSE_RAILWAY_REDIS_URL,
 	PULSE_REDIS_PREFIX,
 	PULSE_SERVICE_PREFIX,
-	PULSE_WEBSOCKET_HEARTBEAT_SECONDS,
-	PULSE_WEBSOCKET_TTL_SECONDS,
 	RAILWAY_TOKEN,
 	REDIS_URL,
 )
@@ -87,8 +84,6 @@ def router_env(
 	service_prefix: str | None,
 	redis_url: str | None,
 	redis_prefix: str,
-	websocket_heartbeat_seconds: int,
-	websocket_ttl_seconds: int,
 ) -> dict[str, str]:
 	env = {
 		RAILWAY_TOKEN: token,
@@ -99,8 +94,6 @@ def router_env(
 	if redis_url:
 		env[REDIS_URL] = redis_url
 		env[PULSE_REDIS_PREFIX] = redis_prefix
-		env[PULSE_WEBSOCKET_HEARTBEAT_SECONDS] = str(websocket_heartbeat_seconds)
-		env[PULSE_WEBSOCKET_TTL_SECONDS] = str(websocket_ttl_seconds)
 	return env
 
 
@@ -111,16 +104,14 @@ def janitor_env(
 	redis_url: str,
 	redis_prefix: str,
 	service_prefix: str | None,
-	drain_grace_seconds: int,
-	max_drain_age_seconds: int,
+	drain_ttl_seconds: int,
 ) -> dict[str, str]:
 	env = {
 		RAILWAY_TOKEN: token,
 		PULSE_INTERNAL_TOKEN: internal_token,
 		REDIS_URL: redis_url,
 		PULSE_REDIS_PREFIX: redis_prefix or DEFAULT_REDIS_PREFIX,
-		PULSE_DRAIN_GRACE_SECONDS: str(drain_grace_seconds),
-		PULSE_MAX_DRAIN_AGE_SECONDS: str(max_drain_age_seconds),
+		PULSE_DRAIN_TTL_SECONDS: str(drain_ttl_seconds),
 	}
 	if service_prefix is not None:
 		env[PULSE_SERVICE_PREFIX] = service_prefix

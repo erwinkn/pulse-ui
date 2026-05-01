@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 import os
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any, override
 
 import pulse as ps
@@ -22,6 +23,11 @@ from pulse_railway.railway import (
 	normalize_service_name,
 	normalize_service_prefix,
 )
+from pulse_railway.session import RailwayRedisSessionStore
+
+
+class RailwayPluginError(ValueError):
+	pass
 
 
 class RailwayPlugin(ps.Plugin):
@@ -37,6 +43,7 @@ class RailwayPlugin(ps.Plugin):
 	janitor_service: str
 	redis_service: str
 	service_prefix: str | None
+	app: ps.App | None
 	deployment_id: str
 	internal_token: str
 	enabled: bool
@@ -70,9 +77,31 @@ class RailwayPlugin(ps.Plugin):
 			if clean_service_prefix is not None
 			else None
 		)
+		self.app = None
 		self.deployment_id = ""
 		self.internal_token = ""
 		self.enabled = False
+
+	@classmethod
+	def from_app(cls, app: ps.App) -> RailwayPlugin:
+		plugins = [plugin for plugin in app.plugins if isinstance(plugin, cls)]
+		if not plugins:
+			raise RailwayPluginError("RailwayPlugin not found on app")
+		if len(plugins) > 1:
+			raise RailwayPluginError("expected exactly one RailwayPlugin on app")
+		plugin = plugins[0]
+		plugin.attach_app(app)
+		return plugin
+
+	def attach_app(self, app: ps.App) -> None:
+		if self.app is not None and self.app is not app:
+			raise RailwayPluginError("RailwayPlugin is already attached to another app")
+		self.app = app
+
+	def _require_app(self) -> ps.App:
+		if self.app is None:
+			raise RailwayPluginError("RailwayPlugin is not attached to an app")
+		return self.app
 
 	@property
 	def router_service_name(self) -> str:
@@ -93,8 +122,21 @@ class RailwayPlugin(ps.Plugin):
 			name = name.removeprefix("pulse-")
 		return f"{self.service_prefix}{name}"
 
+	@property
+	def server_address(self) -> str | None:
+		return self._require_app().server_address
+
+	@property
+	def web_root(self) -> Path:
+		return self._require_app().codegen.cfg.web_root
+
+	@property
+	def uses_railway_session_store(self) -> bool:
+		return isinstance(self._require_app().session_store, RailwayRedisSessionStore)
+
 	@override
 	def on_startup(self, app: ps.App) -> None:
+		self.attach_app(app)
 		deployment_id = os.environ.get(PULSE_DEPLOYMENT_ID)
 		if not deployment_id:
 			return
@@ -108,6 +150,8 @@ class RailwayPlugin(ps.Plugin):
 
 	@override
 	def on_setup(self, app: ps.App) -> None:
+		self.attach_app(app)
+
 		@app.fastapi.get(DEPLOYMENT_META_PATH)
 		def deployment_info():  # pyright: ignore[reportUnusedFunction]
 			if not self.enabled:
@@ -134,19 +178,11 @@ class RailwayPlugin(ps.Plugin):
 				raise HTTPException(status_code=403, detail="forbidden")
 			if not hmac.compare_digest(x_internal_token, self.internal_token):
 				raise HTTPException(status_code=403, detail="forbidden")
-			connected_render_count = 0
-			resumable_render_count = 0
-			for render in app.render_sessions.values():
-				if render.connected:
-					connected_render_count += 1
-				else:
-					resumable_render_count += 1
+			render_session_count = len(app.render_sessions)
 			return {
 				"deployment_id": self.deployment_id,
-				"connected_render_count": connected_render_count,
-				"resumable_render_count": resumable_render_count,
-				"drainable": connected_render_count == 0
-				and resumable_render_count == 0,
+				"render_session_count": render_session_count,
+				"drainable": render_session_count == 0,
 				"session_timeout_seconds": app.session_timeout,
 			}
 
@@ -205,7 +241,7 @@ class RailwayDirectivesMiddleware(ps.PulseMiddleware):
 		return res
 
 
-__all__ = ["RailwayPlugin"]
+__all__ = ["RailwayPlugin", "RailwayPluginError"]
 
 
 def _clean_optional(value: str | None) -> str | None:

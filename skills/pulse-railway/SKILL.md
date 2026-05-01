@@ -183,7 +183,7 @@ Check:
 - app loads through the Railway router URL or custom domain
 - session data survives a redeploy when using `RailwaySessionStore()`
 - websocket navigation and actions still work after a redeploy
-- old deployment services eventually drain and get deleted by the janitor
+- old deployment services are deleted once they have no render sessions, or after the drain TTL
 
 For a local repo example, inspect `examples/railway/` and `packages/pulse-railway/README.md`.
 

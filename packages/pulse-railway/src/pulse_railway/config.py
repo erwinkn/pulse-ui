@@ -7,15 +7,12 @@ from pathlib import Path
 
 from pulse_railway.constants import (
 	DEFAULT_BACKEND_HEALTH_PATH,
-	DEFAULT_DRAIN_GRACE_SECONDS,
+	DEFAULT_DRAIN_TTL_SECONDS,
 	DEFAULT_JANITOR_CRON_SCHEDULE,
-	DEFAULT_MAX_DRAIN_AGE_SECONDS,
 	DEFAULT_REDIS_PREFIX,
 	DEFAULT_REDIS_TEMPLATE_CODE,
 	DEFAULT_ROUTER_HEALTH_PATH,
 	DEFAULT_ROUTER_PORT,
-	DEFAULT_WEBSOCKET_HEARTBEAT_SECONDS,
-	DEFAULT_WEBSOCKET_TTL_SECONDS,
 )
 
 
@@ -50,10 +47,7 @@ class RailwayProject:
 	janitor_service_name: str | None = None
 	janitor_replicas: int = 1
 	janitor_cron_schedule: str = DEFAULT_JANITOR_CRON_SCHEDULE
-	drain_grace_seconds: int = DEFAULT_DRAIN_GRACE_SECONDS
-	max_drain_age_seconds: int = DEFAULT_MAX_DRAIN_AGE_SECONDS
-	websocket_heartbeat_seconds: int = DEFAULT_WEBSOCKET_HEARTBEAT_SECONDS
-	websocket_ttl_seconds: int = DEFAULT_WEBSOCKET_TTL_SECONDS
+	drain_ttl_seconds: int = DEFAULT_DRAIN_TTL_SECONDS
 	env_vars: dict[str, str] = field(default_factory=dict)
 
 

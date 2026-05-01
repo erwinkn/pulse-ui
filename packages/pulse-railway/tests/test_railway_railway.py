@@ -50,6 +50,47 @@ async def test_update_service_instance_includes_cron_schedule(monkeypatch) -> No
 	}
 
 
+@pytest.mark.asyncio
+async def test_upsert_variable_collection_uses_batch_mutation(monkeypatch) -> None:
+	calls: list[tuple[str, dict[str, object] | None]] = []
+
+	async def fake_graphql(
+		self: RailwayGraphQLClient,
+		query: str,
+		variables: dict[str, object] | None = None,
+	) -> object:
+		calls.append((query, variables))
+		return {}
+
+	monkeypatch.setattr(RailwayGraphQLClient, "graphql", fake_graphql)
+	client = RailwayGraphQLClient(token="token")
+	try:
+		await client.upsert_variable_collection(
+			project_id="project",
+			environment_id="env",
+			service_id="svc-1",
+			variables={"A": "1", "B": "2"},
+			skip_deploys=True,
+			replace=False,
+		)
+	finally:
+		await client.aclose()
+
+	assert len(calls) == 1
+	query, variables = calls[0]
+	assert "variableCollectionUpsert" in query
+	assert variables == {
+		"input": {
+			"projectId": "project",
+			"environmentId": "env",
+			"serviceId": "svc-1",
+			"variables": {"A": "1", "B": "2"},
+			"skipDeploys": True,
+			"replace": False,
+		}
+	}
+
+
 def test_graphql_client_uses_longer_read_timeout() -> None:
 	client = RailwayGraphQLClient(token="token")
 	try:
@@ -234,6 +275,45 @@ async def test_create_project_uses_bearer_auth() -> None:
 		await client.aclose()
 
 	assert project_id == "project"
+	assert len(request_headers) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_template_by_code_uses_public_auth() -> None:
+	request_headers: list[httpx.Headers] = []
+
+	def handler(request: httpx.Request) -> httpx.Response:
+		request_headers.append(request.headers)
+		assert "Authorization" not in request.headers
+		assert "Project-Access-Token" not in request.headers
+		return httpx.Response(
+			200,
+			json={
+				"data": {
+					"template": {
+						"id": "template-id",
+						"code": "pulse-baseline",
+						"serializedConfig": {"services": {}},
+					}
+				}
+			},
+		)
+
+	client = RailwayGraphQLClient(token="token")
+	client._client = httpx.AsyncClient(
+		base_url=client.endpoint,
+		headers={"Content-Type": "application/json"},
+		transport=httpx.MockTransport(handler),
+		timeout=client._client.timeout,
+	)
+	try:
+		template = await client.get_template_by_code(code="pulse-baseline")
+	finally:
+		await client.aclose()
+
+	assert template.id == "template-id"
+	assert template.code == "pulse-baseline"
+	assert template.serialized_config == {"services": {}}
 	assert len(request_headers) == 1
 
 
@@ -477,6 +557,51 @@ async def test_list_projects_filters_workspace_listing_by_workspace_id() -> None
 
 	assert [(project.id, project.name) for project in projects] == [
 		("project-2", "stoneware-v4")
+	]
+
+
+@pytest.mark.asyncio
+async def test_list_workspaces_reads_owned_and_external_workspaces() -> None:
+	def handler(request: httpx.Request) -> httpx.Response:
+		payload = json.loads(request.read().decode())
+		query = str(payload["query"])
+		if "projectToken" in query:
+			return httpx.Response(403, json={"errors": [{"message": "forbidden"}]})
+		assert "externalWorkspaces" in query
+		return httpx.Response(
+			200,
+			json={
+				"data": {
+					"me": {
+						"workspaces": [
+							{"id": "workspace-1", "name": "Personal"},
+							{"id": "workspace-2", "name": "Team"},
+						]
+					},
+					"externalWorkspaces": [
+						{"id": "workspace-2", "name": "Team"},
+						{"id": "workspace-3", "name": "External"},
+					],
+				}
+			},
+		)
+
+	client = RailwayGraphQLClient(token="token")
+	client._client = httpx.AsyncClient(
+		base_url=client.endpoint,
+		headers={"Content-Type": "application/json"},
+		transport=httpx.MockTransport(handler),
+		timeout=client._client.timeout,
+	)
+	try:
+		workspaces = await client.list_workspaces()
+	finally:
+		await client.aclose()
+
+	assert [(workspace.id, workspace.name) for workspace in workspaces] == [
+		("workspace-1", "Personal"),
+		("workspace-2", "Team"),
+		("workspace-3", "External"),
 	]
 
 

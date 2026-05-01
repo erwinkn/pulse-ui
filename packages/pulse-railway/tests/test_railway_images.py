@@ -9,9 +9,9 @@ from pulse_railway.images import (
 
 
 def test_official_runtime_images_use_published_tag() -> None:
-	assert official_router_image_ref() == (f"{OFFICIAL_ROUTER_IMAGE_REPOSITORY}:0.1.0")
+	assert official_router_image_ref() == (f"{OFFICIAL_ROUTER_IMAGE_REPOSITORY}:0.2.2")
 	assert official_janitor_image_ref() == (
-		f"{OFFICIAL_JANITOR_IMAGE_REPOSITORY}:0.1.0"
+		f"{OFFICIAL_JANITOR_IMAGE_REPOSITORY}:0.2.2"
 	)
 
 

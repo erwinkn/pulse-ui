@@ -101,17 +101,18 @@ def test_create_app_uses_railway_session_store_by_default() -> None:
 
 
 def test_example_dockerfile_builds_workspace_packages_for_source_uploads() -> None:
-	dockerfile = (ROOT / "examples/Dockerfile").read_text()
+	dockerfile = (ROOT / "examples/railway/Dockerfile").read_text()
 	js_build_stage = _dockerfile_stage(dockerfile, "js-build")
 	final_stage = _dockerfile_stage(dockerfile, "final")
 
 	workspace_build = js_build_stage.index("RUN bun run build")
-	web_workdir = js_build_stage.index("WORKDIR /app/${WEB_ROOT}")
+	web_workdir = js_build_stage.index("WORKDIR /app/${PULSE_WEB_ROOT}")
 	web_build = js_build_stage.index("RUN bun run build", web_workdir)
 
 	assert workspace_build < web_build
 	assert any(" /app/packages/pulse/js/dist" in line for line in final_stage)
 	assert any(" /app/packages/pulse-mantine/js/dist" in line for line in final_stage)
+	assert any(" /app/${PULSE_WEB_ROOT}/build" in line for line in final_stage)
 
 
 @pytest.mark.asyncio
@@ -228,11 +229,9 @@ def test_railway_example_prod_smoke() -> None:
 
 	redis_process, redis_url = _start_redis_server()
 	port = _free_port()
-	server_address = f"https://127.0.0.1:{port}"
-	internal_server_address = f"http://127.0.0.1:{port}"
+	server_address = f"http://127.0.0.1:{port}"
 	base_env = os.environ.copy()
 	base_env["PULSE_SERVER_ADDRESS"] = server_address
-	base_env["PULSE_INTERNAL_SERVER_ADDRESS"] = internal_server_address
 	base_env["PULSE_DEPLOYMENT_ID"] = "smoke"
 	base_env[PULSE_RAILWAY_REDIS_URL] = redis_url
 
@@ -284,7 +283,7 @@ def test_railway_example_prod_smoke() -> None:
 					output = "" if process.stdout is None else process.stdout.read()
 					raise AssertionError(f"prod smoke process exited early:\n{output}")
 				try:
-					response = httpx.get(internal_server_address, timeout=1.0)
+					response = httpx.get(server_address, timeout=1.0)
 				except httpx.HTTPError:
 					time.sleep(0.5)
 					continue

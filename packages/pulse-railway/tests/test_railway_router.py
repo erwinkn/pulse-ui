@@ -13,9 +13,17 @@ from httpx import ASGITransport, AsyncClient
 from pulse_railway.constants import (
 	CLIENT_LOADER_HEADER,
 	CLIENT_LOADER_LOCATION_HEADER,
+	INTERNAL_TOKEN_HEADER,
+	PULSE_KV_KIND,
+	PULSE_KV_PATH,
+	PULSE_KV_URL,
+	RAILWAY_ENVIRONMENT_ID,
+	RAILWAY_PROJECT_ID,
+	RAILWAY_TOKEN,
+	REDIS_URL,
 	STALE_AFFINITY_RELOAD_QUERY_PARAM,
 )
-from pulse_railway.router import StaticResolver, build_app
+from pulse_railway.router import StaticResolver, build_app, build_app_from_env
 from pulse_railway.store import MemoryDeploymentStore
 
 
@@ -117,6 +125,278 @@ async def test_router_blocks_store_sync_internal_path(
 	await app.state.router.close()
 
 	assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_router_control_endpoint_promotes_deployment() -> None:
+	store = MemoryDeploymentStore()
+	app = build_app(
+		StaticResolver(backends={}),
+		store=store,
+		internal_token="secret-token",
+	)
+	async with AsyncClient(
+		transport=ASGITransport(app=app),
+		base_url="http://testserver",
+	) as client:
+		unauthorized = await client.post(
+			"/_pulse/internal/railway/promote",
+			json={},
+		)
+		response = await client.post(
+			"/_pulse/internal/railway/promote",
+			headers={INTERNAL_TOKEN_HEADER: "secret-token"},
+			json={
+				"active": {
+					"deployment_id": "prod-new",
+					"service_name": "pulse-prod-new",
+				},
+				"draining": [
+					{
+						"deployment_id": "prod-old",
+						"service_name": "pulse-prod-old",
+						"drain_started_at": 123.0,
+					}
+				],
+			},
+		)
+		active = await client.get(
+			"/_pulse/internal/railway/active",
+			headers={INTERNAL_TOKEN_HEADER: "secret-token"},
+		)
+	await app.state.router.close()
+
+	assert unauthorized.status_code == 404
+	assert response.status_code == 200
+	assert active.json() == {"deployment_id": "prod-new"}
+	assert await store.get_active_deployment() == "prod-new"
+	draining = await store.list_draining_deployments()
+	assert len(draining) == 1
+	assert draining[0].deployment_id == "prod-old"
+	assert draining[0].service_name == "pulse-prod-old"
+	assert draining[0].drain_started_at == 123.0
+
+
+@pytest.mark.asyncio
+async def test_router_promote_rejects_active_deployment_in_draining() -> None:
+	store = MemoryDeploymentStore()
+	await store.set_active(deployment_id="prod-current", service_name="pulse-current")
+	app = build_app(
+		StaticResolver(backends={}),
+		store=store,
+		internal_token="secret-token",
+	)
+	async with AsyncClient(
+		transport=ASGITransport(app=app),
+		base_url="http://testserver",
+	) as client:
+		response = await client.post(
+			"/_pulse/internal/railway/promote",
+			headers={INTERNAL_TOKEN_HEADER: "secret-token"},
+			json={
+				"active": {
+					"deployment_id": "prod-new",
+					"service_name": "pulse-prod-new",
+				},
+				"draining": [
+					{
+						"deployment_id": "prod-new",
+						"service_name": "pulse-prod-new",
+					}
+				],
+			},
+		)
+	await app.state.router.close()
+
+	assert response.status_code == 400
+	assert await store.get_active_deployment() == "prod-current"
+	assert await store.get_deployment(deployment_id="prod-new") is None
+	assert await store.list_draining_deployments() == []
+
+
+@pytest.mark.asyncio
+async def test_router_promote_rejects_duplicate_draining_deployment_ids() -> None:
+	store = MemoryDeploymentStore()
+	await store.set_active(deployment_id="prod-current", service_name="pulse-current")
+	app = build_app(
+		StaticResolver(backends={}),
+		store=store,
+		internal_token="secret-token",
+	)
+	async with AsyncClient(
+		transport=ASGITransport(app=app),
+		base_url="http://testserver",
+	) as client:
+		response = await client.post(
+			"/_pulse/internal/railway/promote",
+			headers={INTERNAL_TOKEN_HEADER: "secret-token"},
+			json={
+				"active": {
+					"deployment_id": "prod-new",
+					"service_name": "pulse-prod-new",
+				},
+				"draining": [
+					{
+						"deployment_id": "prod-old",
+						"service_name": "pulse-prod-old-a",
+					},
+					{
+						"deployment_id": "prod-old",
+						"service_name": "pulse-prod-old-b",
+					},
+				],
+			},
+		)
+	await app.state.router.close()
+
+	assert response.status_code == 400
+	assert await store.get_active_deployment() == "prod-current"
+	assert await store.get_deployment(deployment_id="prod-new") is None
+	assert await store.get_deployment(deployment_id="prod-old") is None
+
+
+@pytest.mark.asyncio
+async def test_router_promote_rejects_invalid_drain_started_at() -> None:
+	store = MemoryDeploymentStore()
+	await store.set_active(deployment_id="prod-current", service_name="pulse-current")
+	app = build_app(
+		StaticResolver(backends={}),
+		store=store,
+		internal_token="secret-token",
+	)
+	async with AsyncClient(
+		transport=ASGITransport(app=app),
+		base_url="http://testserver",
+	) as client:
+		response = await client.post(
+			"/_pulse/internal/railway/promote",
+			headers={INTERNAL_TOKEN_HEADER: "secret-token"},
+			json={
+				"active": {
+					"deployment_id": "prod-new",
+					"service_name": "pulse-prod-new",
+				},
+				"draining": [
+					{
+						"deployment_id": "prod-old",
+						"service_name": "pulse-prod-old",
+						"drain_started_at": "soon",
+					}
+				],
+			},
+		)
+	await app.state.router.close()
+
+	assert response.status_code == 400
+	assert await store.get_active_deployment() == "prod-current"
+	assert await store.get_deployment(deployment_id="prod-new") is None
+	assert await store.get_deployment(deployment_id="prod-old") is None
+
+
+@pytest.mark.asyncio
+async def test_router_control_endpoint_deletes_inactive_deployment_state() -> None:
+	store = MemoryDeploymentStore()
+	await store.set_active(deployment_id="prod-new", service_name="pulse-prod-new")
+	await store.mark_draining(
+		deployment_id="prod-old",
+		service_name="pulse-prod-old",
+		now=123.0,
+	)
+	app = build_app(
+		StaticResolver(backends={}),
+		store=store,
+		internal_token="secret-token",
+	)
+	async with AsyncClient(
+		transport=ASGITransport(app=app),
+		base_url="http://testserver",
+	) as client:
+		response = await client.post(
+			"/_pulse/internal/railway/delete",
+			headers={INTERNAL_TOKEN_HEADER: "secret-token"},
+			json={"deployment_id": "prod-old"},
+		)
+	await app.state.router.close()
+
+	assert response.status_code == 200
+	assert await store.get_active_deployment() == "prod-new"
+	assert await store.get_deployment(deployment_id="prod-old") is None
+
+
+@pytest.mark.asyncio
+async def test_router_control_endpoint_rejects_active_deployment_delete() -> None:
+	store = MemoryDeploymentStore()
+	await store.set_active(deployment_id="prod-active", service_name="pulse-active")
+	app = build_app(
+		StaticResolver(backends={}),
+		store=store,
+		internal_token="secret-token",
+	)
+	async with AsyncClient(
+		transport=ASGITransport(app=app),
+		base_url="http://testserver",
+	) as client:
+		response = await client.post(
+			"/_pulse/internal/railway/delete",
+			headers={INTERNAL_TOKEN_HEADER: "secret-token"},
+			json={"deployment_id": "prod-active"},
+		)
+	await app.state.router.close()
+
+	assert response.status_code == 400
+	assert await store.get_active_deployment() == "prod-active"
+	assert await store.get_deployment(deployment_id="prod-active") is not None
+
+
+def test_build_app_from_env_requires_deployment_store(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setenv(RAILWAY_TOKEN, "token")
+	monkeypatch.setenv(RAILWAY_PROJECT_ID, "project")
+	monkeypatch.setenv(RAILWAY_ENVIRONMENT_ID, "environment")
+	monkeypatch.delenv(REDIS_URL, raising=False)
+	monkeypatch.delenv(PULSE_KV_KIND, raising=False)
+	monkeypatch.delenv(PULSE_KV_URL, raising=False)
+	monkeypatch.delenv(PULSE_KV_PATH, raising=False)
+
+	with pytest.raises(RuntimeError, match="deployment store"):
+		build_app_from_env()
+
+
+@pytest.mark.asyncio
+async def test_build_app_from_env_uses_redis_url(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setenv(RAILWAY_TOKEN, "token")
+	monkeypatch.setenv(RAILWAY_PROJECT_ID, "project")
+	monkeypatch.setenv(RAILWAY_ENVIRONMENT_ID, "environment")
+	monkeypatch.setenv(REDIS_URL, "redis://localhost:6379/0")
+	monkeypatch.delenv(PULSE_KV_KIND, raising=False)
+	monkeypatch.delenv(PULSE_KV_URL, raising=False)
+	monkeypatch.delenv(PULSE_KV_PATH, raising=False)
+
+	app = build_app_from_env()
+
+	assert app.state.router.store is not None
+	await app.state.router.close()
+
+
+@pytest.mark.asyncio
+async def test_build_app_from_env_uses_explicit_kv_env(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setenv(RAILWAY_TOKEN, "token")
+	monkeypatch.setenv(RAILWAY_PROJECT_ID, "project")
+	monkeypatch.setenv(RAILWAY_ENVIRONMENT_ID, "environment")
+	monkeypatch.delenv(REDIS_URL, raising=False)
+	monkeypatch.setenv(PULSE_KV_KIND, "memory")
+	monkeypatch.delenv(PULSE_KV_URL, raising=False)
+	monkeypatch.delenv(PULSE_KV_PATH, raising=False)
+
+	app = build_app_from_env()
+
+	assert app.state.router.store is not None
+	await app.state.router.close()
 
 
 @pytest.mark.asyncio

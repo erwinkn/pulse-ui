@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
@@ -21,17 +22,22 @@ from pulse_railway.constants import (
 	DEFAULT_REDIS_PREFIX,
 	DEFAULT_ROUTER_HEALTH_PATH,
 	INTERNAL_API_PREFIX,
+	INTERNAL_TOKEN_HEADER,
+	PULSE_INTERNAL_TOKEN,
 	PULSE_REDIS_PREFIX,
 	PULSE_SERVICE_PREFIX,
-	PULSE_WEBSOCKET_HEARTBEAT_SECONDS,
-	PULSE_WEBSOCKET_TTL_SECONDS,
 	RAILWAY_ENVIRONMENT_ID,
 	RAILWAY_PROJECT_ID,
 	RAILWAY_TOKEN,
 	STALE_AFFINITY_RELOAD_QUERY_PARAM,
 )
-from pulse_railway.railway import RailwayGraphQLClient, RailwayResolver, RouteTarget
+from pulse_railway.railway.client import (
+	RailwayGraphQLClient,
+	RailwayResolver,
+	RouteTarget,
+)
 from pulse_railway.store import (
+	ActiveDeploymentError,
 	DeploymentStore,
 	kv_store_spec_from_env,
 )
@@ -93,11 +99,11 @@ class AffinityRouter:
 		self,
 		resolver: Resolver,
 		store: DeploymentStore | None = None,
-		websocket_heartbeat_seconds: int = 15,
+		internal_token: str = "",
 	) -> None:
 		self.resolver: Resolver = resolver
 		self.store: DeploymentStore | None = store
-		self.websocket_heartbeat_seconds: int = websocket_heartbeat_seconds
+		self.internal_token: str = internal_token
 		self._session: aiohttp.ClientSession | None = None
 		self._active_websockets: set[aiohttp.ClientWebSocketResponse] = set()
 		self._tasks: set[asyncio.Task[Any]] = set()
@@ -171,6 +177,107 @@ class AffinityRouter:
 	async def health(self) -> JSONResponse:
 		return JSONResponse({"ok": True})
 
+	def _authorize_internal_request(self, request: Request) -> None:
+		header = request.headers.get(INTERNAL_TOKEN_HEADER)
+		if not self.internal_token or header is None:
+			raise HTTPException(status_code=404, detail="not found")
+		if not hmac.compare_digest(header, self.internal_token):
+			raise HTTPException(status_code=404, detail="not found")
+
+	async def active_deployment(self, request: Request) -> JSONResponse:
+		self._authorize_internal_request(request)
+		if self.store is None:
+			raise HTTPException(status_code=503, detail="deployment store unavailable")
+		return JSONResponse({"deployment_id": await self.store.get_active_deployment()})
+
+	async def promote_deployment(self, request: Request) -> JSONResponse:
+		self._authorize_internal_request(request)
+		if self.store is None:
+			raise HTTPException(status_code=503, detail="deployment store unavailable")
+		payload = await request.json()
+		active = payload.get("active")
+		if not isinstance(active, dict):
+			raise HTTPException(status_code=400, detail="active deployment required")
+		active_deployment_id = active.get("deployment_id")
+		active_service_name = active.get("service_name")
+		if not isinstance(active_deployment_id, str) or not isinstance(
+			active_service_name, str
+		):
+			raise HTTPException(status_code=400, detail="active deployment invalid")
+		draining = payload.get("draining", [])
+		if not isinstance(draining, list):
+			raise HTTPException(status_code=400, detail="draining deployments invalid")
+		draining_records: list[tuple[str, str, float | None]] = []
+		draining_deployment_ids: set[str] = set()
+		for item in draining:
+			if not isinstance(item, dict):
+				raise HTTPException(
+					status_code=400, detail="draining deployment invalid"
+				)
+			deployment_id = item.get("deployment_id")
+			service_name = item.get("service_name")
+			drain_started_at = item.get("drain_started_at")
+			if not isinstance(deployment_id, str) or not isinstance(service_name, str):
+				raise HTTPException(
+					status_code=400, detail="draining deployment invalid"
+				)
+			if deployment_id == active_deployment_id:
+				raise HTTPException(
+					status_code=400,
+					detail="active deployment cannot be draining",
+				)
+			if deployment_id in draining_deployment_ids:
+				raise HTTPException(
+					status_code=400,
+					detail="duplicate draining deployment",
+				)
+			draining_deployment_ids.add(deployment_id)
+			drain_started_at_float: float | None = None
+			if drain_started_at is not None:
+				if not isinstance(drain_started_at, str | int | float):
+					raise HTTPException(
+						status_code=400,
+						detail="draining deployment drain_started_at invalid",
+					)
+				try:
+					drain_started_at_float = float(drain_started_at)
+				except ValueError as exc:
+					raise HTTPException(
+						status_code=400,
+						detail="draining deployment drain_started_at invalid",
+					) from exc
+			draining_records.append(
+				(deployment_id, service_name, drain_started_at_float)
+			)
+		await self.store.set_active(
+			deployment_id=active_deployment_id,
+			service_name=active_service_name,
+		)
+		for deployment_id, service_name, drain_started_at in draining_records:
+			await self.store.mark_draining(
+				deployment_id=deployment_id,
+				service_name=service_name,
+				now=drain_started_at,
+			)
+		return JSONResponse({"ok": True})
+
+	async def delete_deployment_state(self, request: Request) -> JSONResponse:
+		self._authorize_internal_request(request)
+		if self.store is None:
+			raise HTTPException(status_code=503, detail="deployment store unavailable")
+		payload = await request.json()
+		deployment_id = payload.get("deployment_id")
+		if not isinstance(deployment_id, str):
+			raise HTTPException(status_code=400, detail="deployment_id required")
+		try:
+			await self.store.delete_inactive_deployment(deployment_id=deployment_id)
+		except ActiveDeploymentError as exc:
+			raise HTTPException(
+				status_code=400,
+				detail="active deployment cannot be deleted",
+			) from exc
+		return JSONResponse({"ok": True})
+
 	@staticmethod
 	def _is_internal_path(path: str) -> bool:
 		internal_prefix = INTERNAL_API_PREFIX.lstrip("/")
@@ -198,8 +305,6 @@ class AffinityRouter:
 					status_code=409,
 				)
 			raise
-		if self.store is not None:
-			await self.store.record_request(deployment_id=target.deployment_id)
 		url = target.base_url.rstrip("/")
 		if path:
 			url += "/" + path
@@ -266,11 +371,6 @@ class AffinityRouter:
 			autoclose=True,
 			autoping=True,
 		)
-		lease_id: str | None = None
-		if self.store is not None:
-			lease_id = await self.store.create_websocket_lease(
-				deployment_id=target.deployment_id
-			)
 		self._active_websockets.add(backend_ws)
 		await websocket.accept(subprotocol=backend_ws.protocol)
 
@@ -302,22 +402,10 @@ class AffinityRouter:
 				elif message.type == aiohttp.WSMsgType.ERROR:
 					raise RuntimeError("backend websocket error")
 
-		async def websocket_heartbeat() -> None:
-			if self.store is None or lease_id is None:
-				return
-			while True:
-				await asyncio.sleep(self.websocket_heartbeat_seconds)
-				await self.store.refresh_websocket_lease(
-					deployment_id=target.deployment_id,
-					lease_id=lease_id,
-				)
-
 		tasks = [
 			asyncio.create_task(client_to_backend()),
 			asyncio.create_task(backend_to_client()),
 		]
-		if self.store is not None and lease_id is not None:
-			tasks.append(asyncio.create_task(websocket_heartbeat()))
 		for task in tasks:
 			self._track_task(task)
 		try:
@@ -332,12 +420,6 @@ class AffinityRouter:
 					raise exc
 		finally:
 			self._active_websockets.discard(backend_ws)
-			if self.store is not None and lease_id is not None:
-				with suppress(Exception):
-					await self.store.remove_websocket_lease(
-						deployment_id=target.deployment_id,
-						lease_id=lease_id,
-					)
 			with suppress(Exception):
 				await backend_ws.close()
 			with suppress(Exception):
@@ -347,16 +429,16 @@ class AffinityRouter:
 def build_app(
 	resolver: Resolver,
 	store: DeploymentStore | None = None,
-	websocket_heartbeat_seconds: int = 15,
+	internal_token: str = "",
 ) -> FastAPI:
 	router = AffinityRouter(
 		resolver,
 		store=store,
-		websocket_heartbeat_seconds=websocket_heartbeat_seconds,
+		internal_token=internal_token,
 	)
 
 	@asynccontextmanager
-	async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+	async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 		yield
 		await router.close()
 
@@ -366,6 +448,18 @@ def build_app(
 	@app.get(DEFAULT_ROUTER_HEALTH_PATH)
 	async def healthz() -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
 		return await router.health()
+
+	@app.get(f"{INTERNAL_API_PREFIX}/railway/active")
+	async def active_deployment(request: Request) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
+		return await router.active_deployment(request)
+
+	@app.post(f"{INTERNAL_API_PREFIX}/railway/promote")
+	async def promote_deployment(request: Request) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
+		return await router.promote_deployment(request)
+
+	@app.post(f"{INTERNAL_API_PREFIX}/railway/delete")
+	async def delete_deployment_state(request: Request) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
+		return await router.delete_deployment_state(request)
 
 	@app.api_route(
 		"/{path:path}",
@@ -389,33 +483,28 @@ def build_app_from_env() -> FastAPI:
 		raise RuntimeError(
 			f"missing required env vars: {RAILWAY_TOKEN}, {RAILWAY_PROJECT_ID}, {RAILWAY_ENVIRONMENT_ID}"
 		)
+	store = None
+	spec = kv_store_spec_from_env(dict(os.environ))
+	if spec is None:
+		raise RuntimeError("missing required router deployment store env vars")
+	store = DeploymentStore(
+		store=spec,
+		prefix=os.environ.get(PULSE_REDIS_PREFIX, DEFAULT_REDIS_PREFIX),
+		owns_store=True,
+	)
 	client = RailwayGraphQLClient(token=token)
 	resolver = RailwayResolver(
 		client=client,
 		project_id=project_id,
 		environment_id=environment_id,
 		service_prefix=os.environ.get(PULSE_SERVICE_PREFIX),
-		backend_port=int(
-			os.environ.get("PULSE_BACKEND_PORT", str(DEFAULT_BACKEND_PORT))
-		),
+		store=store,
+		backend_port=DEFAULT_BACKEND_PORT,
 	)
-	store = None
-	spec = kv_store_spec_from_env(dict(os.environ))
-	if spec is not None:
-		store = DeploymentStore(
-			store=spec,
-			prefix=os.environ.get(PULSE_REDIS_PREFIX, DEFAULT_REDIS_PREFIX),
-			websocket_ttl_seconds=int(
-				os.environ.get(PULSE_WEBSOCKET_TTL_SECONDS, "45")
-			),
-			owns_store=True,
-		)
 	return build_app(
 		resolver,
 		store=store,
-		websocket_heartbeat_seconds=int(
-			os.environ.get(PULSE_WEBSOCKET_HEARTBEAT_SECONDS, "15")
-		),
+		internal_token=os.environ.get(PULSE_INTERNAL_TOKEN, ""),
 	)
 
 

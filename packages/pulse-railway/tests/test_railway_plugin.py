@@ -119,11 +119,10 @@ async def test_plugin_exposes_internal_session_endpoint(monkeypatch) -> None:
 
 	assert forbidden.status_code == 403
 	assert response.status_code == 200
-	assert app.render_sessions.values_calls == 1
+	assert app.render_sessions.values_calls == 0
 	assert response.json() == {
 		"deployment_id": "prod-260402-120000",
-		"connected_render_count": 1,
-		"resumable_render_count": 1,
+		"render_session_count": 2,
 		"drainable": False,
 		"session_timeout_seconds": 60.0,
 	}

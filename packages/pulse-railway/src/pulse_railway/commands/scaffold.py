@@ -9,22 +9,25 @@ from typing import Any
 
 from pulse_railway.auth import railway_access_token
 from pulse_railway.commands.common import (
+	add_railway_target_args,
 	build_target_project,
+	environment_id_from_sources,
 	environment_name_from_sources,
-	load_deploy_target,
+	load_railway_plugin,
+	project_id_from_sources,
 	project_name_from_sources,
-	resolve_railway_target_ids,
+	workspace_id_from_sources,
+	workspace_name_from_sources,
 )
 from pulse_railway.config import RailwayProject
 from pulse_railway.constants import (
-	DEFAULT_BACKEND_PORT,
-	DEFAULT_DRAIN_GRACE_SECONDS,
+	DEFAULT_DRAIN_TTL_SECONDS,
 	DEFAULT_JANITOR_CRON_SCHEDULE,
-	DEFAULT_MAX_DRAIN_AGE_SECONDS,
 	DEFAULT_REDIS_PREFIX,
 )
-from pulse_railway.stack import bootstrap_stack, ensure_stack
-from pulse_railway.target import RailwayDeployTarget
+from pulse_railway.plugin import RailwayPlugin
+from pulse_railway.railway.ops import resolve_railway_target_ids
+from pulse_railway.stack import create_or_reconcile_stack, create_stack
 
 
 def _add_baseline_args(parser: argparse.ArgumentParser) -> None:
@@ -32,11 +35,7 @@ def _add_baseline_args(parser: argparse.ArgumentParser) -> None:
 		"app_file",
 		help="App entry file used to load RailwayPlugin config",
 	)
-	parser.add_argument(
-		"--workspace-id",
-		default=None,
-		help="Railway workspace id used to disambiguate project lookup.",
-	)
+	add_railway_target_args(parser)
 	parser.add_argument(
 		"--token",
 		default=None,
@@ -53,37 +52,15 @@ def _add_baseline_args(parser: argparse.ArgumentParser) -> None:
 		help="Redis key prefix for pulse-railway control-plane state.",
 	)
 	parser.add_argument(
-		"--router-image",
-		default=None,
-		help="Router image override. Defaults to the official pulse-railway router image.",
-	)
-	parser.add_argument(
-		"--janitor-image",
-		default=None,
-		help="Janitor image override. Defaults to the official pulse-railway janitor image.",
-	)
-	parser.add_argument(
 		"--janitor-cron-schedule",
 		default=DEFAULT_JANITOR_CRON_SCHEDULE,
 		help="Railway cron schedule for the janitor service. Defaults to every 5 minutes.",
 	)
 	parser.add_argument(
-		"--drain-grace-seconds",
+		"--drain-ttl-seconds",
 		type=int,
-		default=DEFAULT_DRAIN_GRACE_SECONDS,
-		help="Minimum idle and drain duration before janitor cleanup.",
-	)
-	parser.add_argument(
-		"--max-drain-age-seconds",
-		type=int,
-		default=DEFAULT_MAX_DRAIN_AGE_SECONDS,
+		default=DEFAULT_DRAIN_TTL_SECONDS,
 		help="Maximum time to keep a draining deployment before forced cleanup.",
-	)
-	parser.add_argument(
-		"--backend-port",
-		type=int,
-		default=DEFAULT_BACKEND_PORT,
-		help="Backend container port used by the router and janitor.",
 	)
 	parser.add_argument(
 		"--router-replicas",
@@ -99,22 +76,18 @@ def _build_baseline_project(
 	project_id: str,
 	environment_id: str,
 	token: str,
-	deploy_target: RailwayDeployTarget,
+	plugin: RailwayPlugin,
 ) -> RailwayProject:
 	return build_target_project(
 		args,
-		deploy_target=deploy_target,
+		plugin=plugin,
 		project_id=project_id,
 		environment_id=environment_id,
 		token=token,
 		redis_url=args.redis_url,
-		backend_port=args.backend_port,
 		router_replicas=args.router_replicas,
-		router_image=args.router_image,
-		janitor_image=args.janitor_image,
 		janitor_cron_schedule=args.janitor_cron_schedule,
-		drain_grace_seconds=args.drain_grace_seconds,
-		max_drain_age_seconds=args.max_drain_age_seconds,
+		drain_ttl_seconds=args.drain_ttl_seconds,
 	)
 
 
@@ -123,7 +96,7 @@ async def _run_baseline(
 	*,
 	ensure: bool,
 ) -> int:
-	_app_path, deploy_target = load_deploy_target(
+	_app_path, plugin = load_railway_plugin(
 		app_file=args.app_file,
 		base_path=Path.cwd(),
 	)
@@ -131,22 +104,25 @@ async def _run_baseline(
 	if not token:
 		raise ValueError("token is required")
 	project_id, environment_id = await resolve_railway_target_ids(
-		project_name=project_name_from_sources(args, deploy_target),
-		environment_name=environment_name_from_sources(args, deploy_target),
+		project_name=project_name_from_sources(args, plugin),
+		project_id=project_id_from_sources(args),
+		environment_name=environment_name_from_sources(args, plugin),
+		environment_id=environment_id_from_sources(args),
 		token=token,
-		workspace_id=args.workspace_id,
+		workspace_name=workspace_name_from_sources(args),
+		workspace_id=workspace_id_from_sources(args),
 	)
 	project = _build_baseline_project(
 		args,
 		project_id=project_id,
 		environment_id=environment_id,
 		token=token,
-		deploy_target=deploy_target,
+		plugin=plugin,
 	)
 	if ensure:
-		result = await ensure_stack(project=project)
+		result = await create_or_reconcile_stack(project=project)
 	else:
-		result = await bootstrap_stack(project=project)
+		result = await create_stack(project=project)
 	print(json.dumps(asdict(result), indent=2, sort_keys=True))
 	return 0
 
@@ -173,7 +149,7 @@ def register(subparsers: Any) -> None:
 	_add_baseline_args(scaffold_parser)
 	ensure_parser = subparsers.add_parser(
 		"ensure",
-		help="Create or reconcile the stable Railway baseline stack.",
+		help="Create an empty baseline or reconcile a complete baseline.",
 	)
 	_add_baseline_args(ensure_parser)
 

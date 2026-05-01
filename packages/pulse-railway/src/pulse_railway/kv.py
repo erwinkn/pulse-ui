@@ -380,10 +380,3 @@ class RedisStore(Store):
 			keys.append(str(key))
 		keys.sort()
 		return keys
-
-
-KVStore = Store
-MemoryKVStore = MemoryStore
-SQLiteKVStore = SQLiteStore
-RedisKVStore = RedisStore
-InMemoryKVStore = MemoryStore

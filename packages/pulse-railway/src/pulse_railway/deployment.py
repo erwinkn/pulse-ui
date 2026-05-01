@@ -19,6 +19,8 @@ from pulse_railway.config import (
 	DockerBuild,
 	RailwayProject,
 	ServiceInstanceConfig,
+	default_janitor_service_name,
+	default_redis_service_name,
 )
 from pulse_railway.constants import (
 	DEPLOYMENT_STATE_DRAINING,
@@ -54,9 +56,6 @@ from pulse_railway.stack import (
 	JANITOR_START_COMMAND,
 	ROUTER_START_COMMAND,
 	ResolvedRedis,
-	default_env_service_name,
-	default_janitor_service_name,
-	default_redis_service_name,
 	deploy_service_and_wait,
 	place_service_in_router_group,
 	require_ready_stack,
@@ -211,7 +210,7 @@ async def _pulse_env_reference_variables(
 	project: RailwayProject,
 	env_service_id: str | None = None,
 ) -> dict[str, str]:
-	env_service_name = default_env_service_name(project.service_name)
+	env_service_name = project.env_service_name
 	if env_service_id is None:
 		env_service = await client.find_service_by_name(
 			project_id=project.project_id,

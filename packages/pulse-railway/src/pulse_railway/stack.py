@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import secrets
-from copy import deepcopy
 from dataclasses import dataclass
 
 from pulse_railway.config import (
@@ -10,6 +9,9 @@ from pulse_railway.config import (
 	RailwayInternals,
 	RailwayProject,
 	ServiceInstanceConfig,
+	default_env_service_name,
+	default_janitor_service_name,
+	default_redis_service_name,
 )
 from pulse_railway.constants import (
 	DEFAULT_PULSE_BASELINE_TEMPLATE_CODE,
@@ -30,7 +32,6 @@ from pulse_railway.images import official_janitor_image_ref, official_router_ima
 from pulse_railway.railway import (
 	RailwayGraphQLClient,
 	ServiceRecord,
-	normalize_service_name,
 	normalize_service_prefix,
 )
 
@@ -98,22 +99,17 @@ class BaselineServiceInput:
 def _baseline_service_names(project: RailwayProject) -> dict[str, str]:
 	names = {
 		"router": project.service_name,
-		"janitor": project.janitor_service_name
-		or default_janitor_service_name(project.service_name),
-		"env": default_env_service_name(project.service_name),
+		"janitor": project.janitor_service_name,
+		"env": project.env_service_name,
 	}
 	if project.redis_url is None:
-		names["redis"] = project.redis_service_name or default_redis_service_name(
-			project.service_name
-		)
+		names["redis"] = project.redis_service_name
 	return names
 
 
 def _baseline_leftover_service_names(project: RailwayProject) -> dict[str, str]:
 	names = dict(_baseline_service_names(project))
-	names["redis"] = project.redis_service_name or default_redis_service_name(
-		project.service_name
-	)
+	names["redis"] = project.redis_service_name
 	if names["redis"] != "pulse-redis":
 		names["template_redis"] = "pulse-redis"
 	return names
@@ -129,7 +125,7 @@ def _raise_for_existing_baseline(found_names: list[str]) -> None:
 	)
 
 
-async def _deploy_baseline_template(
+async def deploy_template(
 	client: RailwayGraphQLClient,
 	*,
 	project: RailwayProject,
@@ -137,31 +133,20 @@ async def _deploy_baseline_template(
 	template = await client.get_template_by_code(
 		code=DEFAULT_PULSE_BASELINE_TEMPLATE_CODE
 	)
-	config = deepcopy(template.serialized_config)
+	config = template.serialized_config
 	service_name_map = {
 		"pulse-router": project.service_name,
-		"pulse-janitor": project.janitor_service_name
-		or default_janitor_service_name(project.service_name),
+		"pulse-janitor": project.janitor_service_name,
 	}
 	if project.redis_url is None:
-		service_name_map["pulse-redis"] = project.redis_service_name or (
-			default_redis_service_name(project.service_name)
-		)
+		service_name_map["pulse-redis"] = project.redis_service_name
 	else:
 		service_name_map["pulse-redis"] = "pulse-redis"
-	renamed_services: set[str] = set()
 	for service_config in config["services"].values():
 		template_name = service_config.get("name")
 		if template_name not in service_name_map:
 			continue
 		service_config["name"] = service_name_map[template_name]
-		renamed_services.add(template_name)
-	missing = [name for name in service_name_map if name not in renamed_services]
-	if missing:
-		missing_text = ", ".join(missing)
-		raise DeploymentError(
-			f"template {template.code} is missing expected services: {missing_text}"
-		)
 	await client.deploy_template(
 		project_id=project.project_id,
 		environment_id=project.environment_id,
@@ -233,8 +218,7 @@ async def _remove_managed_redis_from_baseline(
 	redis_names = list(
 		dict.fromkeys(
 			[
-				project.redis_service_name
-				or default_redis_service_name(project.service_name),
+				project.redis_service_name,
 				"pulse-redis",
 			]
 		)
@@ -299,21 +283,6 @@ async def _remove_managed_redis_from_baseline(
 	return True
 
 
-def default_janitor_service_name(service_name: str) -> str:
-	return normalize_service_name(f"{service_name}-janitor")
-
-
-def default_redis_service_name(service_name: str) -> str:
-	return normalize_service_name(f"{service_name}-redis")
-
-
-def default_env_service_name(service_name: str) -> str:
-	candidate = service_name.strip().lower()
-	if candidate.endswith("-router"):
-		candidate = candidate[:-7]
-	return normalize_service_name(f"{candidate}-env")
-
-
 async def _ensure_service(
 	client: RailwayGraphQLClient,
 	*,
@@ -355,12 +324,11 @@ async def _ensure_env_service(
 	router_service: ServiceRecord | None = None,
 	existing_service: ServiceRecord | None = None,
 ) -> ServiceRecord:
-	service_name = default_env_service_name(project.service_name)
 	service, created = await _ensure_service(
 		client,
 		project_id=project.project_id,
 		environment_id=project.environment_id,
-		name=service_name,
+		name=project.env_service_name,
 		existing_service=existing_service,
 	)
 	if created and router_service is not None:
@@ -661,9 +629,7 @@ async def resolve_or_create_redis(
 	existing_service: ServiceRecord | None = None,
 	existing_created: bool = False,
 ) -> ResolvedRedis:
-	service_name = project.redis_service_name or default_redis_service_name(
-		project.service_name
-	)
+	service_name = project.redis_service_name
 	service = existing_service
 	created = existing_created
 	if service is None:
@@ -676,7 +642,7 @@ async def resolve_or_create_redis(
 		template = await client.get_template_by_code(
 			code=project.redis_template_code or DEFAULT_REDIS_TEMPLATE_CODE
 		)
-		config = deepcopy(template.serialized_config)
+		config = template.serialized_config
 		template_service_id = next(iter(config["services"]))
 		config["services"][template_service_id]["name"] = service_name
 		await client.deploy_template(
@@ -723,8 +689,7 @@ async def resolve_or_create_internal_token(
 		janitor_service = await client.find_service_by_name(
 			project_id=project.project_id,
 			environment_id=project.environment_id,
-			name=project.janitor_service_name
-			or default_janitor_service_name(project.service_name),
+			name=project.janitor_service_name,
 		)
 	for service in (router_service, janitor_service):
 		if service is None:
@@ -1040,7 +1005,7 @@ async def _bootstrap_stack_with_client(
 		if found_leftovers:
 			_raise_for_existing_baseline(found_leftovers)
 
-	template_services = await _deploy_baseline_template(client, project=project)
+	template_services = await deploy_template(client, project=project)
 	router_service = template_services["pulse-router"]
 	janitor_service = template_services["pulse-janitor"]
 	env_service = await _ensure_env_service(
@@ -1123,13 +1088,9 @@ async def ensure_stack(
 			)
 
 		router_service = service_by_name.get(project.service_name)
-		janitor_name = project.janitor_service_name or default_janitor_service_name(
-			project.service_name
-		)
+		janitor_name = project.janitor_service_name
 		janitor_service = service_by_name.get(janitor_name)
-		env_service = service_by_name.get(
-			default_env_service_name(project.service_name)
-		)
+		env_service = service_by_name.get(project.env_service_name)
 		if project.redis_url is not None:
 			await _remove_managed_redis_from_baseline(
 				client,
@@ -1138,9 +1099,7 @@ async def ensure_stack(
 				janitor_service=janitor_service,
 				env_service=env_service,
 			)
-		redis_name = project.redis_service_name or default_redis_service_name(
-			project.service_name
-		)
+		redis_name = project.redis_service_name
 		resolved_redis, token_created, internals = await _resolve_baseline_internals(
 			client,
 			project=project,
@@ -1201,9 +1160,7 @@ async def require_ready_stack(*, project: RailwayProject) -> StackState:
 				f"router service {project.service_name} not found; "
 				+ "run `pulse-railway scaffold`"
 			)
-		janitor_name = project.janitor_service_name or default_janitor_service_name(
-			project.service_name
-		)
+		janitor_name = project.janitor_service_name
 		janitor_service = await client.find_service_by_name(
 			project_id=project.project_id,
 			environment_id=project.environment_id,
@@ -1214,7 +1171,7 @@ async def require_ready_stack(*, project: RailwayProject) -> StackState:
 				f"janitor service {janitor_name} not found; "
 				+ "run `pulse-railway scaffold`"
 			)
-		env_name = default_env_service_name(project.service_name)
+		env_name = project.env_service_name
 		env_service = await client.find_service_by_name(
 			project_id=project.project_id,
 			environment_id=project.environment_id,
@@ -1259,9 +1216,7 @@ async def require_ready_stack(*, project: RailwayProject) -> StackState:
 			router_variables=router_variables,
 			janitor_variables=janitor_variables,
 		)
-		redis_name = project.redis_service_name or default_redis_service_name(
-			project.service_name
-		)
+		redis_name = project.redis_service_name
 		redis_service = await client.find_service_by_name(
 			project_id=project.project_id,
 			environment_id=project.environment_id,

@@ -48,7 +48,6 @@ from pulse_railway.constants import (
 	PULSE_DRAIN_TTL_SECONDS,
 )
 from pulse_railway.deployment import (
-	default_redis_service_name,
 	delete_deployment,
 	redeploy_deployment,
 	resolve_deployment_id_by_name,
@@ -128,7 +127,7 @@ def _railway_project(
 		redis_url=getattr(args, "redis_url", None),
 		redis_service_name=redis_service_name
 		or getattr(args, "redis_service", None)
-		or default_redis_service_name(resolved_service_name),
+		or "",
 		redis_prefix=getattr(args, "redis_prefix", None) or DEFAULT_REDIS_PREFIX,
 		**overrides,
 	)

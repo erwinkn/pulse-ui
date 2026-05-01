@@ -3,6 +3,7 @@ from __future__ import annotations
 import pulse as ps
 import pytest
 from pulse_railway import RailwaySessionStore
+from pulse_railway.config import RailwayProject
 from pulse_railway.plugin import RailwayPlugin, RailwayPluginError
 
 
@@ -68,6 +69,37 @@ def test_railway_plugin_preserves_old_prefixing_for_default_service_names() -> N
 	assert plugin.janitor_service_name == "foo-janitor"
 	assert plugin.redis_service_name == "foo-redis"
 	assert plugin.service_prefix == "foo-"
+
+
+def test_railway_project_resolves_default_service_names() -> None:
+	project = RailwayProject(
+		project_id="project",
+		environment_id="env",
+		token="token",
+		service_name="Pulse Router",
+	)
+
+	assert project.service_name == "pulse-router"
+	assert project.janitor_service_name == "pulse-router-janitor"
+	assert project.redis_service_name == "pulse-router-redis"
+	assert project.env_service_name == "pulse-env"
+
+
+def test_railway_project_preserves_explicit_service_names() -> None:
+	project = RailwayProject(
+		project_id="project",
+		environment_id="env",
+		token="token",
+		service_name="api",
+		janitor_service_name="pulse-janitor",
+		redis_service_name="pulse-redis",
+		env_service_name="pulse-env",
+	)
+
+	assert project.service_name == "api"
+	assert project.janitor_service_name == "pulse-janitor"
+	assert project.redis_service_name == "pulse-redis"
+	assert project.env_service_name == "pulse-env"
 
 
 def test_railway_plugin_exposes_plugin_deployment_name() -> None:

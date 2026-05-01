@@ -19,7 +19,6 @@ from pulse_railway.constants import (
 from pulse_railway.deployment import (
 	DeploymentError,
 	_list_deployment_services,
-	_pulse_env_reference_variables,
 	_run_command,
 	_uses_railway_session_store_from_app,
 	default_service_prefix,
@@ -35,6 +34,7 @@ from pulse_railway.env import (
 	validate_backend_env_vars,
 )
 from pulse_railway.railway import ServiceDomain, ServiceRecord
+from pulse_railway.railway.ops import pulse_env_reference_variables
 from pulse_railway.stack import StackInspection
 
 
@@ -79,7 +79,7 @@ def _stub_pulse_env_reference_variables(monkeypatch: pytest.MonkeyPatch) -> None
 		return {}
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment._pulse_env_reference_variables",
+		"pulse_railway.deployment.pulse_env_reference_variables",
 		fake_pulse_env_reference_variables,
 	)
 
@@ -190,7 +190,7 @@ async def test_pulse_env_reference_variables_only_uses_unrendered_user_vars() ->
 				"PORT": "8000",
 			}
 
-	result = await _pulse_env_reference_variables(
+	result = await pulse_env_reference_variables(
 		_FakeClient(),  # pyright: ignore[reportArgumentType]
 		project=RailwayProject(
 			project_id="project",
@@ -946,7 +946,7 @@ async def test_deploy_happy_path_on_ready_stack(
 		return {"EXTERNAL_KEY": "${{pulse-env.EXTERNAL_KEY}}"}
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment._pulse_env_reference_variables",
+		"pulse_railway.deployment.pulse_env_reference_variables",
 		fake_pulse_env_reference_variables,
 	)
 
@@ -1204,7 +1204,7 @@ async def test_deploy_source_happy_path_on_ready_stack(
 		return {"EXTERNAL_KEY": "${{pulse-env.EXTERNAL_KEY}}"}
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment._pulse_env_reference_variables",
+		"pulse_railway.deployment.pulse_env_reference_variables",
 		fake_pulse_env_reference_variables,
 	)
 
@@ -1882,7 +1882,7 @@ async def test_deploy_source_keeps_service_when_post_build_polling_fails(
 
 	monkeypatch.setattr("pulse_railway.deployment._run_command", fake_run_command)
 	monkeypatch.setattr(
-		"pulse_railway.deployment._wait_for_latest_service_deployment",
+		"pulse_railway.deployment.wait_for_latest_service_deployment",
 		fake_wait_for_latest_service_deployment,
 	)
 

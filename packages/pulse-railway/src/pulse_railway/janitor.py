@@ -16,14 +16,12 @@ from pulse_railway.constants import (
 	INTERNAL_SESSIONS_PATH,
 	INTERNAL_TOKEN_HEADER,
 )
-from pulse_railway.deployment import (
-	list_deployment_service_records,
-	validate_deployment_service_records,
-)
+from pulse_railway.deployment import validate_deployment_service_records
 from pulse_railway.railway.client import (
 	RailwayGraphQLClient,
 	service_name_for_deployment,
 )
+from pulse_railway.railway.ops import list_deployment_service_records
 from pulse_railway.stack import inspect_stack
 from pulse_railway.store import (
 	DeploymentStore,

@@ -27,9 +27,10 @@ from pulse_railway.errors import DeploymentError
 from pulse_railway.images import official_janitor_image_ref, official_router_image_ref
 from pulse_railway.railway.client import RailwayGraphQLClient, ServiceRecord
 from pulse_railway.railway.ops import (
-	deploy_service_and_wait,
-	place_service_in_router_group,
-	upsert_service_variables,
+	configure_service_and_deploy,
+	create_service_in_router_group,
+	wait_for_service_by_name,
+	wait_for_service_variable,
 )
 
 ROUTER_START_COMMAND = (
@@ -147,58 +148,6 @@ def _raise_missing_service(name: str, *, command: str) -> None:
 	)
 
 
-async def _wait_for_service_by_name(
-	client: RailwayGraphQLClient,
-	*,
-	project_id: str,
-	environment_id: str,
-	name: str,
-	timeout: float = 120.0,
-	poll_interval: float = 2.0,
-) -> ServiceRecord:
-	loop = asyncio.get_running_loop()
-	deadline = loop.time() + timeout
-	while True:
-		service = await client.find_service_by_name(
-			project_id=project_id,
-			environment_id=environment_id,
-			name=name,
-		)
-		if service is not None:
-			return service
-		if loop.time() >= deadline:
-			raise TimeoutError(f"service {name} was not created within {timeout:.0f}s")
-		await asyncio.sleep(poll_interval)
-
-
-async def _wait_for_service_variable(
-	client: RailwayGraphQLClient,
-	*,
-	project_id: str,
-	environment_id: str,
-	service_id: str,
-	name: str,
-	timeout: float = 180.0,
-	poll_interval: float = 2.0,
-) -> str:
-	loop = asyncio.get_running_loop()
-	deadline = loop.time() + timeout
-	while True:
-		variables = await client.get_service_variables_for_deployment(
-			project_id=project_id,
-			environment_id=environment_id,
-			service_id=service_id,
-		)
-		value = variables.get(name)
-		if value:
-			return value
-		if loop.time() >= deadline:
-			raise TimeoutError(
-				f"service variable {name} not available within {timeout:.0f}s"
-			)
-		await asyncio.sleep(poll_interval)
-
-
 async def _deploy_baseline_template(
 	client: RailwayGraphQLClient, *, project: RailwayProject
 ) -> _BaselineServices:
@@ -224,16 +173,14 @@ async def _deploy_baseline_template(
 		template_id=template.id,
 		serialized_config=config,
 	)
-	router_wait = _wait_for_service_by_name(
+	router_wait = wait_for_service_by_name(
 		client,
-		project_id=project.project_id,
-		environment_id=project.environment_id,
+		project=project,
 		name=project.service_name,
 	)
-	janitor_wait = _wait_for_service_by_name(
+	janitor_wait = wait_for_service_by_name(
 		client,
-		project_id=project.project_id,
-		environment_id=project.environment_id,
+		project=project,
 		name=project.janitor_service_name,
 	)
 	if project.redis_service_name is None:
@@ -243,10 +190,9 @@ async def _deploy_baseline_template(
 		router, janitor, redis = await asyncio.gather(
 			router_wait,
 			janitor_wait,
-			_wait_for_service_by_name(
+			wait_for_service_by_name(
 				client,
-				project_id=project.project_id,
-				environment_id=project.environment_id,
+				project=project,
 				name=project.redis_service_name,
 			),
 		)
@@ -263,24 +209,12 @@ async def _create_env_service(
 	project: RailwayProject,
 	router: ServiceRecord,
 ) -> ServiceRecord:
-	await client.create_service(
-		project_id=project.project_id,
-		environment_id=project.environment_id,
-		name=project.env_service_name,
-	)
-	service = await _wait_for_service_by_name(
-		client,
-		project_id=project.project_id,
-		environment_id=project.environment_id,
-		name=project.env_service_name,
-	)
-	await place_service_in_router_group(
+	return await create_service_in_router_group(
 		client,
 		project=project,
 		router_service_id=router.id,
-		service_id=service.id,
+		name=project.env_service_name,
 	)
-	return service
 
 
 async def _ensure_router_domain(
@@ -363,7 +297,7 @@ async def _configure_router_service(
 	service: ServiceRecord,
 	router_instance: ServiceInstanceConfig,
 ) -> str:
-	await upsert_service_variables(
+	deployment_id, _status = await configure_service_and_deploy(
 		client,
 		project=project,
 		service_id=service.id,
@@ -377,22 +311,13 @@ async def _configure_router_service(
 				redis_prefix=project.redis_prefix,
 			),
 		},
-	)
-	await client.update_service_instance(
-		service_id=service.id,
-		environment_id=project.environment_id,
+		error_message="router deployment failed",
 		source_image=official_router_image_ref(),
 		num_replicas=project.router_replicas,
 		healthcheck_path=router_instance.healthcheck_path,
 		healthcheck_timeout=router_instance.healthcheck_timeout,
 		overlap_seconds=router_instance.overlap_seconds,
 		start_command=ROUTER_START_COMMAND,
-	)
-	deployment_id, _status = await deploy_service_and_wait(
-		client,
-		service_id=service.id,
-		environment_id=project.environment_id,
-		error_message="router deployment failed",
 	)
 	return deployment_id
 
@@ -406,7 +331,7 @@ async def _configure_janitor_service(
 ) -> str:
 	if internals.redis_url is None:
 		raise DeploymentError("redis_url is required for janitor service creation")
-	await upsert_service_variables(
+	deployment_id, _status = await configure_service_and_deploy(
 		client,
 		project=project,
 		service_id=service.id,
@@ -418,21 +343,12 @@ async def _configure_janitor_service(
 			service_prefix=internals.service_prefix,
 			drain_ttl_seconds=project.drain_ttl_seconds,
 		),
-	)
-	await client.update_service_instance(
-		service_id=service.id,
-		environment_id=project.environment_id,
+		error_message="janitor deployment failed",
 		source_image=official_janitor_image_ref(),
 		num_replicas=project.janitor_replicas,
 		start_command=JANITOR_START_COMMAND,
 		cron_schedule=project.janitor_cron_schedule,
 		restart_policy_type="NEVER",
-	)
-	deployment_id, _status = await deploy_service_and_wait(
-		client,
-		service_id=service.id,
-		environment_id=project.environment_id,
-		error_message="janitor deployment failed",
 	)
 	return deployment_id
 
@@ -619,10 +535,9 @@ async def _create_stack_with_client(
 	if redis_url is None:
 		if services.redis is None:
 			raise DeploymentError("baseline template did not create managed Redis")
-		redis_url = await _wait_for_service_variable(
+		redis_url = await wait_for_service_variable(
 			client,
-			project_id=project.project_id,
-			environment_id=project.environment_id,
+			project=project,
 			service_id=services.redis.id,
 			name=REDIS_URL,
 		)
@@ -640,10 +555,9 @@ async def _create_stack_with_client(
 		internals=internals,
 		router_instance=router_instance,
 	)
-	router = await _wait_for_service_by_name(
+	router = await wait_for_service_by_name(
 		client,
-		project_id=project.project_id,
-		environment_id=project.environment_id,
+		project=project,
 		name=project.service_name,
 	)
 	router_domain = await _ensure_router_domain(client, project=project, service=router)

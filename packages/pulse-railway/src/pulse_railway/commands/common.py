@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
-from typing import NotRequired, TypedDict, TypeVar, Unpack
+from typing import NotRequired, TypedDict, Unpack
 
 from pulse.cli.helpers import load_app_from_target
 from pulse.env import (
@@ -18,21 +18,6 @@ from pulse.env import (
 from pulse_railway.config import RailwayProject
 from pulse_railway.constants import DEFAULT_REDIS_PREFIX
 from pulse_railway.plugin import RailwayPlugin, RailwayPluginError
-from pulse_railway.railway.client import (
-	EnvironmentRecord,
-	ProjectRecord,
-	ProjectTokenRecord,
-	RailwayGraphQLClient,
-	WorkspaceRecord,
-)
-
-DEFAULT_RAILWAY_ENVIRONMENT_NAME = "production"
-RailwayNameRecord = TypeVar(
-	"RailwayNameRecord",
-	ProjectRecord,
-	EnvironmentRecord,
-	WorkspaceRecord,
-)
 
 
 class RailwayProjectOverrides(TypedDict):
@@ -184,175 +169,6 @@ def workspace_name_from_sources(args: argparse.Namespace) -> str | None:
 
 def workspace_id_from_sources(args: argparse.Namespace) -> str | None:
 	return clean_optional(getattr(args, "workspace_id", None))
-
-
-def _match_record_by_name(
-	records: list[RailwayNameRecord],
-	*,
-	name: str,
-	label: str,
-) -> RailwayNameRecord:
-	matches = [record for record in records if record.name == name]
-	if len(matches) == 1:
-		return matches[0]
-	if not matches:
-		available = ", ".join(record.name for record in records) or "none"
-		raise ValueError(
-			f"Railway {label} not found by name: {name}. Available: {available}"
-		)
-	raise ValueError(f"multiple Railway {label}s named {name}")
-
-
-def _reject_name_and_id(
-	*,
-	name: str | None,
-	record_id: str | None,
-	label: str,
-) -> None:
-	if name is not None and record_id is not None:
-		raise ValueError(f"use either Railway {label} name or {label} id, not both")
-
-
-async def _resolve_workspace_id(
-	client: RailwayGraphQLClient,
-	*,
-	workspace_name: str | None,
-	workspace_id: str | None,
-) -> str | None:
-	_reject_name_and_id(name=workspace_name, record_id=workspace_id, label="workspace")
-	if workspace_id is not None:
-		return workspace_id
-	if workspace_name is None:
-		return None
-	workspaces = await client.list_workspaces()
-	return _match_record_by_name(
-		workspaces,
-		name=workspace_name,
-		label="workspace",
-	).id
-
-
-async def _resolve_project_id(
-	client: RailwayGraphQLClient,
-	*,
-	project_name: str | None,
-	project_id: str | None,
-	project_token: ProjectTokenRecord | None,
-	workspace_id: str | None,
-) -> str:
-	_reject_name_and_id(name=project_name, record_id=project_id, label="project")
-	if project_id is not None:
-		if project_token is not None and project_token.project_id != project_id:
-			project = await client.get_project(project_id=project_token.project_id)
-			raise ValueError(
-				f"project token is scoped to Railway project {project.name}, not {project_id}"
-			)
-		return project_id
-	if project_name is None:
-		if project_token is None:
-			raise ValueError(
-				"Railway project is required unless token is a project token"
-			)
-		return project_token.project_id
-	if project_token is not None:
-		project = await client.get_project(project_id=project_token.project_id)
-		if project.name != project_name:
-			raise ValueError(
-				f"project token is scoped to Railway project {project.name}, not {project_name}"
-			)
-		return project.id
-	projects = await client.list_projects(workspace_id=workspace_id)
-	return _match_record_by_name(
-		projects,
-		name=project_name,
-		label="project",
-	).id
-
-
-async def _resolve_environment_id(
-	client: RailwayGraphQLClient,
-	*,
-	project_id: str,
-	environment_name: str | None,
-	environment_id: str | None,
-	project_token_environment_id: str | None,
-) -> str:
-	_reject_name_and_id(
-		name=environment_name,
-		record_id=environment_id,
-		label="environment",
-	)
-	if environment_id is not None:
-		if (
-			project_token_environment_id is not None
-			and project_token_environment_id != environment_id
-		):
-			environment = await client.get_environment(
-				environment_id=project_token_environment_id
-			)
-			raise ValueError(
-				"project token is scoped to Railway environment "
-				+ f"{environment.name}, not {environment_id}"
-			)
-		return environment_id
-	if project_token_environment_id is not None:
-		if environment_name is None:
-			return project_token_environment_id
-		environment = await client.get_environment(
-			environment_id=project_token_environment_id
-		)
-		if environment.name == environment_name:
-			return environment.id
-		raise ValueError(
-			"project token is scoped to Railway environment "
-			+ f"{environment.name}, not {environment_name}"
-		)
-	resolved_environment_name = environment_name or DEFAULT_RAILWAY_ENVIRONMENT_NAME
-	environments = await client.list_environments(project_id=project_id)
-	return _match_record_by_name(
-		environments,
-		name=resolved_environment_name,
-		label="environment",
-	).id
-
-
-async def resolve_railway_target_ids(
-	*,
-	token: str,
-	project_name: str | None = None,
-	project_id: str | None = None,
-	environment_name: str | None = None,
-	environment_id: str | None = None,
-	workspace_name: str | None = None,
-	workspace_id: str | None = None,
-) -> tuple[str, str]:
-	async with RailwayGraphQLClient(token=token) as client:
-		project_token = await client.get_project_token()
-		resolved_workspace_id = await _resolve_workspace_id(
-			client,
-			workspace_name=workspace_name,
-			workspace_id=workspace_id,
-		)
-		project_id = await _resolve_project_id(
-			client,
-			project_name=project_name,
-			project_id=project_id,
-			project_token=project_token,
-			workspace_id=resolved_workspace_id,
-		)
-		project_token_environment_id = (
-			project_token.environment_id
-			if project_token is not None and project_token.project_id == project_id
-			else None
-		)
-		environment_id = await _resolve_environment_id(
-			client,
-			project_id=project_id,
-			environment_name=environment_name,
-			environment_id=environment_id,
-			project_token_environment_id=project_token_environment_id,
-		)
-	return project_id, environment_id
 
 
 def build_target_project(

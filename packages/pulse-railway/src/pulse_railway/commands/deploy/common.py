@@ -19,7 +19,6 @@ from pulse_railway.commands.common import (
 	project_id_from_sources,
 	project_name_from_sources,
 	resolve_path,
-	resolve_railway_target_ids,
 	workspace_id_from_sources,
 	workspace_name_from_sources,
 )
@@ -28,6 +27,7 @@ from pulse_railway.env import (
 	check_reserved_source_build_args,
 	validate_backend_env_vars,
 )
+from pulse_railway.railway.ops import resolve_railway_target_ids
 
 DeployMode = Literal["image", "source"]
 

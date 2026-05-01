@@ -15,7 +15,6 @@ from pulse_railway.commands.common import (
 	clean_optional,
 	env,
 	normalize_optional_service_prefix,
-	resolve_railway_target_ids,
 )
 from pulse_railway.commands.deploy import (
 	add_deploy_args as _add_deploy_args,
@@ -54,6 +53,7 @@ from pulse_railway.deployment import (
 )
 from pulse_railway.janitor import JanitorResult, run_janitor
 from pulse_railway.railway.client import validate_deployment_id
+from pulse_railway.railway.ops import resolve_railway_target_ids
 
 RAILWAY_RUNTIME_ENV_VARS = (
 	"RAILWAY_SERVICE_ID",

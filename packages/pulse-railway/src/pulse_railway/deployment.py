@@ -5,7 +5,6 @@ import os
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import aiohttp
 from pulse.cli.helpers import load_app_from_target
@@ -26,9 +25,6 @@ from pulse_railway.constants import (
 	DEPLOYMENT_STATE_DRAINING,
 	INTERNAL_API_PREFIX,
 	INTERNAL_TOKEN_HEADER,
-	PULSE_DEPLOYMENT_ID,
-	PULSE_DEPLOYMENT_STATE,
-	PULSE_DRAIN_STARTED_AT,
 	RAILWAY_API_TOKEN,
 	RAILWAY_TOKEN,
 )
@@ -37,7 +33,6 @@ from pulse_railway.env import (
 	backend_env,
 	backend_session_env,
 	check_reserved_source_build_args,
-	pulse_env_user_references,
 	validate_backend_env_vars,
 )
 from pulse_railway.errors import DeploymentError
@@ -52,9 +47,16 @@ from pulse_railway.railway.client import (
 	validate_deployment_id,
 )
 from pulse_railway.railway.ops import (
+	DeploymentServiceRecord,
+	configure_service,
+	configure_service_and_deploy,
+	create_service_in_router_group,
 	deploy_service_and_wait,
-	place_service_in_router_group,
-	upsert_service_variables,
+	list_deployment_service_records,
+	pulse_env_reference_variables,
+	raise_if_service_exists,
+	require_service_by_name,
+	wait_for_latest_service_deployment,
 )
 from pulse_railway.session import RailwayRedisSessionStore
 from pulse_railway.stack import (
@@ -95,15 +97,6 @@ class RedeployResult:
 	backend_service_name: str
 	backend_deployment_id: str
 	backend_status: str
-
-
-@dataclass(slots=True)
-class DeploymentServiceRecord:
-	service_id: str
-	service_name: str
-	deployment_id: str
-	state: str | None = None
-	drain_started_at: float | None = None
 
 
 def validate_deployment_service_records(
@@ -202,37 +195,6 @@ def _resolve_uses_railway_session_store(
 	return _uses_railway_session_store_from_app(app_file, context_path)
 
 
-async def _pulse_env_reference_variables(
-	client: RailwayGraphQLClient,
-	*,
-	project: RailwayProject,
-	env_service_id: str | None = None,
-) -> dict[str, str]:
-	env_service_name = project.env_service_name
-	if env_service_id is None:
-		env_service = await client.find_service_by_name(
-			project_id=project.project_id,
-			environment_id=project.environment_id,
-			name=env_service_name,
-		)
-		if env_service is None:
-			raise DeploymentError(
-				f"env service {env_service_name} not found; "
-				+ "run `pulse-railway scaffold`"
-			)
-		env_service_id = env_service.id
-	variables = await client.get_project_variables(
-		project_id=project.project_id,
-		environment_id=project.environment_id,
-		service_id=env_service_id,
-		unrendered=True,
-	)
-	return pulse_env_user_references(
-		env_service_name=env_service_name,
-		env_vars=variables,
-	)
-
-
 async def _run_command(
 	*args: str,
 	cwd: Path | None = None,
@@ -266,7 +228,7 @@ async def _promote_deployment(
 	backend_service_name: str,
 	deployment_id: str,
 ) -> None:
-	deployment_services = await _list_deployment_service_records(
+	deployment_services = await list_deployment_service_records(
 		client,
 		project=project,
 	)
@@ -371,85 +333,12 @@ def railway_up_command(
 	return command
 
 
-async def _wait_for_latest_service_deployment(
-	client: RailwayGraphQLClient,
-	*,
-	project: RailwayProject,
-	service_id: str,
-	timeout: float = 900.0,
-	poll_interval: float = 2.0,
-) -> dict[str, Any]:
-	deadline = asyncio.get_running_loop().time() + timeout
-	last_seen: dict[str, Any] | None = None
-	while asyncio.get_running_loop().time() < deadline:
-		last_seen = await client.get_service_latest_deployment(
-			project_id=project.project_id,
-			environment_id=project.environment_id,
-			service_id=service_id,
-		)
-		if last_seen is None:
-			await asyncio.sleep(poll_interval)
-			continue
-		if last_seen["status"] in {"SUCCESS", "FAILED", "CRASHED", "REMOVED"}:
-			return last_seen
-		await asyncio.sleep(poll_interval)
-	raise TimeoutError(
-		f"service {service_id} did not produce a terminal deployment in {timeout:.0f}s"
-	)
-
-
-def _parse_optional_float(value: str | None) -> float | None:
-	if value is None or not value:
-		return None
-	return float(value)
-
-
-async def _list_deployment_service_records(
-	client: RailwayGraphQLClient,
-	*,
-	project: RailwayProject,
-) -> list[DeploymentServiceRecord]:
-	services = await client.list_services(
-		project_id=project.project_id,
-		environment_id=project.environment_id,
-	)
-	variable_sets = await asyncio.gather(
-		*[
-			client.get_service_variables_for_deployment(
-				project_id=project.project_id,
-				environment_id=project.environment_id,
-				service_id=service.id,
-			)
-			for service in services
-		]
-	)
-	deployments: list[DeploymentServiceRecord] = []
-	for service, variables in zip(services, variable_sets, strict=True):
-		deployment_id = variables.get(PULSE_DEPLOYMENT_ID)
-		if deployment_id:
-			deployments.append(
-				DeploymentServiceRecord(
-					service_id=service.id,
-					service_name=service.name,
-					deployment_id=deployment_id,
-					state=variables.get(PULSE_DEPLOYMENT_STATE),
-					drain_started_at=_parse_optional_float(
-						variables.get(PULSE_DRAIN_STARTED_AT)
-					),
-				)
-			)
-	return deployments
-
-
-list_deployment_service_records = _list_deployment_service_records
-
-
 async def _list_deployment_services(
 	client: RailwayGraphQLClient,
 	*,
 	project: RailwayProject,
 ) -> list[tuple[str, str]]:
-	services = await _list_deployment_service_records(client, project=project)
+	services = await list_deployment_service_records(client, project=project)
 	return [(service.deployment_id, service.service_name) for service in services]
 
 
@@ -506,13 +395,11 @@ async def redeploy_deployment(
 			project.service_prefix,
 			resolved_deployment_id,
 		)
-		backend_service = await client.find_service_by_name(
-			project_id=project.project_id,
-			environment_id=project.environment_id,
+		backend_service = await require_service_by_name(
+			client,
+			project=project,
 			name=backend_service_name,
 		)
-		if backend_service is None:
-			raise DeploymentError(f"service {backend_service_name} not found")
 		backend_deployment_id, backend_status = await deploy_service_and_wait(
 			client,
 			service_id=backend_service.id,
@@ -579,18 +466,15 @@ async def deploy(
 	)
 
 	async with RailwayGraphQLClient(token=project.token) as client:
-		existing_backend = await client.find_service_by_name(
-			project_id=project.project_id,
-			environment_id=project.environment_id,
+		await raise_if_service_exists(
+			client,
+			project=project,
 			name=backend_service_name,
+			error_message=f"service already exists for deployment {deployment_id}",
 		)
-		if existing_backend is not None:
-			raise DeploymentError(
-				f"service already exists for deployment {deployment_id}"
-			)
 		stack_state = await inspect_stack(project=project)
 		server_address = project.server_address or stack_state.server_address
-		reference_env_vars = await _pulse_env_reference_variables(
+		reference_env_vars = await pulse_env_reference_variables(
 			client,
 			project=project,
 			env_service_id=(
@@ -614,19 +498,15 @@ async def deploy(
 			image_ref=backend_image,
 		)
 
-		backend_service_id = await client.create_service(
-			project_id=project.project_id,
-			environment_id=project.environment_id,
-			name=backend_service_name,
-			image=backend_image,
-		)
-		await place_service_in_router_group(
+		backend_service = await create_service_in_router_group(
 			client,
 			project=project,
 			router_service_id=stack_state.router.service_id,
-			service_id=backend_service_id,
+			name=backend_service_name,
+			image=backend_image,
 		)
-		await upsert_service_variables(
+		backend_service_id = backend_service.id
+		backend_deployment_id, backend_status = await configure_service_and_deploy(
 			client,
 			project=project,
 			service_id=backend_service_id,
@@ -638,10 +518,7 @@ async def deploy(
 				session_env=session_env,
 				user_env={**reference_env_vars, **project.env_vars},
 			),
-		)
-		await client.update_service_instance(
-			service_id=backend_service_id,
-			environment_id=project.environment_id,
+			error_message="backend deployment failed",
 			source_image=backend_image,
 			num_replicas=project.backend_replicas,
 			healthcheck_path=backend_instance.healthcheck_path,
@@ -649,15 +526,6 @@ async def deploy(
 			overlap_seconds=backend_instance.overlap_seconds,
 			start_command=pulse_start_command(),
 		)
-		backend_deployment_id = await client.deploy_service(
-			service_id=backend_service_id,
-			environment_id=project.environment_id,
-		)
-		backend_deployment = await client.wait_for_deployment(
-			deployment_id=backend_deployment_id
-		)
-		if backend_deployment["status"] != "SUCCESS":
-			raise DeploymentError("backend deployment failed")
 		await _promote_deployment(
 			client,
 			project=project,
@@ -677,7 +545,7 @@ async def deploy(
 			router_domain=stack_state.router.domain or "",
 			server_address=server_address,
 			backend_deployment_id=backend_deployment_id,
-			backend_status=backend_deployment["status"],
+			backend_status=backend_status,
 			janitor_service_id=stack_state.janitor.service_id,
 			janitor_service_name=stack_state.janitor.service_name,
 			janitor_image=stack_state.janitor.image,
@@ -720,22 +588,19 @@ async def _deploy_source(
 
 	try:
 		async with RailwayGraphQLClient(token=project.token) as client:
-			existing_backend = await client.find_service_by_name(
-				project_id=project.project_id,
-				environment_id=project.environment_id,
+			await raise_if_service_exists(
+				client,
+				project=project,
 				name=backend_service_name,
+				error_message=f"service already exists for deployment {deployment_id}",
 			)
-			if existing_backend is not None:
-				raise DeploymentError(
-					f"service already exists for deployment {deployment_id}"
-				)
 			stack_state = await inspect_stack(project=project)
 			server_address = project.server_address or stack_state.server_address
 			session_env = backend_session_env(
 				resolved_uses_railway_session_store,
 				redis_url=stack_state.redis_url,
 			)
-			reference_env_vars = await _pulse_env_reference_variables(
+			reference_env_vars = await pulse_env_reference_variables(
 				client,
 				project=project,
 				env_service_id=(
@@ -758,26 +623,18 @@ async def _deploy_source(
 				dockerfile_path=docker.dockerfile_path,
 				context_path=docker.context_path,
 			)
-			backend_service_id = await client.create_service(
-				project_id=project.project_id,
-				environment_id=project.environment_id,
-				name=backend_service_name,
-			)
-			await place_service_in_router_group(
+			backend_service = await create_service_in_router_group(
 				client,
 				project=project,
 				router_service_id=stack_state.router.service_id,
-				service_id=backend_service_id,
+				name=backend_service_name,
 			)
-			await upsert_service_variables(
+			backend_service_id = backend_service.id
+			await configure_service(
 				client,
 				project=project,
 				service_id=backend_service_id,
 				variables={**runtime_vars, **build_vars},
-			)
-			await client.update_service_instance(
-				service_id=backend_service_id,
-				environment_id=project.environment_id,
 				num_replicas=project.backend_replicas,
 				healthcheck_path=backend_instance.healthcheck_path,
 				healthcheck_timeout=backend_instance.healthcheck_timeout,
@@ -807,7 +664,7 @@ async def _deploy_source(
 		build_started = True
 
 		async with RailwayGraphQLClient(token=project.token) as client:
-			build_deployment = await _wait_for_latest_service_deployment(
+			build_deployment = await wait_for_latest_service_deployment(
 				client,
 				project=project,
 				service_id=backend_service_id,
@@ -870,13 +727,11 @@ async def delete_deployment(
 		deployment_id,
 	)
 	async with RailwayGraphQLClient(token=project.token) as client:
-		service = await client.find_service_by_name(
-			project_id=project.project_id,
-			environment_id=project.environment_id,
+		service = await require_service_by_name(
+			client,
+			project=project,
 			name=service_name,
 		)
-		if service is None:
-			raise DeploymentError(f"service {service_name} not found")
 		stack_state = await inspect_stack(project=project)
 		active_deployment_id = await _get_active_deployment_from_router(
 			server_address=project.server_address or stack_state.server_address,
@@ -915,9 +770,7 @@ __all__ = [
 	"default_service_prefix",
 	"delete_deployment",
 	"deploy",
-	"DeploymentServiceRecord",
 	"generate_deployment_id",
-	"list_deployment_service_records",
 	"railway_up_command",
 	"redeploy_deployment",
 	"resolve_deployment_id_by_name",

@@ -701,7 +701,7 @@ async def test_run_ensure_uses_cli_target_ids(monkeypatch, tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_resolve_railway_target_ids_resolves_names(monkeypatch) -> None:
-	from pulse_railway.commands.common import resolve_railway_target_ids
+	from pulse_railway.railway.ops import resolve_railway_target_ids
 
 	class _FakeClient:
 		def __init__(self, **_: object) -> None:
@@ -731,9 +731,7 @@ async def test_resolve_railway_target_ids_resolves_names(monkeypatch) -> None:
 				EnvironmentRecord(id="env-staging", name="staging"),
 			]
 
-	monkeypatch.setattr(
-		"pulse_railway.commands.common.RailwayGraphQLClient", _FakeClient
-	)
+	monkeypatch.setattr("pulse_railway.railway.ops.RailwayGraphQLClient", _FakeClient)
 
 	project_id, environment_id = await resolve_railway_target_ids(
 		project_name="stoneware",
@@ -748,8 +746,8 @@ async def test_resolve_railway_target_ids_resolves_names(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_resolve_railway_target_ids_resolves_workspace_name(monkeypatch) -> None:
-	from pulse_railway.commands.common import resolve_railway_target_ids
 	from pulse_railway.railway import WorkspaceRecord
+	from pulse_railway.railway.ops import resolve_railway_target_ids
 
 	class _FakeClient:
 		def __init__(self, **_: object) -> None:
@@ -779,9 +777,7 @@ async def test_resolve_railway_target_ids_resolves_workspace_name(monkeypatch) -
 			assert project_id == "project-id"
 			return [EnvironmentRecord(id="env-id", name="production")]
 
-	monkeypatch.setattr(
-		"pulse_railway.commands.common.RailwayGraphQLClient", _FakeClient
-	)
+	monkeypatch.setattr("pulse_railway.railway.ops.RailwayGraphQLClient", _FakeClient)
 
 	project_id, environment_id = await resolve_railway_target_ids(
 		workspace_name="team",
@@ -796,7 +792,7 @@ async def test_resolve_railway_target_ids_resolves_workspace_name(monkeypatch) -
 
 @pytest.mark.asyncio
 async def test_resolve_railway_target_ids_uses_explicit_ids(monkeypatch) -> None:
-	from pulse_railway.commands.common import resolve_railway_target_ids
+	from pulse_railway.railway.ops import resolve_railway_target_ids
 
 	class _FakeClient:
 		def __init__(self, **_: object) -> None:
@@ -824,9 +820,7 @@ async def test_resolve_railway_target_ids_uses_explicit_ids(monkeypatch) -> None
 		) -> list[EnvironmentRecord]:
 			raise AssertionError("ids should not require environment lookup")
 
-	monkeypatch.setattr(
-		"pulse_railway.commands.common.RailwayGraphQLClient", _FakeClient
-	)
+	monkeypatch.setattr("pulse_railway.railway.ops.RailwayGraphQLClient", _FakeClient)
 
 	project_id, environment_id = await resolve_railway_target_ids(
 		project_id="project-id",
@@ -842,7 +836,7 @@ async def test_resolve_railway_target_ids_uses_explicit_ids(monkeypatch) -> None
 async def test_resolve_railway_target_ids_rejects_name_and_id_pairs(
 	monkeypatch,
 ) -> None:
-	from pulse_railway.commands.common import resolve_railway_target_ids
+	from pulse_railway.railway.ops import resolve_railway_target_ids
 
 	class _FakeClient:
 		def __init__(self, **_: object) -> None:
@@ -857,9 +851,7 @@ async def test_resolve_railway_target_ids_rejects_name_and_id_pairs(
 		async def get_project_token(self) -> None:
 			return None
 
-	monkeypatch.setattr(
-		"pulse_railway.commands.common.RailwayGraphQLClient", _FakeClient
-	)
+	monkeypatch.setattr("pulse_railway.railway.ops.RailwayGraphQLClient", _FakeClient)
 
 	with pytest.raises(ValueError, match="project name or project id"):
 		await resolve_railway_target_ids(
@@ -889,7 +881,7 @@ async def test_resolve_railway_target_ids_rejects_name_and_id_pairs(
 async def test_resolve_railway_target_ids_defaults_environment_without_project_token(
 	monkeypatch,
 ) -> None:
-	from pulse_railway.commands.common import resolve_railway_target_ids
+	from pulse_railway.railway.ops import resolve_railway_target_ids
 
 	class _FakeClient:
 		def __init__(self, **_: object) -> None:
@@ -919,9 +911,7 @@ async def test_resolve_railway_target_ids_defaults_environment_without_project_t
 				EnvironmentRecord(id="env-staging", name="staging"),
 			]
 
-	monkeypatch.setattr(
-		"pulse_railway.commands.common.RailwayGraphQLClient", _FakeClient
-	)
+	monkeypatch.setattr("pulse_railway.railway.ops.RailwayGraphQLClient", _FakeClient)
 
 	project_id, environment_id = await resolve_railway_target_ids(
 		project_name="stoneware",
@@ -937,7 +927,7 @@ async def test_resolve_railway_target_ids_defaults_environment_without_project_t
 async def test_resolve_railway_target_ids_infers_project_from_token(
 	monkeypatch,
 ) -> None:
-	from pulse_railway.commands.common import resolve_railway_target_ids
+	from pulse_railway.railway.ops import resolve_railway_target_ids
 
 	class _FakeClient:
 		def __init__(self, **_: object) -> None:
@@ -959,9 +949,7 @@ async def test_resolve_railway_target_ids_infers_project_from_token(
 			assert environment_id == "env-from-token"
 			return EnvironmentRecord(id="env-from-token", name="production")
 
-	monkeypatch.setattr(
-		"pulse_railway.commands.common.RailwayGraphQLClient", _FakeClient
-	)
+	monkeypatch.setattr("pulse_railway.railway.ops.RailwayGraphQLClient", _FakeClient)
 
 	project_id, environment_id = await resolve_railway_target_ids(
 		project_name=None,
@@ -977,7 +965,7 @@ async def test_resolve_railway_target_ids_infers_project_from_token(
 async def test_resolve_railway_target_ids_infers_environment_from_token(
 	monkeypatch,
 ) -> None:
-	from pulse_railway.commands.common import resolve_railway_target_ids
+	from pulse_railway.railway.ops import resolve_railway_target_ids
 
 	class _FakeClient:
 		def __init__(self, **_: object) -> None:
@@ -1003,9 +991,7 @@ async def test_resolve_railway_target_ids_infers_environment_from_token(
 		) -> list[EnvironmentRecord]:
 			raise AssertionError("omitted environment should use the token scope")
 
-	monkeypatch.setattr(
-		"pulse_railway.commands.common.RailwayGraphQLClient", _FakeClient
-	)
+	monkeypatch.setattr("pulse_railway.railway.ops.RailwayGraphQLClient", _FakeClient)
 
 	project_id, environment_id = await resolve_railway_target_ids(
 		project_name=None,
@@ -1021,7 +1007,7 @@ async def test_resolve_railway_target_ids_infers_environment_from_token(
 async def test_resolve_railway_target_ids_rejects_mismatched_project_token_environment(
 	monkeypatch,
 ) -> None:
-	from pulse_railway.commands.common import resolve_railway_target_ids
+	from pulse_railway.railway.ops import resolve_railway_target_ids
 
 	class _FakeClient:
 		def __init__(self, **_: object) -> None:
@@ -1048,9 +1034,7 @@ async def test_resolve_railway_target_ids_rejects_mismatched_project_token_envir
 		) -> list[EnvironmentRecord]:
 			raise AssertionError("project token should not resolve other environments")
 
-	monkeypatch.setattr(
-		"pulse_railway.commands.common.RailwayGraphQLClient", _FakeClient
-	)
+	monkeypatch.setattr("pulse_railway.railway.ops.RailwayGraphQLClient", _FakeClient)
 
 	with pytest.raises(ValueError, match="scoped to Railway environment staging"):
 		await resolve_railway_target_ids(
@@ -1064,7 +1048,7 @@ async def test_resolve_railway_target_ids_rejects_mismatched_project_token_envir
 async def test_resolve_railway_target_ids_fails_without_project_or_project_token(
 	monkeypatch,
 ) -> None:
-	from pulse_railway.commands.common import resolve_railway_target_ids
+	from pulse_railway.railway.ops import resolve_railway_target_ids
 
 	class _FakeClient:
 		def __init__(self, **_: object) -> None:
@@ -1079,9 +1063,7 @@ async def test_resolve_railway_target_ids_fails_without_project_or_project_token
 		async def get_project_token(self) -> None:
 			return None
 
-	monkeypatch.setattr(
-		"pulse_railway.commands.common.RailwayGraphQLClient", _FakeClient
-	)
+	monkeypatch.setattr("pulse_railway.railway.ops.RailwayGraphQLClient", _FakeClient)
 
 	with pytest.raises(ValueError, match="project is required"):
 		await resolve_railway_target_ids(

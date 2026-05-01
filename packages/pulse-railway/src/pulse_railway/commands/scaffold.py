@@ -16,7 +16,6 @@ from pulse_railway.commands.common import (
 	load_railway_plugin,
 	project_id_from_sources,
 	project_name_from_sources,
-	resolve_railway_target_ids,
 	workspace_id_from_sources,
 	workspace_name_from_sources,
 )
@@ -27,6 +26,7 @@ from pulse_railway.constants import (
 	DEFAULT_REDIS_PREFIX,
 )
 from pulse_railway.plugin import RailwayPlugin
+from pulse_railway.railway.ops import resolve_railway_target_ids
 from pulse_railway.stack import create_or_reconcile_stack, create_stack
 
 

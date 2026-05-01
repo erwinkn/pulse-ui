@@ -45,24 +45,22 @@ from pulse_railway.images import (
 	build_and_push_image,
 	image_ref,
 )
-from pulse_railway.railway import (
+from pulse_railway.railway.client import (
 	RailwayGraphQLClient,
 	normalize_service_prefix,
 	service_name_for_deployment,
 	validate_deployment_id,
 )
+from pulse_railway.railway.ops import (
+	deploy_service_and_wait,
+	place_service_in_router_group,
+	upsert_service_variables,
+)
 from pulse_railway.session import RailwayRedisSessionStore
 from pulse_railway.stack import (
 	JANITOR_START_COMMAND,
 	ROUTER_START_COMMAND,
-	ResolvedRedis,
-	deploy_service_and_wait,
-	place_service_in_router_group,
-	require_ready_stack,
-	resolve_or_create_internal_token,
-	resolve_or_create_redis,
-	resolve_project_internals,
-	upsert_service_variables,
+	inspect_stack,
 )
 
 
@@ -495,7 +493,7 @@ async def redeploy_deployment(
 ) -> RedeployResult:
 	resolved_deployment_id = deployment_id
 	if resolved_deployment_id is None:
-		stack_state = await require_ready_stack(project=project)
+		stack_state = await inspect_stack(project=project)
 		resolved_deployment_id = await _get_active_deployment_from_router(
 			server_address=project.server_address or stack_state.server_address,
 			internal_token=stack_state.internal_token,
@@ -590,7 +588,7 @@ async def deploy(
 			raise DeploymentError(
 				f"service already exists for deployment {deployment_id}"
 			)
-		stack_state = await require_ready_stack(project=project)
+		stack_state = await inspect_stack(project=project)
 		server_address = project.server_address or stack_state.server_address
 		reference_env_vars = await _pulse_env_reference_variables(
 			client,
@@ -731,7 +729,7 @@ async def _deploy_source(
 				raise DeploymentError(
 					f"service already exists for deployment {deployment_id}"
 				)
-			stack_state = await require_ready_stack(project=project)
+			stack_state = await inspect_stack(project=project)
 			server_address = project.server_address or stack_state.server_address
 			session_env = backend_session_env(
 				resolved_uses_railway_session_store,
@@ -879,7 +877,7 @@ async def delete_deployment(
 		)
 		if service is None:
 			raise DeploymentError(f"service {service_name} not found")
-		stack_state = await require_ready_stack(project=project)
+		stack_state = await inspect_stack(project=project)
 		active_deployment_id = await _get_active_deployment_from_router(
 			server_address=project.server_address or stack_state.server_address,
 			internal_token=stack_state.internal_token,
@@ -922,10 +920,6 @@ __all__ = [
 	"list_deployment_service_records",
 	"railway_up_command",
 	"redeploy_deployment",
-	"ResolvedRedis",
 	"resolve_deployment_id_by_name",
-	"resolve_or_create_redis",
-	"resolve_or_create_internal_token",
-	"resolve_project_internals",
 	"validate_deployment_service_records",
 ]

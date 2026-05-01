@@ -19,7 +19,7 @@ from pulse_railway.constants import (
 	PULSE_INTERNAL_TOKEN,
 	STALE_AFFINITY_RELOAD_QUERY_PARAM,
 )
-from pulse_railway.railway import (
+from pulse_railway.railway.client import (
 	normalize_service_name,
 	normalize_service_prefix,
 )

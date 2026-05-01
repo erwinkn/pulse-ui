@@ -147,7 +147,7 @@ Use either the name or ID form for each target, not both.
 
 ## Railway Model
 
-`pulse-railway scaffold` / `pulse-railway ensure` create or configure:
+`pulse-railway scaffold` creates, and `pulse-railway ensure` creates only on an empty project or reconciles mutable config on a complete baseline:
 
 - stable public router service, default `pulse-router`
 - stable env service, default `pulse-env`, for user-managed app variables
@@ -155,7 +155,7 @@ Use either the name or ID form for each target, not both.
 - janitor cron service, default `pulse-janitor`
 - latest published official router/janitor GHCR image tags
 
-`scaffold` is fresh-only. If baseline services or partial leftovers already exist, run `ensure`. `deploy` is strict and will not repair missing baseline services.
+`scaffold` is fresh-only. `ensure` fails on partial baselines instead of repairing missing services; delete partial leftovers and rerun `scaffold`. `deploy` is strict and will not repair missing baseline services.
 
 User-managed variables belong on `pulse-env`. New backend deployments reference every non-Pulse-managed variable from that service.
 

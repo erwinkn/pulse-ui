@@ -53,7 +53,7 @@ from pulse_railway.deployment import (
 	resolve_deployment_id_by_name,
 )
 from pulse_railway.janitor import JanitorResult, run_janitor
-from pulse_railway.railway import validate_deployment_id
+from pulse_railway.railway.client import validate_deployment_id
 
 RAILWAY_RUNTIME_ENV_VARS = (
 	"RAILWAY_SERVICE_ID",

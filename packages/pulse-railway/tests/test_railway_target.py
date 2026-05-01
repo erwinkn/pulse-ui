@@ -102,6 +102,17 @@ def test_railway_project_preserves_explicit_service_names() -> None:
 	assert project.env_service_name == "pulse-env"
 
 
+def test_railway_project_omits_redis_service_for_external_redis() -> None:
+	project = RailwayProject(
+		project_id="project",
+		environment_id="env",
+		token="token",
+		redis_url="redis://external.example:6379",
+	)
+
+	assert project.redis_service_name is None
+
+
 def test_railway_plugin_exposes_plugin_deployment_name() -> None:
 	plugin = RailwayPlugin(dockerfile="Dockerfile", deployment_name="staging")
 	ps.App(routes=[], plugins=[plugin])

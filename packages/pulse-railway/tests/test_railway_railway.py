@@ -50,6 +50,47 @@ async def test_update_service_instance_includes_cron_schedule(monkeypatch) -> No
 	}
 
 
+@pytest.mark.asyncio
+async def test_upsert_variable_collection_uses_batch_mutation(monkeypatch) -> None:
+	calls: list[tuple[str, dict[str, object] | None]] = []
+
+	async def fake_graphql(
+		self: RailwayGraphQLClient,
+		query: str,
+		variables: dict[str, object] | None = None,
+	) -> object:
+		calls.append((query, variables))
+		return {}
+
+	monkeypatch.setattr(RailwayGraphQLClient, "graphql", fake_graphql)
+	client = RailwayGraphQLClient(token="token")
+	try:
+		await client.upsert_variable_collection(
+			project_id="project",
+			environment_id="env",
+			service_id="svc-1",
+			variables={"A": "1", "B": "2"},
+			skip_deploys=True,
+			replace=False,
+		)
+	finally:
+		await client.aclose()
+
+	assert len(calls) == 1
+	query, variables = calls[0]
+	assert "variableCollectionUpsert" in query
+	assert variables == {
+		"input": {
+			"projectId": "project",
+			"environmentId": "env",
+			"serviceId": "svc-1",
+			"variables": {"A": "1", "B": "2"},
+			"skipDeploys": True,
+			"replace": False,
+		}
+	}
+
+
 def test_graphql_client_uses_longer_read_timeout() -> None:
 	client = RailwayGraphQLClient(token="token")
 	try:

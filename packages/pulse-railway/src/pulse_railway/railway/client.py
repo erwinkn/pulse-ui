@@ -102,6 +102,20 @@ class ServiceRecord:
 	repo: str | None = None
 	domains: list[ServiceDomain] = field(default_factory=list)
 
+	@property
+	def service_id(self) -> str:
+		return self.id
+
+	@property
+	def service_name(self) -> str:
+		return self.name
+
+	@property
+	def domain(self) -> str | None:
+		if not self.domains:
+			return None
+		return self.domains[0].domain
+
 
 @dataclass(slots=True)
 class TemplateRecord:
@@ -620,6 +634,34 @@ class RailwayGraphQLClient:
 			},
 		)
 
+	async def upsert_variable_collection(
+		self,
+		*,
+		project_id: str,
+		environment_id: str,
+		variables: dict[str, str],
+		service_id: str | None = None,
+		skip_deploys: bool = True,
+		replace: bool = False,
+	) -> None:
+		await self.graphql(
+			"""
+			mutation($input: VariableCollectionUpsertInput!) {
+				variableCollectionUpsert(input: $input)
+			}
+			""",
+			{
+				"input": {
+					"projectId": project_id,
+					"environmentId": environment_id,
+					"serviceId": service_id,
+					"variables": variables,
+					"skipDeploys": skip_deploys,
+					"replace": replace,
+				}
+			},
+		)
+
 	async def delete_variable(
 		self,
 		*,
@@ -1091,9 +1133,13 @@ __all__ = [
 	"RailwayGraphQLError",
 	"RailwayResolver",
 	"RouteTarget",
+	"ServiceDomain",
 	"ServiceRecord",
 	"TemplateRecord",
+	"WorkspaceRecord",
+	"normalize_service_name",
 	"normalize_service_prefix",
+	"prefixed_service_name",
 	"service_name_for_deployment",
 	"validate_deployment_id",
 ]

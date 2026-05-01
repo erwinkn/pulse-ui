@@ -20,8 +20,11 @@ from pulse_railway.deployment import (
 	list_deployment_service_records,
 	validate_deployment_service_records,
 )
-from pulse_railway.railway import RailwayGraphQLClient, service_name_for_deployment
-from pulse_railway.stack import resolve_project_internals
+from pulse_railway.railway.client import (
+	RailwayGraphQLClient,
+	service_name_for_deployment,
+)
+from pulse_railway.stack import inspect_stack
 from pulse_railway.store import (
 	DeploymentStore,
 	RedisDeploymentStore,
@@ -146,12 +149,15 @@ async def run_janitor(
 	lock_token = secrets.token_hex(8)
 	try:
 		async with RailwayGraphQLClient(token=project.token) as client:
-			internals = await resolve_project_internals(client, project=project)
+			stack = await inspect_stack(project=project)
+			internals = RailwayInternals(
+				service_prefix=project.service_prefix,
+				internal_token=stack.internal_token,
+				redis_url=stack.redis_url,
+			)
 			if store is None:
-				if internals.redis_url is None:
-					raise RuntimeError("redis_url is required for janitor tracking")
 				store = RedisDeploymentStore.from_url(
-					url=internals.redis_url,
+					url=stack.redis_url,
 					prefix=project.redis_prefix,
 				)
 				created_store = True

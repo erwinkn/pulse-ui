@@ -30,7 +30,7 @@ from pulse_railway.deployment import (
 )
 from pulse_railway.janitor import JanitorResult
 from pulse_railway.railway import EnvironmentRecord, ProjectRecord, ProjectTokenRecord
-from pulse_railway.stack import InitResult, StackServiceResult
+from pulse_railway.stack import StackChange, StackServiceChange
 
 
 def _make_scaffold_args(**overrides: Any) -> argparse.Namespace:
@@ -79,9 +79,9 @@ def _make_deploy_args(**overrides: Any) -> argparse.Namespace:
 	return argparse.Namespace(**values)
 
 
-def _baseline_result(*, created: bool) -> InitResult:
-	return InitResult(
-		router=StackServiceResult(
+def _baseline_result(*, created: bool) -> StackChange:
+	return StackChange(
+		router=StackServiceChange(
 			service_id="svc-router",
 			service_name="pulse-router",
 			domain="pulse-router-production.up.railway.app",
@@ -90,7 +90,7 @@ def _baseline_result(*, created: bool) -> InitResult:
 			deployment_id="deploy-router",
 			status="SUCCESS",
 		),
-		janitor=StackServiceResult(
+		janitor=StackServiceChange(
 			service_id="svc-janitor",
 			service_name="pulse-janitor",
 			created=created,
@@ -98,7 +98,7 @@ def _baseline_result(*, created: bool) -> InitResult:
 			deployment_id="deploy-janitor",
 			status="SUCCESS",
 		),
-		redis=StackServiceResult(
+		redis=StackServiceChange(
 			service_id="svc-redis",
 			service_name="pulse-redis",
 			created=created,
@@ -133,7 +133,7 @@ def _install_fake_baseline(
 		fake_resolve_railway_target_ids,
 	)
 
-	async def fake_stack(**kwargs: Any) -> InitResult:
+	async def fake_stack(**kwargs: Any) -> StackChange:
 		baseline_call.update(kwargs)
 		return _baseline_result(created=created)
 
@@ -144,7 +144,7 @@ def _install_fake_baseline(
 def _install_fake_scaffold(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 	return _install_fake_baseline(
 		monkeypatch,
-		stack_function="bootstrap_stack",
+		stack_function="create_stack",
 		created=True,
 	)
 
@@ -152,7 +152,7 @@ def _install_fake_scaffold(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 def _install_fake_ensure(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 	return _install_fake_baseline(
 		monkeypatch,
-		stack_function="ensure_stack",
+		stack_function="create_or_reconcile_stack",
 		created=False,
 	)
 
@@ -623,6 +623,30 @@ async def test_run_scaffold_uses_cli_target_ids(monkeypatch, tmp_path) -> None:
 	assert init_call["target"]["environment_id"] == "env-id"
 	assert init_call["project"].project_id == "project-id"
 	assert init_call["project"].environment_id == "env-id"
+
+
+@pytest.mark.asyncio
+async def test_run_scaffold_external_redis_omits_redis_service(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	init_call = _install_fake_scaffold(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	result = await _run_scaffold(
+		_make_scaffold_args(
+			project_id="project-id",
+			environment_id="env-id",
+			token="token",
+			redis_url="redis://external.example:6379",
+		)
+	)
+
+	assert result == 0
+	assert init_call["project"].redis_url == "redis://external.example:6379"
+	assert init_call["project"].redis_service_name is None
 
 
 @pytest.mark.asyncio

@@ -31,7 +31,11 @@ from pulse_railway.constants import (
 	RAILWAY_TOKEN,
 	STALE_AFFINITY_RELOAD_QUERY_PARAM,
 )
-from pulse_railway.railway import RailwayGraphQLClient, RailwayResolver, RouteTarget
+from pulse_railway.railway.client import (
+	RailwayGraphQLClient,
+	RailwayResolver,
+	RouteTarget,
+)
 from pulse_railway.store import (
 	ActiveDeploymentError,
 	DeploymentStore,

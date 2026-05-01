@@ -14,7 +14,10 @@ from pulse_railway.constants import (
 	DEFAULT_ROUTER_HEALTH_PATH,
 	DEFAULT_ROUTER_PORT,
 )
-from pulse_railway.railway import normalize_service_name, normalize_service_prefix
+from pulse_railway.railway.client import (
+	normalize_service_name,
+	normalize_service_prefix,
+)
 
 
 def default_janitor_service_name(service_name: str) -> str:
@@ -58,7 +61,7 @@ class RailwayProject:
 	server_address: str | None = None
 	redis_url: str | None = None
 	redis_prefix: str = DEFAULT_REDIS_PREFIX
-	redis_service_name: str = ""
+	redis_service_name: str | None = ""
 	redis_template_code: str = DEFAULT_REDIS_TEMPLATE_CODE
 	janitor_service_name: str = ""
 	env_service_name: str = ""
@@ -79,11 +82,16 @@ class RailwayProject:
 			if self.janitor_service_name
 			else default_janitor_service_name(self.service_name)
 		)
-		self.redis_service_name = (
-			normalize_service_name(self.redis_service_name)
-			if self.redis_service_name
-			else default_redis_service_name(self.service_name)
-		)
+		if self.redis_service_name is None:
+			self.redis_service_name = None
+		elif self.redis_service_name:
+			self.redis_service_name = normalize_service_name(self.redis_service_name)
+		else:
+			self.redis_service_name = (
+				None
+				if self.redis_url is not None
+				else default_redis_service_name(self.service_name)
+			)
 		self.env_service_name = (
 			normalize_service_name(self.env_service_name)
 			if self.env_service_name

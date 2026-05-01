@@ -25,14 +25,14 @@ uv run pulse-railway deploy \
 Use the commands like this:
 
 - `pulse-railway scaffold` bootstraps the stable router, env, Redis, and janitor stack into an empty Railway project.
-- `pulse-railway ensure` creates or reconciles that baseline stack and is safe to run from CI before deploy.
+- `pulse-railway ensure` creates the baseline on an empty project or reconciles mutable runtime config on a complete baseline.
 - `pulse-railway deploy` builds and rolls out a new backend service on top of an already-initialized stack.
   By default it uploads source and uses `railway up` to build on Railway. Passing an image repository switches deploy to the local `docker buildx build --push` path.
 - `pulse-railway redeploy` redeploys the active backend service. Pass `--deployment-id <id>` to redeploy a specific Pulse deployment.
 
 `scaffold <app-file>` bootstraps the baseline from `RailwayPlugin` config and defaults. Stable router, Redis, janitor, and backend service names come from the app plugin. The baseline also includes a stable env service that acts as the canonical source for user-managed deployment variables.
 
-`ensure` uses the same target/options as `scaffold`, but it is idempotent. On an empty project it creates the baseline; on an existing or partial baseline it creates missing services and rewrites Pulse-managed runtime config.
+`ensure` uses the same target/options as `scaffold`, but it is strict about topology. On an empty project it creates the baseline. On a complete baseline it rewrites Pulse-managed runtime config such as images, variables, replica counts, healthchecks, cron, and janitor drain settings. On a partial baseline it fails; delete the baseline services and rerun `scaffold`.
 
 `deploy` reads app configuration from `RailwayPlugin` on the target app. Provide the Dockerfile with `RailwayPlugin(dockerfile=...)`.
 
@@ -67,9 +67,9 @@ You can also set `image_repository` on `RailwayPlugin` to provide the default ba
 
 `pulse-railway deploy <app-file>` reads `server_address` and web root from the target `ps.App`, and the Dockerfile path from `RailwayPlugin(dockerfile=...)`. The deploy context is the invocation directory unless `--context` is provided. Dockerfile and web root paths are resolved from that context. `--server-address` and `--web-root` can override app config; Dockerfile is only configured on the plugin.
 
-If `--redis-url` is omitted, `pulse-railway scaffold` and `pulse-railway ensure` create the stable Redis service in the Railway project.
+If `--redis-url` is omitted, `pulse-railway scaffold` and an empty-project `pulse-railway ensure` create the stable Redis service in the Railway project. Redis mode is baseline topology; `ensure` does not switch an existing stack between managed and external Redis.
 
-`pulse-railway deploy` is strict. It does not create or repair the stable baseline stack. If the router, env, Redis, or janitor baseline is missing or outdated, run `pulse-railway ensure` first.
+`pulse-railway deploy` is strict. It inspects the stable baseline stack and does not create or repair it. If router, env, Redis, or janitor topology is missing, delete the partial baseline and rerun `pulse-railway scaffold`.
 
 User-managed app variables should live on the stable env service. Each new backend deployment references every non-Pulse-managed variable from `pulse-env`, so users can sync secrets into that service however they want: Railway UI, Shared Variables, Doppler, or another workflow.
 

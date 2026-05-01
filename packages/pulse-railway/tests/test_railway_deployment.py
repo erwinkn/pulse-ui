@@ -34,8 +34,23 @@ from pulse_railway.env import (
 	check_reserved_source_build_args,
 	validate_backend_env_vars,
 )
-from pulse_railway.railway import ServiceRecord
-from pulse_railway.stack import StackServiceState, StackState
+from pulse_railway.railway import ServiceDomain, ServiceRecord
+from pulse_railway.stack import StackInspection
+
+
+def _service_record(
+	service_id: str,
+	service_name: str,
+	*,
+	image: str | None = None,
+	domain: str | None = None,
+) -> ServiceRecord:
+	domains = (
+		[ServiceDomain(id=f"domain-{service_id}", domain=domain, target_port=8000)]
+		if domain is not None
+		else []
+	)
+	return ServiceRecord(id=service_id, name=service_name, image=image, domains=domains)
 
 
 def _write_app_fixture(
@@ -473,19 +488,19 @@ async def test_redeploy_deployment_defaults_to_active_deployment(
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_require_ready_stack(**_: Any) -> StackState:
-		return StackState(
-			router=StackServiceState("svc-router", "pulse-router"),
-			janitor=StackServiceState("svc-janitor", "pulse-janitor"),
-			redis=StackServiceState("svc-redis", "pulse-redis"),
+	async def fake_inspect_stack(**_: Any) -> StackInspection:
+		return StackInspection(
+			router=_service_record("svc-router", "pulse-router"),
+			janitor=_service_record("svc-janitor", "pulse-janitor"),
+			redis=_service_record("svc-redis", "pulse-redis"),
 			internal_token="secret-token",
 			redis_url="redis://pulse-redis.railway.internal:6379",
 			server_address="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment.require_ready_stack",
-		fake_require_ready_stack,
+		"pulse_railway.deployment.inspect_stack",
+		fake_inspect_stack,
 	)
 
 	result = await redeploy_deployment(
@@ -579,19 +594,19 @@ async def test_delete_deployment_rejects_active_before_service_delete(
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_require_ready_stack(**_: Any) -> StackState:
-		return StackState(
-			router=StackServiceState("svc-router", "pulse-router"),
-			janitor=StackServiceState("svc-janitor", "pulse-janitor"),
-			redis=StackServiceState("svc-redis", "pulse-redis"),
+	async def fake_inspect_stack(**_: Any) -> StackInspection:
+		return StackInspection(
+			router=_service_record("svc-router", "pulse-router"),
+			janitor=_service_record("svc-janitor", "pulse-janitor"),
+			redis=_service_record("svc-redis", "pulse-redis"),
 			internal_token="secret-token",
 			redis_url="redis://pulse-redis.railway.internal:6379",
 			server_address="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment.require_ready_stack",
-		fake_require_ready_stack,
+		"pulse_railway.deployment.inspect_stack",
+		fake_inspect_stack,
 	)
 
 	with pytest.raises(DeploymentError, match="cannot delete active deployment"):
@@ -650,19 +665,19 @@ async def test_delete_deployment_clears_router_state_then_deletes_inactive_servi
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_require_ready_stack(**_: Any) -> StackState:
-		return StackState(
-			router=StackServiceState("svc-router", "pulse-router"),
-			janitor=StackServiceState("svc-janitor", "pulse-janitor"),
-			redis=StackServiceState("svc-redis", "pulse-redis"),
+	async def fake_inspect_stack(**_: Any) -> StackInspection:
+		return StackInspection(
+			router=_service_record("svc-router", "pulse-router"),
+			janitor=_service_record("svc-janitor", "pulse-janitor"),
+			redis=_service_record("svc-redis", "pulse-redis"),
 			internal_token="secret-token",
 			redis_url="redis://pulse-redis.railway.internal:6379",
 			server_address="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment.require_ready_stack",
-		fake_require_ready_stack,
+		"pulse_railway.deployment.inspect_stack",
+		fake_inspect_stack,
 	)
 
 	await delete_deployment(
@@ -709,19 +724,19 @@ async def test_delete_deployment_keeps_service_when_router_state_delete_fails(
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_require_ready_stack(**_: Any) -> StackState:
-		return StackState(
-			router=StackServiceState("svc-router", "pulse-router"),
-			janitor=StackServiceState("svc-janitor", "pulse-janitor"),
-			redis=StackServiceState("svc-redis", "pulse-redis"),
+	async def fake_inspect_stack(**_: Any) -> StackInspection:
+		return StackInspection(
+			router=_service_record("svc-router", "pulse-router"),
+			janitor=_service_record("svc-janitor", "pulse-janitor"),
+			redis=_service_record("svc-redis", "pulse-redis"),
 			internal_token="secret-token",
 			redis_url="redis://pulse-redis.railway.internal:6379",
 			server_address="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment.require_ready_stack",
-		fake_require_ready_stack,
+		"pulse_railway.deployment.inspect_stack",
+		fake_inspect_stack,
 	)
 
 	async def fake_router_control_request(**kwargs: Any) -> dict[str, object]:
@@ -772,7 +787,7 @@ async def test_deploy_happy_path_on_ready_stack(
 		},
 	}
 	project_variables: dict[str, str] = {}
-	variables: list[tuple[str | None, str, str]] = []
+	variable_writes: list[tuple[str | None, str, str]] = []
 	deleted_variables: list[tuple[str, str, str]] = []
 	group_updates: list[tuple[str, str, str]] = []
 
@@ -809,24 +824,26 @@ async def test_deploy_happy_path_on_ready_stack(
 			service_variables[service_id] = {}
 			return service_id
 
-		async def upsert_variable(
+		async def upsert_variable_collection(
 			self,
 			*,
 			project_id: str,
 			environment_id: str,
-			name: str,
-			value: str,
+			variables: dict[str, str],
 			service_id: str | None = None,
 			skip_deploys: bool = True,
+			replace: bool = False,
 		) -> None:
 			assert project_id == "project"
 			assert environment_id == "env"
 			assert skip_deploys is True
-			variables.append((service_id, name, value))
+			assert replace is False
 			if service_id is None:
-				project_variables[name] = value
+				project_variables.update(variables)
 				return
-			service_variables.setdefault(service_id, {})[name] = value
+			for name, value in variables.items():
+				variable_writes.append((service_id, name, value))
+			service_variables.setdefault(service_id, {}).update(variables)
 
 		async def delete_variable(
 			self,
@@ -896,20 +913,20 @@ async def test_deploy_happy_path_on_ready_stack(
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_require_ready_stack(**_: Any) -> StackState:
-		return StackState(
-			router=StackServiceState(
+	async def fake_inspect_stack(**_: Any) -> StackInspection:
+		return StackInspection(
+			router=_service_record(
 				service_id="svc-router",
 				service_name="pulse-router",
 				image="ghcr.io/acme/router:24h",
 				domain="pulse-router-production.up.railway.app",
 			),
-			janitor=StackServiceState(
+			janitor=_service_record(
 				service_id="svc-janitor",
 				service_name="pulse-janitor",
 				image="ghcr.io/acme/router:24h",
 			),
-			redis=StackServiceState(
+			redis=_service_record(
 				service_id="svc-redis",
 				service_name="pulse-redis",
 			),
@@ -919,8 +936,8 @@ async def test_deploy_happy_path_on_ready_stack(
 		)
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment.require_ready_stack",
-		fake_require_ready_stack,
+		"pulse_railway.deployment.inspect_stack",
+		fake_inspect_stack,
 	)
 
 	async def fake_pulse_env_reference_variables(
@@ -988,11 +1005,12 @@ async def test_deploy_happy_path_on_ready_stack(
 	assert draining["prod-old"]["service_name"] == "pulse-prod-old"
 	assert draining["prod-old"]["drain_started_at"] > 0
 	assert not any(
-		name == "PULSE_ACTIVE_DEPLOYMENT" for _service_id, name, _value in variables
+		name == "PULSE_ACTIVE_DEPLOYMENT"
+		for _service_id, name, _value in variable_writes
 	)
 	assert not any(
 		service_id == result.backend_service_id and key == REDIS_URL
-		for service_id, key, _value in variables
+		for service_id, key, _value in variable_writes
 	)
 	assert service_variables[result.backend_service_id]["EXTERNAL_KEY"] == (
 		"${{pulse-env.EXTERNAL_KEY}}"
@@ -1031,7 +1049,7 @@ async def test_deploy_source_happy_path_on_ready_stack(
 		},
 	}
 	project_variables: dict[str, str] = {}
-	variables: list[tuple[str | None, str, str]] = []
+	variable_writes: list[tuple[str | None, str, str]] = []
 	group_updates: list[tuple[str, str, str]] = []
 	build_time_service_variables: list[dict[str, str]] = []
 	run_command_calls: list[
@@ -1072,24 +1090,26 @@ async def test_deploy_source_happy_path_on_ready_stack(
 			service_variables[service_id] = {}
 			return service_id
 
-		async def upsert_variable(
+		async def upsert_variable_collection(
 			self,
 			*,
 			project_id: str,
 			environment_id: str,
-			name: str,
-			value: str,
+			variables: dict[str, str],
 			service_id: str | None = None,
 			skip_deploys: bool = True,
+			replace: bool = False,
 		) -> None:
 			assert project_id == "project"
 			assert environment_id == "env"
 			assert skip_deploys is True
-			variables.append((service_id, name, value))
+			assert replace is False
 			if service_id is None:
-				project_variables[name] = value
+				project_variables.update(variables)
 				return
-			service_variables.setdefault(service_id, {})[name] = value
+			for name, value in variables.items():
+				variable_writes.append((service_id, name, value))
+			service_variables.setdefault(service_id, {}).update(variables)
 
 		async def update_service_instance(self, **kwargs: Any) -> None:
 			assert kwargs["start_command"]
@@ -1151,20 +1171,20 @@ async def test_deploy_source_happy_path_on_ready_stack(
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_require_ready_stack(**_: Any) -> StackState:
-		return StackState(
-			router=StackServiceState(
+	async def fake_inspect_stack(**_: Any) -> StackInspection:
+		return StackInspection(
+			router=_service_record(
 				service_id="svc-router",
 				service_name="pulse-router",
 				image="ghcr.io/acme/router:24h",
 				domain="pulse-router-production.up.railway.app",
 			),
-			janitor=StackServiceState(
+			janitor=_service_record(
 				service_id="svc-janitor",
 				service_name="pulse-janitor",
 				image="ghcr.io/acme/router:24h",
 			),
-			redis=StackServiceState(
+			redis=_service_record(
 				service_id="svc-redis",
 				service_name="pulse-redis",
 			),
@@ -1174,8 +1194,8 @@ async def test_deploy_source_happy_path_on_ready_stack(
 		)
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment.require_ready_stack",
-		fake_require_ready_stack,
+		"pulse_railway.deployment.inspect_stack",
+		fake_inspect_stack,
 	)
 
 	async def fake_pulse_env_reference_variables(
@@ -1273,7 +1293,8 @@ async def test_deploy_source_happy_path_on_ready_stack(
 	assert draining["prod-old"]["service_name"] == "pulse-prod-old"
 	assert draining["prod-old"]["drain_started_at"] > 0
 	assert not any(
-		name == "PULSE_ACTIVE_DEPLOYMENT" for _service_id, name, _value in variables
+		name == "PULSE_ACTIVE_DEPLOYMENT"
+		for _service_id, name, _value in variable_writes
 	)
 	assert service_variables[result.backend_service_id]["RAILWAY_DOCKERFILE_PATH"] == (
 		"examples/Dockerfile"
@@ -1340,7 +1361,7 @@ async def test_deploy_source_uses_railway_api_token_for_cli_when_present(
 		async def get_project_variables(self, **_: object) -> dict[str, str]:
 			return {}
 
-		async def upsert_variable(self, **_: object) -> None:
+		async def upsert_variable_collection(self, **_: object) -> None:
 			return None
 
 		async def update_service_instance(self, **_: object) -> None:
@@ -1363,20 +1384,20 @@ async def test_deploy_source_uses_railway_api_token_for_cli_when_present(
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_require_ready_stack(*, project: RailwayProject) -> StackState:
-		return StackState(
-			router=StackServiceState(
+	async def fake_inspect_stack(*, project: RailwayProject) -> StackInspection:
+		return StackInspection(
+			router=_service_record(
 				service_id="svc-router",
 				service_name="pulse-router",
 				domain="pulse-router-production.up.railway.app",
 				image="ghcr.io/acme/router:24h",
 			),
-			janitor=StackServiceState(
+			janitor=_service_record(
 				service_id="svc-janitor",
 				service_name="pulse-janitor",
 				image="ghcr.io/acme/router:24h",
 			),
-			redis=StackServiceState(
+			redis=_service_record(
 				service_id="svc-redis",
 				service_name="pulse-redis",
 			),
@@ -1386,8 +1407,8 @@ async def test_deploy_source_uses_railway_api_token_for_cli_when_present(
 		)
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment.require_ready_stack",
-		fake_require_ready_stack,
+		"pulse_railway.deployment.inspect_stack",
+		fake_inspect_stack,
 	)
 	monkeypatch.setenv("RAILWAY_API_TOKEN", "api-token")
 
@@ -1466,7 +1487,7 @@ async def test_deploy_source_uses_bearer_env_for_unmatched_explicit_account_toke
 		async def get_project_variables(self, **_: object) -> dict[str, str]:
 			return {}
 
-		async def upsert_variable(self, **_: object) -> None:
+		async def upsert_variable_collection(self, **_: object) -> None:
 			return None
 
 		async def delete_variable(self, **_: object) -> None:
@@ -1489,20 +1510,20 @@ async def test_deploy_source_uses_bearer_env_for_unmatched_explicit_account_toke
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_require_ready_stack(*, project: RailwayProject) -> StackState:
-		return StackState(
-			router=StackServiceState(
+	async def fake_inspect_stack(*, project: RailwayProject) -> StackInspection:
+		return StackInspection(
+			router=_service_record(
 				service_id="svc-router",
 				service_name="pulse-router",
 				domain="pulse-router-production.up.railway.app",
 				image="ghcr.io/acme/router:24h",
 			),
-			janitor=StackServiceState(
+			janitor=_service_record(
 				service_id="svc-janitor",
 				service_name="pulse-janitor",
 				image="ghcr.io/acme/router:24h",
 			),
-			redis=StackServiceState(
+			redis=_service_record(
 				service_id="svc-redis",
 				service_name="pulse-redis",
 			),
@@ -1512,8 +1533,8 @@ async def test_deploy_source_uses_bearer_env_for_unmatched_explicit_account_toke
 		)
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment.require_ready_stack",
-		fake_require_ready_stack,
+		"pulse_railway.deployment.inspect_stack",
+		fake_inspect_stack,
 	)
 
 	async def fake_run_command(
@@ -1591,7 +1612,7 @@ async def test_deploy_source_uses_project_token_env_for_explicit_token_override(
 		async def get_project_variables(self, **_: object) -> dict[str, str]:
 			return {}
 
-		async def upsert_variable(self, **_: object) -> None:
+		async def upsert_variable_collection(self, **_: object) -> None:
 			return None
 
 		async def update_service_instance(self, **_: object) -> None:
@@ -1614,20 +1635,20 @@ async def test_deploy_source_uses_project_token_env_for_explicit_token_override(
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_require_ready_stack(*, project: RailwayProject) -> StackState:
-		return StackState(
-			router=StackServiceState(
+	async def fake_inspect_stack(*, project: RailwayProject) -> StackInspection:
+		return StackInspection(
+			router=_service_record(
 				service_id="svc-router",
 				service_name="pulse-router",
 				domain="pulse-router-production.up.railway.app",
 				image="ghcr.io/acme/router:24h",
 			),
-			janitor=StackServiceState(
+			janitor=_service_record(
 				service_id="svc-janitor",
 				service_name="pulse-janitor",
 				image="ghcr.io/acme/router:24h",
 			),
-			redis=StackServiceState(
+			redis=_service_record(
 				service_id="svc-redis",
 				service_name="pulse-redis",
 			),
@@ -1637,8 +1658,8 @@ async def test_deploy_source_uses_project_token_env_for_explicit_token_override(
 		)
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment.require_ready_stack",
-		fake_require_ready_stack,
+		"pulse_railway.deployment.inspect_stack",
+		fake_inspect_stack,
 	)
 	monkeypatch.setenv("RAILWAY_API_TOKEN", "api-token")
 
@@ -1704,7 +1725,7 @@ async def test_deploy_source_cleans_up_failed_source_service(
 		async def set_service_group_id(self, **_: object) -> None:
 			return None
 
-		async def upsert_variable(self, **_: object) -> None:
+		async def upsert_variable_collection(self, **_: object) -> None:
 			return None
 
 		async def update_service_instance(self, **_: object) -> None:
@@ -1718,20 +1739,20 @@ async def test_deploy_source_cleans_up_failed_source_service(
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_require_ready_stack(*, project: RailwayProject) -> StackState:
-		return StackState(
-			router=StackServiceState(
+	async def fake_inspect_stack(*, project: RailwayProject) -> StackInspection:
+		return StackInspection(
+			router=_service_record(
 				service_id="svc-router",
 				service_name="pulse-router",
 				domain="pulse-router-production.up.railway.app",
 				image="ghcr.io/acme/router:24h",
 			),
-			janitor=StackServiceState(
+			janitor=_service_record(
 				service_id="svc-janitor",
 				service_name="pulse-janitor",
 				image="ghcr.io/acme/router:24h",
 			),
-			redis=StackServiceState(
+			redis=_service_record(
 				service_id="svc-redis",
 				service_name="pulse-redis",
 			),
@@ -1741,8 +1762,8 @@ async def test_deploy_source_cleans_up_failed_source_service(
 		)
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment.require_ready_stack",
-		fake_require_ready_stack,
+		"pulse_railway.deployment.inspect_stack",
+		fake_inspect_stack,
 	)
 
 	async def fake_run_command(
@@ -1807,7 +1828,7 @@ async def test_deploy_source_keeps_service_when_post_build_polling_fails(
 		async def set_service_group_id(self, **_: object) -> None:
 			return None
 
-		async def upsert_variable(self, **_: object) -> None:
+		async def upsert_variable_collection(self, **_: object) -> None:
 			return None
 
 		async def update_service_instance(self, **_: object) -> None:
@@ -1821,20 +1842,20 @@ async def test_deploy_source_keeps_service_when_post_build_polling_fails(
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_require_ready_stack(*, project: RailwayProject) -> StackState:
-		return StackState(
-			router=StackServiceState(
+	async def fake_inspect_stack(*, project: RailwayProject) -> StackInspection:
+		return StackInspection(
+			router=_service_record(
 				service_id="svc-router",
 				service_name="pulse-router",
 				domain="pulse-router-production.up.railway.app",
 				image="ghcr.io/acme/router:24h",
 			),
-			janitor=StackServiceState(
+			janitor=_service_record(
 				service_id="svc-janitor",
 				service_name="pulse-janitor",
 				image="ghcr.io/acme/router:24h",
 			),
-			redis=StackServiceState(
+			redis=_service_record(
 				service_id="svc-redis",
 				service_name="pulse-redis",
 			),
@@ -1844,8 +1865,8 @@ async def test_deploy_source_keeps_service_when_post_build_polling_fails(
 		)
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment.require_ready_stack",
-		fake_require_ready_stack,
+		"pulse_railway.deployment.inspect_stack",
+		fake_inspect_stack,
 	)
 
 	async def fake_run_command(
@@ -1937,7 +1958,7 @@ async def test_deploy_source_waits_through_transient_stopped_build_state(
 		async def get_project_variables(self, **_: object) -> dict[str, str]:
 			return {}
 
-		async def upsert_variable(self, **_: object) -> None:
+		async def upsert_variable_collection(self, **_: object) -> None:
 			return None
 
 		async def update_service_instance(self, **_: object) -> None:
@@ -1960,20 +1981,20 @@ async def test_deploy_source_waits_through_transient_stopped_build_state(
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_require_ready_stack(*, project: RailwayProject) -> StackState:
-		return StackState(
-			router=StackServiceState(
+	async def fake_inspect_stack(*, project: RailwayProject) -> StackInspection:
+		return StackInspection(
+			router=_service_record(
 				service_id="svc-router",
 				service_name="pulse-router",
 				domain="pulse-router-production.up.railway.app",
 				image="ghcr.io/acme/router:24h",
 			),
-			janitor=StackServiceState(
+			janitor=_service_record(
 				service_id="svc-janitor",
 				service_name="pulse-janitor",
 				image="ghcr.io/acme/router:24h",
 			),
-			redis=StackServiceState(
+			redis=_service_record(
 				service_id="svc-redis",
 				service_name="pulse-redis",
 			),
@@ -1983,8 +2004,8 @@ async def test_deploy_source_waits_through_transient_stopped_build_state(
 		)
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment.require_ready_stack",
-		fake_require_ready_stack,
+		"pulse_railway.deployment.inspect_stack",
+		fake_inspect_stack,
 	)
 
 	async def fake_run_command(
@@ -2068,12 +2089,12 @@ async def test_deploy_ignores_ambient_redis_url_for_managed_session_store(
 			service_variables[service_id] = {}
 			return service_id
 
-		async def upsert_variable(self, **kwargs: Any) -> None:
+		async def upsert_variable_collection(self, **kwargs: Any) -> None:
 			service_id = kwargs.get("service_id")
 			if service_id is not None:
-				service_variables.setdefault(service_id, {})[kwargs["name"]] = kwargs[
-					"value"
-				]
+				variables = kwargs["variables"]
+				assert isinstance(variables, dict)
+				service_variables.setdefault(service_id, {}).update(variables)
 
 		async def update_service_instance(self, **kwargs: Any) -> None:
 			return None
@@ -2112,23 +2133,23 @@ async def test_deploy_ignores_ambient_redis_url_for_managed_session_store(
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_require_ready_stack(**_: Any) -> StackState:
-		return StackState(
-			router=StackServiceState(
+	async def fake_inspect_stack(**_: Any) -> StackInspection:
+		return StackInspection(
+			router=_service_record(
 				service_id="svc-router",
 				service_name="pulse-router",
 				domain="pulse-router-production.up.railway.app",
 			),
-			janitor=StackServiceState("svc-janitor", "pulse-janitor"),
-			redis=StackServiceState("svc-redis", "pulse-redis"),
+			janitor=_service_record("svc-janitor", "pulse-janitor"),
+			redis=_service_record("svc-redis", "pulse-redis"),
 			internal_token="secret-token",
 			redis_url="redis://railway-internal:6379/0",
 			server_address="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment.require_ready_stack",
-		fake_require_ready_stack,
+		"pulse_railway.deployment.inspect_stack",
+		fake_inspect_stack,
 	)
 
 	async def fake_build_and_push_image(*, docker: DockerBuild, image_ref: str) -> str:
@@ -2186,11 +2207,11 @@ async def test_deploy_rejects_duplicate_deployment(monkeypatch, tmp_path) -> Non
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 	monkeypatch.setattr(
-		"pulse_railway.deployment.require_ready_stack",
-		lambda **_: StackState(
-			router=StackServiceState("svc-router", "pulse-router"),
-			janitor=StackServiceState("svc-janitor", "pulse-janitor"),
-			redis=StackServiceState("svc-redis", "pulse-redis"),
+		"pulse_railway.deployment.inspect_stack",
+		lambda **_: StackInspection(
+			router=_service_record("svc-router", "pulse-router"),
+			janitor=_service_record("svc-janitor", "pulse-janitor"),
+			redis=_service_record("svc-redis", "pulse-redis"),
 			internal_token="secret-token",
 			redis_url="redis://pulse-router-redis.railway.internal:6379",
 			server_address="https://test.pulse.sc",
@@ -2237,12 +2258,12 @@ async def test_deploy_fails_when_stack_not_ready(monkeypatch, tmp_path) -> None:
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_require_ready_stack(**_: Any) -> StackState:
+	async def fake_inspect_stack(**_: Any) -> StackInspection:
 		raise DeploymentError("router service pulse-router not found")
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment.require_ready_stack",
-		fake_require_ready_stack,
+		"pulse_railway.deployment.inspect_stack",
+		fake_inspect_stack,
 	)
 
 	with pytest.raises(DeploymentError, match="router service pulse-router not found"):
@@ -2305,12 +2326,12 @@ async def test_deploy_always_injects_managed_railway_redis_url(
 			service_variables[service_id] = {}
 			return service_id
 
-		async def upsert_variable(self, **kwargs: Any) -> None:
+		async def upsert_variable_collection(self, **kwargs: Any) -> None:
 			service_id = kwargs.get("service_id")
 			if service_id is not None:
-				service_variables.setdefault(service_id, {})[kwargs["name"]] = kwargs[
-					"value"
-				]
+				variables = kwargs["variables"]
+				assert isinstance(variables, dict)
+				service_variables.setdefault(service_id, {}).update(variables)
 
 		async def update_service_instance(self, **kwargs: Any) -> None:
 			return None
@@ -2349,23 +2370,23 @@ async def test_deploy_always_injects_managed_railway_redis_url(
 
 	monkeypatch.setattr("pulse_railway.deployment.RailwayGraphQLClient", _FakeClient)
 
-	async def fake_require_ready_stack(**_: Any) -> StackState:
-		return StackState(
-			router=StackServiceState(
+	async def fake_inspect_stack(**_: Any) -> StackInspection:
+		return StackInspection(
+			router=_service_record(
 				service_id="svc-router",
 				service_name="pulse-router",
 				domain="pulse-router-production.up.railway.app",
 			),
-			janitor=StackServiceState("svc-janitor", "pulse-janitor"),
-			redis=StackServiceState("svc-redis", "pulse-redis"),
+			janitor=_service_record("svc-janitor", "pulse-janitor"),
+			redis=_service_record("svc-redis", "pulse-redis"),
 			internal_token="secret-token",
 			redis_url="redis://project-public:6379",
 			server_address="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment.require_ready_stack",
-		fake_require_ready_stack,
+		"pulse_railway.deployment.inspect_stack",
+		fake_inspect_stack,
 	)
 
 	async def fake_build_and_push_image(*, docker: DockerBuild, image_ref: str) -> str:

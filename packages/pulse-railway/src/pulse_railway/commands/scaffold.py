@@ -27,7 +27,7 @@ from pulse_railway.constants import (
 	DEFAULT_REDIS_PREFIX,
 )
 from pulse_railway.plugin import RailwayPlugin
-from pulse_railway.stack import bootstrap_stack, ensure_stack
+from pulse_railway.stack import create_or_reconcile_stack, create_stack
 
 
 def _add_baseline_args(parser: argparse.ArgumentParser) -> None:
@@ -120,9 +120,9 @@ async def _run_baseline(
 		plugin=plugin,
 	)
 	if ensure:
-		result = await ensure_stack(project=project)
+		result = await create_or_reconcile_stack(project=project)
 	else:
-		result = await bootstrap_stack(project=project)
+		result = await create_stack(project=project)
 	print(json.dumps(asdict(result), indent=2, sort_keys=True))
 	return 0
 
@@ -149,7 +149,7 @@ def register(subparsers: Any) -> None:
 	_add_baseline_args(scaffold_parser)
 	ensure_parser = subparsers.add_parser(
 		"ensure",
-		help="Create or reconcile the stable Railway baseline stack.",
+		help="Create an empty baseline or reconcile a complete baseline.",
 	)
 	_add_baseline_args(ensure_parser)
 

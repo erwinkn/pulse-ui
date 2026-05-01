@@ -18,7 +18,7 @@ async def test_resolver_skips_service_refresh_when_active_deployment_is_unchange
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 	now = 100.0
-	monkeypatch.setattr("pulse_railway.railway.time.monotonic", lambda: now)
+	monkeypatch.setattr("pulse_railway.railway.client.time.monotonic", lambda: now)
 
 	class _FakeClient:
 		def __init__(self) -> None:

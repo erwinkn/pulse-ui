@@ -18,7 +18,7 @@ from pulse.env import (
 from pulse_railway.config import RailwayProject
 from pulse_railway.constants import DEFAULT_REDIS_PREFIX
 from pulse_railway.plugin import RailwayPlugin, RailwayPluginError
-from pulse_railway.railway import (
+from pulse_railway.railway.client import (
 	EnvironmentRecord,
 	ProjectRecord,
 	ProjectTokenRecord,
@@ -58,7 +58,7 @@ def clean_optional(value: str | None) -> str | None:
 
 
 def normalize_optional_service_prefix(value: str | None) -> str | None:
-	from pulse_railway.railway import normalize_service_prefix
+	from pulse_railway.railway.client import normalize_service_prefix
 
 	if value is None:
 		return None
@@ -374,7 +374,7 @@ def build_target_project(
 		service_name=plugin.router_service_name,
 		service_prefix=normalize_optional_service_prefix(service_prefix),
 		redis_url=redis_url,
-		redis_service_name=plugin.redis_service_name,
+		redis_service_name=None if redis_url is not None else plugin.redis_service_name,
 		redis_prefix=getattr(args, "redis_prefix", None) or DEFAULT_REDIS_PREFIX,
 		janitor_service_name=plugin.janitor_service_name,
 		env_vars={} if env_vars is None else env_vars,

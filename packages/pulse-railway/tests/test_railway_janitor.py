@@ -13,8 +13,14 @@ from pulse_railway.constants import (
 )
 from pulse_railway.errors import DeploymentError
 from pulse_railway.janitor import DeploymentSessionStatus, run_janitor
-from pulse_railway.railway import ServiceRecord, TemplateRecord
+from pulse_railway.railway import ServiceRecord
+from pulse_railway.stack import StackInspection
 from pulse_railway.store import MemoryDeploymentStore
+
+
+def _service_record(service_id: str, service_name: str | None) -> ServiceRecord:
+	assert service_name is not None
+	return ServiceRecord(id=service_id, name=service_name)
 
 
 class _FakeClient:
@@ -88,14 +94,22 @@ def _internals(**overrides: object) -> RailwayInternals:
 
 
 def _install_internals(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> None:
-	async def fake_resolve_project_internals(
-		*_args: object, **_kwargs: object
-	) -> RailwayInternals:
-		return _internals(**overrides)
+	internals = _internals(**overrides)
+
+	async def fake_inspect_stack(*, project: RailwayProject) -> StackInspection:
+		return StackInspection(
+			router=_service_record("svc-router", project.service_name),
+			janitor=_service_record("svc-janitor", project.janitor_service_name),
+			redis=_service_record("svc-redis", project.redis_service_name),
+			env=_service_record("svc-env", project.env_service_name),
+			internal_token=internals.internal_token,
+			redis_url=internals.redis_url or "redis://test",
+			server_address="https://test.pulse.sc",
+		)
 
 	monkeypatch.setattr(
-		"pulse_railway.janitor.resolve_project_internals",
-		fake_resolve_project_internals,
+		"pulse_railway.janitor.inspect_stack",
+		fake_inspect_stack,
 	)
 
 
@@ -614,59 +628,32 @@ async def test_janitor_resolves_project_redis_when_url_missing(monkeypatch) -> N
 
 	fake_store = _FakeRedisStore()
 	store_urls: list[str] = []
-	service_state = {
-		"pulse-router-redis": ServiceRecord(
-			id="svc-redis",
-			name="pulse-router-redis",
-		)
-	}
 
-	class _RedisClient(_FakeClient):
-		def __init__(self, **kwargs: object) -> None:
-			super().__init__(**kwargs)
-			self.services = dict(service_state)
-			self.service_variables = {"svc-redis": {}}
+	class _EmptyClient:
+		def __init__(self, **_: object) -> None:
+			return None
 
-		async def get_template_by_code(self, *, code: str) -> TemplateRecord:
-			assert code == "redis"
-			return TemplateRecord(
-				id="template-1",
-				code="redis",
-				serialized_config={"services": {"template-service": {"name": "Redis"}}},
-			)
+		async def __aenter__(self) -> "_EmptyClient":
+			return self
 
-		async def deploy_template(self, **_: object) -> str:
-			return "workflow-1"
+		async def __aexit__(self, *_: object) -> None:
+			return None
 
-		async def get_service_variables_for_deployment(
-			self, *, project_id: str, environment_id: str, service_id: str
-		) -> dict[str, str]:
+		async def list_services(
+			self, *, project_id: str, environment_id: str
+		) -> list[ServiceRecord]:
 			assert project_id == "project"
 			assert environment_id == "env"
-			assert service_id == "svc-redis"
-			return {
-				"REDIS_URL": "redis://pulse-router-redis.railway.internal:6379",
-			}
+			return []
 
-		async def find_service_by_name(
-			self, *, project_id: str, environment_id: str, name: str
-		) -> ServiceRecord | None:
-			assert project_id == "project"
-			assert environment_id == "env"
-			return service_state.get(name)
-
-	monkeypatch.setattr("pulse_railway.janitor.RailwayGraphQLClient", _RedisClient)
+	monkeypatch.setattr("pulse_railway.janitor.RailwayGraphQLClient", _EmptyClient)
 	monkeypatch.setattr(
 		"pulse_railway.janitor.RedisDeploymentStore.from_url",
 		lambda **kwargs: store_urls.append(kwargs["url"]) or fake_store,
 	)
-
-	async def fake_internal_token(*args: object, **kwargs: object) -> tuple[str, bool]:
-		return "secret-token", False
-
-	monkeypatch.setattr(
-		"pulse_railway.stack.resolve_or_create_internal_token",
-		fake_internal_token,
+	_install_internals(
+		monkeypatch,
+		redis_url="redis://pulse-router-redis.railway.internal:6379",
 	)
 
 	project = RailwayProject(

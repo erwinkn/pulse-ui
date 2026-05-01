@@ -8,7 +8,7 @@ from pulse_railway.errors import DeploymentError
 
 OFFICIAL_JANITOR_IMAGE_REPOSITORY = "ghcr.io/erwinkn/pulse-railway-janitor"
 OFFICIAL_ROUTER_IMAGE_REPOSITORY = "ghcr.io/erwinkn/pulse-railway-router"
-OFFICIAL_RUNTIME_IMAGE_VERSION = "0.2.1"
+OFFICIAL_RUNTIME_IMAGE_VERSION = "0.2.2"
 
 
 async def _run_command(*args: str, cwd: Path | None = None) -> None:

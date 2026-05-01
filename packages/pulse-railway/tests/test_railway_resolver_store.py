@@ -1,18 +1,14 @@
 from __future__ import annotations
 
 import pytest
-from pulse_railway.constants import (
-	ACTIVE_DEPLOYMENT_VARIABLE,
-	PULSE_DEPLOYMENT_ID,
-	PULSE_KV_KIND,
-	PULSE_KV_URL,
-)
+from pulse_railway.constants import PULSE_DEPLOYMENT_ID, PULSE_KV_KIND, PULSE_KV_URL
 from pulse_railway.railway import RailwayResolver, ServiceRecord
 from pulse_railway.store import (
+	ActiveDeploymentError,
 	DeploymentStore,
-	InMemoryKVStore,
+	MemoryStore,
 	RedisDeploymentStore,
-	RedisKVStore,
+	RedisStore,
 	kv_store_spec_from_env,
 )
 
@@ -22,26 +18,11 @@ async def test_resolver_skips_service_refresh_when_active_deployment_is_unchange
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 	now = 100.0
-	monkeypatch.setattr("pulse_railway.railway.time.monotonic", lambda: now)
+	monkeypatch.setattr("pulse_railway.railway.client.time.monotonic", lambda: now)
 
 	class _FakeClient:
 		def __init__(self) -> None:
-			self.variable_calls = 0
 			self.service_calls = 0
-			self.active_deployment = "v1"
-
-		async def get_project_variables(
-			self,
-			*,
-			project_id: str,
-			environment_id: str,
-			service_id: str | None = None,
-		) -> dict[str, str]:
-			assert project_id == "project"
-			assert environment_id == "env"
-			assert service_id is None
-			self.variable_calls += 1
-			return {ACTIVE_DEPLOYMENT_VARIABLE: self.active_deployment}
 
 		async def list_services(
 			self, *, project_id: str, environment_id: str
@@ -66,11 +47,14 @@ async def test_resolver_skips_service_refresh_when_active_deployment_is_unchange
 			return {}
 
 	client = _FakeClient()
+	store = DeploymentStore(MemoryStore())
+	await store.set_active(deployment_id="v1", service_name="pulse-v1")
 	resolver = RailwayResolver(
 		client=client,
 		project_id="project",
 		environment_id="env",
 		service_prefix="pulse",
+		store=store,
 		cache_ttl_seconds=5.0,
 	)
 
@@ -81,25 +65,22 @@ async def test_resolver_skips_service_refresh_when_active_deployment_is_unchange
 	assert first.deployment_id == "v1"
 	assert second is not None
 	assert second.deployment_id == "v1"
-	assert client.variable_calls == 1
-	assert client.service_calls == 1
+	assert client.service_calls == 0
 
 	now = 106.0
 	third = await resolver.resolve_active()
 
 	assert third is not None
 	assert third.deployment_id == "v1"
-	assert client.variable_calls == 2
-	assert client.service_calls == 1
+	assert client.service_calls == 0
 
 	now = 112.0
-	client.active_deployment = "v2"
+	await store.set_active(deployment_id="v2", service_name="pulse-v2")
 	fourth = await resolver.resolve_active()
 
 	assert fourth is not None
 	assert fourth.deployment_id == "v2"
-	assert client.variable_calls == 3
-	assert client.service_calls == 2
+	assert client.service_calls == 0
 
 
 @pytest.mark.asyncio
@@ -140,18 +121,12 @@ async def test_resolver_only_routes_services_with_matching_deployment_id() -> No
 
 
 @pytest.mark.asyncio
-async def test_deployment_store_uses_kv_for_deployments_and_leases() -> None:
-	store = DeploymentStore(InMemoryKVStore())
+async def test_deployment_store_uses_kv_for_deployments() -> None:
+	store = DeploymentStore(MemoryStore())
 
-	await store.mark_active(
+	await store.set_active(
 		deployment_id="v1",
 		service_name="pulse-v1",
-		now=10.0,
-	)
-	lease_id = await store.create_websocket_lease(
-		deployment_id="v1",
-		service_name="pulse-v1",
-		now=11.0,
 	)
 	await store.mark_draining(
 		deployment_id="v1",
@@ -165,19 +140,30 @@ async def test_deployment_store_uses_kv_for_deployments_and_leases() -> None:
 	assert draining[0].deployment_id == "v1"
 	assert draining[0].state == "draining"
 	assert draining[0].service_name == "pulse-v1"
-	assert draining[0].last_seen_at == 11.0
 	assert draining[0].drain_started_at == 12.0
-	assert await store.count_websocket_leases(deployment_id="v1") == 1
 
-	await store.remove_websocket_lease(
-		deployment_id="v1",
-		lease_id=lease_id,
-		now=13.0,
+	await store.set_active(
+		deployment_id="v2",
+		service_name="pulse-v2",
 	)
-	assert await store.count_websocket_leases(deployment_id="v1") == 0
-
-	await store.clear_deployment(deployment_id="v1")
+	await store.delete_inactive_deployment(deployment_id="v1")
 	assert await store.list_draining_deployments() == []
+
+
+@pytest.mark.asyncio
+async def test_deployment_store_rejects_deleting_active_deployment() -> None:
+	store = DeploymentStore(MemoryStore())
+
+	await store.set_active(
+		deployment_id="v1",
+		service_name="pulse-v1",
+	)
+
+	with pytest.raises(ActiveDeploymentError):
+		await store.delete_inactive_deployment(deployment_id="v1")
+
+	assert await store.get_active_deployment() == "v1"
+	assert await store.get_deployment(deployment_id="v1") is not None
 
 
 @pytest.mark.asyncio
@@ -219,25 +205,17 @@ async def test_redis_store_batches_draining_deployment_fetches() -> None:
 	client = _FakeRedisClient()
 	store = RedisDeploymentStore(client=client)
 
-	await store.mark_active(
+	await store.set_active(
 		deployment_id="v1",
 		service_name="pulse-v1",
-		now=10.0,
 	)
-	await store.mark_active(
+	await store.set_active(
 		deployment_id="v2",
 		service_name="pulse-v2",
-		now=11.0,
 	)
-	await store.record_request(
-		deployment_id="v1",
-		service_name="pulse-v1",
-		now=12.0,
-	)
-	await store.mark_active(
+	await store.set_active(
 		deployment_id="v3",
 		service_name="pulse-v3",
-		now=13.0,
 	)
 	await store.mark_draining(
 		deployment_id="v1",
@@ -254,11 +232,11 @@ async def test_redis_store_batches_draining_deployment_fetches() -> None:
 
 	assert {deployment.deployment_id for deployment in draining} == {"v1", "v3"}
 	assert {
-		(deployment.deployment_id, deployment.last_seen_at, deployment.drain_started_at)
+		(deployment.deployment_id, deployment.drain_started_at)
 		for deployment in draining
 	} == {
-		("v1", 12.0, 14.0),
-		("v3", 13.0, 15.0),
+		("v1", 14.0),
+		("v3", 15.0),
 	}
 	assert client.data["pulse:railway:deployment:v1"].startswith("{")
 
@@ -270,5 +248,5 @@ def test_kv_store_spec_round_trip_from_env() -> None:
 			PULSE_KV_URL: "redis://localhost:6379/0",
 		}
 	)
-	assert isinstance(spec, RedisKVStore)
+	assert isinstance(spec, RedisStore)
 	assert spec.url == "redis://localhost:6379/0"

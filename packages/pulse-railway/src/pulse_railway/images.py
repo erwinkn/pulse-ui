@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-import tempfile
 from pathlib import Path
 
 from pulse_railway.config import DockerBuild
-from pulse_railway.constants import DEFAULT_ROUTER_PORT
 from pulse_railway.errors import DeploymentError
 
 OFFICIAL_JANITOR_IMAGE_REPOSITORY = "ghcr.io/erwinkn/pulse-railway-janitor"
 OFFICIAL_ROUTER_IMAGE_REPOSITORY = "ghcr.io/erwinkn/pulse-railway-router"
-OFFICIAL_RUNTIME_IMAGE_VERSION = "0.1.0"
+OFFICIAL_RUNTIME_IMAGE_VERSION = "0.2.2"
 
 
 async def _run_command(*args: str, cwd: Path | None = None) -> None:
@@ -65,71 +63,11 @@ async def build_and_push_image(
 	return image_ref
 
 
-def _workspace_root() -> Path | None:
-	for parent in Path(__file__).resolve().parents:
-		if (parent / "packages" / "pulse-railway" / "pyproject.toml").exists():
-			return parent
-	return None
-
-
-def _router_dockerfile() -> str:
-	workspace_root = _workspace_root()
-	if workspace_root is None:
-		return "\n".join(
-			[
-				"FROM python:3.12-slim",
-				"COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv",
-				"RUN uv pip install --system pulse-railway",
-				f"EXPOSE {DEFAULT_ROUTER_PORT}",
-				'CMD ["uvicorn", "pulse_railway.router:build_app_from_env", "--factory", "--host", "0.0.0.0", "--port", "8000"]',
-			]
-		)
-	return "\n".join(
-		[
-			"FROM python:3.12-slim",
-			"COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv",
-			"WORKDIR /src",
-			"COPY packages/pulse/python /src/packages/pulse/python",
-			"COPY packages/pulse-railway /src/packages/pulse-railway",
-			"RUN uv pip install --system /src/packages/pulse/python /src/packages/pulse-railway",
-			f"EXPOSE {DEFAULT_ROUTER_PORT}",
-			'CMD ["uvicorn", "pulse_railway.router:build_app_from_env", "--factory", "--host", "0.0.0.0", "--port", "8000"]',
-		]
-	)
-
-
-async def build_router_image(*, image_ref: str) -> str:
-	workspace_root = _workspace_root()
-	context = workspace_root if workspace_root is not None else Path(tempfile.mkdtemp())
-	with tempfile.NamedTemporaryFile("w", suffix=".Dockerfile", delete=False) as handle:
-		handle.write(_router_dockerfile())
-		dockerfile_path = Path(handle.name)
-	try:
-		command = [
-			"docker",
-			"buildx",
-			"build",
-			"--push",
-			"--platform",
-			"linux/amd64",
-			"-t",
-			image_ref,
-			"-f",
-			str(dockerfile_path),
-			str(context),
-		]
-		await _run_command(*command)
-		return image_ref
-	finally:
-		dockerfile_path.unlink(missing_ok=True)
-
-
 __all__ = [
 	"OFFICIAL_JANITOR_IMAGE_REPOSITORY",
 	"OFFICIAL_RUNTIME_IMAGE_VERSION",
 	"OFFICIAL_ROUTER_IMAGE_REPOSITORY",
 	"build_and_push_image",
-	"build_router_image",
 	"image_ref",
 	"official_janitor_image_ref",
 	"official_router_image_ref",

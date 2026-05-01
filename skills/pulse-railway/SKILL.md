@@ -22,10 +22,14 @@ app = ps.App(
 
 ```bash
 uv run pulse-railway ensure \
-  apps/my-app/main.py
+  apps/my-app/main.py \
+  --project my-railway-project \
+  --environment production
 
 uv run pulse-railway deploy \
-  apps/my-app/main.py
+  apps/my-app/main.py \
+  --project my-railway-project \
+  --environment production
 
 uv run pulse-railway redeploy
 ```
@@ -41,7 +45,7 @@ uv run pulse-railway redeploy
 
 ## App Integration
 
-Add `RailwayPlugin(...)` to the app. It injects `pulse_deployment` into prerender and Socket.IO directives and exposes `/_pulse/meta`. Set `dockerfile=...` there, or pass `--dockerfile` during deploy.
+Add `RailwayPlugin(...)` to the app. It injects `pulse_deployment` into prerender and Socket.IO directives and exposes `/_pulse/meta`. Set `dockerfile=...` there.
 
 ```python
 import os
@@ -114,16 +118,22 @@ uv run pulse-railway redeploy \
 
 `scaffold <app-file>` and `ensure <app-file>` load the app and resolve project, environment, stable service names, and service prefix from `RailwayPlugin`. If project or environment is omitted from the plugin, the token must provide enough scope to infer them.
 
-Use `scaffold` for fresh-only template setup. Use `ensure` for CI and repeated setup; it creates or reconciles the baseline. Existing router and janitor images are preserved unless `--router-image` or `--janitor-image` is passed.
+Use `scaffold` for fresh-only template setup. Use `ensure` for CI and repeated setup; it creates or reconciles the baseline with the official router and janitor images for the installed package version. If the router is in a Railway canvas group, `ensure` also moves Pulse baseline and deployment services into that group.
+
+Target flags are shared by local commands:
+
+- workspace: `--workspace` or `--workspace-id`; only needed to disambiguate project lookup by name
+- project: `--project-id`, then `--project`, then `RailwayPlugin(project=...)`; absent means infer from a project token
+- environment: `--environment-id`, then `--environment`, then `RailwayPlugin(environment=...)`, then the project token environment, then `production`
+
+Use either the name or ID form for each target, not both.
 
 `deploy` precedence:
 
-- project: `--project`, then `RailwayPlugin(project=...)`; absent means infer from a project token
-- environment: `--environment`, then `RailwayPlugin(environment=...)`, then the project token environment, then `production`
 - deployment name: `--deployment-name`, then `RailwayPlugin(deployment_name=...)`, then `prod`
 - image repository: `--image-repository`, then `RailwayPlugin(image_repository=...)`; absent means source deploy
 - server address: `--server-address`, then `App(server_address=...)`, then the initialized router service address
-- Dockerfile: `--dockerfile`, then `RailwayPlugin(dockerfile=...)`; one is required for deploy
+- Dockerfile: `RailwayPlugin(dockerfile=...)`; one is required for deploy
 - web root: `--web-root`, then `App(..., codegen=CodegenConfig(web_dir=...))`
 
 ## Path Rules
@@ -137,7 +147,7 @@ Use `scaffold` for fresh-only template setup. Use `ensure` for CI and repeated s
 
 ## Railway Model
 
-`pulse-railway scaffold` / `pulse-railway ensure` create or configure:
+`pulse-railway scaffold` creates, and `pulse-railway ensure` creates only on an empty project or reconciles mutable config on a complete baseline:
 
 - stable public router service, default `pulse-router`
 - stable env service, default `pulse-env`, for user-managed app variables
@@ -145,7 +155,9 @@ Use `scaffold` for fresh-only template setup. Use `ensure` for CI and repeated s
 - janitor cron service, default `pulse-janitor`
 - latest published official router/janitor GHCR image tags
 
-`scaffold` is fresh-only. If baseline services or partial leftovers already exist, run `ensure`. `deploy` is strict and will not repair missing baseline services.
+`scaffold` is fresh-only. `ensure` fails on partial baselines instead of repairing missing services; delete partial leftovers and rerun `scaffold`. `deploy` is strict and will not repair missing baseline services.
+
+If the router has no Railway canvas group, grouping reconciliation is skipped.
 
 User-managed variables belong on `pulse-env`. New backend deployments reference every non-Pulse-managed variable from that service.
 
@@ -173,7 +185,7 @@ Check:
 - app loads through the Railway router URL or custom domain
 - session data survives a redeploy when using `RailwaySessionStore()`
 - websocket navigation and actions still work after a redeploy
-- old deployment services eventually drain and get deleted by the janitor
+- old deployment services are deleted once they have no render sessions, or after the drain TTL
 
 For a local repo example, inspect `examples/railway/` and `packages/pulse-railway/README.md`.
 
@@ -182,7 +194,7 @@ For a local repo example, inspect `examples/railway/` and `packages/pulse-railwa
 - Keep backend replicas at `1` unless sessions are safe across replicas; Railway does not provide replica-level sticky routing.
 - The router can run multiple replicas because routing state lives in request affinity plus Redis.
 - `pulse-railway janitor run` is for the deployed janitor service only and fails outside Railway.
+- `ensure` rewrites janitor runtime env with `PULSE_RAILWAY_SERVICE`, `PULSE_RAILWAY_JANITOR_SERVICE`, and `PULSE_RAILWAY_REDIS_SERVICE`; rerun it after changing baseline service names.
 - The janitor should run every 5 minutes or slower; Railway cron does not run more frequently.
-- `pulse-railway upgrade` is currently a no-op placeholder.
-- `pulse-railway redeploy` defaults to `PULSE_ACTIVE_DEPLOYMENT`; use `--deployment-id` for a specific Pulse deployment.
+- `pulse-railway redeploy` defaults to the active deployment in Redis; use `--deployment-id` for a specific Pulse deployment.
 - If a deployment name matches multiple generated ids, `pulse-railway remove` fails and prints matches; retry with `pulse-railway delete --deployment-id ...`.

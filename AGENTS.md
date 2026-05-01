@@ -16,6 +16,7 @@ Full-stack Python framework for interactive web apps. Runs on React with WebSock
 - Use `bun info ...` to get information about a JS package
 - Test examples by running them with `pulse run` in a background task and using the agent-browser CLI for interacting with the UI.
 - While debugging, feel free to add debug print statements, spin up test files, modify existing code, or anything else that would improve your feedback loop and accelerate the troubleshooting process. Remove those debug changes after fixing the issue.
+- Tests should never be used as a reason to keep aliases or dead code around.
 
 
 ## Code Style

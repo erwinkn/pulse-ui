@@ -319,7 +319,15 @@ def _install_client(monkeypatch: pytest.MonkeyPatch, harness: RailwayHarness) ->
 			)
 			del harness.services[name]
 
-	monkeypatch.setattr("pulse_railway.stack.RailwayGraphQLClient", _FakeClient)
+	monkeypatch.setattr(
+		"pulse_railway.stack.creation.RailwayGraphQLClient", _FakeClient
+	)
+	monkeypatch.setattr(
+		"pulse_railway.stack.inspection.RailwayGraphQLClient", _FakeClient
+	)
+	monkeypatch.setattr(
+		"pulse_railway.stack.reconciliation.RailwayGraphQLClient", _FakeClient
+	)
 
 
 @pytest.mark.asyncio

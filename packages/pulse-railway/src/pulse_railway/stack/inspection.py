@@ -133,6 +133,8 @@ async def _inspect_stack_with_client(
 		internal_token=internal_token,
 		redis_url=redis_url,
 		server_address=server_address,
+		router_variables=router_variables,
+		janitor_variables=janitor_variables,
 	)
 
 

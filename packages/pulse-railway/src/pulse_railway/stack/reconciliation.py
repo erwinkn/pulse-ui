@@ -14,8 +14,8 @@ from pulse_railway.railway.ops import (
 from pulse_railway.stack.common import (
 	StackChange,
 	StackServiceChange,
-	configure_runtime,
 	list_baseline_services,
+	reconcile_runtime,
 	stack_internals,
 )
 from pulse_railway.stack.creation import _create_stack_with_client
@@ -53,13 +53,15 @@ async def _reconcile_stack_with_client(
 		internal_token=stack.internal_token,
 		redis_url=stack.redis_url,
 	)
-	router_deployment_id, janitor_deployment_id = await configure_runtime(
+	router_deployment_id, janitor_deployment_id = await reconcile_runtime(
 		client,
 		project=project,
 		router=stack.router,
 		janitor=stack.janitor,
 		internals=internals,
 		router_instance=router_instance,
+		router_variables=stack.router_variables,
+		janitor_variables=stack.janitor_variables,
 	)
 	return StackChange(
 		router=StackServiceChange(
@@ -67,17 +69,17 @@ async def _reconcile_stack_with_client(
 			service_name=stack.router.service_name,
 			image=official_router_image_ref(),
 			domain=stack.router.domain,
-			deployed=True,
+			deployed=router_deployment_id is not None,
 			deployment_id=router_deployment_id,
-			status="SUCCESS",
+			status="SUCCESS" if router_deployment_id is not None else None,
 		),
 		janitor=StackServiceChange(
 			service_id=stack.janitor.service_id,
 			service_name=stack.janitor.service_name,
 			image=official_janitor_image_ref(),
-			deployed=True,
+			deployed=janitor_deployment_id is not None,
 			deployment_id=janitor_deployment_id,
-			status="SUCCESS",
+			status="SUCCESS" if janitor_deployment_id is not None else None,
 		),
 		redis=(
 			StackServiceChange(

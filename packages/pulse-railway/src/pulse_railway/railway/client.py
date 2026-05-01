@@ -100,6 +100,14 @@ class ServiceRecord:
 	environment_id: str | None = None
 	image: str | None = None
 	repo: str | None = None
+	num_replicas: int | None = None
+	healthcheck_path: str | None = None
+	healthcheck_timeout: int | None = None
+	overlap_seconds: int | None = None
+	start_command: str | None = None
+	cron_schedule: str | None = None
+	restart_policy_type: str | None = None
+	restart_policy_max_retries: int | None = None
 	domains: list[ServiceDomain] = field(default_factory=list)
 
 	@property
@@ -709,6 +717,14 @@ class RailwayGraphQLClient:
 												image
 												repo
 											}
+											numReplicas
+											healthcheckPath
+											healthcheckTimeout
+											overlapSeconds
+											startCommand
+											cronSchedule
+											restartPolicyType
+											restartPolicyMaxRetries
 											domains {
 												serviceDomains {
 													id
@@ -739,6 +755,16 @@ class RailwayGraphQLClient:
 				record.environment_id = instance["environmentId"]
 				record.image = (instance.get("source") or {}).get("image")
 				record.repo = (instance.get("source") or {}).get("repo")
+				record.num_replicas = instance.get("numReplicas")
+				record.healthcheck_path = instance.get("healthcheckPath")
+				record.healthcheck_timeout = instance.get("healthcheckTimeout")
+				record.overlap_seconds = instance.get("overlapSeconds")
+				record.start_command = instance.get("startCommand")
+				record.cron_schedule = instance.get("cronSchedule")
+				record.restart_policy_type = instance.get("restartPolicyType")
+				record.restart_policy_max_retries = instance.get(
+					"restartPolicyMaxRetries"
+				)
 				record.domains = [
 					ServiceDomain(
 						id=domain["id"],

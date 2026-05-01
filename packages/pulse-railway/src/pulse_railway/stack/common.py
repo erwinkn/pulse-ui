@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 from pulse_railway.config import (
 	RailwayInternals,
@@ -14,7 +14,10 @@ from pulse_railway.env import janitor_env, router_env
 from pulse_railway.errors import DeploymentError
 from pulse_railway.images import official_janitor_image_ref, official_router_image_ref
 from pulse_railway.railway.client import RailwayGraphQLClient, ServiceRecord
-from pulse_railway.railway.ops import configure_service_and_deploy
+from pulse_railway.railway.ops import (
+	configure_service_and_deploy,
+	deploy_service_and_wait,
+)
 
 ROUTER_START_COMMAND = (
 	"sh -c 'uvicorn pulse_railway.router:build_app_from_env --factory "
@@ -31,6 +34,8 @@ class StackInspection:
 	internal_token: str
 	redis_url: str
 	server_address: str
+	router_variables: dict[str, str] = field(default_factory=dict)
+	janitor_variables: dict[str, str] = field(default_factory=dict)
 	env: ServiceRecord | None = None
 	redis_mode: Literal["managed", "external"] = "managed"
 
@@ -236,6 +241,87 @@ async def configure_router_service(
 	return deployment_id
 
 
+def _service_variables_changed(
+	current_variables: dict[str, str],
+	desired_variables: dict[str, str],
+) -> bool:
+	return any(
+		current_variables.get(name) != value
+		for name, value in desired_variables.items()
+	)
+
+
+def _service_instance_changed(
+	service: ServiceRecord,
+	*,
+	source_image: str | None = None,
+	num_replicas: int | None = None,
+	healthcheck_path: str | None = None,
+	healthcheck_timeout: int | None = None,
+	overlap_seconds: int | None = None,
+	start_command: str | None = None,
+	cron_schedule: str | None = None,
+	restart_policy_type: str | None = None,
+	restart_policy_max_retries: int | None = None,
+) -> bool:
+	expected = {
+		"image": source_image,
+		"num_replicas": num_replicas,
+		"healthcheck_path": healthcheck_path,
+		"healthcheck_timeout": healthcheck_timeout,
+		"overlap_seconds": overlap_seconds,
+		"start_command": start_command,
+		"cron_schedule": cron_schedule,
+		"restart_policy_type": restart_policy_type,
+		"restart_policy_max_retries": restart_policy_max_retries,
+	}
+	return any(
+		value is not None and getattr(service, name) != value
+		for name, value in expected.items()
+	)
+
+
+async def configure_service_if_changed(
+	client: RailwayGraphQLClient,
+	*,
+	project: RailwayProject,
+	service: ServiceRecord,
+	current_variables: dict[str, str],
+	desired_variables: dict[str, str],
+	error_message: str,
+	**instance_config: Any,
+) -> str | None:
+	variables_changed = _service_variables_changed(
+		current_variables,
+		desired_variables,
+	)
+	instance_changed = _service_instance_changed(service, **instance_config)
+	if not variables_changed and not instance_changed:
+		return None
+	if variables_changed:
+		await client.upsert_variable_collection(
+			project_id=project.project_id,
+			environment_id=project.environment_id,
+			service_id=service.id,
+			variables=desired_variables,
+			skip_deploys=True,
+			replace=False,
+		)
+	if instance_changed:
+		await client.update_service_instance(
+			service_id=service.id,
+			environment_id=project.environment_id,
+			**instance_config,
+		)
+	deployment_id, _status = await deploy_service_and_wait(
+		client,
+		service_id=service.id,
+		environment_id=project.environment_id,
+		error_message=error_message,
+	)
+	return deployment_id
+
+
 async def configure_janitor_service(
 	client: RailwayGraphQLClient,
 	*,
@@ -291,6 +377,76 @@ async def configure_runtime(
 			project=project,
 			internals=internals,
 			service=janitor,
+		)
+	)
+	try:
+		return await asyncio.gather(router_task, janitor_task)
+	except Exception:
+		for task in (router_task, janitor_task):
+			if not task.done():
+				task.cancel()
+		await asyncio.gather(router_task, janitor_task, return_exceptions=True)
+		raise
+
+
+async def reconcile_runtime(
+	client: RailwayGraphQLClient,
+	*,
+	project: RailwayProject,
+	router: ServiceRecord,
+	janitor: ServiceRecord,
+	internals: RailwayInternals,
+	router_instance: ServiceInstanceConfig,
+	router_variables: dict[str, str],
+	janitor_variables: dict[str, str],
+) -> tuple[str | None, str | None]:
+	if internals.redis_url is None:
+		raise DeploymentError("redis_url is required for janitor service creation")
+	router_task = asyncio.create_task(
+		configure_service_if_changed(
+			client,
+			project=project,
+			service=router,
+			current_variables=router_variables,
+			desired_variables={
+				PULSE_INTERNAL_TOKEN: internals.internal_token,
+				**router_env(
+					token=project.token,
+					router_port=project.router_port,
+					service_prefix=internals.service_prefix,
+					redis_url=internals.redis_url,
+					redis_prefix=project.redis_prefix,
+				),
+			},
+			error_message="router deployment failed",
+			source_image=official_router_image_ref(),
+			num_replicas=project.router_replicas,
+			healthcheck_path=router_instance.healthcheck_path,
+			healthcheck_timeout=router_instance.healthcheck_timeout,
+			overlap_seconds=router_instance.overlap_seconds,
+			start_command=ROUTER_START_COMMAND,
+		)
+	)
+	janitor_task = asyncio.create_task(
+		configure_service_if_changed(
+			client,
+			project=project,
+			service=janitor,
+			current_variables=janitor_variables,
+			desired_variables=janitor_env(
+				token=project.token,
+				internal_token=internals.internal_token,
+				redis_url=internals.redis_url,
+				redis_prefix=project.redis_prefix,
+				service_prefix=internals.service_prefix,
+				drain_ttl_seconds=project.drain_ttl_seconds,
+			),
+			error_message="janitor deployment failed",
+			source_image=official_janitor_image_ref(),
+			num_replicas=project.janitor_replicas,
+			start_command=JANITOR_START_COMMAND,
+			cron_schedule=project.janitor_cron_schedule,
+			restart_policy_type="NEVER",
 		)
 	)
 	try:

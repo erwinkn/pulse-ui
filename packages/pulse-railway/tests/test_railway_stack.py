@@ -39,6 +39,7 @@ class RailwayHarness:
 	deleted_variables: list[tuple[str, str]] = field(default_factory=list)
 	variable_collections: list[tuple[str, dict[str, str]]] = field(default_factory=list)
 	created_services: list[str] = field(default_factory=list)
+	deployed_services: list[str] = field(default_factory=list)
 	group_assignments: list[tuple[str, str]] = field(default_factory=list)
 	service_groups: dict[str, str] = field(default_factory=dict)
 	domain_creations: list[str] = field(default_factory=list)
@@ -58,11 +59,29 @@ class RailwayHarness:
 		group_id: str | None = None,
 		variables: dict[str, str] | None = None,
 		unrendered_variables: dict[str, str] | None = None,
+		num_replicas: int | None = None,
+		healthcheck_path: str | None = None,
+		healthcheck_timeout: int | None = None,
+		overlap_seconds: int | None = None,
+		start_command: str | None = None,
+		cron_schedule: str | None = None,
+		restart_policy_type: str | None = None,
 	) -> ServiceRecord:
 		if service_id is None:
 			self.service_counter += 1
 			service_id = f"svc-{self.service_counter}"
-		service = ServiceRecord(id=service_id, name=name, image=image)
+		service = ServiceRecord(
+			id=service_id,
+			name=name,
+			image=image,
+			num_replicas=num_replicas,
+			healthcheck_path=healthcheck_path,
+			healthcheck_timeout=healthcheck_timeout,
+			overlap_seconds=overlap_seconds,
+			start_command=start_command,
+			cron_schedule=cron_schedule,
+			restart_policy_type=restart_policy_type,
+		)
 		if domain is not None:
 			service.domains = [
 				ServiceDomain(
@@ -282,18 +301,31 @@ def _install_client(monkeypatch: pytest.MonkeyPatch, harness: RailwayHarness) ->
 
 		async def update_service_instance(self, **kwargs: Any) -> None:
 			harness.updates.append(kwargs)
-			source_image = kwargs.get("source_image")
-			if source_image is None:
-				return
 			service = next(
 				service
 				for service in harness.services.values()
 				if service.id == kwargs["service_id"]
 			)
-			service.image = source_image
+			if kwargs.get("source_image") is not None:
+				service.image = kwargs["source_image"]
+			if kwargs.get("num_replicas") is not None:
+				service.num_replicas = kwargs["num_replicas"]
+			if kwargs.get("healthcheck_path") is not None:
+				service.healthcheck_path = kwargs["healthcheck_path"]
+			if kwargs.get("healthcheck_timeout") is not None:
+				service.healthcheck_timeout = kwargs["healthcheck_timeout"]
+			if kwargs.get("overlap_seconds") is not None:
+				service.overlap_seconds = kwargs["overlap_seconds"]
+			if kwargs.get("start_command") is not None:
+				service.start_command = kwargs["start_command"]
+			if kwargs.get("cron_schedule") is not None:
+				service.cron_schedule = kwargs["cron_schedule"]
+			if kwargs.get("restart_policy_type") is not None:
+				service.restart_policy_type = kwargs["restart_policy_type"]
 
 		async def deploy_service(self, *, service_id: str, environment_id: str) -> str:
 			assert environment_id == "env"
+			harness.deployed_services.append(service_id)
 			return f"deploy-{service_id}"
 
 		async def wait_for_deployment(self, *, deployment_id: str) -> dict[str, str]:
@@ -635,6 +667,110 @@ async def test_reconcile_stack_updates_runtime_config_without_creating_services(
 	assert router_update["num_replicas"] == 3
 	assert janitor_update["source_image"] == official_janitor_image_ref()
 	assert harness.variables["svc-janitor"][PULSE_DRAIN_TTL_SECONDS] == "120"
+	assert harness.deployed_services == ["svc-router", "svc-janitor"]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_stack_skips_runtime_deploy_when_config_is_current(
+	monkeypatch,
+) -> None:
+	project = _project()
+	harness = RailwayHarness()
+	router_vars, janitor_vars = _runtime_variables()
+	harness.add_service(
+		"pulse-router",
+		service_id="svc-router",
+		domain="pulse-router-production.up.railway.app",
+		variables=router_vars,
+		image=official_router_image_ref(),
+		num_replicas=project.router_replicas,
+		healthcheck_path="/healthz",
+		healthcheck_timeout=60,
+		overlap_seconds=30,
+		start_command=ROUTER_START_COMMAND,
+	)
+	harness.add_service(
+		"pulse-janitor",
+		service_id="svc-janitor",
+		variables=janitor_vars,
+		image=official_janitor_image_ref(),
+		num_replicas=project.janitor_replicas,
+		start_command=JANITOR_START_COMMAND,
+		cron_schedule=project.janitor_cron_schedule,
+		restart_policy_type="NEVER",
+	)
+	harness.add_service("pulse-env", service_id="svc-env", group_id="group-baseline")
+	harness.add_service(
+		"pulse-redis", service_id="svc-redis", group_id="group-baseline"
+	)
+	_install_client(monkeypatch, harness)
+
+	result = await reconcile_stack(project=project)
+
+	assert result.router.deployed is False
+	assert result.router.deployment_id is None
+	assert result.janitor.deployed is False
+	assert result.janitor.deployment_id is None
+	assert harness.updates == []
+	assert harness.variable_collections == []
+	assert harness.deployed_services == []
+
+
+@pytest.mark.asyncio
+async def test_reconcile_stack_deploys_only_changed_runtime_service(
+	monkeypatch,
+) -> None:
+	project = _project(drain_ttl_seconds=120)
+	harness = RailwayHarness()
+	router_vars, janitor_vars = _runtime_variables()
+	janitor_vars[PULSE_DRAIN_TTL_SECONDS] = "86400"
+	harness.add_service(
+		"pulse-router",
+		service_id="svc-router",
+		domain="pulse-router-production.up.railway.app",
+		variables=router_vars,
+		image=official_router_image_ref(),
+		num_replicas=project.router_replicas,
+		healthcheck_path="/healthz",
+		healthcheck_timeout=60,
+		overlap_seconds=30,
+		start_command=ROUTER_START_COMMAND,
+	)
+	harness.add_service(
+		"pulse-janitor",
+		service_id="svc-janitor",
+		variables=janitor_vars,
+		image=official_janitor_image_ref(),
+		num_replicas=project.janitor_replicas,
+		start_command=JANITOR_START_COMMAND,
+		cron_schedule=project.janitor_cron_schedule,
+		restart_policy_type="NEVER",
+	)
+	harness.add_service("pulse-env", service_id="svc-env", group_id="group-baseline")
+	harness.add_service(
+		"pulse-redis", service_id="svc-redis", group_id="group-baseline"
+	)
+	_install_client(monkeypatch, harness)
+
+	result = await reconcile_stack(project=project)
+
+	assert result.router.deployed is False
+	assert result.janitor.deployed is True
+	assert result.janitor.deployment_id == "deploy-svc-janitor"
+	assert harness.updates == []
+	assert harness.variable_collections == [
+		(
+			"svc-janitor",
+			{
+				RAILWAY_TOKEN: "token",
+				PULSE_INTERNAL_TOKEN: "secret-token",
+				REDIS_URL: "redis://pulse-redis:6379",
+				PULSE_REDIS_PREFIX: "pulse:railway",
+				PULSE_DRAIN_TTL_SECONDS: "120",
+			},
+		)
+	]
+	assert harness.deployed_services == ["svc-janitor"]
 
 
 @pytest.mark.asyncio

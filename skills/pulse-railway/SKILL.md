@@ -194,6 +194,7 @@ For a local repo example, inspect `examples/railway/` and `packages/pulse-railwa
 - Keep backend replicas at `1` unless sessions are safe across replicas; Railway does not provide replica-level sticky routing.
 - The router can run multiple replicas because routing state lives in request affinity plus Redis.
 - `pulse-railway janitor run` is for the deployed janitor service only and fails outside Railway.
+- `ensure` rewrites janitor runtime env with `PULSE_RAILWAY_SERVICE`, `PULSE_RAILWAY_JANITOR_SERVICE`, and `PULSE_RAILWAY_REDIS_SERVICE`; rerun it after changing baseline service names.
 - The janitor should run every 5 minutes or slower; Railway cron does not run more frequently.
 - `pulse-railway redeploy` defaults to the active deployment in Redis; use `--deployment-id` for a specific Pulse deployment.
 - If a deployment name matches multiple generated ids, `pulse-railway remove` fails and prints matches; retry with `pulse-railway delete --deployment-id ...`.

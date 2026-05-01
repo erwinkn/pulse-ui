@@ -108,7 +108,7 @@ When the baseline stack has Redis configured:
 
 The janitor job runs as a Railway cron service, not a permanent always-on process. Use a cadence of 5 minutes or slower; Railway does not run cron jobs more frequently than that.
 
-`pulse-railway janitor run` is for the deployed janitor service only. It probes `*.railway.internal` backends and now fails fast outside Railway.
+`pulse-railway janitor run` is for the deployed janitor service only. It probes `*.railway.internal` backends and now fails fast outside Railway. `scaffold` and `ensure` inject the stable router, janitor, and Redis service names into the janitor runtime so custom service names are preserved.
 
 If you need to trigger cleanup manually, run the command from inside the deployed janitor service:
 

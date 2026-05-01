@@ -10,6 +10,9 @@ from pulse_railway.constants import (
 	PULSE_DEPLOYMENT_ID,
 	PULSE_DRAIN_TTL_SECONDS,
 	PULSE_INTERNAL_TOKEN,
+	PULSE_RAILWAY_JANITOR_SERVICE,
+	PULSE_RAILWAY_REDIS_SERVICE,
+	PULSE_RAILWAY_SERVICE,
 	PULSE_REDIS_PREFIX,
 	RAILWAY_TOKEN,
 	REDIS_URL,
@@ -131,6 +134,9 @@ def _runtime_variables(
 		REDIS_URL: redis_url,
 		PULSE_REDIS_PREFIX: "pulse:railway",
 		PULSE_DRAIN_TTL_SECONDS: "86400",
+		PULSE_RAILWAY_SERVICE: "pulse-router",
+		PULSE_RAILWAY_JANITOR_SERVICE: "pulse-janitor",
+		PULSE_RAILWAY_REDIS_SERVICE: "pulse-redis",
 	}
 	return router, janitor
 
@@ -767,6 +773,9 @@ async def test_reconcile_stack_deploys_only_changed_runtime_service(
 				REDIS_URL: "redis://pulse-redis:6379",
 				PULSE_REDIS_PREFIX: "pulse:railway",
 				PULSE_DRAIN_TTL_SECONDS: "120",
+				PULSE_RAILWAY_SERVICE: "pulse-router",
+				PULSE_RAILWAY_JANITOR_SERVICE: "pulse-janitor",
+				PULSE_RAILWAY_REDIS_SERVICE: "pulse-redis",
 			},
 		)
 	]

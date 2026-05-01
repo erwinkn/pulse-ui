@@ -12,7 +12,10 @@ from pulse_railway.constants import (
 	PULSE_DRAIN_STARTED_AT,
 	PULSE_DRAIN_TTL_SECONDS,
 	PULSE_INTERNAL_TOKEN,
+	PULSE_RAILWAY_JANITOR_SERVICE,
+	PULSE_RAILWAY_REDIS_SERVICE,
 	PULSE_RAILWAY_REDIS_URL,
+	PULSE_RAILWAY_SERVICE,
 	PULSE_REDIS_PREFIX,
 	PULSE_SERVICE_PREFIX,
 	RAILWAY_TOKEN,
@@ -103,6 +106,9 @@ def janitor_env(
 	internal_token: str,
 	redis_url: str,
 	redis_prefix: str,
+	router_service_name: str,
+	janitor_service_name: str,
+	redis_service_name: str | None,
 	service_prefix: str | None,
 	drain_ttl_seconds: int,
 ) -> dict[str, str]:
@@ -112,7 +118,11 @@ def janitor_env(
 		REDIS_URL: redis_url,
 		PULSE_REDIS_PREFIX: redis_prefix or DEFAULT_REDIS_PREFIX,
 		PULSE_DRAIN_TTL_SECONDS: str(drain_ttl_seconds),
+		PULSE_RAILWAY_SERVICE: router_service_name,
+		PULSE_RAILWAY_JANITOR_SERVICE: janitor_service_name,
 	}
+	if redis_service_name is not None:
+		env[PULSE_RAILWAY_REDIS_SERVICE] = redis_service_name
 	if service_prefix is not None:
 		env[PULSE_SERVICE_PREFIX] = service_prefix
 	return env

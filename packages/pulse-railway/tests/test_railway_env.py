@@ -5,7 +5,10 @@ from pathlib import Path
 from pulse_railway.constants import (
 	PULSE_DRAIN_TTL_SECONDS,
 	PULSE_INTERNAL_TOKEN,
+	PULSE_RAILWAY_JANITOR_SERVICE,
+	PULSE_RAILWAY_REDIS_SERVICE,
 	PULSE_RAILWAY_REDIS_URL,
+	PULSE_RAILWAY_SERVICE,
 	PULSE_REDIS_PREFIX,
 	PULSE_SERVICE_PREFIX,
 	RAILWAY_TOKEN,
@@ -48,6 +51,9 @@ def test_janitor_env_sets_drain_ttl() -> None:
 		internal_token="secret",
 		redis_url="redis://internal",
 		redis_prefix="pulse:railway",
+		router_service_name="pulse-router",
+		janitor_service_name="pulse-janitor",
+		redis_service_name="pulse-redis",
 		service_prefix=None,
 		drain_ttl_seconds=86400,
 	)
@@ -58,6 +64,9 @@ def test_janitor_env_sets_drain_ttl() -> None:
 		REDIS_URL: "redis://internal",
 		PULSE_REDIS_PREFIX: "pulse:railway",
 		PULSE_DRAIN_TTL_SECONDS: "86400",
+		PULSE_RAILWAY_SERVICE: "pulse-router",
+		PULSE_RAILWAY_JANITOR_SERVICE: "pulse-janitor",
+		PULSE_RAILWAY_REDIS_SERVICE: "pulse-redis",
 	}
 
 

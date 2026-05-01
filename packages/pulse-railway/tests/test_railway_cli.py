@@ -461,6 +461,9 @@ def test_janitor_parser_reads_service_env_defaults(monkeypatch) -> None:
 	monkeypatch.setenv("RAILWAY_PROJECT_ID", "project")
 	monkeypatch.setenv("RAILWAY_ENVIRONMENT_ID", "env")
 	monkeypatch.setenv("RAILWAY_TOKEN", "token")
+	monkeypatch.setenv("PULSE_RAILWAY_SERVICE", "pulse-router")
+	monkeypatch.setenv("PULSE_RAILWAY_JANITOR_SERVICE", "pulse-janitor")
+	monkeypatch.setenv("PULSE_RAILWAY_REDIS_SERVICE", "pulse-redis")
 	parser = argparse.ArgumentParser()
 
 	_add_janitor_run_args(parser)
@@ -469,6 +472,9 @@ def test_janitor_parser_reads_service_env_defaults(monkeypatch) -> None:
 	assert args.project_id == "project"
 	assert args.environment_id == "env"
 	assert args.token == "token"
+	assert args.service == "pulse-router"
+	assert args.janitor_service == "pulse-janitor"
+	assert args.redis_service == "pulse-redis"
 
 
 def test_janitor_parser_prefers_railway_token(monkeypatch) -> None:
@@ -1839,6 +1845,7 @@ async def test_run_janitor_run_invokes_janitor(monkeypatch) -> None:
 			environment_id="env",
 			token="token",
 			service_prefix=None,
+			janitor_service="pulse-janitor",
 			redis_url=None,
 			redis_service=None,
 			redis_prefix="pulse:railway",
@@ -1847,6 +1854,7 @@ async def test_run_janitor_run_invokes_janitor(monkeypatch) -> None:
 	)
 
 	assert result == 0
+	assert janitor_call["project"].janitor_service_name == "pulse-janitor"
 	assert janitor_call["project"].redis_service_name == "pulse-router-redis"
 
 
@@ -1863,6 +1871,7 @@ async def test_run_janitor_run_fails_outside_railway(monkeypatch) -> None:
 				environment_id="env",
 				token="token",
 				service_prefix=None,
+				janitor_service=None,
 				redis_url=None,
 				redis_service=None,
 				redis_prefix="pulse:railway",

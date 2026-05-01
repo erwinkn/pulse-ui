@@ -45,6 +45,9 @@ from pulse_railway.constants import (
 	DEFAULT_DRAIN_TTL_SECONDS,
 	DEFAULT_REDIS_PREFIX,
 	PULSE_DRAIN_TTL_SECONDS,
+	PULSE_RAILWAY_JANITOR_SERVICE,
+	PULSE_RAILWAY_REDIS_SERVICE,
+	PULSE_RAILWAY_SERVICE,
 )
 from pulse_railway.deployment import (
 	delete_deployment,
@@ -128,6 +131,7 @@ def _railway_project(
 		redis_service_name=redis_service_name
 		or getattr(args, "redis_service", None)
 		or "",
+		janitor_service_name=getattr(args, "janitor_service", None) or "",
 		redis_prefix=getattr(args, "redis_prefix", None) or DEFAULT_REDIS_PREFIX,
 		**overrides,
 	)
@@ -203,8 +207,13 @@ def _add_janitor_run_args(parser: argparse.ArgumentParser) -> None:
 	parser.description = JANITOR_RUN_DESCRIPTION
 	parser.add_argument(
 		"--service",
-		default=env("PULSE_RAILWAY_SERVICE") or "pulse-router",
+		default=env(PULSE_RAILWAY_SERVICE) or "pulse-router",
 		help="Stable public Railway router service name for the deployed janitor.",
+	)
+	parser.add_argument(
+		"--janitor-service",
+		default=env(PULSE_RAILWAY_JANITOR_SERVICE),
+		help="Stable Railway janitor service name. Defaults to <service>-janitor.",
 	)
 	parser.add_argument("--project-id", default=env("RAILWAY_PROJECT_ID"))
 	parser.add_argument("--environment-id", default=env("RAILWAY_ENVIRONMENT_ID"))
@@ -217,7 +226,7 @@ def _add_janitor_run_args(parser: argparse.ArgumentParser) -> None:
 	)
 	parser.add_argument(
 		"--redis-service",
-		default=env("PULSE_RAILWAY_REDIS_SERVICE"),
+		default=env(PULSE_RAILWAY_REDIS_SERVICE),
 		help="Stable Railway Redis service name. Defaults to <service>-redis.",
 	)
 	parser.add_argument(

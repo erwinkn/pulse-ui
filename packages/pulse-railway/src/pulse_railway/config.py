@@ -42,14 +42,12 @@ class RailwayProject:
 	backend_replicas: int = 1
 	router_port: int = DEFAULT_ROUTER_PORT
 	router_replicas: int = 1
-	router_image: str | None = None
 	server_address: str | None = None
 	redis_url: str | None = None
 	redis_prefix: str = DEFAULT_REDIS_PREFIX
 	redis_service_name: str | None = None
 	redis_template_code: str = DEFAULT_REDIS_TEMPLATE_CODE
 	janitor_service_name: str | None = None
-	janitor_image: str | None = None
 	janitor_replicas: int = 1
 	janitor_cron_schedule: str = DEFAULT_JANITOR_CRON_SCHEDULE
 	drain_grace_seconds: int = DEFAULT_DRAIN_GRACE_SECONDS

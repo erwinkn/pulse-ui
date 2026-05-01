@@ -96,7 +96,6 @@ class ResolvedRedis:
 class BaselineServiceInput:
 	record: ServiceRecord
 	created: bool
-	image: str | None
 
 
 def _baseline_service_names(project: RailwayProject) -> dict[str, str]:
@@ -575,7 +574,6 @@ async def _configure_router_service(
 	project: RailwayProject,
 	internals: RailwayInternals,
 	service: ServiceRecord,
-	router_image: str | None,
 	router_instance: ServiceInstanceConfig,
 ) -> tuple[ServiceRecord, str, str]:
 	await upsert_service_variables(
@@ -598,7 +596,7 @@ async def _configure_router_service(
 	await client.update_service_instance(
 		service_id=service.id,
 		environment_id=project.environment_id,
-		source_image=router_image,
+		source_image=official_router_image_ref(),
 		num_replicas=project.router_replicas,
 		healthcheck_path=router_instance.healthcheck_path,
 		healthcheck_timeout=router_instance.healthcheck_timeout,
@@ -627,7 +625,6 @@ async def _configure_janitor_service(
 	project: RailwayProject,
 	internals: RailwayInternals,
 	service: ServiceRecord,
-	janitor_image: str | None,
 ) -> tuple[ServiceRecord, str]:
 	if not internals.redis_url:
 		raise DeploymentError("redis_url is required for janitor service creation")
@@ -648,7 +645,7 @@ async def _configure_janitor_service(
 	await client.update_service_instance(
 		service_id=service.id,
 		environment_id=project.environment_id,
-		source_image=janitor_image,
+		source_image=official_janitor_image_ref(),
 		num_replicas=project.janitor_replicas,
 		start_command=JANITOR_START_COMMAND,
 		cron_schedule=project.janitor_cron_schedule,
@@ -967,7 +964,6 @@ async def _configure_baseline_services(
 			project=project,
 			internals=internals,
 			service=router.record,
-			router_image=router.image,
 			router_instance=router_instance,
 		)
 	)
@@ -977,7 +973,6 @@ async def _configure_baseline_services(
 			project=project,
 			internals=internals,
 			service=janitor.record,
-			janitor_image=janitor.image,
 		)
 	)
 	try:
@@ -1006,7 +1001,7 @@ async def _configure_baseline_services(
 		router=StackServiceResult(
 			service_id=router_service.id,
 			service_name=router_service.name,
-			image=router.image or router_service.image,
+			image=official_router_image_ref(),
 			domain=router_domain,
 			created=router.created,
 			deployed=True,
@@ -1016,7 +1011,7 @@ async def _configure_baseline_services(
 		janitor=StackServiceResult(
 			service_id=janitor_service.id,
 			service_name=janitor_service.name,
-			image=janitor.image or janitor_service.image,
+			image=official_janitor_image_ref(),
 			created=janitor.created,
 			deployed=True,
 			deployment_id=janitor_deployment_id,
@@ -1088,12 +1083,10 @@ async def _bootstrap_stack_with_client(
 		router=BaselineServiceInput(
 			record=router_service,
 			created=True,
-			image=project.router_image or official_router_image_ref(),
 		),
 		janitor=BaselineServiceInput(
 			record=janitor_service,
 			created=True,
-			image=project.janitor_image or official_janitor_image_ref(),
 		),
 		env_service=env_service,
 	)
@@ -1165,18 +1158,12 @@ async def ensure_stack(
 			janitor_service=janitor_service,
 		)
 
-		router_image = project.router_image
-		if router_image is None and router_service is None:
-			router_image = official_router_image_ref()
-		janitor_image = project.janitor_image
-		if janitor_image is None and janitor_service is None:
-			janitor_image = official_janitor_image_ref()
 		router_service, router_created = await _ensure_service(
 			client,
 			project_id=project.project_id,
 			environment_id=project.environment_id,
 			name=project.service_name,
-			image=router_image,
+			image=official_router_image_ref(),
 			existing_service=router_service,
 		)
 		janitor_service, janitor_created = await _ensure_service(
@@ -1184,7 +1171,7 @@ async def ensure_stack(
 			project_id=project.project_id,
 			environment_id=project.environment_id,
 			name=janitor_name,
-			image=janitor_image,
+			image=official_janitor_image_ref(),
 			existing_service=janitor_service,
 		)
 		return await _configure_baseline_services(
@@ -1197,12 +1184,10 @@ async def ensure_stack(
 			router=BaselineServiceInput(
 				record=router_service,
 				created=router_created,
-				image=router_image,
 			),
 			janitor=BaselineServiceInput(
 				record=janitor_service,
 				created=janitor_created,
-				image=janitor_image,
 			),
 			env_service=env_service,
 		)

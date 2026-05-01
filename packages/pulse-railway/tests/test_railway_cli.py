@@ -45,8 +45,6 @@ def _make_scaffold_args(**overrides: Any) -> argparse.Namespace:
 		"token": "token",
 		"redis_url": None,
 		"redis_prefix": "pulse:railway",
-		"router_image": None,
-		"janitor_image": None,
 		"janitor_cron_schedule": "*/5 * * * *",
 		"drain_grace_seconds": 60,
 		"max_drain_age_seconds": 86400,
@@ -267,6 +265,8 @@ def test_scaffold_parser_uses_static_defaults(monkeypatch) -> None:
 	assert args.environment_id is None
 	assert not hasattr(args, "service_prefix")
 	assert not hasattr(args, "backend_port")
+	assert not hasattr(args, "router_image")
+	assert not hasattr(args, "janitor_image")
 
 
 def test_scaffold_parser_ignores_workspace_env_default(monkeypatch) -> None:
@@ -426,6 +426,18 @@ def test_deploy_parser_removes_backend_port_flag() -> None:
 
 	with pytest.raises(SystemExit):
 		parser.parse_args(["main.py", "--backend-port", "9000"])
+
+
+def test_scaffold_parser_removes_runtime_image_flags() -> None:
+	parser = argparse.ArgumentParser()
+
+	_add_scaffold_args(parser)
+
+	with pytest.raises(SystemExit):
+		parser.parse_args(["main.py", "--router-image", "ghcr.io/acme/router:dev"])
+
+	with pytest.raises(SystemExit):
+		parser.parse_args(["main.py", "--janitor-image", "ghcr.io/acme/janitor:dev"])
 
 
 def test_deploy_parser_requires_app_file() -> None:

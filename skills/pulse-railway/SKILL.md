@@ -118,7 +118,7 @@ uv run pulse-railway redeploy \
 
 `scaffold <app-file>` and `ensure <app-file>` load the app and resolve project, environment, stable service names, and service prefix from `RailwayPlugin`. If project or environment is omitted from the plugin, the token must provide enough scope to infer them.
 
-Use `scaffold` for fresh-only template setup. Use `ensure` for CI and repeated setup; it creates or reconciles the baseline. Existing router and janitor images are preserved unless `--router-image` or `--janitor-image` is passed.
+Use `scaffold` for fresh-only template setup. Use `ensure` for CI and repeated setup; it creates or reconciles the baseline with the official router and janitor images for the installed package version.
 
 Target flags are shared by local commands:
 

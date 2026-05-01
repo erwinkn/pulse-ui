@@ -53,16 +53,6 @@ def _add_baseline_args(parser: argparse.ArgumentParser) -> None:
 		help="Redis key prefix for pulse-railway control-plane state.",
 	)
 	parser.add_argument(
-		"--router-image",
-		default=None,
-		help="Router image override. Defaults to the official pulse-railway router image.",
-	)
-	parser.add_argument(
-		"--janitor-image",
-		default=None,
-		help="Janitor image override. Defaults to the official pulse-railway janitor image.",
-	)
-	parser.add_argument(
 		"--janitor-cron-schedule",
 		default=DEFAULT_JANITOR_CRON_SCHEDULE,
 		help="Railway cron schedule for the janitor service. Defaults to every 5 minutes.",
@@ -103,8 +93,6 @@ def _build_baseline_project(
 		token=token,
 		redis_url=args.redis_url,
 		router_replicas=args.router_replicas,
-		router_image=args.router_image,
-		janitor_image=args.janitor_image,
 		janitor_cron_schedule=args.janitor_cron_schedule,
 		drain_grace_seconds=args.drain_grace_seconds,
 		max_drain_age_seconds=args.max_drain_age_seconds,

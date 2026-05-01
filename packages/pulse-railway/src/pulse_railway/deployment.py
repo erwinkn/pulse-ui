@@ -41,7 +41,6 @@ from pulse_railway.env import (
 from pulse_railway.errors import DeploymentError
 from pulse_railway.images import (
 	build_and_push_image,
-	build_router_image,
 	image_ref,
 )
 from pulse_railway.railway import (
@@ -913,7 +912,6 @@ __all__ = [
 	"RedeployResult",
 	"ROUTER_START_COMMAND",
 	"build_and_push_image",
-	"build_router_image",
 	"deployment_name_slug",
 	"default_janitor_service_name",
 	"default_redis_service_name",

@@ -458,7 +458,11 @@ def rewrite_init_blocks(func: Callable[..., Any]) -> Callable[..., Any]:
 	filename = inspect.getsourcefile(func) or "<rewrite>"
 	compiled = compile(tree, filename=filename, mode="exec")
 
-	global_ns = dict(func.__globals__)
+	# Rewritten component functions should resolve globals like normal Python
+	# functions do: against the live module globals dict. Copying this mapping
+	# freezes the names that existed at decoration time, so components using
+	# ps.init() cannot reference helpers/classes defined later in the module.
+	global_ns = func.__globals__
 	closure_vars = inspect.getclosurevars(func)
 	global_ns.update(closure_vars.nonlocals)
 	# Ensure `ps` resolves during exec.

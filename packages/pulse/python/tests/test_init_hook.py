@@ -1,5 +1,8 @@
+import importlib.util
 import inspect
 import re
+import sys
+from pathlib import Path
 from typing import Any, Callable, cast
 
 import pulse as ps
@@ -91,6 +94,36 @@ def test_component_without_init_is_unchanged():
 		assert cast(str, cast(object, hello.fn())) == "hi"
 	# Without init, the function should run each time we call fn()
 	assert len(calls) == 2
+
+
+def test_init_rewrite_resolves_later_module_globals(tmp_path: Path):
+	module_path = tmp_path / "late_global_component.py"
+	module_path.write_text(
+		"""
+import pulse as ps
+
+
+@ps.component
+def Example():
+	with ps.init():
+		value = 1
+	return helper(value)
+
+
+def helper(value):
+	return value + 1
+""",
+		encoding="utf-8",
+	)
+	spec = importlib.util.spec_from_file_location("late_global_component", module_path)
+	assert spec is not None
+	assert spec.loader is not None
+	module = importlib.util.module_from_spec(spec)
+	sys.modules[spec.name] = module
+	spec.loader.exec_module(module)
+
+	with HookContext():
+		assert module.Example.fn() == 2
 
 
 def test_fallback_rewrite(monkeypatch: pytest.MonkeyPatch) -> None:

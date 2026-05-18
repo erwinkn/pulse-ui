@@ -1716,6 +1716,47 @@ async def test_query_resets_data_on_key_change_when_keep_previous_false():
 
 @pytest.mark.asyncio
 @with_render_session
+async def test_query_key_change_refetches_after_duplicate_dependency_notification():
+	"""
+	Regression test for dynamic keys that read the same underlying signal through
+	multiple dependency paths. The second notification can cancel the just-started
+	fetch; the query must not remain stuck as fetching with no task.
+	"""
+
+	fetch_log: list[str] = []
+
+	class S(ps.State):
+		uid: str = ""
+
+		@ps.computed
+		def effective_uid(self) -> str:
+			return self.uid
+
+		@ps.query(retries=0)
+		async def user(self) -> dict[str, str]:
+			fetch_log.append(self.effective_uid)
+			await asyncio.sleep(0)
+			return {"id": self.effective_uid}
+
+		@user.key
+		def _user_key(self):
+			return ("user", self.uid, self.effective_uid)
+
+	s = S()
+	q = s.user
+
+	s.uid = "2"
+	await asyncio.sleep(0)
+	await q.wait()
+
+	assert q.is_loading is False
+	assert q.is_fetching is False
+	assert q.data == {"id": "2"}
+	assert fetch_log == ["2"]
+
+
+@pytest.mark.asyncio
+@with_render_session
 async def test_query_preserves_data_on_key_change_when_keep_previous_true():
 	"""
 	Regression test: when keep_previous_data=True, changing the query key

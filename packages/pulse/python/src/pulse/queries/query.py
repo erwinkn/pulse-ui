@@ -442,8 +442,9 @@ class KeyedQuery(Generic[T], Disposable):
 		"""Cancel the current fetch if running."""
 		if self._task and not self._task.done():
 			self._task.cancel()
-			self._task = None
-			self._task_initiator = None
+		self._task = None
+		self._task_initiator = None
+		self.state.is_fetching.write(False)
 
 	def _get_first_observer_fetch_fn(self) -> Callable[[], Awaitable[T]]:
 		"""Get the fetch function from the first observer."""
@@ -553,9 +554,7 @@ class KeyedQuery(Generic[T], Disposable):
 
 		# If the departing observer initiated the ongoing fetch, cancel it
 		if self._task_initiator is observer and self._task and not self._task.done():
-			self._task.cancel()
-			self._task = None
-			self._task_initiator = None
+			self.cancel()
 			# Reschedule from another observer if any remain
 			if len(self.observers) > 0:
 				fetch_fn = self._get_first_observer_fetch_fn()

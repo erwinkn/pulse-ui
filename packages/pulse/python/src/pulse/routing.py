@@ -365,8 +365,9 @@ class Layout:
 				converted.append("layout" + suffix)
 			else:
 				converted.append(seg)
-		# Place file within the current layout's directory
-		path = "/".join([*converted, "_layout.tsx"])
+		# Place file within the current layout's directory. Generated route/layout
+		# modules contain transpiled JavaScript, so keep them as JSX files.
+		path = "/".join([*converted, "_layout.jsx"])
 		# Replace Windows-invalid characters in filenames
 		return _sanitize_filename(path)
 

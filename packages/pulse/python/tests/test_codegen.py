@@ -330,8 +330,8 @@ class TestCodegen:
 		codegen.generate_all(server_address=SERVER_ADDRESS)
 
 		# Expect two sibling layout directories: layout/ and layout2/
-		layout1 = codegen.output_folder / "layouts" / "layout" / "_layout.tsx"
-		layout2 = codegen.output_folder / "layouts" / "layout2" / "_layout.tsx"
+		layout1 = codegen.output_folder / "layouts" / "layout" / "_layout.jsx"
+		layout2 = codegen.output_folder / "layouts" / "layout2" / "_layout.jsx"
 		assert layout1.exists(), f"missing {layout1}"
 		assert layout2.exists(), f"missing {layout2}"
 		assert layout1 != layout2
@@ -617,7 +617,7 @@ class TestLocalFileImports:
 		codegen.generate_all(server_address=SERVER_ADDRESS)
 
 		# Check layout file import - layouts are in layouts/ folder
-		layout_files = list((codegen.output_folder / "layouts").rglob("_layout.tsx"))
+		layout_files = list((codegen.output_folder / "layouts").rglob("_layout.jsx"))
 		assert len(layout_files) >= 1
 
 		# The layout file should import from ../assets/ or ../../assets/ depending on nesting

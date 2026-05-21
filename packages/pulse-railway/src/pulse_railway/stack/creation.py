@@ -100,7 +100,7 @@ async def _create_env_service(
 	)
 
 
-async def _create_stack_with_client(
+async def create_stack_with_client(
 	client: RailwayGraphQLClient,
 	*,
 	project: RailwayProject,
@@ -187,7 +187,7 @@ async def create_stack(
 	router_instance: ServiceInstanceConfig = DEFAULT_ROUTER_INSTANCE,
 ) -> StackChange:
 	async with RailwayGraphQLClient(token=project.token) as client:
-		return await _create_stack_with_client(
+		return await create_stack_with_client(
 			client,
 			project=project,
 			router_instance=router_instance,

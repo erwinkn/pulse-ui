@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlencode
 
 import aiohttp
 from pulse.cli.helpers import load_app_from_target
@@ -22,6 +23,7 @@ from pulse_railway.config import (
 	default_redis_service_name,
 )
 from pulse_railway.constants import (
+	DEPLOYMENT_META_PATH,
 	DEPLOYMENT_STATE_DRAINING,
 	INTERNAL_API_PREFIX,
 	INTERNAL_TOKEN_HEADER,
@@ -64,6 +66,9 @@ from pulse_railway.stack import (
 	ROUTER_START_COMMAND,
 	inspect_stack,
 )
+
+ROUTED_DEPLOYMENT_TIMEOUT_SECONDS = 180.0
+ROUTED_DEPLOYMENT_POLL_SECONDS = 2.0
 
 
 @dataclass(slots=True)
@@ -257,6 +262,59 @@ async def _promote_deployment(
 				if service.deployment_id != deployment_id
 			],
 		},
+	)
+
+
+async def _fetch_deployment_meta(
+	session: aiohttp.ClientSession,
+	*,
+	server_address: str,
+	deployment_id: str | None,
+) -> tuple[int | None, dict[str, object] | None]:
+	url = f"{server_address.rstrip('/')}{DEPLOYMENT_META_PATH}"
+	if deployment_id is not None:
+		url += "?" + urlencode({"pulse_deployment": deployment_id})
+	try:
+		async with session.get(url) as response:
+			payload = await response.json(content_type=None)
+			return response.status, payload if isinstance(payload, dict) else None
+	except Exception:
+		return None, None
+
+
+async def _wait_for_routed_deployment(
+	*,
+	server_address: str,
+	deployment_id: str,
+	use_affinity: bool,
+	timeout: float = ROUTED_DEPLOYMENT_TIMEOUT_SECONDS,
+	poll_interval: float = ROUTED_DEPLOYMENT_POLL_SECONDS,
+) -> None:
+	deadline = asyncio.get_running_loop().time() + timeout
+	last_status: int | None = None
+	last_payload: dict[str, object] | None = None
+	async with aiohttp.ClientSession(
+		timeout=aiohttp.ClientTimeout(total=10, sock_connect=5)
+	) as session:
+		while True:
+			last_status, last_payload = await _fetch_deployment_meta(
+				session,
+				server_address=server_address,
+				deployment_id=deployment_id if use_affinity else None,
+			)
+			if (
+				last_status == 200
+				and last_payload is not None
+				and last_payload.get("deployment_id") == deployment_id
+			):
+				return
+			if asyncio.get_running_loop().time() >= deadline:
+				break
+			await asyncio.sleep(poll_interval)
+	mode = "affinity" if use_affinity else "active"
+	raise DeploymentError(
+		f"deployment {deployment_id} did not become healthy through router "
+		+ f"({mode}); last_status={last_status!r}, last_payload={last_payload!r}"
 	)
 
 
@@ -526,6 +584,11 @@ async def deploy(
 			overlap_seconds=backend_instance.overlap_seconds,
 			start_command=pulse_start_command(),
 		)
+		await _wait_for_routed_deployment(
+			server_address=server_address,
+			deployment_id=deployment_id,
+			use_affinity=True,
+		)
 		await _promote_deployment(
 			client,
 			project=project,
@@ -533,6 +596,11 @@ async def deploy(
 			internal_token=stack_state.internal_token,
 			backend_service_name=backend_service_name,
 			deployment_id=deployment_id,
+		)
+		await _wait_for_routed_deployment(
+			server_address=server_address,
+			deployment_id=deployment_id,
+			use_affinity=False,
 		)
 		return DeployResult(
 			deployment_id=deployment_id,
@@ -674,6 +742,11 @@ async def _deploy_source(
 					"backend source build failed after railway up: "
 					+ build_deployment["status"].lower()
 				)
+			await _wait_for_routed_deployment(
+				server_address=server_address,
+				deployment_id=deployment_id,
+				use_affinity=True,
+			)
 			await _promote_deployment(
 				client,
 				project=project,
@@ -683,6 +756,11 @@ async def _deploy_source(
 				deployment_id=deployment_id,
 			)
 			promoted = True
+			await _wait_for_routed_deployment(
+				server_address=server_address,
+				deployment_id=deployment_id,
+				use_affinity=False,
+			)
 			return DeployResult(
 				deployment_id=deployment_id,
 				backend_service_id=backend_service_id,

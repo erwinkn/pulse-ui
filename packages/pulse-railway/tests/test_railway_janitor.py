@@ -368,6 +368,86 @@ async def test_janitor_keeps_draining_deployments_with_render_sessions(
 
 
 @pytest.mark.asyncio
+async def test_janitor_skips_unknown_non_active_deployments(monkeypatch) -> None:
+	store = MemoryDeploymentStore()
+	await store.set_active(
+		deployment_id="active",
+		service_name="pulse-active",
+	)
+	created_clients: list[_FakeClient] = []
+
+	def fake_client(**_: object) -> _FakeClient:
+		client = _FakeClient()
+		created_clients.append(client)
+		return client
+
+	monkeypatch.setattr("pulse_railway.janitor.RailwayGraphQLClient", fake_client)
+	_install_internals(monkeypatch)
+	monkeypatch.setattr(
+		"pulse_railway.janitor._fetch_deployment_session_status",
+		pytest.fail,
+	)
+
+	result = await run_janitor(project=_project(), store=store, now=120)
+
+	assert result.scanned_count == 0
+	assert result.deleted_deployments == []
+	assert result.skipped_deployments == []
+	assert created_clients[0].deleted_service_ids == []
+	assert await store.get_deployment(deployment_id="deploy1") is None
+
+
+@pytest.mark.asyncio
+async def test_janitor_does_not_delete_service_if_draining_becomes_active(
+	monkeypatch,
+) -> None:
+	store = MemoryDeploymentStore()
+	await store.set_active(
+		deployment_id="active",
+		service_name="pulse-active",
+	)
+	await store.mark_draining(
+		deployment_id="deploy1",
+		service_name="pulse-deploy1",
+		now=0,
+	)
+	created_clients: list[_FakeClient] = []
+
+	def fake_client(**_: object) -> _FakeClient:
+		client = _FakeClient()
+		client.service_variables["svc-1"].update(
+			{
+				PULSE_DEPLOYMENT_STATE: DEPLOYMENT_STATE_DRAINING,
+				PULSE_DRAIN_STARTED_AT: "0",
+			}
+		)
+		created_clients.append(client)
+		return client
+
+	async def fake_status(*args: object, **kwargs: object) -> DeploymentSessionStatus:
+		_ = args, kwargs
+		await store.set_active(
+			deployment_id="deploy1",
+			service_name="pulse-deploy1",
+		)
+		return DeploymentSessionStatus(render_session_count=0)
+
+	monkeypatch.setattr("pulse_railway.janitor.RailwayGraphQLClient", fake_client)
+	_install_internals(monkeypatch)
+	monkeypatch.setattr(
+		"pulse_railway.janitor._fetch_deployment_session_status",
+		fake_status,
+	)
+
+	result = await run_janitor(project=_project(), store=store, now=120)
+
+	assert result.deleted_deployments == []
+	assert result.skipped_deployments == ["deploy1"]
+	assert created_clients[0].deleted_service_ids == []
+	assert await store.get_active_deployment() == "deploy1"
+
+
+@pytest.mark.asyncio
 async def test_janitor_force_deletes_when_drain_ttl_is_exceeded(
 	monkeypatch,
 ) -> None:

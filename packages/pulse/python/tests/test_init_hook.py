@@ -47,6 +47,33 @@ def test_init_preserves_object_identity_and_runs_once():
 	assert second_list == [0, 1]
 
 
+def test_init_reruns_when_key_changes():
+	calls: list[str] = []
+
+	@ps.component
+	def Example(key: str) -> tuple[int, str]:
+		with ps.init(key=key):
+			calls.append(key)
+			value = {"key": key}
+		return id(value), value["key"]
+
+	example = Example
+	with HookContext():
+		first_id, first_key = cast(tuple[int, str], cast(object, example.fn("a")))
+		second_id, second_key = cast(tuple[int, str], cast(object, example.fn("a")))
+		third_id, third_key = cast(tuple[int, str], cast(object, example.fn("b")))
+		fourth_id, fourth_key = cast(tuple[int, str], cast(object, example.fn("b")))
+
+	assert calls == ["a", "b"]
+	assert first_id == second_id
+	assert third_id == fourth_id
+	assert first_id != third_id
+	assert first_key == "a"
+	assert second_key == "a"
+	assert third_key == "b"
+	assert fourth_key == "b"
+
+
 def test_init_restores_functions_and_classes():
 	@ps.component
 	def Example() -> tuple[Callable[[int], int], type[Any]]:
@@ -180,6 +207,38 @@ def test_fallback_preserves_identity_and_runs_once(
 	assert o2["x"] == 3
 
 
+def test_fallback_init_reruns_when_key_changes(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	from pulse.hooks import init as init_mod
+
+	monkeypatch.setattr(init_mod, "_CAN_USE_CPYTHON", False)
+	calls: list[str] = []
+
+	@ps.component
+	def Example(key: str) -> tuple[int, str]:
+		with ps.init(key=key):
+			calls.append(key)
+			value = {"key": key}
+		return id(value), value["key"]
+
+	example = Example
+	with HookContext():
+		first_id, first_key = cast(tuple[int, str], cast(object, example.fn("a")))
+		second_id, second_key = cast(tuple[int, str], cast(object, example.fn("a")))
+		third_id, third_key = cast(tuple[int, str], cast(object, example.fn("b")))
+		fourth_id, fourth_key = cast(tuple[int, str], cast(object, example.fn("b")))
+
+	assert calls == ["a", "b"]
+	assert first_id == second_id
+	assert third_id == fourth_id
+	assert first_id != third_id
+	assert first_key == "a"
+	assert second_key == "a"
+	assert third_key == "b"
+	assert fourth_key == "b"
+
+
 def test_init_allows_control_flow_outside_block() -> None:
 	@ps.component
 	def Example(flag: bool) -> int:
@@ -265,6 +324,34 @@ def test_init_disallows_as_binding() -> None:
 	line_match = re.search(r"test_init_hook\.py:(\d+):", message)
 	assert line_match is not None
 	assert int(line_match.group(1)) == expected_line
+
+
+def test_init_key_must_be_string() -> None:
+	@ps.component
+	def Example() -> int:
+		with ps.init(key=cast(Any, 1)):
+			value = 1
+		return value
+
+	example = Example
+	with HookContext():
+		with pytest.raises(TypeError, match="init\\(\\) key must be a string"):
+			example.fn()
+
+
+def test_init_key_must_not_be_empty() -> None:
+	@ps.component
+	def Example() -> int:
+		with ps.init(key=""):
+			value = 1
+		return value
+
+	example = Example
+	with HookContext():
+		with pytest.raises(
+			ValueError, match="init\\(\\) requires a non-empty string key"
+		):
+			example.fn()
 
 
 def test_init_exception_does_not_save_partial_locals() -> None:

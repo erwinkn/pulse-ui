@@ -214,7 +214,16 @@ def MyComponent():
     return ps.div(str(state.count))
 ```
 
-Variables inside `ps.init()` persist across re-renders.
+Variables inside `ps.init()` persist across re-renders. Use `key=` when the init block depends on an input and should run again when that input changes.
+
+```python
+@ps.component
+def UserComponent(user_id: str):
+    with ps.init(key=user_id):
+        state = MyState(user_id)
+
+    return ps.div(str(state.count))
+```
 
 ### Creation with `ps.state`
 

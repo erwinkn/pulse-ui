@@ -267,13 +267,15 @@ The rule exists because hooks rely on call order to track their state internally
 
 ## Hook keys
 
-Both `ps.setup()` and `ps.state()` accept an optional `key` argument. When the key changes, the hook re-initializes:
+`ps.init()` and `ps.state()` accept an optional `key` argument. When the key changes, the hook re-initializes:
 
 ```python
 @ps.component
 def DataLoader(data_id: int):
-    # Re-runs load_data whenever data_id changes
-    data = ps.setup(load_data, data_id, key=data_id)
+    # Re-runs load_data whenever data_id changes.
+    with ps.init(key=str(data_id)):
+        data = load_data(data_id)
+
     return ps.div(f"Data: {data}")
 ```
 
@@ -285,7 +287,7 @@ def UserProfile(user_id: int):
     return ps.div(f"User: {state.name}")
 ```
 
-Keys are compared using `!=`, so use primitive values (strings, numbers, booleans) or tuples of primitives.
+Keys must be non-empty strings, so build stable string keys from the values that identify the instance.
 
 Similarly, `@ps.effect` accepts a `key` parameter for use in loops or to force effect recreation:
 

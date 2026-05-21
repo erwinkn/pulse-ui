@@ -738,7 +738,10 @@ class ReactProxy:
 					return_when=asyncio.FIRST_COMPLETED,
 				)
 				if disconnect_task in done or closing_task in done:
-					if not next_chunk_task.done():
+					if next_chunk_task.done():
+						with suppress(asyncio.CancelledError, Exception):
+							next_chunk_task.result()
+					else:
 						next_chunk_task.cancel()
 						with suppress(asyncio.CancelledError, Exception):
 							await next_chunk_task

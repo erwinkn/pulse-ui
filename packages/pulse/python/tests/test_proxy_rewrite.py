@@ -641,6 +641,58 @@ class TestReactProxyStreaming:
 		assert response.close.call_count >= 1
 
 	@pytest.mark.asyncio
+	async def test_disconnect_race_with_stream_end_retrieves_task_exception(self):
+		proxy = ReactProxy(
+			react_server_address="http://localhost:5173",
+			server_address="http://localhost:8000",
+		)
+		response = _StubResponse(
+			status=200,
+			raw_headers=[(b"content-type", b"text/plain")],
+			chunks=[],
+		)
+		proxy._session = _make_session(response)  # pyright: ignore[reportPrivateUsage]
+
+		loop = asyncio.get_running_loop()
+		previous_handler = loop.get_exception_handler()
+		unhandled_contexts: list[dict[str, Any]] = []
+		disconnect_ready = asyncio.Event()
+		sent: list[Message] = []
+
+		async def receive() -> Message:
+			await disconnect_ready.wait()
+			return {"type": "http.disconnect"}
+
+		async def send(message: Message) -> None:
+			sent.append(message)
+			if message["type"] == "http.response.start":
+				disconnect_ready.set()
+				await asyncio.sleep(0)
+
+		try:
+			loop.set_exception_handler(
+				lambda _loop, context: unhandled_contexts.append(context)
+			)
+			await proxy(_make_asgi_scope("/"), receive, send)
+			await asyncio.sleep(0)
+		finally:
+			loop.set_exception_handler(previous_handler)
+
+		assert sent == [
+			{
+				"type": "http.response.start",
+				"status": 200,
+				"headers": [(b"content-type", b"text/plain")],
+			}
+		]
+		assert not any(
+			context.get("message") == "Task exception was never retrieved"
+			and isinstance(context.get("exception"), StopAsyncIteration)
+			for context in unhandled_contexts
+		)
+		assert response.close.call_count >= 1
+
+	@pytest.mark.asyncio
 	async def test_send_start_failure_closes_response(self):
 		proxy = ReactProxy(
 			react_server_address="http://localhost:5173",

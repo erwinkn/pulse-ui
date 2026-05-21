@@ -38,7 +38,7 @@ def _require_variables(
 		)
 
 
-async def _inspect_stack_with_client(
+async def inspect_stack_with_client(
 	client: RailwayGraphQLClient,
 	*,
 	project: RailwayProject,
@@ -57,7 +57,12 @@ async def _inspect_stack_with_client(
 	assert services.router is not None
 	assert services.janitor is not None
 	assert services.env is not None
-	router_variables, janitor_variables = await asyncio.gather(
+	(
+		router_variables,
+		janitor_variables,
+		router_config_variables,
+		janitor_config_variables,
+	) = await asyncio.gather(
 		client.get_service_variables_for_deployment(
 			project_id=project.project_id,
 			environment_id=project.environment_id,
@@ -67,6 +72,18 @@ async def _inspect_stack_with_client(
 			project_id=project.project_id,
 			environment_id=project.environment_id,
 			service_id=services.janitor.id,
+		),
+		client.get_project_variables(
+			project_id=project.project_id,
+			environment_id=project.environment_id,
+			service_id=services.router.id,
+			unrendered=True,
+		),
+		client.get_project_variables(
+			project_id=project.project_id,
+			environment_id=project.environment_id,
+			service_id=services.janitor.id,
+			unrendered=True,
 		),
 	)
 	_require_variables(
@@ -135,12 +152,14 @@ async def _inspect_stack_with_client(
 		server_address=server_address,
 		router_variables=router_variables,
 		janitor_variables=janitor_variables,
+		router_config_variables=router_config_variables or router_variables,
+		janitor_config_variables=janitor_config_variables or janitor_variables,
 	)
 
 
 async def inspect_stack(*, project: RailwayProject) -> StackInspection:
 	async with RailwayGraphQLClient(token=project.token) as client:
-		return await _inspect_stack_with_client(
+		return await inspect_stack_with_client(
 			client,
 			project=project,
 			command="scaffold",

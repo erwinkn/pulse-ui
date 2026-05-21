@@ -24,6 +24,7 @@ from pulse_railway.railway.client import (
 from pulse_railway.railway.ops import list_deployment_service_records
 from pulse_railway.stack import inspect_stack
 from pulse_railway.store import (
+	ActiveDeploymentError,
 	DeploymentStore,
 	RedisDeploymentStore,
 )
@@ -189,15 +190,15 @@ async def run_janitor(
 					or stored.state != DEPLOYMENT_STATE_DRAINING
 					or stored.drain_started_at is None
 				):
+					if (
+						service.state != DEPLOYMENT_STATE_DRAINING
+						or service.drain_started_at is None
+					):
+						continue
 					await store.mark_draining(
 						deployment_id=service.deployment_id,
 						service_name=service.service_name,
-						now=(
-							service.drain_started_at
-							if service.state == DEPLOYMENT_STATE_DRAINING
-							and service.drain_started_at is not None
-							else timestamp
-						),
+						now=service.drain_started_at,
 					)
 					stored = await store.get_deployment(
 						deployment_id=service.deployment_id
@@ -205,6 +206,12 @@ async def run_janitor(
 				assert stored is not None
 				service.state = stored.state
 				service.drain_started_at = stored.drain_started_at
+			draining = [
+				service
+				for service in draining
+				if service.state == DEPLOYMENT_STATE_DRAINING
+				and service.drain_started_at is not None
+			]
 			result = JanitorResult(lock_acquired=True, scanned_count=len(draining))
 			draining_service_ids = {
 				service.service_name: service.service_id for service in draining
@@ -246,15 +253,19 @@ async def run_janitor(
 						connected_reload_count = 0
 					if connected_reload_count > 0:
 						await asyncio.sleep(JANITOR_RELOAD_GRACE_SECONDS)
+					try:
+						await store.delete_inactive_deployment(
+							deployment_id=decision.deployment_id
+						)
+					except ActiveDeploymentError:
+						result.skipped_deployments.append(decision.deployment_id)
+						continue
 					service_id = draining_service_ids.get(decision.service_name)
 					if service_id is not None:
 						await client.delete_service(
 							service_id=service_id,
 							environment_id=project.environment_id,
 						)
-					await store.delete_inactive_deployment(
-						deployment_id=decision.deployment_id
-					)
 					result.deleted_deployments.append(decision.deployment_id)
 					if decision.force_delete:
 						result.force_deleted_deployments.append(decision.deployment_id)

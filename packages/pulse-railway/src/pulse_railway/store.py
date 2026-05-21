@@ -32,7 +32,7 @@ class StoredDeployment:
 class ActiveDeploymentError(RuntimeError):
 	def __init__(self, deployment_id: str) -> None:
 		super().__init__(f"active deployment cannot be deleted: {deployment_id}")
-		self.deployment_id = deployment_id
+		self.deployment_id: str = deployment_id
 
 
 def kv_store_spec_from_env(env: dict[str, str] | None = None) -> Store | None:

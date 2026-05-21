@@ -36,6 +36,8 @@ class StackInspection:
 	server_address: str
 	router_variables: dict[str, str] = field(default_factory=dict)
 	janitor_variables: dict[str, str] = field(default_factory=dict)
+	router_config_variables: dict[str, str] = field(default_factory=dict)
+	janitor_config_variables: dict[str, str] = field(default_factory=dict)
 	env: ServiceRecord | None = None
 	redis_mode: Literal["managed", "external"] = "managed"
 

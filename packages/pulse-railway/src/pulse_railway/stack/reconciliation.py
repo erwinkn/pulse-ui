@@ -18,8 +18,8 @@ from pulse_railway.stack.common import (
 	reconcile_runtime,
 	stack_internals,
 )
-from pulse_railway.stack.creation import _create_stack_with_client
-from pulse_railway.stack.inspection import _inspect_stack_with_client
+from pulse_railway.stack.creation import create_stack_with_client
+from pulse_railway.stack.inspection import inspect_stack_with_client
 
 
 async def _reconcile_stack_with_client(
@@ -28,7 +28,7 @@ async def _reconcile_stack_with_client(
 	project: RailwayProject,
 	router_instance: ServiceInstanceConfig = DEFAULT_ROUTER_INSTANCE,
 ) -> StackChange:
-	stack = await _inspect_stack_with_client(
+	stack = await inspect_stack_with_client(
 		client,
 		project=project,
 		command="ensure",
@@ -60,8 +60,8 @@ async def _reconcile_stack_with_client(
 		janitor=stack.janitor,
 		internals=internals,
 		router_instance=router_instance,
-		router_variables=stack.router_variables,
-		janitor_variables=stack.janitor_variables,
+		router_variables=stack.router_config_variables,
+		janitor_variables=stack.janitor_config_variables,
 	)
 	return StackChange(
 		router=StackServiceChange(
@@ -117,7 +117,7 @@ async def create_or_reconcile_stack(
 	async with RailwayGraphQLClient(token=project.token) as client:
 		services = await list_baseline_services(client, project=project)
 		if not services.found:
-			return await _create_stack_with_client(
+			return await create_stack_with_client(
 				client,
 				project=project,
 				router_instance=router_instance,

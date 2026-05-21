@@ -101,6 +101,20 @@ def router_control_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]
 	return calls
 
 
+@pytest.fixture(autouse=True)
+def routed_health_checks(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+	calls: list[dict[str, Any]] = []
+
+	async def fake_wait_for_routed_deployment(**kwargs: Any) -> None:
+		calls.append(kwargs)
+
+	monkeypatch.setattr(
+		"pulse_railway.deployment._wait_for_routed_deployment",
+		fake_wait_for_routed_deployment,
+	)
+	return calls
+
+
 def test_generate_deployment_id_and_prefix() -> None:
 	deployment_id = generate_deployment_id("Production Main")
 	assert deployment_id.startswith("production-")
@@ -765,7 +779,7 @@ async def test_delete_deployment_keeps_service_when_router_state_delete_fails(
 
 @pytest.mark.asyncio
 async def test_deploy_happy_path_on_ready_stack(
-	monkeypatch, tmp_path, router_control_calls
+	monkeypatch, tmp_path, router_control_calls, routed_health_checks
 ) -> None:
 	dockerfile = tmp_path / "Dockerfile"
 	dockerfile.write_text("FROM scratch\n")
@@ -991,6 +1005,18 @@ async def test_deploy_happy_path_on_ready_stack(
 	assert router_control_calls[-1]["path"] == "promote"
 	assert router_control_calls[-1]["server_address"] == "https://test.pulse.sc"
 	assert router_control_calls[-1]["internal_token"] == "secret-token"
+	assert routed_health_checks == [
+		{
+			"server_address": "https://test.pulse.sc",
+			"deployment_id": "prod-260402-120000",
+			"use_affinity": True,
+		},
+		{
+			"server_address": "https://test.pulse.sc",
+			"deployment_id": "prod-260402-120000",
+			"use_affinity": False,
+		},
+	]
 	payload = router_control_calls[-1]["json_payload"]
 	assert payload["active"] == {
 		"deployment_id": "prod-260402-120000",
@@ -1021,7 +1047,7 @@ async def test_deploy_happy_path_on_ready_stack(
 
 @pytest.mark.asyncio
 async def test_deploy_source_happy_path_on_ready_stack(
-	monkeypatch, tmp_path, router_control_calls
+	monkeypatch, tmp_path, router_control_calls, routed_health_checks
 ) -> None:
 	dockerfile = tmp_path / "examples" / "Dockerfile"
 	dockerfile.parent.mkdir(parents=True, exist_ok=True)
@@ -1279,6 +1305,18 @@ async def test_deploy_source_happy_path_on_ready_stack(
 		}
 	]
 	assert router_control_calls[-1]["path"] == "promote"
+	assert routed_health_checks == [
+		{
+			"server_address": "https://test.pulse.sc",
+			"deployment_id": "prod-260402-120000",
+			"use_affinity": True,
+		},
+		{
+			"server_address": "https://test.pulse.sc",
+			"deployment_id": "prod-260402-120000",
+			"use_affinity": False,
+		},
+	]
 	payload = router_control_calls[-1]["json_payload"]
 	assert payload["active"] == {
 		"deployment_id": "prod-260402-120000",

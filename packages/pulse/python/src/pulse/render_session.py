@@ -19,7 +19,7 @@ from pulse.messages import (
 	ServerUpdateMessage,
 )
 from pulse.queries.store import QueryStore
-from pulse.reactive import REACTIVE_CONTEXT, Effect, flush_effects
+from pulse.reactive import REACTIVE_CONTEXT, Effect, Untrack, flush_effects
 from pulse.renderer import RenderTree
 from pulse.routing import (
 	Layout,
@@ -100,6 +100,7 @@ class RouteMount:
 	pending_action: PendingAction | None
 	queue: list[ServerMessage] | None
 	queue_timeout: TimerHandleLike | None
+	mount_id: str
 	render_batch_id: int
 	render_batch_renders: int
 
@@ -112,7 +113,7 @@ class RouteMount:
 	) -> None:
 		self.render = render
 		self.path = ensure_absolute_path(path)
-		self.route = RouteContext(route_info, route, render)
+		self.route = RouteContext(route_info, route, render, self.path)
 		self.effect = None
 		self._pulse_ctx = None
 		self.tree = RenderTree(route.render())
@@ -121,11 +122,15 @@ class RouteMount:
 		self.pending_action = None
 		self.queue = []
 		self.queue_timeout = None
+		self.mount_id = uuid.uuid4().hex
 		self.render_batch_id = -1
 		self.render_batch_renders = 0
 
 	def update_route(self, route_info: RouteInfo) -> None:
 		self.route.update(route_info)
+
+	def renew_mount_id(self) -> None:
+		self.mount_id = uuid.uuid4().hex
 
 	def _cancel_pending_timeout(self) -> None:
 		if self.queue_timeout is not None:
@@ -250,7 +255,7 @@ class RenderSession:
 	route_mounts: dict[str, RouteMount]
 	connected: bool
 	prerender_queue_timeout: float
-	detach_queue_timeout: float
+	dev_strict_mode_detach_timeout: float
 	disconnect_queue_timeout: float
 	render_loop_limit: int
 	_server_address: str | None
@@ -273,7 +278,7 @@ class RenderSession:
 		server_address: str | None = None,
 		client_address: str | None = None,
 		prerender_queue_timeout: float = 60.0,
-		detach_queue_timeout: float = 15.0,
+		dev_strict_mode_detach_timeout: float = 0.0,
 		disconnect_queue_timeout: float = 300.0,
 		render_loop_limit: int = 50,
 	) -> None:
@@ -299,7 +304,7 @@ class RenderSession:
 		self._timers = TimerRegistry(tasks=self._tasks, name=f"render:{id}")
 		self.query_store = QueryStore()
 		self.prerender_queue_timeout = prerender_queue_timeout
-		self.detach_queue_timeout = detach_queue_timeout
+		self.dev_strict_mode_detach_timeout = dev_strict_mode_detach_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
 		self.render_loop_limit = render_loop_limit
 
@@ -327,9 +332,10 @@ class RenderSession:
 		self._send_message = send_message
 		self.connected = True
 		if self._global_queue:
-			for msg in self._global_queue:
-				send_message(msg)
+			queued = self._global_queue
 			self._global_queue = []
+			for msg in queued:
+				self.send(msg)
 
 	def disconnect(self):
 		"""WebSocket disconnected. Start queuing briefly before pausing."""
@@ -344,8 +350,33 @@ class RenderSession:
 
 	def send(self, message: ServerMessage):
 		"""Route message based on mount state."""
-		# Global messages (not path-specific, or navigate_to) bypass mount state.
+		# Forced navigation is global. Route-bound navigation is dropped once
+		# its source route has unmounted.
 		if message.get("type") == "navigate_to":
+			source_route_path = message.get("sourceRoutePath")
+			source_path = message.get("sourcePath")
+			source_mount_id = message.get("sourceMountId")
+			if isinstance(source_route_path, str) and isinstance(source_path, str):
+				mount = self.route_mounts.get(ensure_absolute_path(source_route_path))
+				source_path = ensure_absolute_path(source_path)
+				if (
+					mount is None
+					or mount.route.pathname != source_path
+					or (
+						isinstance(source_mount_id, str)
+						and mount.mount_id != source_mount_id
+					)
+				):
+					return
+			elif isinstance(source_path, str):
+				source_path = ensure_absolute_path(source_path)
+				with Untrack():
+					source_path_is_active = any(
+						mount.route.pathname == source_path
+						for mount in self.route_mounts.values()
+					)
+				if not source_path_is_active:
+					return
 			if self._send_message:
 				self._send_message(message)
 			else:
@@ -494,20 +525,24 @@ class RenderSession:
 		except Exception as e:
 			self.report_error(path, "unmount", e)
 
-	def detach(self, path: str, *, timeout: float | None = None):
-		"""Client no longer wants updates. Queue briefly, then dispose."""
+	def detach(self, path: str):
+		"""Client route unmounted. Dispose immediately outside dev StrictMode replay."""
 		path = ensure_absolute_path(path)
 		self._ref_channels_by_route.pop(path, None)
 		mount = self.route_mounts.get(path)
 		if not mount:
 			return
-
-		if timeout is None:
-			timeout = self.detach_queue_timeout
-		if timeout <= 0:
-			self.dispose_mount(path, mount)
+		mount.renew_mount_id()
+		if self.dev_strict_mode_detach_timeout > 0:
+			# React StrictMode in development intentionally replays mount effects as
+			# attach -> detach -> attach without another prerender. Keep the mount for
+			# a very short dev-only window so that synthetic cleanup can be cancelled
+			# by the replayed attach. The mount id was renewed above before this delay,
+			# so async work from the detached generation is still route-stale and cannot
+			# navigate during the grace period.
+			mount.start_pending(self.dev_strict_mode_detach_timeout, action="dispose")
 			return
-		mount.start_pending(timeout, action="dispose")
+		self.dispose_mount(path, mount)
 
 	# ---- Effect creation ----
 
@@ -533,8 +568,17 @@ class RenderSession:
 	) -> T_Render | ServerNavigateToMessage:
 		ctx = PulseContext.get()
 		render_session = ctx.session if session is None else session
+		with Untrack():
+			source_path = mount.route.pathname
+			source_route_path = mount.route.route_path
+			source_mount_id = mount.mount_id
 		with PulseContext.update(
-			session=render_session, render=self, route=mount.route
+			session=render_session,
+			render=self,
+			route=mount.route,
+			source_route_path=source_route_path,
+			source_path=source_path,
+			source_mount_id=source_mount_id,
 		):
 			try:
 				self._check_render_loop(mount, path)
@@ -590,8 +634,8 @@ class RenderSession:
 		self._timers.cancel_all()
 		self.forms.dispose()
 		self._tasks.cancel_all()
-		for path in list(self.route_mounts.keys()):
-			self.detach(path, timeout=0)
+		for path, mount in list(self.route_mounts.items()):
+			self.dispose_mount(path, mount)
 		self.route_mounts.clear()
 		self.query_store.dispose_all()
 		for value in self._global_states.values():
@@ -641,7 +685,7 @@ class RenderSession:
 			self._ref_channel = self.channels.create(bind_route=False)
 			return self._ref_channel
 
-		route_path = ctx.route.pulse_route.unique_path()
+		route_path = ctx.route.route_path
 		channel = self._ref_channels_by_route.get(route_path)
 		if channel is not None and channel.closed:
 			self._ref_channels_by_route.pop(route_path, None)
@@ -685,7 +729,17 @@ class RenderSession:
 			self.report_error(path, "callback", e, {"callback": key, "async": is_async})
 
 		try:
-			with PulseContext.update(render=self, route=mount.route):
+			with Untrack():
+				source_path = mount.route.pathname
+				source_route_path = mount.route.route_path
+				source_mount_id = mount.mount_id
+			with PulseContext.update(
+				render=self,
+				route=mount.route,
+				source_route_path=source_route_path,
+				source_path=source_path,
+				source_mount_id=source_mount_id,
+			):
 				res = cb.fn(*args[: cb.n_args])
 				if iscoroutine(res):
 

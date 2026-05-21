@@ -253,8 +253,8 @@ export class PulseSocketIOClient {
 	}
 
 	public detach(path: string) {
-		void this.sendMessage({ type: "detach", path });
 		this.#activeViews.delete(path);
+		void this.sendMessage({ type: "detach", path });
 	}
 
 	public disconnect() {
@@ -299,6 +299,19 @@ export class PulseSocketIOClient {
 				break;
 			}
 			case "navigate_to": {
+				if (message.sourceRoutePath && message.sourcePath) {
+					const view = this.#activeViews.get(message.sourceRoutePath);
+					if (!view || view.routeInfo.pathname !== message.sourcePath) break;
+				} else if (message.sourcePath) {
+					let sourceActive = false;
+					for (const view of this.#activeViews.values()) {
+						if (view.routeInfo.pathname === message.sourcePath) {
+							sourceActive = true;
+							break;
+						}
+					}
+					if (!sourceActive) break;
+				}
 				const replace = !!message.replace;
 				let dest = message.path || "";
 				if (dest.startsWith("//")) dest = `${window.location.protocol}${dest}`;

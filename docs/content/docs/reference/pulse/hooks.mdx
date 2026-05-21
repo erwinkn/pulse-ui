@@ -307,7 +307,13 @@ def show_route():
 Navigate to a new URL.
 
 ```python
-def navigate(path: str, *, replace: bool = False, hard: bool = False) -> None
+def navigate(
+    path: str,
+    *,
+    replace: bool = False,
+    hard: bool = False,
+    force: bool = False,
+) -> None
 ```
 
 ### Parameters
@@ -317,6 +323,11 @@ def navigate(path: str, *, replace: bool = False, hard: bool = False) -> None
 | `path` | `str` | required | Destination URL |
 | `replace` | `bool` | `False` | Replace current history entry |
 | `hard` | `bool` | `False` | Full page reload instead of client-side navigation |
+| `force` | `bool` | `False` | Navigate even if the requesting route has unmounted |
+
+By default, navigation from route callbacks is route-bound. If an async callback
+resumes after the user leaves the route, the navigation is ignored. Pass
+`force=True` for intentionally global redirects.
 
 ### Example
 

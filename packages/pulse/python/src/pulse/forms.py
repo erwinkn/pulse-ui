@@ -187,7 +187,13 @@ class FormRegistry(Disposable):
 				detail="Form route is no longer mounted",
 			) from exc
 
-		with PulseContext.update(render=self._render, route=mount.route):
+		with PulseContext.update(
+			render=self._render,
+			route=mount.route,
+			source_route_path=registration.route_path,
+			source_path=mount.route.pathname,
+			source_mount_id=mount.mount_id,
+		):
 			await call_flexible(registration.on_submit, data)
 
 		return Response(status_code=204)
@@ -385,7 +391,7 @@ class ManualForm(Disposable):
 		self._registration = render.forms.register(
 			session_id=session.sid,
 			render_id=render.id,
-			route_id=route.pulse_route.unique_path(),
+			route_id=route.route_path,
 			on_submit=self.wrap_on_submit(on_submit),
 		)
 

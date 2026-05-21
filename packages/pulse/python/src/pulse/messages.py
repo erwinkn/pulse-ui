@@ -46,6 +46,9 @@ class ServerNavigateToMessage(TypedDict):
 	path: str
 	replace: bool
 	hard: bool
+	sourceRoutePath: NotRequired[str]
+	sourcePath: NotRequired[str]
+	sourceMountId: NotRequired[str]
 
 
 class ServerReloadMessage(TypedDict):

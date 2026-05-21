@@ -45,7 +45,7 @@ app = ps.App([ps.Route("/", App)])
 | Effects | `@ps.effect` decorator | Hooks |
 | DOM refs | `ps.ref()` | Refs |
 | Route info | `ps.route()` | Navigation |
-| Navigate | `ps.navigate(path)`, `ps.Link` | Navigation |
+| Navigate | `ps.navigate(path, force=False)`, `ps.Link` | Navigation |
 | Forms | `ps.Form(on_submit=handler)` | Forms |
 | Data fetching | `@ps.query` on State method | Data Fetching |
 | Mutations | `@ps.mutation` on State method | Data Fetching |
@@ -253,7 +253,7 @@ ps.pulse_route()    # Route | Layout definition
 ps.session()        # ReactiveDict of session data
 ps.session_id()     # str session ID
 ps.websocket_id()   # str WebSocket connection ID (one session can have multiple)
-ps.navigate(path)   # Client-side navigation
+ps.navigate(path)   # Route-bound client-side navigation
 ps.redirect(path)   # Server redirect (throws)
 ps.not_found()      # 404 (throws)
 ```
@@ -363,7 +363,7 @@ def UserDetail():
 **Navigation:**
 ```python
 ps.Link("Go", to="/path")              # Client nav
-ps.navigate("/path")                    # Programmatic
+ps.navigate("/path")                    # Programmatic, ignored if source route unmounted
 ps.redirect("/login")                   # Server redirect (throws)
 ```
 

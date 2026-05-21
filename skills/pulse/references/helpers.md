@@ -17,6 +17,12 @@ handle = ps.later(delay, fn, *args, **kwargs)
 
 **Returns:** `asyncio.TimerHandle` with `.cancel()` method
 
+`ps.later()` callbacks are not canceled by route unmounting. They run unless you
+cancel the returned handle or the render session/app closes. If a later callback
+calls `ps.navigate()`, that navigation is route-bound by default and is ignored
+after the source route has unmounted; use `force=True` only for intentionally
+global navigation.
+
 ```python
 # Delayed cleanup
 def cleanup():

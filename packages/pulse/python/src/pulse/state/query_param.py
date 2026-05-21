@@ -23,6 +23,7 @@ from urllib.parse import urlencode
 
 from pulse.context import PulseContext
 from pulse.helpers import Disposable, values_equal
+from pulse.messages import ServerNavigateToMessage
 from pulse.reactive import Effect, Scope, Signal, Untrack
 from pulse.reactive_extensions import reactive, unwrap
 from pulse.state.property import InitializableProperty, StateProperty
@@ -488,6 +489,10 @@ class QueryParamSync(Disposable):
 			raw_params = info["queryParams"]
 			current_params = dict(cast(Mapping[str, str], raw_params))
 			pathname = info["pathname"]
+			source_route_path = self.route.route_path
+			source_path = pathname
+			mount = self.render.route_mounts.get(source_route_path)
+			source_mount_id = mount.mount_id if mount is not None else None
 			hash_frag = info["hash"]
 		query_params = dict(current_params)
 		for binding in self._bindings.values():
@@ -518,14 +523,17 @@ class QueryParamSync(Disposable):
 				path += hash_frag
 			else:
 				path += "#" + hash_frag
-		self.render.send(
-			{
-				"type": "navigate_to",
-				"path": path,
-				"replace": True,
-				"hard": False,
-			}
+		message = ServerNavigateToMessage(
+			type="navigate_to",
+			path=path,
+			replace=True,
+			hard=False,
+			sourceRoutePath=source_route_path,
+			sourcePath=source_path,
 		)
+		if source_mount_id is not None:
+			message["sourceMountId"] = source_mount_id
+		self.render.send(message)
 
 	@override
 	def dispose(self) -> None:

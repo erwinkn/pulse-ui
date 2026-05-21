@@ -59,13 +59,15 @@ def make_routes() -> RouteTree:
 	return RouteTree([route_a, route_b])
 
 
-def make_route_info(pathname: str) -> RouteInfo:
+def make_route_info(
+	pathname: str, *, path_params: dict[str, str] | None = None
+) -> RouteInfo:
 	return {
 		"pathname": pathname,
 		"hash": "",
 		"query": "",
 		"queryParams": {},
-		"pathParams": {},
+		"pathParams": path_params or {},
 		"catchall": [],
 	}
 
@@ -135,6 +137,42 @@ def extract_count_from_ctx(session: RenderSession, path: str) -> int:
 	text_children = cast(list[Any], span.get("children", [0]))
 	text = text_children[0]
 	return int(text)  # type: ignore[arg-type]
+
+
+def first_callback_key(session: RenderSession, path: str) -> str:
+	return next(iter(session.route_mounts[path].tree.callbacks))
+
+
+@pytest.mark.asyncio
+async def test_pulse_context_update_can_clear_route_source():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	route = session.route_mounts["/a"].route
+	with ps.PulseContext.update(
+		render=session,
+		route=route,
+		source_route_path=route.route_path,
+		source_path=route.pathname,
+		source_mount_id=session.route_mounts["/a"].mount_id,
+	):
+		with ps.PulseContext.update(
+			route=None,
+			source_route_path=None,
+			source_path=None,
+			source_mount_id=None,
+		):
+			ctx = ps.PulseContext.get()
+			assert ctx.route is None
+			assert ctx.source_route_path is None
+			assert ctx.source_path is None
+			assert ctx.source_mount_id is None
+
+	session.close()
 
 
 @pytest.mark.asyncio
@@ -325,7 +363,7 @@ def test_dummy_placeholder_to_keep_line_numbers_stable():
 	assert True
 
 
-def test_navigate_to_bypasses_pending_mount_queue():
+def test_global_navigate_to_bypasses_pending_mount_queue():
 	routes = RouteTree(
 		[
 			Route("a", simple_component),
@@ -342,8 +380,8 @@ def test_navigate_to_bypasses_pending_mount_queue():
 		session.attach("/a", make_route_info("/a"))
 		session.attach("/a/b", make_route_info("/a/b"))
 
-	session.detach("/a/b", timeout=10)
 	mount = session.route_mounts["/a/b"]
+	mount.start_pending(10)
 	assert mount.state == "pending"
 	assert mount.queue == []
 
@@ -420,6 +458,289 @@ async def test_attach_without_prerender_requests_reload():
 	assert "/a" not in session.route_mounts
 	assert len(messages) == 1
 	assert messages[0]["type"] == "reload"
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_async_callback_navigation_after_detach_is_ignored_by_default():
+	started = asyncio.Event()
+	release = asyncio.Event()
+	completed = asyncio.Event()
+
+	@ps.component
+	def Page():
+		async def on_click():
+			started.set()
+			await release.wait()
+			ps.navigate("/after")
+			completed.set()
+
+		return ps.button(onClick=on_click)["go"]
+
+	routes = RouteTree([Route("a", Page)])
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	session.execute_callback("/a", first_callback_key(session, "/a"), [])
+	await started.wait()
+	session.detach("/a")
+	release.set()
+	await asyncio.wait_for(completed.wait(), timeout=0.2)
+	await asyncio.sleep(0)
+
+	assert not [msg for msg in messages if msg["type"] == "navigate_to"]
+	assert not [msg for msg in messages if msg["type"] == "server_error"]
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_async_callback_force_navigation_after_detach_still_navigates():
+	started = asyncio.Event()
+	release = asyncio.Event()
+
+	@ps.component
+	def Page():
+		async def on_click():
+			started.set()
+			await release.wait()
+			ps.navigate("/after", force=True)
+
+		return ps.button(onClick=on_click)["go"]
+
+	routes = RouteTree([Route("a", Page)])
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	session.execute_callback("/a", first_callback_key(session, "/a"), [])
+	await started.wait()
+	session.detach("/a")
+	release.set()
+	await wait_for(lambda: any(msg["type"] == "navigate_to" for msg in messages))
+
+	navigations = [msg for msg in messages if msg["type"] == "navigate_to"]
+	assert len(navigations) == 1
+	assert navigations[0]["path"] == "/after"
+
+	session.close()
+
+
+def test_route_bound_navigation_uses_current_path_for_dynamic_routes():
+	@ps.component
+	def Page():
+		return ps.button(onClick=lambda: ps.navigate("/after"))["go"]
+
+	routes = RouteTree([Route("items/:id", Page)])
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	route_info = make_route_info("/items/123", path_params={"id": "123"})
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/items/:id"], route_info)
+		session.attach("/items/:id", route_info)
+
+	session.execute_callback(
+		"/items/:id",
+		first_callback_key(session, "/items/:id"),
+		[],
+	)
+
+	navigations = [msg for msg in messages if msg["type"] == "navigate_to"]
+	assert len(navigations) == 1
+	assert navigations[0]["path"] == "/after"
+	assert navigations[0].get("sourceRoutePath") == "/items/:id"
+	assert navigations[0].get("sourcePath") == "/items/123"
+	assert isinstance(navigations[0].get("sourceMountId"), str)
+
+	session.close()
+
+
+def test_route_bound_navigation_validates_source_route_identity():
+	routes = RouteTree([Route("a", simple_component), Route("b", simple_component)])
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	route_info = make_route_info("/shared")
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"], route_info)
+		session.attach("/a", route_info)
+		session.prerender(["/b"], route_info)
+		session.attach("/b", route_info)
+
+	mount = session.route_mounts["/a"]
+	with ps.PulseContext.update(
+		render=session,
+		route=mount.route,
+		source_route_path=mount.route.route_path,
+		source_path=mount.route.pathname,
+	):
+		session.detach("/a")
+		ps.navigate("/after")
+
+	assert "/b" in session.route_mounts
+	assert not [msg for msg in messages if msg["type"] == "navigate_to"]
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_async_callback_navigation_after_same_url_remount_is_ignored():
+	started = asyncio.Event()
+	release = asyncio.Event()
+	completed = asyncio.Event()
+
+	@ps.component
+	def Page():
+		async def on_click():
+			started.set()
+			await release.wait()
+			ps.navigate("/after")
+			completed.set()
+
+		return ps.button(onClick=on_click)["go"]
+
+	routes = RouteTree([Route("a", Page)])
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	session.execute_callback("/a", first_callback_key(session, "/a"), [])
+	await started.wait()
+	session.detach("/a")
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	release.set()
+	await asyncio.wait_for(completed.wait(), timeout=0.2)
+	await asyncio.sleep(0)
+
+	assert not [msg for msg in messages if msg["type"] == "navigate_to"]
+	assert not [msg for msg in messages if msg["type"] == "server_error"]
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_async_callback_navigation_after_route_update_is_ignored_by_default():
+	started = asyncio.Event()
+	release = asyncio.Event()
+	completed = asyncio.Event()
+
+	@ps.component
+	def Page():
+		async def on_click():
+			started.set()
+			await release.wait()
+			ps.navigate("/after")
+			completed.set()
+
+		return ps.button(onClick=on_click)["go"]
+
+	routes = RouteTree([Route("items/:id", Page)])
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	first_info = make_route_info("/items/123", path_params={"id": "123"})
+	next_info = make_route_info("/items/456", path_params={"id": "456"})
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/items/:id"], first_info)
+		session.attach("/items/:id", first_info)
+
+	session.execute_callback(
+		"/items/:id", first_callback_key(session, "/items/:id"), []
+	)
+	await started.wait()
+	session.attach("/items/:id", next_info)
+	release.set()
+	await asyncio.wait_for(completed.wait(), timeout=0.2)
+	await asyncio.sleep(0)
+
+	assert not [msg for msg in messages if msg["type"] == "navigate_to"]
+	assert not [msg for msg in messages if msg["type"] == "server_error"]
+
+	session.close()
+
+
+def test_queued_route_bound_navigation_is_revalidated_on_reconnect():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	session.disconnect()
+	mount = session.route_mounts["/a"]
+	with ps.PulseContext.update(
+		render=session,
+		route=mount.route,
+		source_route_path=mount.route.route_path,
+		source_path=mount.route.pathname,
+	):
+		ps.navigate("/after")
+
+	session.detach("/a")
+	session.connect(messages.append)
+
+	assert not [msg for msg in messages if msg["type"] == "navigate_to"]
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_later_callback_runs_after_detach_but_route_navigation_is_ignored():
+	fired = asyncio.Event()
+
+	@ps.component
+	def Page():
+		def run_later():
+			ps.navigate("/after")
+			fired.set()
+
+		def on_click():
+			ps.later(0.01, run_later)
+
+		return ps.button(onClick=on_click)["go"]
+
+	routes = RouteTree([Route("a", Page)])
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	session.execute_callback("/a", first_callback_key(session, "/a"), [])
+	session.detach("/a")
+
+	await asyncio.wait_for(fired.wait(), timeout=0.2)
+	await asyncio.sleep(0)
+
+	assert not [msg for msg in messages if msg["type"] == "navigate_to"]
+	assert not [msg for msg in messages if msg["type"] == "server_error"]
 
 	session.close()
 
@@ -1330,8 +1651,8 @@ async def test_re_prerender_returns_fresh_vdom():
 
 
 @pytest.mark.asyncio
-async def test_detach_soft_keeps_mount_until_timeout_dispose():
-	"""Test that detach keeps the mount pending; timeout disposal removes it."""
+async def test_detach_immediate_removes_mount_and_disposes_effect():
+	"""Test that detach immediately removes the mount and disposes its effect."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
 
@@ -1345,24 +1666,58 @@ async def test_detach_soft_keeps_mount_until_timeout_dispose():
 	mount = session.route_mounts["/a"]
 	effect = mount.effect
 	assert effect is not None
-	# Effect has deps before dispose
-	assert len(effect.deps) >= 0  # Just verify effect exists and is valid
 
-	# Soft detach
 	session.detach("/a")
 
-	# Mount should remain pending
-	assert "/a" in session.route_mounts
-	assert mount.state == "pending"
-
-	# Immediate timeout to dispose
-	session.detach("/a", timeout=0)
-
-	# Mount should be removed
 	assert "/a" not in session.route_mounts
-	# Effect should be disposed (deps cleared, removed from parent)
 	assert len(effect.deps) == 0
 	assert effect.parent is None
+
+	session.close()
+
+
+def test_dev_strict_mode_detach_replay_reuses_mount_without_reload():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes, dev_strict_mode_detach_timeout=10.0)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	mount = session.route_mounts["/a"]
+	first_mount_id = mount.mount_id
+
+	session.detach("/a")
+
+	assert session.route_mounts["/a"] is mount
+	assert mount.state == "pending"
+	assert mount.pending_action == "dispose"
+	assert mount.mount_id != first_mount_id
+
+	with ps.PulseContext.update(render=session):
+		session.attach("/a", make_route_info("/a"))
+
+	assert session.route_mounts["/a"] is mount
+	assert mount.state == "active"
+	assert not [msg for msg in messages if msg["type"] == "reload"]
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_dev_strict_mode_detach_disposes_after_timeout():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes, dev_strict_mode_detach_timeout=0.01)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	session.detach("/a")
+
+	await wait_for(lambda: "/a" not in session.route_mounts)
 
 	session.close()
 

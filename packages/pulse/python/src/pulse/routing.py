@@ -548,6 +548,7 @@ class RouteContext:
 
 	info: RouteInfo
 	pulse_route: Route | Layout
+	route_path: str
 	query_param_sync: "QueryParamSync"
 
 	def __init__(
@@ -555,9 +556,11 @@ class RouteContext:
 		info: RouteInfo,
 		pulse_route: Route | Layout,
 		render: "RenderSession",
+		route_path: str | None = None,
 	):
 		self.info = cast(RouteInfo, cast(object, ReactiveDict(info)))
 		self.pulse_route = pulse_route
+		self.route_path = ensure_absolute_path(route_path or pulse_route.unique_path())
 		from pulse.state.query_param import QueryParamSync
 
 		self.query_param_sync = QueryParamSync(render, self)

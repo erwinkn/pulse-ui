@@ -148,7 +148,7 @@ def route_meta():
 
 ## Navigation APIs
 
-### `ps.navigate(path)`
+### `ps.navigate(path, *, replace=False, hard=False, force=False)`
 
 Programmatic navigation from event handlers:
 
@@ -160,9 +160,10 @@ async def handle_login():
 # With options
 ps.navigate("/dashboard", replace=True)  # Replace history entry
 ps.navigate("/external", hard=True)      # Full page reload
+ps.navigate("/login", force=True)        # Global navigation even after route unmount
 ```
 
-**Note**: Must be called from a Pulse callback context (event handler, effect), not during render.
+**Note**: Must be called from a Pulse callback context (event handler, effect), not during render. By default, navigation is bound to the source route and is ignored if an async callback resumes after that route unmounts. Use `force=True` only when navigation should still happen after the user leaves the route.
 
 ### `ps.redirect(path)`
 

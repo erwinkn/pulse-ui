@@ -248,7 +248,7 @@ def Layout():
 | Helper | Usage |
 |--------|-------|
 | `ps.repeat(n, fn)` | `*ps.repeat(5, lambda i: ps.span(f"Item {i}"))` |
-| `ps.later(delay, fn)` | `ps.later(5.0, lambda: state.refresh())` — delayed callback |
+| `ps.later(delay, fn)` | `ps.later(5.0, lambda: state.refresh())` — delayed callback, not canceled by route unmount |
 
 ## See Also
 

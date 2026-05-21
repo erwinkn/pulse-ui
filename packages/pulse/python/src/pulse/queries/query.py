@@ -370,17 +370,16 @@ class KeyedQuery(Generic[T], Disposable):
 	async def _run_fetch(
 		self,
 		fetch_fn: Callable[[], Awaitable[T]],
-		observers: "list[KeyedQueryResult[T]]",
 	) -> None:
 		"""Execute the fetch with retry logic."""
 
 		async def on_success(result: T):
-			for obs in observers:
+			for obs in list(self.observers):
 				if obs._on_success:  # pyright: ignore[reportPrivateUsage]
 					await maybe_await(call_flexible(obs._on_success, result))  # pyright: ignore[reportPrivateUsage]
 
 		async def on_error(e: Exception):
-			for obs in observers:
+			for obs in list(self.observers):
 				if obs._on_error:  # pyright: ignore[reportPrivateUsage]
 					await maybe_await(call_flexible(obs._on_error, e))  # pyright: ignore[reportPrivateUsage]
 
@@ -411,9 +410,7 @@ class KeyedQuery(Generic[T], Disposable):
 			self._task.cancel()
 
 		self.state.is_fetching.write(True)
-		# Capture current observers at fetch start
-		observers = list(self.observers)
-		self._task = create_task(self._run_fetch(fetch_fn, observers))
+		self._task = create_task(self._run_fetch(fetch_fn))
 		self._task_initiator = initiator
 		return self._task
 

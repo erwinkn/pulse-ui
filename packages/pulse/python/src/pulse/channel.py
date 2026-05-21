@@ -96,8 +96,7 @@ class ChannelsManager:
 
 		route_path: str | None = None
 		if bind_route and ctx.route is not None:
-			# unique_path() returns absolute path, use as-is for keys
-			route_path = ctx.route.pulse_route.unique_path()
+			route_path = ctx.route.route_path
 
 		channel = Channel(
 			self,
@@ -173,17 +172,26 @@ class ChannelsManager:
 			return
 
 		route_ctx = None
+		source_mount_id = None
 		if channel.route_path is not None:
 			try:
 				mount = render.get_route_mount(channel.route_path)
 				route_ctx = mount.route
+				source_mount_id = mount.mount_id
 			except Exception:
 				route_ctx = None
 
 		async def _invoke() -> None:
 			try:
 				with PulseContext.update(
-					session=session, render=render, route=route_ctx
+					session=session,
+					render=render,
+					route=route_ctx,
+					source_route_path=(
+						route_ctx.route_path if route_ctx is not None else None
+					),
+					source_path=route_ctx.pathname if route_ctx is not None else None,
+					source_mount_id=source_mount_id,
 				):
 					result = await channel.dispatch(event, payload, request_id)
 			except Exception as exc:

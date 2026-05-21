@@ -61,7 +61,7 @@ Cleanup runs:
 - When the state is disposed
 
 <Callout type="info">
-**Good news:** Pulse's `ps.later()` and `ps.repeat()` are automatically cleaned up when the render session closes—so for simple cases, you might not need manual cleanup at all. See [Scheduling](/docs/reference/pulse/scheduling) for details.
+Pulse's `ps.later()` and `ps.repeat()` are automatically cleaned up when the render session closes. Route unmounting does not cancel `ps.later()` callbacks; cancel the returned handle in cleanup if the callback should not run after unmount. See [Scheduling](/docs/reference/pulse/scheduling) for details.
 </Callout>
 
 ## Effects in components

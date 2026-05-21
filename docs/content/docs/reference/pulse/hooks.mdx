@@ -65,7 +65,7 @@ def user_profile(user_id):
 Context manager for one-time initialization in components. Variables assigned inside the block persist across re-renders.
 
 ```python
-def init() -> InitContext
+def init(*, key: str | None = None) -> InitContext
 ```
 
 ### Usage
@@ -81,6 +81,12 @@ def my_component():
     return m.Text(f"Counter: {counter}")
 ```
 
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `key` | `str \| None` | `None` | Optional key for re-running the init block when an input changes |
+
 ### Rules
 
 - Can only be used once per component
@@ -88,12 +94,24 @@ def my_component():
 - Cannot contain control flow (`if`, `for`, `while`, `try`, `with`, `match`)
 - Cannot use `as` binding (`with ps.init() as ctx:` not allowed)
 - Variables are restored from first render on subsequent renders
+- Key must be a non-empty string if provided
 
 ### How It Works
 
 `ps.init()` uses **AST rewriting** to transform your code at decoration time. When you use the `@ps.component` decorator, Pulse parses your function's source code and rewrites `with ps.init():` blocks into conditional logic.
 
-On first render, the code inside the block runs normally and variables are captured. On subsequent renders, the block is skipped entirely and variables are restored from storage.
+On first render, the code inside the block runs normally and variables are captured. On subsequent renders with the same key, the block is skipped entirely and variables are restored from storage. When the key changes, the block runs again and replaces the captured variables.
+
+### Dynamic key
+
+```python
+@ps.component
+def UserProfile(user_id: str):
+    with ps.init(key=user_id):
+        user = UserState(user_id)
+
+    return ps.div(user.name)
+```
 
 ### Equivalent to `ps.setup()`
 

@@ -55,6 +55,7 @@ class InitContext:
 		first_render: True if this is the first render cycle.
 		pre_keys: Set of variable names that existed before entering the block.
 		saved: Dictionary of captured variable values.
+		key: Optional string key that re-runs the block when it changes.
 
 	Example:
 
@@ -74,13 +75,15 @@ class InitContext:
 	first_render: bool
 	pre_keys: set[str]
 	saved: dict[str, Any]
+	key: str | None
 
-	def __init__(self):
+	def __init__(self, *, key: str | None = None):
 		self.callsite = None
 		self.frame = None
 		self.first_render = False
 		self.pre_keys = set()
 		self.saved = {}
+		self.key = key
 
 	def __enter__(self):
 		self.frame = previous_frame()
@@ -90,7 +93,7 @@ class InitContext:
 
 		storage = _init_hook().storage
 		entry = storage.get(self.callsite)
-		if entry is None:
+		if entry is None or entry.get("key") != self.key:
 			self.first_render = True
 			self.saved = {}
 		else:
@@ -109,7 +112,7 @@ class InitContext:
 		self.saved = values
 		assert self.callsite is not None, "callsite is None"
 		storage = _init_hook().storage
-		storage[self.callsite] = {"vars": values}
+		storage[self.callsite] = {"vars": values, "key": self.key}
 
 	def _capture_new_locals(self) -> dict[str, Any]:
 		frame = self.frame
@@ -133,16 +136,20 @@ class InitContext:
 			captured = self._capture_new_locals()
 			assert self.callsite is not None, "callsite  None"
 			storage = _init_hook().storage
-			storage[self.callsite] = {"vars": captured}
+			storage[self.callsite] = {"vars": captured, "key": self.key}
 		self.frame = None
 		return False
 
 
-def init() -> InitContext:
+def init(*, key: str | None = None) -> InitContext:
 	"""Context manager for one-time initialization in components.
 
 	Variables assigned inside the block persist across re-renders. Uses AST
-	rewriting to transform the code at decoration time.
+	rewriting to transform the code at decoration time. When ``key`` changes,
+	the block re-runs and captured variables are replaced.
+
+	Args:
+		key: Optional non-empty string key for re-initialization control.
 
 	Returns:
 		InitContext: Context manager that captures and restores variables.
@@ -150,11 +157,11 @@ def init() -> InitContext:
 	Example:
 
 	```python
-	def my_component():
-	    with ps.init():
+	def my_component(user_id: str):
+	    with ps.init(key=user_id):
 	        counter = 0
-	        api = ApiClient()
-	        data = fetch_initial_data()
+	        api = ApiClient(user_id)
+	        data = fetch_initial_data(user_id)
 	    # counter, api, data retain their values across renders
 	    return m.Text(f"Counter: {counter}")
 	```
@@ -172,7 +179,11 @@ def init() -> InitContext:
 		available in some deployment environments), use ``ps.setup()`` instead.
 		It provides the same functionality without AST rewriting.
 	"""
-	return InitContext()
+	if key is not None and not isinstance(key, str):
+		raise TypeError("init() key must be a string")
+	if key == "":
+		raise ValueError("init() requires a non-empty string key")
+	return InitContext(key=key)
 
 
 # ---------------------------- AST rewriting -------------------------------

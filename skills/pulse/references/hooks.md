@@ -4,7 +4,7 @@ Functions for preserving state, running setup code, and managing side effects ac
 
 ## ps.init()
 
-Context manager for one-time initialization. Variables assigned inside persist across re-renders.
+Context manager for one-time initialization. Variables assigned inside persist across re-renders. Pass `key=` to re-run the block when an input changes.
 
 ```python
 @ps.component
@@ -18,11 +18,21 @@ def Counter():
     return ps.div(f"Count: {state.count}")
 ```
 
+```python
+@ps.component
+def UserProfile(user_id: str):
+    with ps.init(key=user_id):
+        state = UserState(user_id)
+
+    return ps.div(state.name)
+```
+
 **Rules:**
 - Only at top level of component (not in `if`, `for`, nested functions)
 - No control flow inside block (no `if`, `for`, `while`, `try`, `with`, `match`)
 - No `as` binding (`with ps.init() as ctx:` not allowed)
 - Only once per component
+- `key` must be a non-empty string if provided
 
 **Inside vs Outside:**
 ```python

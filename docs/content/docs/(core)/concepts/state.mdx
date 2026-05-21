@@ -126,6 +126,17 @@ def Counter():
     return ps.div(f"Count: {state.count}")
 ```
 
+Pass `key=` when initialization depends on an input and should reset when that input changes:
+
+```python
+@ps.component
+def UserCounter(user_id: str):
+    with ps.init(key=user_id):
+        state = CounterState(user_id)
+
+    return ps.div(f"Count: {state.count}")
+```
+
 Without `ps.init()`, each render would create a brand-new `CounterState` starting at zero:
 
 ```python

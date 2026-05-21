@@ -167,7 +167,7 @@ See `references/refs.md` for full API.
 
 ### Hooks
 
-#### `ps.init()` — Preserve state across renders
+#### `ps.init(*, key=None)` — Preserve state across renders
 
 ```python
 @ps.component
@@ -176,6 +176,12 @@ def MyComponent():
         state = MyState()      # Created once
         other = OtherState()   # Multiple states OK
     # state/other persist across re-renders
+
+@ps.component
+def UserView(user_id: str):
+    with ps.init(key=user_id):  # Re-runs when user_id changes
+        state = UserState(user_id)
+    return ps.div(state.name)
 ```
 
 #### `ps.setup(fn, *args)` — One-time initialization with args

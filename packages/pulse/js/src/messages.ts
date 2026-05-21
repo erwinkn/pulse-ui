@@ -68,6 +68,9 @@ export interface ServerNavigateToMessage {
 	path: string;
 	replace: boolean;
 	hard: boolean;
+	sourceRoutePath?: string;
+	sourcePath?: string;
+	sourceMountId?: string;
 }
 
 export interface ServerReloadMessage {

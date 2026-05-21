@@ -251,7 +251,7 @@ A reference to a scheduled callback. Call `.cancel()` to prevent it from running
 Pulse's internal tracker for asyncio tasks. Tasks created through Pulse's scheduling functions are automatically tracked and cancelled when the render session closes.
 
 **Timer Registry**
-Pulse's internal tracker for scheduled callbacks. Timers created through `later()` and `repeat()` are automatically tracked and cancelled when the render session closes.
+Pulse's internal tracker for scheduled callbacks. Timers created through `later()` and `repeat()` are automatically tracked and cancelled when the render session closes. Route unmounting does not cancel `later()` callbacks.
 
 **Debouncing**
 Delaying an action until a pause in events. Common for search-as-you-type: wait until the user stops typing before searching. Implemented with `later()` and cancelling previous timers.

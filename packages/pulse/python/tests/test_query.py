@@ -3088,6 +3088,94 @@ async def test_query_result_dispose_does_not_cancel_other_observer_fetch():
 
 @pytest.mark.asyncio
 @with_render_session
+async def test_keyed_query_success_skips_disposed_observer():
+	fetch_started = asyncio.Event()
+	release_fetch = asyncio.Event()
+
+	class S(ps.State):
+		name: str
+		success_calls: int = 0
+
+		def __init__(self, name: str):
+			self.name = name
+
+		@ps.query(retries=0, gc_time=10, fetch_on_mount=False)
+		async def data(self) -> str:
+			fetch_started.set()
+			await release_fetch.wait()
+			return "result"
+
+		@data.key
+		def _key(self):
+			return ("shared-success",)
+
+		@data.on_success
+		def _on_success(self, data: str):
+			self.success_calls += 1
+
+	s1 = S("s1")
+	s2 = S("s2")
+	q1 = s1.data
+	q2 = s2.data
+
+	wait_task = asyncio.create_task(q1.refetch())
+	await fetch_started.wait()
+	query_result(q2).dispose()
+
+	release_fetch.set()
+	await wait_task
+	await asyncio.sleep(0)
+
+	assert s1.success_calls == 1
+	assert s2.success_calls == 0
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_keyed_query_error_skips_disposed_observer():
+	fetch_started = asyncio.Event()
+	release_fetch = asyncio.Event()
+
+	class S(ps.State):
+		name: str
+		error_calls: int = 0
+
+		def __init__(self, name: str):
+			self.name = name
+
+		@ps.query(retries=0, gc_time=10)
+		async def data(self) -> str:
+			fetch_started.set()
+			await release_fetch.wait()
+			raise ValueError("boom")
+
+		@data.key
+		def _key(self):
+			return ("shared-error",)
+
+		@data.on_error
+		def _on_error(self, error: Exception):
+			self.error_calls += 1
+
+	s1 = S("s1")
+	s2 = S("s2")
+	q1 = s1.data
+	q2 = s2.data
+
+	wait_task = asyncio.create_task(q1.wait())
+	await fetch_started.wait()
+	query_result(q2).dispose()
+
+	release_fetch.set()
+	await wait_task
+	await asyncio.sleep(0)
+
+	assert s1.error_calls == 1
+	assert s2.error_calls == 0
+
+
+@pytest.mark.asyncio
+@with_render_session
 async def test_query_result_dispose_reschedules_fetch_from_other_observer():
 	"""
 	Test that when the initiating observer disposes mid-fetch, the fetch is cancelled

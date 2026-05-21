@@ -275,7 +275,7 @@ def UserProfile():
 
 4. **Use queries for data fetching**: For most data fetching needs, Pulse queries (covered in the next section) provide a better abstraction than raw async handlers.
 
-5. **Use Pulse's scheduling for timers and tasks**: Instead of `asyncio.create_task()`, use `ps.later()` and `ps.repeat()` for timers. These are automatically cleaned up when the render session closes—no need for manual cancellation in most cases.
+5. **Use Pulse's scheduling for timers and tasks**: Instead of `asyncio.create_task()`, use `ps.later()` and `ps.repeat()` for timers. These are automatically cleaned up when the render session closes. Route unmounting does not cancel `ps.later()` callbacks, so cancel the returned handle when a route-local callback should not run after unmount.
 
 ## See also
 

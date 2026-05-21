@@ -233,11 +233,24 @@ def AppLayout():
 Programmatic navigation (available via `ps.navigate()`).
 
 ```python
-def navigate(path: str) -> None
+def navigate(
+    path: str,
+    *,
+    replace: bool = False,
+    hard: bool = False,
+    force: bool = False,
+) -> None
 ```
 
 **Parameters:**
 - `path` - Target path.
+- `replace` - Replace the current history entry instead of pushing a new one.
+- `hard` - Use a full page reload instead of client-side navigation.
+- `force` - Navigate even if the route that requested navigation has unmounted.
+
+By default, navigation from a route callback is bound to the route that requested it.
+If the user has already left that route by the time an async callback resumes, the
+navigation is ignored. Use `force=True` only for intentionally global navigation.
 
 ```python
 def handle_submit():

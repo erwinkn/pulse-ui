@@ -46,6 +46,11 @@ def later(
 
 `TimerHandleLike` with `.cancel()` method to cancel the scheduled callback.
 
+Route unmounting does not cancel `later()` callbacks. A callback scheduled from a
+route continues to run unless you cancel its handle or the render session/app
+closes. If that callback calls `ps.navigate()`, the navigation remains
+route-bound by default and is ignored after the source route has unmounted.
+
 ### Example
 
 ```python

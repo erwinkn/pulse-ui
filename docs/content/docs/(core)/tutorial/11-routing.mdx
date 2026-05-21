@@ -82,6 +82,11 @@ class LoginState(ps.State):
             ps.navigate("/dashboard")
 ```
 
+`ps.navigate()` is route-bound by default. If the user leaves the route before an
+async handler finishes, the navigation is ignored. Use
+`ps.navigate("/dashboard", force=True)` only when the redirect should still win
+after the route has unmounted.
+
 You can also pass query parameters:
 
 ```python

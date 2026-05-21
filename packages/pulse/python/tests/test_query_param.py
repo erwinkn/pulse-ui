@@ -35,9 +35,17 @@ def make_context(route_info: RouteInfo):
 	route = Route("/", ps.component(render))
 	routes = RouteTree([route])
 	session = RenderSession("test", routes)
-	route_ctx = RouteContext(route_info, route, session)
 	app = ps.App(routes=[route])
+	session.prerender(["/"], route_info)
+	route_ctx = session.route_mounts["/"].route
 	return app, session, route_ctx
+
+
+def flush_query_param_sync(route_ctx: RouteContext) -> None:
+	flush_effects()
+	effect = route_ctx.query_param_sync._state_effect  # pyright: ignore[reportPrivateUsage]
+	if effect is not None:
+		effect.flush()
 
 
 class TestQueryParam:
@@ -52,15 +60,19 @@ class TestQueryParam:
 		session.connect(messages.append)
 
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			assert route_ctx.pathname in session.route_mounts
 			state = QState()
 			assert state.q == "hello"
+			flush_effects()
 			messages.clear()
 			state.q = "next"
-			flush_effects()
+			flush_query_param_sync(route_ctx)
 
 		assert len(messages) == 1
 		msg = messages[0]
 		assert msg["type"] == "navigate_to"
+		assert msg.get("sourceRoutePath") == "/"
+		assert msg.get("sourcePath") == "/"
 		parsed = urlparse(str(msg["path"]))
 		query = parse_qs(parsed.query)
 		assert query["q"] == ["next"]
@@ -110,9 +122,10 @@ class TestQueryParam:
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			state = TagState()
 			assert list(state.tags) == ["a,b", "c\\d"]
+			flush_effects()
 			messages.clear()
 			state.tags = ["x,y", "z\\w"]
-			flush_effects()
+			flush_query_param_sync(route_ctx)
 
 		assert len(messages) == 1
 		msg = messages[0]
@@ -131,9 +144,10 @@ class TestQueryParam:
 
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			state = TagState()
+			flush_effects()
 			messages.clear()
 			state.tags.append("alpha")
-			flush_effects()
+			flush_query_param_sync(route_ctx)
 
 		assert len(messages) == 1
 		msg = messages[0]
@@ -154,9 +168,10 @@ class TestQueryParam:
 
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			state = QState()
+			flush_effects()
 			messages.clear()
 			state.q = "hello"
-			flush_effects()
+			flush_query_param_sync(route_ctx)
 
 		assert len(messages) == 1
 		msg = messages[0]
@@ -186,9 +201,10 @@ class TestQueryParam:
 
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			state = TagState()
+			flush_effects()
 			messages.clear()
 			state.tags = []
-			flush_effects()
+			flush_query_param_sync(route_ctx)
 
 		assert len(messages) == 1
 		msg = messages[0]
@@ -211,7 +227,7 @@ class TestQueryParam:
 			state = QState()
 			messages.clear()
 			state.q = "next"
-			flush_effects()
+			flush_query_param_sync(route_ctx)
 
 		assert len(messages) == 1
 		msg = messages[0]

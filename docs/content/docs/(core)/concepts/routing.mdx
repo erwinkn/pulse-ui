@@ -127,6 +127,10 @@ def login_form():
     return ps.button("Login", onClick=handle_login)
 ```
 
+Navigation from route callbacks is route-bound by default. If an async callback
+resumes after the user has already left the route, the navigation is ignored.
+Use `ps.navigate("/path", force=True)` only for intentionally global redirects.
+
 You can also use `ps.redirect()` to navigate immediately during render (useful for auth guards):
 
 ```python

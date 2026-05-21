@@ -217,7 +217,6 @@ class App:
 	connection_status: ConnectionStatusConfig
 	render_loop_limit: int
 	prerender_queue_timeout: float
-	detach_queue_timeout: float
 	disconnect_queue_timeout: float
 
 	def __init__(
@@ -239,7 +238,6 @@ class App:
 		fastapi: dict[str, Any] | None = None,
 		session_timeout: float = 60.0,
 		prerender_queue_timeout: float = 60.0,
-		detach_queue_timeout: float = 15.0,
 		disconnect_queue_timeout: float = 300.0,
 		connection_status: ConnectionStatusConfig | None = None,
 		render_loop_limit: int = 50,
@@ -295,7 +293,6 @@ class App:
 		self._proxy = None
 		self.session_timeout = session_timeout
 		self.prerender_queue_timeout = prerender_queue_timeout
-		self.detach_queue_timeout = detach_queue_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
 		self.connection_status = connection_status or ConnectionStatusConfig()
 		self.render_loop_limit = render_loop_limit
@@ -1038,7 +1035,10 @@ class App:
 			server_address=self.server_address,
 			client_address=client_address,
 			prerender_queue_timeout=self.prerender_queue_timeout,
-			detach_queue_timeout=self.detach_queue_timeout,
+			# Development React StrictMode replays PulseView effects as
+			# attach -> detach -> attach on first mount. Production should keep the
+			# normal immediate detach semantics; only dev gets a tiny grace window.
+			dev_strict_mode_detach_timeout=0.1 if self.env == "dev" else 0.0,
 			disconnect_queue_timeout=self.disconnect_queue_timeout,
 			render_loop_limit=self.render_loop_limit,
 		)

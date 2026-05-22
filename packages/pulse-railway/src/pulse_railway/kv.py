@@ -376,7 +376,10 @@ class RedisStore(Store):
 	@override
 	async def scan_prefix(self, prefix: str) -> list[str]:
 		keys: list[str] = []
-		async for key in self._ensure_client().scan_iter(match=f"{prefix}*"):
+		async for key in self._ensure_client().scan_iter(
+			match=f"{prefix}*",
+			count=1000,
+		):
 			keys.append(str(key))
 		keys.sort()
 		return keys

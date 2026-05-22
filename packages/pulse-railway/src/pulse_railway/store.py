@@ -8,6 +8,7 @@ from typing import Any, override
 
 from pulse_railway.constants import (
 	DEFAULT_REDIS_PREFIX,
+	DEPLOYMENT_STATE_PENDING,
 	PULSE_KV_KIND,
 	PULSE_KV_PATH,
 	PULSE_KV_URL,
@@ -110,6 +111,21 @@ class DeploymentStore:
 			StoredDeployment(
 				deployment_id=deployment_id,
 				state="active",
+				service_name=service_name,
+				drain_started_at=None,
+			)
+		)
+
+	async def register_deployment(
+		self,
+		*,
+		deployment_id: str,
+		service_name: str,
+	) -> None:
+		await self.save_deployment(
+			StoredDeployment(
+				deployment_id=deployment_id,
+				state=DEPLOYMENT_STATE_PENDING,
 				service_name=service_name,
 				drain_started_at=None,
 			)

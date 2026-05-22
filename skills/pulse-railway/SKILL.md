@@ -155,6 +155,12 @@ Use either the name or ID form for each target, not both.
 - janitor cron service, default `pulse-janitor`
 - latest published official router/janitor GHCR image tags
 
+The router resolves deployments from Redis only. Deploy registers a new backend
+deployment in Redis before checking it through the router with
+`pulse_deployment=<id>`, then promotes it active after the affinity check
+passes. Railway API calls belong to the deploy CLI/control plane, not the
+router request path.
+
 `scaffold` is fresh-only. `ensure` fails on partial baselines instead of repairing missing services; delete partial leftovers and rerun `scaffold`. `deploy` is strict and will not repair missing baseline services.
 
 If the router has no Railway canvas group, grouping reconciliation is skipped.

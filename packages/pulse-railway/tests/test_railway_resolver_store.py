@@ -84,13 +84,17 @@ async def test_resolver_skips_service_refresh_when_active_deployment_is_unchange
 
 
 @pytest.mark.asyncio
-async def test_resolver_only_routes_services_with_matching_deployment_id() -> None:
+async def test_resolver_only_routes_registered_deployments() -> None:
 	class _FakeClient:
+		def __init__(self) -> None:
+			self.service_calls = 0
+
 		async def list_services(
 			self, *, project_id: str, environment_id: str
 		) -> list[ServiceRecord]:
 			assert project_id == "project"
 			assert environment_id == "env"
+			self.service_calls += 1
 			return [
 				ServiceRecord(id="svc-router", name="pulse-router"),
 				ServiceRecord(id="svc-backend", name="pulse-v1"),
@@ -105,11 +109,15 @@ async def test_resolver_only_routes_services_with_matching_deployment_id() -> No
 				return {PULSE_DEPLOYMENT_ID: "v1"}
 			return {}
 
+	client = _FakeClient()
+	store = DeploymentStore(MemoryStore())
+	await store.register_deployment(deployment_id="v1", service_name="pulse-v1")
 	resolver = RailwayResolver(
-		client=_FakeClient(),
+		client=client,
 		project_id="project",
 		environment_id="env",
 		service_prefix="pulse",
+		store=store,
 		cache_ttl_seconds=5.0,
 	)
 
@@ -118,6 +126,27 @@ async def test_resolver_only_routes_services_with_matching_deployment_id() -> No
 
 	assert target is not None
 	assert target.deployment_id == "v1"
+	assert client.service_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_resolver_does_not_discover_unregistered_services() -> None:
+	class _FakeClient:
+		async def list_services(
+			self, *, project_id: str, environment_id: str
+		) -> list[ServiceRecord]:
+			raise AssertionError("router must not use Railway GraphQL discovery")
+
+	resolver = RailwayResolver(
+		client=_FakeClient(),  # pyright: ignore[reportArgumentType]
+		project_id="project",
+		environment_id="env",
+		service_prefix="pulse",
+		store=DeploymentStore(MemoryStore()),
+		cache_ttl_seconds=5.0,
+	)
+
+	assert await resolver.resolve("v1") is None
 
 
 @pytest.mark.asyncio
@@ -164,6 +193,21 @@ async def test_deployment_store_rejects_deleting_active_deployment() -> None:
 
 	assert await store.get_active_deployment() == "v1"
 	assert await store.get_deployment(deployment_id="v1") is not None
+
+
+@pytest.mark.asyncio
+async def test_deployment_store_registers_pending_deployment() -> None:
+	store = DeploymentStore(MemoryStore())
+
+	await store.register_deployment(deployment_id="v2", service_name="pulse-v2")
+
+	deployment = await store.get_deployment("v2")
+	assert deployment is not None
+	assert deployment.deployment_id == "v2"
+	assert deployment.state == "pending"
+	assert deployment.service_name == "pulse-v2"
+	assert deployment.drain_started_at is None
+	assert await store.get_active_deployment() is None
 
 
 @pytest.mark.asyncio

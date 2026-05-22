@@ -265,6 +265,24 @@ async def _promote_deployment(
 	)
 
 
+async def _register_deployment(
+	*,
+	server_address: str,
+	internal_token: str,
+	backend_service_name: str,
+	deployment_id: str,
+) -> None:
+	await _router_control_request(
+		server_address=server_address,
+		internal_token=internal_token,
+		path="register",
+		json_payload={
+			"deployment_id": deployment_id,
+			"service_name": backend_service_name,
+		},
+	)
+
+
 async def _fetch_deployment_meta(
 	session: aiohttp.ClientSession,
 	*,
@@ -584,6 +602,12 @@ async def deploy(
 			overlap_seconds=backend_instance.overlap_seconds,
 			start_command=pulse_start_command(),
 		)
+		await _register_deployment(
+			server_address=server_address,
+			internal_token=stack_state.internal_token,
+			backend_service_name=backend_service_name,
+			deployment_id=deployment_id,
+		)
 		await _wait_for_routed_deployment(
 			server_address=server_address,
 			deployment_id=deployment_id,
@@ -742,6 +766,12 @@ async def _deploy_source(
 					"backend source build failed after railway up: "
 					+ build_deployment["status"].lower()
 				)
+			await _register_deployment(
+				server_address=server_address,
+				internal_token=stack_state.internal_token,
+				backend_service_name=backend_service_name,
+				deployment_id=deployment_id,
+			)
 			await _wait_for_routed_deployment(
 				server_address=server_address,
 				deployment_id=deployment_id,

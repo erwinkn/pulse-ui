@@ -8,11 +8,7 @@ from typing import Any, cast
 
 import httpx
 
-from pulse_railway.constants import (
-	DEFAULT_BACKEND_PORT,
-	PULSE_DEPLOYMENT_ID,
-	RAILWAY_API_ENDPOINT,
-)
+from pulse_railway.constants import DEFAULT_BACKEND_PORT, RAILWAY_API_ENDPOINT
 from pulse_railway.store import DeploymentStore
 
 DEPLOYMENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,23}$")
@@ -1082,8 +1078,6 @@ class RailwayResolver:
 		self._active_cached_at: float = 0.0
 		self._resolved_active_deployment_id: str | None = None
 		self._cached_active_target: RouteTarget | None = None
-		self._cached_deployment_service_names: dict[str, str] = {}
-		self._cached_at: float = 0.0
 
 	async def _refresh_active_deployment(self) -> str | None:
 		if time.monotonic() - self._active_cached_at < self.cache_ttl_seconds:
@@ -1095,42 +1089,12 @@ class RailwayResolver:
 		self._active_cached_at = time.monotonic()
 		return self._cached_active_deployment_id
 
-	async def _refresh_services(self) -> None:
-		if time.monotonic() - self._cached_at < self.cache_ttl_seconds:
-			return
-		services = await self.client.list_services(
-			project_id=self.project_id,
-			environment_id=self.environment_id,
-		)
-		variable_sets = await asyncio.gather(
-			*[
-				self.client.get_service_variables_for_deployment(
-					project_id=self.project_id,
-					environment_id=self.environment_id,
-					service_id=service.id,
-				)
-				for service in services
-			]
-		)
-		self._cached_deployment_service_names = {
-			deployment_id: service.name
-			for service, variables in zip(services, variable_sets, strict=True)
-			for deployment_id in [variables.get(PULSE_DEPLOYMENT_ID)]
-			if deployment_id
-		}
-		self._cached_at = time.monotonic()
-
 	async def resolve(self, deployment_id: str) -> RouteTarget | None:
+		if self.store is None:
+			return None
 		service_name = service_name_for_deployment(self.service_prefix, deployment_id)
-		if self.store is not None:
-			deployment = await self.store.get_deployment(deployment_id=deployment_id)
-			if deployment is not None and deployment.service_name == service_name:
-				return RouteTarget(
-					deployment_id=deployment_id,
-					base_url=f"http://{service_name}.railway.internal:{self.backend_port}",
-				)
-		await self._refresh_services()
-		if self._cached_deployment_service_names.get(deployment_id) != service_name:
+		deployment = await self.store.get_deployment(deployment_id=deployment_id)
+		if deployment is None or deployment.service_name != service_name:
 			return None
 		return RouteTarget(
 			deployment_id=deployment_id,

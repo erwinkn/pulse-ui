@@ -178,6 +178,69 @@ async def test_router_control_endpoint_promotes_deployment() -> None:
 
 
 @pytest.mark.asyncio
+async def test_router_control_endpoint_registers_pending_deployment() -> None:
+	store = MemoryDeploymentStore()
+	await store.set_active(deployment_id="prod-current", service_name="pulse-current")
+	app = build_app(
+		StaticResolver(backends={}),
+		store=store,
+		internal_token="secret-token",
+	)
+	async with AsyncClient(
+		transport=ASGITransport(app=app),
+		base_url="http://testserver",
+	) as client:
+		unauthorized = await client.post(
+			"/_pulse/internal/railway/register",
+			json={},
+		)
+		response = await client.post(
+			"/_pulse/internal/railway/register",
+			headers={INTERNAL_TOKEN_HEADER: "secret-token"},
+			json={
+				"deployment_id": "prod-new",
+				"service_name": "pulse-prod-new",
+			},
+		)
+	await app.state.router.close()
+
+	assert unauthorized.status_code == 404
+	assert response.status_code == 200
+	assert await store.get_active_deployment() == "prod-current"
+	deployment = await store.get_deployment("prod-new")
+	assert deployment is not None
+	assert deployment.state == "pending"
+	assert deployment.service_name == "pulse-prod-new"
+
+
+@pytest.mark.asyncio
+async def test_router_register_rejects_active_deployment() -> None:
+	store = MemoryDeploymentStore()
+	await store.set_active(deployment_id="prod-current", service_name="pulse-current")
+	app = build_app(
+		StaticResolver(backends={}),
+		store=store,
+		internal_token="secret-token",
+	)
+	async with AsyncClient(
+		transport=ASGITransport(app=app),
+		base_url="http://testserver",
+	) as client:
+		response = await client.post(
+			"/_pulse/internal/railway/register",
+			headers={INTERNAL_TOKEN_HEADER: "secret-token"},
+			json={
+				"deployment_id": "prod-current",
+				"service_name": "pulse-current",
+			},
+		)
+	await app.state.router.close()
+
+	assert response.status_code == 400
+	assert await store.get_active_deployment() == "prod-current"
+
+
+@pytest.mark.asyncio
 async def test_router_promote_rejects_active_deployment_in_draining() -> None:
 	store = MemoryDeploymentStore()
 	await store.set_active(deployment_id="prod-current", service_name="pulse-current")

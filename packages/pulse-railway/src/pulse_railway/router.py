@@ -261,6 +261,28 @@ class AffinityRouter:
 			)
 		return JSONResponse({"ok": True})
 
+	async def register_deployment(self, request: Request) -> JSONResponse:
+		self._authorize_internal_request(request)
+		if self.store is None:
+			raise HTTPException(status_code=503, detail="deployment store unavailable")
+		payload = await request.json()
+		deployment_id = payload.get("deployment_id")
+		service_name = payload.get("service_name")
+		if not isinstance(deployment_id, str) or not isinstance(service_name, str):
+			raise HTTPException(
+				status_code=400, detail="deployment registration invalid"
+			)
+		if await self.store.get_active_deployment() == deployment_id:
+			raise HTTPException(
+				status_code=400,
+				detail="active deployment cannot be registered",
+			)
+		await self.store.register_deployment(
+			deployment_id=deployment_id,
+			service_name=service_name,
+		)
+		return JSONResponse({"ok": True})
+
 	async def delete_deployment_state(self, request: Request) -> JSONResponse:
 		self._authorize_internal_request(request)
 		if self.store is None:
@@ -456,6 +478,10 @@ def build_app(
 	@app.post(f"{INTERNAL_API_PREFIX}/railway/promote")
 	async def promote_deployment(request: Request) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
 		return await router.promote_deployment(request)
+
+	@app.post(f"{INTERNAL_API_PREFIX}/railway/register")
+	async def register_deployment(request: Request) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
+		return await router.register_deployment(request)
 
 	@app.post(f"{INTERNAL_API_PREFIX}/railway/delete")
 	async def delete_deployment_state(request: Request) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]

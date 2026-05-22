@@ -49,6 +49,14 @@ from pulse_railway.constants import (
 	PULSE_RAILWAY_REDIS_SERVICE,
 	PULSE_RAILWAY_SERVICE,
 )
+from pulse_railway.control import (
+	DrainingDeployment,
+	delete_deployment_state,
+	deployment_store_from_env,
+	get_active_deployment,
+	promote_deployment,
+	register_deployment,
+)
 from pulse_railway.deployment import (
 	delete_deployment,
 	redeploy_deployment,
@@ -74,6 +82,15 @@ JANITOR_RUN_RUNTIME_ERROR = (
 	"RAILWAY_SERVICE_ID, RAILWAY_REPLICA_ID, or RAILWAY_PRIVATE_DOMAIN. "
 	"Run it from the deployed janitor cron service, not a local shell."
 )
+CONTROL_RUN_DESCRIPTION = (
+	"Run private deployment-control mutations inside the Railway router service. "
+	"This command writes Redis state directly and fails outside Railway."
+)
+CONTROL_RUN_RUNTIME_ERROR = (
+	"pulse-railway control must execute inside Railway. "
+	"Run it through `railway ssh --service <router> -- pulse-railway control ...`, "
+	"not from a local shell."
+)
 
 
 def _running_on_railway() -> bool:
@@ -84,6 +101,12 @@ def _require_railway_runtime() -> None:
 	if _running_on_railway():
 		return
 	raise SystemExit(JANITOR_RUN_RUNTIME_ERROR)
+
+
+def _require_control_runtime() -> None:
+	if _running_on_railway():
+		return
+	raise SystemExit(CONTROL_RUN_RUNTIME_ERROR)
 
 
 def _print_janitor_result(result: JanitorResult) -> None:
@@ -240,6 +263,37 @@ def _add_janitor_run_args(parser: argparse.ArgumentParser) -> None:
 	)
 
 
+def _add_control_args(parser: argparse.ArgumentParser) -> None:
+	parser.description = CONTROL_RUN_DESCRIPTION
+	control_subparsers = parser.add_subparsers(
+		dest="control_command",
+		required=True,
+	)
+
+	control_subparsers.add_parser("active", help="Print active deployment JSON.")
+
+	register_parser = control_subparsers.add_parser(
+		"register",
+		help="Register a pending deployment in Redis.",
+	)
+	register_parser.add_argument("--deployment-id", required=True)
+	register_parser.add_argument("--service-name", required=True)
+
+	promote_parser = control_subparsers.add_parser(
+		"promote",
+		help="Promote a deployment and mark previous deployments draining.",
+	)
+	promote_parser.add_argument("--active-deployment-id", required=True)
+	promote_parser.add_argument("--active-service-name", required=True)
+	promote_parser.add_argument("--draining-json", default="[]")
+
+	delete_parser = control_subparsers.add_parser(
+		"delete",
+		help="Delete inactive deployment state from Redis.",
+	)
+	delete_parser.add_argument("--deployment-id", required=True)
+
+
 async def _named_railway_project(args: argparse.Namespace) -> RailwayProject:
 	token = args.token or railway_access_token()
 	if not token:
@@ -308,6 +362,75 @@ async def _run_janitor_run(args: argparse.Namespace) -> int:
 	return 0
 
 
+def _parse_draining_deployments(value: str) -> list[DrainingDeployment]:
+	try:
+		payload = json.loads(value)
+	except ValueError as exc:
+		raise ValueError("draining-json must be valid JSON") from exc
+	if not isinstance(payload, list):
+		raise ValueError("draining-json must be a JSON list")
+	deployments: list[DrainingDeployment] = []
+	for item in payload:
+		if not isinstance(item, dict):
+			raise ValueError("draining-json entries must be objects")
+		deployment_id = item.get("deployment_id")
+		service_name = item.get("service_name")
+		drain_started_at = item.get("drain_started_at")
+		if not isinstance(deployment_id, str) or not isinstance(service_name, str):
+			raise ValueError(
+				"draining-json entries require deployment_id and service_name"
+			)
+		if drain_started_at is not None:
+			if not isinstance(drain_started_at, str | int | float):
+				raise ValueError("drain_started_at must be numeric")
+			drain_started_at = float(drain_started_at)
+		deployments.append(
+			DrainingDeployment(
+				deployment_id=deployment_id,
+				service_name=service_name,
+				drain_started_at=drain_started_at,
+			)
+		)
+	return deployments
+
+
+async def _run_control(args: argparse.Namespace) -> int:
+	_require_control_runtime()
+	store = deployment_store_from_env()
+	try:
+		if args.control_command == "active":
+			deployment_id = await get_active_deployment(store)
+			print(json.dumps({"deployment_id": deployment_id}, sort_keys=True))
+			return 0
+		if args.control_command == "register":
+			await register_deployment(
+				store,
+				deployment_id=validate_deployment_id(args.deployment_id),
+				service_name=args.service_name,
+			)
+			print(json.dumps({"ok": True}, sort_keys=True))
+			return 0
+		if args.control_command == "promote":
+			await promote_deployment(
+				store,
+				active_deployment_id=validate_deployment_id(args.active_deployment_id),
+				active_service_name=args.active_service_name,
+				draining=_parse_draining_deployments(args.draining_json),
+			)
+			print(json.dumps({"ok": True}, sort_keys=True))
+			return 0
+		if args.control_command == "delete":
+			await delete_deployment_state(
+				store,
+				deployment_id=validate_deployment_id(args.deployment_id),
+			)
+			print(json.dumps({"ok": True}, sort_keys=True))
+			return 0
+	finally:
+		await store.close()
+	return 1
+
+
 def main() -> None:
 	parser = argparse.ArgumentParser(prog="pulse-railway")
 	subparsers = parser.add_subparsers(dest="command", required=True)
@@ -341,6 +464,13 @@ def main() -> None:
 	)
 	_add_janitor_run_args(janitor_run_parser)
 
+	control_parser = subparsers.add_parser(
+		"control",
+		help="Private deployment-control commands for Railway runtime.",
+		description=CONTROL_RUN_DESCRIPTION,
+	)
+	_add_control_args(control_parser)
+
 	args = parser.parse_args()
 	if args.command == "scaffold":
 		raise SystemExit(asyncio.run(_run_scaffold(args)))
@@ -356,12 +486,16 @@ def main() -> None:
 		raise SystemExit(asyncio.run(_run_redeploy(args)))
 	if args.command == "janitor" and args.janitor_command == "run":
 		raise SystemExit(asyncio.run(_run_janitor_run(args)))
+	if args.command == "control":
+		raise SystemExit(asyncio.run(_run_control(args)))
 	raise SystemExit(1)
 
 
 __all__ = [
 	"JANITOR_RUN_DESCRIPTION",
 	"JANITOR_RUN_RUNTIME_ERROR",
+	"CONTROL_RUN_DESCRIPTION",
+	"CONTROL_RUN_RUNTIME_ERROR",
 	"_add_deploy_args",
 	"_add_ensure_args",
 	"_add_janitor_run_args",
@@ -370,6 +504,7 @@ __all__ = [
 	"_add_scaffold_args",
 	"_print_janitor_result",
 	"_run_delete",
+	"_run_control",
 	"_run_deploy",
 	"_run_ensure",
 	"_run_janitor_run",

@@ -1,6 +1,6 @@
 [project]
 name = "pulse-railway"
-version = "0.3.4"
+version = "0.3.5"
 description = "Railway deployment utilities for Pulse applications"
 readme = "README.md"
 authors = [{ name = "Erwin Kuhn", email = "erwin.kuhn@protonmail.com" }]

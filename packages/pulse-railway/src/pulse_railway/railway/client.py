@@ -1055,15 +1055,15 @@ class RailwayResolver:
 	def __init__(
 		self,
 		*,
-		client: RailwayGraphQLClient,
-		project_id: str,
-		environment_id: str,
-		service_prefix: str | None,
+		client: RailwayGraphQLClient | None = None,
+		project_id: str = "",
+		environment_id: str = "",
+		service_prefix: str | None = None,
 		store: DeploymentStore | None = None,
 		backend_port: int = DEFAULT_BACKEND_PORT,
 		cache_ttl_seconds: float = 5.0,
 	) -> None:
-		self.client: RailwayGraphQLClient = client
+		self.client: RailwayGraphQLClient | None = client
 		self.project_id: str = project_id
 		self.environment_id: str = environment_id
 		self.service_prefix: str | None = (

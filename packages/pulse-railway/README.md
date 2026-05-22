@@ -89,7 +89,8 @@ By default, `pulse-railway deploy` uses source mode. Image deployments require `
 - Newly deployed backends are registered in Redis before router health checks
 - Before janitor deletion, the backend broadcasts Pulse `reload` to connected clients
 - Websocket reconnects with stale affinity fall back to the active deployment so the app can trigger a full-page reload
-- The router resolves deployments from Redis only; Railway API calls stay in the deploy CLI/control plane.
+- The router resolves deployments from Redis only; Railway API calls stay in the deploy CLI/control plane
+- Deployment control state is mutated by running `pulse-railway control` inside the private router service with `railway ssh`, not through public HTTP routes
 
 ## Runtime
 
@@ -103,6 +104,7 @@ If your app opts into `pulse_railway.RailwaySessionStore()`:
 When the baseline stack has Redis configured:
 
 - deploy registers the new backend deployment in Redis
+- deploy performs Redis control-plane writes from inside the router service, where the private Redis URL is available
 - deploy verifies the registered backend through the router with explicit affinity
 - deploy marks the new deployment `active`
 - previous active deployments become `draining`

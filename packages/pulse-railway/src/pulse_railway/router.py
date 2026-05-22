@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
@@ -22,22 +21,16 @@ from pulse_railway.constants import (
 	DEFAULT_REDIS_PREFIX,
 	DEFAULT_ROUTER_HEALTH_PATH,
 	INTERNAL_API_PREFIX,
-	INTERNAL_TOKEN_HEADER,
 	PULSE_INTERNAL_TOKEN,
 	PULSE_REDIS_PREFIX,
 	PULSE_SERVICE_PREFIX,
-	RAILWAY_ENVIRONMENT_ID,
-	RAILWAY_PROJECT_ID,
-	RAILWAY_TOKEN,
 	STALE_AFFINITY_RELOAD_QUERY_PARAM,
 )
 from pulse_railway.railway.client import (
-	RailwayGraphQLClient,
 	RailwayResolver,
 	RouteTarget,
 )
 from pulse_railway.store import (
-	ActiveDeploymentError,
 	DeploymentStore,
 	kv_store_spec_from_env,
 )
@@ -175,140 +168,6 @@ class AffinityRouter:
 			raise
 
 	async def health(self) -> JSONResponse:
-		return JSONResponse({"ok": True})
-
-	def _authorize_internal_request(self, request: Request) -> None:
-		header = request.headers.get(INTERNAL_TOKEN_HEADER)
-		if not self.internal_token or header is None:
-			raise HTTPException(status_code=404, detail="not found")
-		if not hmac.compare_digest(header, self.internal_token):
-			raise HTTPException(status_code=404, detail="not found")
-
-	async def active_deployment(self, request: Request) -> JSONResponse:
-		self._authorize_internal_request(request)
-		if self.store is None:
-			raise HTTPException(status_code=503, detail="deployment store unavailable")
-		return JSONResponse({"deployment_id": await self.store.get_active_deployment()})
-
-	async def promote_deployment(self, request: Request) -> JSONResponse:
-		self._authorize_internal_request(request)
-		if self.store is None:
-			raise HTTPException(status_code=503, detail="deployment store unavailable")
-		payload = await request.json()
-		active = payload.get("active")
-		if not isinstance(active, dict):
-			raise HTTPException(status_code=400, detail="active deployment required")
-		active_deployment_id = active.get("deployment_id")
-		active_service_name = active.get("service_name")
-		if not isinstance(active_deployment_id, str) or not isinstance(
-			active_service_name, str
-		):
-			raise HTTPException(status_code=400, detail="active deployment invalid")
-		draining = payload.get("draining", [])
-		if not isinstance(draining, list):
-			raise HTTPException(status_code=400, detail="draining deployments invalid")
-		draining_records: list[tuple[str, str, float | None]] = []
-		draining_deployment_ids: set[str] = set()
-		for item in draining:
-			if not isinstance(item, dict):
-				raise HTTPException(
-					status_code=400, detail="draining deployment invalid"
-				)
-			deployment_id = item.get("deployment_id")
-			service_name = item.get("service_name")
-			drain_started_at = item.get("drain_started_at")
-			if not isinstance(deployment_id, str) or not isinstance(service_name, str):
-				raise HTTPException(
-					status_code=400, detail="draining deployment invalid"
-				)
-			if deployment_id == active_deployment_id:
-				raise HTTPException(
-					status_code=400,
-					detail="active deployment cannot be draining",
-				)
-			if deployment_id in draining_deployment_ids:
-				raise HTTPException(
-					status_code=400,
-					detail="duplicate draining deployment",
-				)
-			draining_deployment_ids.add(deployment_id)
-			drain_started_at_float: float | None = None
-			if drain_started_at is not None:
-				if not isinstance(drain_started_at, str | int | float):
-					raise HTTPException(
-						status_code=400,
-						detail="draining deployment drain_started_at invalid",
-					)
-				try:
-					drain_started_at_float = float(drain_started_at)
-				except ValueError as exc:
-					raise HTTPException(
-						status_code=400,
-						detail="draining deployment drain_started_at invalid",
-					) from exc
-			draining_records.append(
-				(deployment_id, service_name, drain_started_at_float)
-			)
-		existing_deployments = await self.store.list_deployments()
-		await self.store.set_active(
-			deployment_id=active_deployment_id,
-			service_name=active_service_name,
-		)
-		for deployment_id, service_name, drain_started_at in draining_records:
-			await self.store.mark_draining(
-				deployment_id=deployment_id,
-				service_name=service_name,
-				now=drain_started_at,
-			)
-		for deployment in existing_deployments:
-			if (
-				deployment.deployment_id != active_deployment_id
-				and deployment.deployment_id not in draining_deployment_ids
-				and deployment.state != "draining"
-			):
-				await self.store.mark_draining(
-					deployment_id=deployment.deployment_id,
-					service_name=deployment.service_name,
-				)
-		return JSONResponse({"ok": True})
-
-	async def register_deployment(self, request: Request) -> JSONResponse:
-		self._authorize_internal_request(request)
-		if self.store is None:
-			raise HTTPException(status_code=503, detail="deployment store unavailable")
-		payload = await request.json()
-		deployment_id = payload.get("deployment_id")
-		service_name = payload.get("service_name")
-		if not isinstance(deployment_id, str) or not isinstance(service_name, str):
-			raise HTTPException(
-				status_code=400, detail="deployment registration invalid"
-			)
-		if await self.store.get_active_deployment() == deployment_id:
-			raise HTTPException(
-				status_code=400,
-				detail="active deployment cannot be registered",
-			)
-		await self.store.register_deployment(
-			deployment_id=deployment_id,
-			service_name=service_name,
-		)
-		return JSONResponse({"ok": True})
-
-	async def delete_deployment_state(self, request: Request) -> JSONResponse:
-		self._authorize_internal_request(request)
-		if self.store is None:
-			raise HTTPException(status_code=503, detail="deployment store unavailable")
-		payload = await request.json()
-		deployment_id = payload.get("deployment_id")
-		if not isinstance(deployment_id, str):
-			raise HTTPException(status_code=400, detail="deployment_id required")
-		try:
-			await self.store.delete_inactive_deployment(deployment_id=deployment_id)
-		except ActiveDeploymentError as exc:
-			raise HTTPException(
-				status_code=400,
-				detail="active deployment cannot be deleted",
-			) from exc
 		return JSONResponse({"ok": True})
 
 	@staticmethod
@@ -482,22 +341,6 @@ def build_app(
 	async def healthz() -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
 		return await router.health()
 
-	@app.get(f"{INTERNAL_API_PREFIX}/railway/active")
-	async def active_deployment(request: Request) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
-		return await router.active_deployment(request)
-
-	@app.post(f"{INTERNAL_API_PREFIX}/railway/promote")
-	async def promote_deployment(request: Request) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
-		return await router.promote_deployment(request)
-
-	@app.post(f"{INTERNAL_API_PREFIX}/railway/register")
-	async def register_deployment(request: Request) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
-		return await router.register_deployment(request)
-
-	@app.post(f"{INTERNAL_API_PREFIX}/railway/delete")
-	async def delete_deployment_state(request: Request) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
-		return await router.delete_deployment_state(request)
-
 	@app.api_route(
 		"/{path:path}",
 		methods=["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"],
@@ -513,13 +356,6 @@ def build_app(
 
 
 def build_app_from_env() -> FastAPI:
-	token = os.environ.get(RAILWAY_TOKEN)
-	project_id = os.environ.get(RAILWAY_PROJECT_ID)
-	environment_id = os.environ.get(RAILWAY_ENVIRONMENT_ID)
-	if not token or not project_id or not environment_id:
-		raise RuntimeError(
-			f"missing required env vars: {RAILWAY_TOKEN}, {RAILWAY_PROJECT_ID}, {RAILWAY_ENVIRONMENT_ID}"
-		)
 	store = None
 	spec = kv_store_spec_from_env(dict(os.environ))
 	if spec is None:
@@ -529,11 +365,10 @@ def build_app_from_env() -> FastAPI:
 		prefix=os.environ.get(PULSE_REDIS_PREFIX, DEFAULT_REDIS_PREFIX),
 		owns_store=True,
 	)
-	client = RailwayGraphQLClient(token=token)
 	resolver = RailwayResolver(
-		client=client,
-		project_id=project_id,
-		environment_id=environment_id,
+		client=None,
+		project_id="",
+		environment_id="",
 		service_prefix=os.environ.get(PULSE_SERVICE_PREFIX),
 		store=store,
 		backend_port=DEFAULT_BACKEND_PORT,

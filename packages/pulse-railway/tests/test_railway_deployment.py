@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +72,19 @@ def _write_app_fixture(
 	)
 
 
+def _control_commands(calls: list[dict[str, Any]]) -> list[str]:
+	return [call["control_args"][0] for call in calls]
+
+
+def _control_arg(call: dict[str, Any], name: str) -> str:
+	control_args = call["control_args"]
+	return control_args[control_args.index(name) + 1]
+
+
+def _control_draining(call: dict[str, Any]) -> list[dict[str, Any]]:
+	return json.loads(_control_arg(call, "--draining-json"))
+
+
 @pytest.fixture(autouse=True)
 def _stub_pulse_env_reference_variables(monkeypatch: pytest.MonkeyPatch) -> None:
 	async def fake_pulse_env_reference_variables(
@@ -88,15 +102,15 @@ def _stub_pulse_env_reference_variables(monkeypatch: pytest.MonkeyPatch) -> None
 def router_control_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 	calls: list[dict[str, Any]] = []
 
-	async def fake_router_control_request(**kwargs: Any) -> dict[str, object]:
+	async def fake_run_router_control_command(**kwargs: Any) -> dict[str, object]:
 		calls.append(kwargs)
-		if kwargs["path"] == "active":
+		if kwargs["control_args"] == ["active"]:
 			return {"deployment_id": "prod-260402-120000"}
 		return {"ok": True}
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment._router_control_request",
-		fake_router_control_request,
+		"pulse_railway.deployment._run_router_control_command",
+		fake_run_router_control_command,
 	)
 	return calls
 
@@ -634,7 +648,7 @@ async def test_delete_deployment_rejects_active_before_service_delete(
 			deployment_id="prod-260402-120000",
 		)
 
-	assert [call["path"] for call in router_control_calls] == ["active"]
+	assert _control_commands(router_control_calls) == ["active"]
 
 
 @pytest.mark.asyncio
@@ -644,16 +658,16 @@ async def test_delete_deployment_clears_router_state_then_deletes_inactive_servi
 	events: list[tuple[str, str]] = []
 	router_control_calls: list[dict[str, Any]] = []
 
-	async def fake_router_control_request(**kwargs: Any) -> dict[str, object]:
+	async def fake_run_router_control_command(**kwargs: Any) -> dict[str, object]:
 		router_control_calls.append(kwargs)
-		if kwargs["path"] == "active":
+		if kwargs["control_args"] == ["active"]:
 			return {"deployment_id": "prod-260402-120000"}
-		events.append(("router_delete", kwargs["json_payload"]["deployment_id"]))
+		events.append(("router_delete", _control_arg(kwargs, "--deployment-id")))
 		return {"ok": True}
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment._router_control_request",
-		fake_router_control_request,
+		"pulse_railway.deployment._run_router_control_command",
+		fake_run_router_control_command,
 	)
 
 	class _FakeClient:
@@ -704,8 +718,8 @@ async def test_delete_deployment_clears_router_state_then_deletes_inactive_servi
 		deployment_id="prod-old",
 	)
 
-	assert [call["path"] for call in router_control_calls] == ["active", "delete"]
-	assert router_control_calls[-1]["json_payload"] == {"deployment_id": "prod-old"}
+	assert _control_commands(router_control_calls) == ["active", "delete"]
+	assert _control_arg(router_control_calls[-1], "--deployment-id") == "prod-old"
 	assert events == [("router_delete", "prod-old"), ("delete_service", "svc-old")]
 
 
@@ -753,14 +767,14 @@ async def test_delete_deployment_keeps_service_when_router_state_delete_fails(
 		fake_inspect_stack,
 	)
 
-	async def fake_router_control_request(**kwargs: Any) -> dict[str, object]:
-		if kwargs["path"] == "active":
+	async def fake_run_router_control_command(**kwargs: Any) -> dict[str, object]:
+		if kwargs["control_args"] == ["active"]:
 			return {"deployment_id": "prod-260402-120000"}
 		raise DeploymentError("router delete failed")
 
 	monkeypatch.setattr(
-		"pulse_railway.deployment._router_control_request",
-		fake_router_control_request,
+		"pulse_railway.deployment._run_router_control_command",
+		fake_run_router_control_command,
 	)
 
 	with pytest.raises(DeploymentError, match="router delete failed"):
@@ -1002,9 +1016,9 @@ async def test_deploy_happy_path_on_ready_stack(
 	assert result.janitor_deployment_id is None
 	assert result.server_address == "https://test.pulse.sc"
 	assert group_updates == [("env", result.backend_service_id, "group-baseline")]
-	assert router_control_calls[-1]["path"] == "promote"
-	assert router_control_calls[-1]["server_address"] == "https://test.pulse.sc"
-	assert router_control_calls[-1]["internal_token"] == "secret-token"
+	assert router_control_calls[-1]["router_service_name"] == "pulse-router"
+	assert router_control_calls[-1]["cli_token_env_name"] is None
+	assert router_control_calls[-1]["control_args"][0] == "promote"
 	assert routed_health_checks == [
 		{
 			"server_address": "https://test.pulse.sc",
@@ -1017,12 +1031,16 @@ async def test_deploy_happy_path_on_ready_stack(
 			"use_affinity": False,
 		},
 	]
-	payload = router_control_calls[-1]["json_payload"]
-	assert payload["active"] == {
-		"deployment_id": "prod-260402-120000",
-		"service_name": "prod-260402-120000",
+	assert _control_arg(router_control_calls[-1], "--active-deployment-id") == (
+		"prod-260402-120000"
+	)
+	assert _control_arg(router_control_calls[-1], "--active-service-name") == (
+		"prod-260402-120000"
+	)
+	draining = {
+		item["deployment_id"]: item
+		for item in _control_draining(router_control_calls[-1])
 	}
-	draining = {item["deployment_id"]: item for item in payload["draining"]}
 	assert draining["prod-prev"] == {
 		"deployment_id": "prod-prev",
 		"service_name": "pulse-prod-prev",
@@ -1304,7 +1322,9 @@ async def test_deploy_source_happy_path_on_ready_stack(
 			"RAILWAY_DOCKERFILE_PATH": "examples/Dockerfile",
 		}
 	]
-	assert router_control_calls[-1]["path"] == "promote"
+	assert router_control_calls[-1]["router_service_name"] == "pulse-router"
+	assert router_control_calls[-1]["cli_token_env_name"] == "RAILWAY_TOKEN"
+	assert router_control_calls[-1]["control_args"][0] == "promote"
 	assert routed_health_checks == [
 		{
 			"server_address": "https://test.pulse.sc",
@@ -1317,12 +1337,16 @@ async def test_deploy_source_happy_path_on_ready_stack(
 			"use_affinity": False,
 		},
 	]
-	payload = router_control_calls[-1]["json_payload"]
-	assert payload["active"] == {
-		"deployment_id": "prod-260402-120000",
-		"service_name": "prod-260402-120000",
+	assert _control_arg(router_control_calls[-1], "--active-deployment-id") == (
+		"prod-260402-120000"
+	)
+	assert _control_arg(router_control_calls[-1], "--active-service-name") == (
+		"prod-260402-120000"
+	)
+	draining = {
+		item["deployment_id"]: item
+		for item in _control_draining(router_control_calls[-1])
 	}
-	draining = {item["deployment_id"]: item for item in payload["draining"]}
 	assert draining["prod-prev"] == {
 		"deployment_id": "prod-prev",
 		"service_name": "pulse-prod-prev",

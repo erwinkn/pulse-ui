@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import shlex
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,8 +27,6 @@ from pulse_railway.config import (
 from pulse_railway.constants import (
 	DEPLOYMENT_META_PATH,
 	DEPLOYMENT_STATE_DRAINING,
-	INTERNAL_API_PREFIX,
-	INTERNAL_TOKEN_HEADER,
 	RAILWAY_API_TOKEN,
 	RAILWAY_TOKEN,
 )
@@ -224,12 +224,88 @@ async def _run_command(
 		)
 
 
+async def _run_command_output(
+	*args: str,
+	cwd: Path | None = None,
+	env_vars: dict[str, str] | None = None,
+) -> str:
+	process_env = os.environ.copy()
+	if env_vars is not None:
+		process_env.pop(RAILWAY_TOKEN, None)
+		process_env.pop(RAILWAY_API_TOKEN, None)
+		process_env.update(env_vars)
+	process = await asyncio.create_subprocess_exec(
+		*args,
+		cwd=str(cwd) if cwd is not None else None,
+		env=process_env,
+		stdout=asyncio.subprocess.PIPE,
+		stderr=asyncio.subprocess.PIPE,
+	)
+	stdout, stderr = await process.communicate()
+	if process.returncode != 0:
+		raise DeploymentError(
+			f"command failed ({' '.join(args)}):\n{stdout.decode()}{stderr.decode()}"
+		)
+	return stdout.decode()
+
+
+async def _resolve_cli_token_env_name(
+	project: RailwayProject,
+	cli_token_env_name: str | None,
+) -> str:
+	if cli_token_env_name is not None:
+		return cli_token_env_name
+	async with RailwayGraphQLClient(token=project.token) as client:
+		return railway_cli_token_env_name_for_auth_mode(
+			await client.resolve_auth_mode()
+		)
+
+
+async def _run_router_control_command(
+	*,
+	project: RailwayProject,
+	router_service_name: str,
+	cli_token_env_name: str | None,
+	control_args: list[str],
+) -> dict[str, object]:
+	resolved_cli_token_env_name = await _resolve_cli_token_env_name(
+		project,
+		cli_token_env_name,
+	)
+	stdout = await _run_command_output(
+		"railway",
+		"ssh",
+		"--project",
+		project.project_id,
+		"--environment",
+		project.environment_id,
+		"--service",
+		router_service_name,
+		"--",
+		shlex.join(["pulse-railway", "control", *control_args]),
+		env_vars=railway_cli_token_env(
+			project.token,
+			env_name=resolved_cli_token_env_name,
+		),
+	)
+	try:
+		stdout_lines = [line for line in stdout.splitlines() if line.strip()]
+		payload = json.loads(stdout_lines[-1] if stdout_lines else "")
+	except ValueError as exc:
+		raise DeploymentError(
+			f"router control command returned invalid JSON: {stdout}"
+		) from exc
+	if not isinstance(payload, dict):
+		raise DeploymentError("router control command returned invalid JSON")
+	return payload
+
+
 async def _promote_deployment(
 	client: RailwayGraphQLClient,
 	*,
 	project: RailwayProject,
-	server_address: str,
-	internal_token: str,
+	router_service_name: str,
+	cli_token_env_name: str | None,
 	backend_service_name: str,
 	deployment_id: str,
 ) -> None:
@@ -238,48 +314,57 @@ async def _promote_deployment(
 		project=project,
 	)
 	drain_started_at = datetime.now(UTC).timestamp()
-	await _router_control_request(
-		server_address=server_address,
-		internal_token=internal_token,
-		path="promote",
-		json_payload={
-			"active": {
-				"deployment_id": deployment_id,
-				"service_name": backend_service_name,
-			},
-			"draining": [
-				{
-					"deployment_id": service.deployment_id,
-					"service_name": service.service_name,
-					"drain_started_at": (
-						service.drain_started_at
-						if service.state == DEPLOYMENT_STATE_DRAINING
-						and service.drain_started_at is not None
-						else drain_started_at
-					),
-				}
-				for service in deployment_services
-				if service.deployment_id != deployment_id
-			],
-		},
+	await _run_router_control_command(
+		project=project,
+		router_service_name=router_service_name,
+		cli_token_env_name=cli_token_env_name,
+		control_args=[
+			"promote",
+			"--active-deployment-id",
+			deployment_id,
+			"--active-service-name",
+			backend_service_name,
+			"--draining-json",
+			json.dumps(
+				[
+					{
+						"deployment_id": service.deployment_id,
+						"service_name": service.service_name,
+						"drain_started_at": (
+							service.drain_started_at
+							if service.state == DEPLOYMENT_STATE_DRAINING
+							and service.drain_started_at is not None
+							else drain_started_at
+						),
+					}
+					for service in deployment_services
+					if service.deployment_id != deployment_id
+				],
+				separators=(",", ":"),
+			),
+		],
 	)
 
 
 async def _register_deployment(
 	*,
-	server_address: str,
-	internal_token: str,
+	project: RailwayProject,
+	router_service_name: str,
+	cli_token_env_name: str | None,
 	backend_service_name: str,
 	deployment_id: str,
 ) -> None:
-	await _router_control_request(
-		server_address=server_address,
-		internal_token=internal_token,
-		path="register",
-		json_payload={
-			"deployment_id": deployment_id,
-			"service_name": backend_service_name,
-		},
+	await _run_router_control_command(
+		project=project,
+		router_service_name=router_service_name,
+		cli_token_env_name=cli_token_env_name,
+		control_args=[
+			"register",
+			"--deployment-id",
+			deployment_id,
+			"--service-name",
+			backend_service_name,
+		],
 	)
 
 
@@ -336,50 +421,23 @@ async def _wait_for_routed_deployment(
 	)
 
 
-async def _router_control_request(
+async def _get_active_deployment_from_control(
 	*,
-	server_address: str,
-	internal_token: str,
-	path: str,
-	method: str = "POST",
-	json_payload: dict[str, object] | None = None,
-) -> dict[str, object]:
-	url = f"{server_address.rstrip('/')}{INTERNAL_API_PREFIX}/railway/{path}"
-	async with aiohttp.ClientSession(
-		timeout=aiohttp.ClientTimeout(total=30, sock_connect=10)
-	) as session:
-		async with session.request(
-			method,
-			url,
-			headers={INTERNAL_TOKEN_HEADER: internal_token},
-			json=json_payload,
-		) as response:
-			payload = await response.json(content_type=None)
-			if response.status >= 400:
-				raise DeploymentError(
-					f"router control request failed ({response.status}): {payload}"
-				)
-			if not isinstance(payload, dict):
-				raise DeploymentError("router control request returned invalid JSON")
-			return payload
-
-
-async def _get_active_deployment_from_router(
-	*,
-	server_address: str,
-	internal_token: str,
+	project: RailwayProject,
+	router_service_name: str,
+	cli_token_env_name: str | None,
 ) -> str | None:
-	payload = await _router_control_request(
-		server_address=server_address,
-		internal_token=internal_token,
-		path="active",
-		method="GET",
+	payload = await _run_router_control_command(
+		project=project,
+		router_service_name=router_service_name,
+		cli_token_env_name=cli_token_env_name,
+		control_args=["active"],
 	)
 	deployment_id = payload.get("deployment_id")
 	if deployment_id is None:
 		return None
 	if not isinstance(deployment_id, str):
-		raise DeploymentError("router returned invalid active deployment")
+		raise DeploymentError("router control returned invalid active deployment")
 	return deployment_id
 
 
@@ -455,13 +513,15 @@ async def redeploy_deployment(
 	*,
 	project: RailwayProject,
 	deployment_id: str | None = None,
+	cli_token_env_name: str | None = None,
 ) -> RedeployResult:
 	resolved_deployment_id = deployment_id
 	if resolved_deployment_id is None:
 		stack_state = await inspect_stack(project=project)
-		resolved_deployment_id = await _get_active_deployment_from_router(
-			server_address=project.server_address or stack_state.server_address,
-			internal_token=stack_state.internal_token,
+		resolved_deployment_id = await _get_active_deployment_from_control(
+			project=project,
+			router_service_name=stack_state.router.service_name,
+			cli_token_env_name=cli_token_env_name,
 		)
 	async with RailwayGraphQLClient(token=project.token) as client:
 		if resolved_deployment_id is None:
@@ -603,29 +663,36 @@ async def deploy(
 			start_command=pulse_start_command(),
 		)
 		await _register_deployment(
-			server_address=server_address,
-			internal_token=stack_state.internal_token,
+			project=project,
+			router_service_name=stack_state.router.service_name,
+			cli_token_env_name=cli_token_env_name,
 			backend_service_name=backend_service_name,
 			deployment_id=deployment_id,
 		)
 		await _wait_for_routed_deployment(
-			server_address=server_address,
+			server_address=stack_state.server_address,
 			deployment_id=deployment_id,
 			use_affinity=True,
 		)
 		await _promote_deployment(
 			client,
 			project=project,
-			server_address=server_address,
-			internal_token=stack_state.internal_token,
+			router_service_name=stack_state.router.service_name,
+			cli_token_env_name=cli_token_env_name,
 			backend_service_name=backend_service_name,
 			deployment_id=deployment_id,
 		)
 		await _wait_for_routed_deployment(
-			server_address=server_address,
+			server_address=stack_state.server_address,
 			deployment_id=deployment_id,
 			use_affinity=False,
 		)
+		if server_address != stack_state.server_address:
+			await _wait_for_routed_deployment(
+				server_address=server_address,
+				deployment_id=deployment_id,
+				use_affinity=False,
+			)
 		return DeployResult(
 			deployment_id=deployment_id,
 			backend_service_id=backend_service_id,
@@ -767,30 +834,37 @@ async def _deploy_source(
 					+ build_deployment["status"].lower()
 				)
 			await _register_deployment(
-				server_address=server_address,
-				internal_token=stack_state.internal_token,
+				project=project,
+				router_service_name=stack_state.router.service_name,
+				cli_token_env_name=resolved_cli_token_env_name,
 				backend_service_name=backend_service_name,
 				deployment_id=deployment_id,
 			)
 			await _wait_for_routed_deployment(
-				server_address=server_address,
+				server_address=stack_state.server_address,
 				deployment_id=deployment_id,
 				use_affinity=True,
 			)
 			await _promote_deployment(
 				client,
 				project=project,
-				server_address=server_address,
-				internal_token=stack_state.internal_token,
+				router_service_name=stack_state.router.service_name,
+				cli_token_env_name=resolved_cli_token_env_name,
 				backend_service_name=backend_service_name,
 				deployment_id=deployment_id,
 			)
 			promoted = True
 			await _wait_for_routed_deployment(
-				server_address=server_address,
+				server_address=stack_state.server_address,
 				deployment_id=deployment_id,
 				use_affinity=False,
 			)
+			if server_address != stack_state.server_address:
+				await _wait_for_routed_deployment(
+					server_address=server_address,
+					deployment_id=deployment_id,
+					use_affinity=False,
+				)
 			return DeployResult(
 				deployment_id=deployment_id,
 				backend_service_id=backend_service_id,
@@ -829,6 +903,7 @@ async def delete_deployment(
 	*,
 	project: RailwayProject,
 	deployment_id: str,
+	cli_token_env_name: str | None = None,
 ) -> None:
 	service_name = service_name_for_deployment(
 		project.service_prefix,
@@ -841,9 +916,10 @@ async def delete_deployment(
 			name=service_name,
 		)
 		stack_state = await inspect_stack(project=project)
-		active_deployment_id = await _get_active_deployment_from_router(
-			server_address=project.server_address or stack_state.server_address,
-			internal_token=stack_state.internal_token,
+		active_deployment_id = await _get_active_deployment_from_control(
+			project=project,
+			router_service_name=stack_state.router.service_name,
+			cli_token_env_name=cli_token_env_name,
 		)
 		if active_deployment_id is None:
 			raise DeploymentError(
@@ -853,11 +929,11 @@ async def delete_deployment(
 			raise DeploymentError(
 				"cannot delete active deployment; deploy or promote another deployment first"
 			)
-		await _router_control_request(
-			server_address=project.server_address or stack_state.server_address,
-			internal_token=stack_state.internal_token,
-			path="delete",
-			json_payload={"deployment_id": deployment_id},
+		await _run_router_control_command(
+			project=project,
+			router_service_name=stack_state.router.service_name,
+			cli_token_env_name=cli_token_env_name,
+			control_args=["delete", "--deployment-id", deployment_id],
 		)
 		await client.delete_service(
 			service_id=service.id,

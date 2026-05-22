@@ -177,6 +177,8 @@ async def test_deployment_store_uses_kv_for_deployments() -> None:
 	)
 	await store.delete_inactive_deployment(deployment_id="v1")
 	assert await store.list_draining_deployments() == []
+	deployments = await store.list_deployments()
+	assert [deployment.deployment_id for deployment in deployments] == ["v2"]
 
 
 @pytest.mark.asyncio

@@ -178,6 +178,41 @@ async def test_router_control_endpoint_promotes_deployment() -> None:
 
 
 @pytest.mark.asyncio
+async def test_router_promote_marks_stale_store_records_draining() -> None:
+	store = MemoryDeploymentStore()
+	await store.set_active(deployment_id="prod-stale", service_name="pulse-stale")
+	app = build_app(
+		StaticResolver(backends={}),
+		store=store,
+		internal_token="secret-token",
+	)
+	async with AsyncClient(
+		transport=ASGITransport(app=app),
+		base_url="http://testserver",
+	) as client:
+		response = await client.post(
+			"/_pulse/internal/railway/promote",
+			headers={INTERNAL_TOKEN_HEADER: "secret-token"},
+			json={
+				"active": {
+					"deployment_id": "prod-new",
+					"service_name": "pulse-prod-new",
+				},
+				"draining": [],
+			},
+		)
+	await app.state.router.close()
+
+	assert response.status_code == 200
+	assert await store.get_active_deployment() == "prod-new"
+	stale = await store.get_deployment("prod-stale")
+	assert stale is not None
+	assert stale.state == "draining"
+	assert stale.service_name == "pulse-stale"
+	assert stale.drain_started_at is not None
+
+
+@pytest.mark.asyncio
 async def test_router_control_endpoint_registers_pending_deployment() -> None:
 	store = MemoryDeploymentStore()
 	await store.set_active(deployment_id="prod-current", service_name="pulse-current")

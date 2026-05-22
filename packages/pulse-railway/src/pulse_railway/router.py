@@ -249,6 +249,7 @@ class AffinityRouter:
 			draining_records.append(
 				(deployment_id, service_name, drain_started_at_float)
 			)
+		existing_deployments = await self.store.list_deployments()
 		await self.store.set_active(
 			deployment_id=active_deployment_id,
 			service_name=active_service_name,
@@ -259,7 +260,7 @@ class AffinityRouter:
 				service_name=service_name,
 				now=drain_started_at,
 			)
-		for deployment in await self.store.list_deployments():
+		for deployment in existing_deployments:
 			if (
 				deployment.deployment_id != active_deployment_id
 				and deployment.deployment_id not in draining_deployment_ids

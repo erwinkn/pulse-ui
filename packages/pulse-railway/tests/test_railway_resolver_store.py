@@ -239,7 +239,8 @@ async def test_redis_store_batches_draining_deployment_fetches() -> None:
 		async def delete(self, key: str) -> None:
 			self.data.pop(key, None)
 
-		async def scan_iter(self, match: str):
+		async def scan_iter(self, match: str, count: int | None = None):
+			_ = count
 			prefix = match[:-1] if match.endswith("*") else match
 			for key in sorted(self.data):
 				if key.startswith(prefix):

@@ -69,6 +69,19 @@ from pulse_railway.stack import (
 
 ROUTED_DEPLOYMENT_TIMEOUT_SECONDS = 180.0
 ROUTED_DEPLOYMENT_POLL_SECONDS = 2.0
+ROUTER_CONTROL_ATTEMPTS = 3
+ROUTER_CONTROL_RETRY_DELAY_SECONDS = 2.0
+ROUTER_CONTROL_RETRYABLE_ERRORS = (
+	"backboard.railway.com",
+	"connection reset",
+	"econnreset",
+	"operation timed out",
+	"temporary failure",
+	"timed out",
+	"502",
+	"503",
+	"504",
+)
 
 
 @dataclass(slots=True)
@@ -261,6 +274,11 @@ async def _resolve_cli_token_env_name(
 		)
 
 
+def _is_retryable_router_control_error(exc: DeploymentError) -> bool:
+	message = str(exc).lower()
+	return any(pattern in message for pattern in ROUTER_CONTROL_RETRYABLE_ERRORS)
+
+
 async def _run_router_control_command(
 	*,
 	project: RailwayProject,
@@ -272,7 +290,7 @@ async def _run_router_control_command(
 		project,
 		cli_token_env_name,
 	)
-	stdout = await _run_command_output(
+	command = [
 		"railway",
 		"ssh",
 		"--project",
@@ -283,11 +301,23 @@ async def _run_router_control_command(
 		router_service_name,
 		"--",
 		shlex.join(["pulse-railway", "control", *control_args]),
-		env_vars=railway_cli_token_env(
-			project.token,
-			env_name=resolved_cli_token_env_name,
-		),
+	]
+	env_vars = railway_cli_token_env(
+		project.token,
+		env_name=resolved_cli_token_env_name,
 	)
+	stdout = ""
+	for attempt in range(1, ROUTER_CONTROL_ATTEMPTS + 1):
+		try:
+			stdout = await _run_command_output(*command, env_vars=env_vars)
+			break
+		except DeploymentError as exc:
+			if (
+				attempt == ROUTER_CONTROL_ATTEMPTS
+				or not _is_retryable_router_control_error(exc)
+			):
+				raise
+			await asyncio.sleep(ROUTER_CONTROL_RETRY_DELAY_SECONDS * attempt)
 	try:
 		stdout_lines = [line for line in stdout.splitlines() if line.strip()]
 		payload = json.loads(stdout_lines[-1] if stdout_lines else "")

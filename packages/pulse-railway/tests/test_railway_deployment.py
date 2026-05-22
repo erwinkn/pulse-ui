@@ -15,12 +15,14 @@ from pulse_railway.constants import (
 	PULSE_DRAIN_STARTED_AT,
 	PULSE_INTERNAL_TOKEN,
 	PULSE_RAILWAY_REDIS_URL,
+	RAILWAY_TOKEN,
 	REDIS_URL,
 )
 from pulse_railway.deployment import (
 	DeploymentError,
 	_list_deployment_services,
 	_run_command,
+	_run_router_control_command,
 	_uses_railway_session_store_from_app,
 	default_service_prefix,
 	delete_deployment,
@@ -192,6 +194,66 @@ async def test_run_command_replaces_railway_token_env(
 
 	assert captured_env["RAILWAY_API_TOKEN"] == "api-token"
 	assert "RAILWAY_TOKEN" not in captured_env
+
+
+@pytest.mark.asyncio
+async def test_router_control_command_retries_transient_railway_ssh_failures(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	calls: list[tuple[tuple[str, ...], dict[str, str] | None]] = []
+	sleeps: list[float] = []
+
+	async def fake_run_command_output(
+		*args: str,
+		cwd: Path | None = None,
+		env_vars: dict[str, str] | None = None,
+	) -> str:
+		_ = cwd
+		calls.append((args, env_vars))
+		if len(calls) == 1:
+			raise DeploymentError(
+				"Failed to fetch: error sending request for url "
+				"(https://backboard.railway.com/graphql/v2): operation timed out"
+			)
+		return '{"ok": true}\n'
+
+	async def fake_sleep(seconds: float) -> None:
+		sleeps.append(seconds)
+
+	monkeypatch.setattr(
+		"pulse_railway.deployment._run_command_output",
+		fake_run_command_output,
+	)
+	monkeypatch.setattr("pulse_railway.deployment.asyncio.sleep", fake_sleep)
+
+	result = await _run_router_control_command(
+		project=RailwayProject(
+			project_id="project",
+			environment_id="env",
+			token="token",
+			service_name="pulse-router",
+		),
+		router_service_name="pulse-router",
+		cli_token_env_name=RAILWAY_TOKEN,
+		control_args=["active"],
+	)
+
+	assert result == {"ok": True}
+	assert len(calls) == 2
+	assert calls[0][0] == (
+		"railway",
+		"ssh",
+		"--project",
+		"project",
+		"--environment",
+		"env",
+		"--service",
+		"pulse-router",
+		"--",
+		"pulse-railway control active",
+	)
+	assert calls[0][1] == {RAILWAY_TOKEN: "token"}
+	assert sleeps == [2.0]
 
 
 @pytest.mark.asyncio

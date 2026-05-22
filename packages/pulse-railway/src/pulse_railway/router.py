@@ -259,6 +259,16 @@ class AffinityRouter:
 				service_name=service_name,
 				now=drain_started_at,
 			)
+		for deployment in await self.store.list_deployments():
+			if (
+				deployment.deployment_id != active_deployment_id
+				and deployment.deployment_id not in draining_deployment_ids
+				and deployment.state != "draining"
+			):
+				await self.store.mark_draining(
+					deployment_id=deployment.deployment_id,
+					service_name=deployment.service_name,
+				)
 		return JSONResponse({"ok": True})
 
 	async def register_deployment(self, request: Request) -> JSONResponse:

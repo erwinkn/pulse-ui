@@ -160,14 +160,21 @@ class DeploymentStore:
 		)
 
 	async def list_draining_deployments(self) -> list[StoredDeployment]:
+		return [
+			deployment
+			for deployment in await self.list_deployments()
+			if deployment.state == "draining"
+		]
+
+	async def list_deployments(self) -> list[StoredDeployment]:
 		deployment_keys = await self.store.scan_prefix(self._deployment_prefix())
-		draining: list[StoredDeployment] = []
+		deployments: list[StoredDeployment] = []
 		for key in deployment_keys:
 			deployment_id = key.removeprefix(self._deployment_prefix())
 			record = await self.get_deployment(deployment_id)
-			if record is not None and record.state == "draining":
-				draining.append(record)
-		return draining
+			if record is not None:
+				deployments.append(record)
+		return deployments
 
 	async def delete_inactive_deployment(self, *, deployment_id: str) -> None:
 		if await self.get_active_deployment() == deployment_id:

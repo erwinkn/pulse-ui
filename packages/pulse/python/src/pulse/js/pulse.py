@@ -12,16 +12,19 @@ def MyChannelComponent(*, channel_id: str):
 
     # Subscribe to events
     useEffect(
-        lambda: bridge.on("server:notify", lambda payload: console.log(payload)),
+        lambda: bridge and bridge.on("server:notify", lambda payload: console.log(payload)),
         [bridge],
     )
 
     # Emit events to server
     def send_ping():
-        bridge.emit("client:ping", {"message": "hello"})
+        if bridge:
+            bridge.emit("client:ping", {"message": "hello"})
 
     # Make requests to server
     async def send_request():
+        if not bridge:
+            return
         response = await bridge.request("client:request", {"data": 123})
         console.log(response)
 
@@ -96,7 +99,7 @@ class ChannelBridge:
 		...
 
 
-def usePulseChannel(channel_id: str) -> ChannelBridge:
+def usePulseChannel(channel_id: str) -> ChannelBridge | None:
 	"""React hook to connect to a Pulse channel.
 
 	Must be called from within a React component. The channel connection

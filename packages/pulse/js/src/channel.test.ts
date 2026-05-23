@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "bun:test";
 import { ChannelBridge, PulseChannelResetError } from "./channel";
+import { PulseSocketIOClient } from "./client";
 import type { ClientChannelMessage } from "./messages";
 
 function makeClient() {
@@ -69,5 +70,27 @@ describe("ChannelBridge", () => {
 			event: "__close__",
 		});
 		await expect(pending).rejects.toBeInstanceOf(PulseChannelResetError);
+	});
+
+	it("reacquires a fresh bridge after release closes a channel", () => {
+		const client = new PulseSocketIOClient(
+			"http://pulse.test",
+			{},
+			vi.fn() as any,
+			{
+				initialConnectingDelay: 0,
+				initialErrorDelay: 0,
+				reconnectErrorDelay: 0,
+			},
+		);
+
+		const first = client.acquireChannel("chan-1");
+		client.releaseChannel("chan-1");
+
+		expect(() => first.on("event", vi.fn())).toThrow(PulseChannelResetError);
+
+		const second = client.acquireChannel("chan-1");
+		expect(second).not.toBe(first);
+		expect(() => second.on("event", vi.fn())).not.toThrow();
 	});
 });

@@ -1,6 +1,11 @@
 import type { UseFormInput, UseFormReturnType } from "@mantine/form";
 import { useForm } from "@mantine/form";
-import { serialize, submitForm, usePulseChannel } from "pulse-ui-client";
+import {
+	serialize,
+	submitForm,
+	usePulseClient,
+	type ChannelBridge,
+} from "pulse-ui-client";
 import {
 	type ComponentPropsWithoutRef,
 	type FormEvent,
@@ -58,7 +63,8 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 	cascadeUpdates,
 	...formProps
 }: MantineFormProps<TValues>) {
-	const channel = usePulseChannel(channelId);
+	const client = usePulseClient();
+	const channelRef = useRef<ChannelBridge | null>(null);
 	const formRef = useRef<UseFormReturnType<TValues> | null>(null);
 	// Timers for server-validation per path
 	const serverTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -83,13 +89,17 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 		>;
 	}, [validate]);
 
+	const emitChannel = useCallback((event: string, payload?: any) => {
+		channelRef.current?.emit(event, payload);
+	}, []);
+
 	const sendSync = useCallback(
 		(reason: "change" | "blur", path?: string) => {
 			const values = formRef.current?.getValues();
 			if (!values) return;
-			channel.emit("syncValues", { reason, path, values });
+			emitChannel("syncValues", { reason, path, values });
 		},
-		[channel],
+		[emitChannel],
 	);
 
 	const getValueAtPath = useCallback((source: any, path?: string) => {
@@ -182,7 +192,7 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 						const latestValues = formRef.current?.getValues();
 						if (!latestValues) return;
 						const value = getValueAtPath(latestValues, path);
-						channel.emit("serverValidate", {
+						emitChannel("serverValidate", {
 							value,
 							values: latestValues,
 							path,
@@ -199,7 +209,7 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 			sendSync,
 			serverRulesByPath,
 			shouldValidateOnChange,
-			channel,
+			emitChannel,
 		],
 	);
 
@@ -245,9 +255,9 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 			const latestValues = formRef.current?.getValues();
 			if (!latestValues) return;
 			const value = getValueAtPath(latestValues, path);
-			channel.emit("serverValidate", { value, values: latestValues, path });
+			emitChannel("serverValidate", { value, values: latestValues, path });
 		},
-		[getValueAtPath, syncMode, sendSync, serverRulesByPath, shouldValidateOnBlur, channel],
+		[getValueAtPath, syncMode, sendSync, serverRulesByPath, shouldValidateOnBlur, emitChannel],
 	);
 
 	const form = useForm<any>({
@@ -281,6 +291,8 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 	}, []);
 
 	useEffect(() => {
+		const channel = client.acquireChannel(channelId);
+		channelRef.current = channel;
 		const cleanups = [
 			channel.on("setValues", (payload: { values: TValues }) => {
 				if (payload?.values !== undefined) {
@@ -355,8 +367,12 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 
 		return () => {
 			for (const dispose of cleanups) dispose();
+			if (channelRef.current === channel) {
+				channelRef.current = null;
+			}
+			client.releaseChannel(channelId);
 		};
-	}, [channel, form, sendSync]);
+	}, [client, channelId, form, sendSync]);
 
 	const submitHandler = useMemo(
 		() =>

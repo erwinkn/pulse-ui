@@ -1,6 +1,6 @@
 import { Combobox as MantineCombobox, useCombobox } from "@mantine/core";
-import { usePulseChannel } from "pulse-ui-client";
-import { type ComponentPropsWithoutRef, useEffect } from "react";
+import { usePulseClient, type ChannelBridge } from "pulse-ui-client";
+import { type ComponentPropsWithoutRef, useEffect, useRef } from "react";
 
 type DropdownEventSource = "keyboard" | "mouse" | "unknown";
 
@@ -38,42 +38,44 @@ export function Combobox({
 	scrollBehavior,
 	...rest
 }: PulseComboboxProps) {
-	// biome-ignore lint/correctness/useHookAtTopLevel: channelId is not expected to change
-	const channel = usePulseChannel(channelId);
+	const client = usePulseClient();
+	const channelRef = useRef<ChannelBridge | null>(null);
 
 	const combobox = useCombobox({
 		defaultOpened,
 		opened,
 		onOpenedChange: (nextOpened) => {
 			onOpenedChange?.(nextOpened);
-			channel.emit("openedChange", { opened: nextOpened });
+			channelRef.current?.emit("openedChange", { opened: nextOpened });
 		},
 		onDropdownOpen: (eventSource) => {
 			onDropdownOpen?.(eventSource);
-			channel.emit("dropdownOpen", { eventSource });
+			channelRef.current?.emit("dropdownOpen", { eventSource });
 		},
 		onDropdownClose: (eventSource) => {
 			onDropdownClose?.(eventSource);
-			channel.emit("dropdownClose", { eventSource });
+			channelRef.current?.emit("dropdownClose", { eventSource });
 		},
 		loop,
-		scrollBehavior
+		scrollBehavior,
 	});
 
-		useEffect(() => {
-			const cleanups = [
-				channel.on("openDropdown", (payload: OptionalEventSourcePayload) => {
-					combobox.openDropdown(payload?.eventSource);
-				}),
-				channel.on("closeDropdown", (payload: OptionalEventSourcePayload) => {
-					combobox.closeDropdown(payload?.eventSource);
-				}),
-				channel.on("toggleDropdown", (payload: OptionalEventSourcePayload) => {
-					combobox.toggleDropdown(payload?.eventSource);
-				}),
-				channel.on("selectOption", (payload: { index: number }) => {
-					combobox.selectOption(payload.index);
-				}),
+	useEffect(() => {
+		const channel = client.acquireChannel(channelId);
+		channelRef.current = channel;
+		const cleanups = [
+			channel.on("openDropdown", (payload: OptionalEventSourcePayload) => {
+				combobox.openDropdown(payload?.eventSource);
+			}),
+			channel.on("closeDropdown", (payload: OptionalEventSourcePayload) => {
+				combobox.closeDropdown(payload?.eventSource);
+			}),
+			channel.on("toggleDropdown", (payload: OptionalEventSourcePayload) => {
+				combobox.toggleDropdown(payload?.eventSource);
+			}),
+			channel.on("selectOption", (payload: { index: number }) => {
+				combobox.selectOption(payload.index);
+			}),
 			channel.on("selectActiveOption", () => combobox.selectActiveOption()),
 			channel.on("selectFirstOption", () => combobox.selectFirstOption()),
 			channel.on("selectNextOption", () => combobox.selectNextOption()),
@@ -84,12 +86,12 @@ export function Combobox({
 			channel.on("clickSelectedOption", () => {
 				combobox.clickSelectedOption();
 			}),
-				channel.on(
-					"updateSelectedOptionIndex",
-					(payload: OptionalTargetPayload) => {
-						combobox.updateSelectedOptionIndex(payload?.target);
-					},
-				),
+			channel.on(
+				"updateSelectedOptionIndex",
+				(payload: OptionalTargetPayload) => {
+					combobox.updateSelectedOptionIndex(payload?.target);
+				},
+			),
 			channel.on("focusSearchInput", () => {
 				combobox.focusSearchInput();
 			}),
@@ -106,8 +108,12 @@ export function Combobox({
 
 		return () => {
 			for (const dispose of cleanups) dispose();
+			if (channelRef.current === channel) {
+				channelRef.current = null;
+			}
+			client.releaseChannel(channelId);
 		};
-	}, [channel, combobox]);
+	}, [client, channelId, combobox]);
 
 	return <MantineCombobox {...(rest as any)} store={combobox} />;
 }

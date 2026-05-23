@@ -111,8 +111,8 @@ def test_react_component_applies_signature_defaults():
 	assert override.props == {"to": "/dashboard", "prefetch": "none"}
 
 	# None defaults are not auto-filled (they would change React semantics).
-	assert "replace" not in node.props
-	assert "replace" not in override.props
+	assert "replace" not in node.props_dict()
+	assert "replace" not in override.props_dict()
 
 
 def test_react_component_string_import():

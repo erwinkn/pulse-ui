@@ -2,7 +2,6 @@ import type { FormValidateInput } from "@mantine/form";
 import {
 	hasLength as hasLengthValidator,
 	isEmail,
-	isInRange,
 	isJSONString,
 	isNotEmpty,
 	isNotEmptyHTML,
@@ -281,8 +280,20 @@ export function composeClientSpecs(specs: ValidatorSpec[]): RuleFn {
 					return matchesValidator(re, spec.error);
 				}
 				case "isInRange": {
-					const opts = { min: spec.min, max: spec.max };
-					return isInRange(opts, spec.error);
+					return (value: any) => {
+						if (isEmptyValue(value)) return null;
+						const num = coerceNumber(value);
+						if (num === null) {
+							return formatError(spec.error, "Must be in range");
+						}
+						if (typeof spec.min === "number" && num < spec.min) {
+							return formatError(spec.error, "Must be in range");
+						}
+						if (typeof spec.max === "number" && num > spec.max) {
+							return formatError(spec.error, "Must be in range");
+						}
+						return null;
+					};
 				}
 				case "hasLength": {
 					if (typeof spec.exact === "number") {

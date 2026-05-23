@@ -62,6 +62,21 @@ describe("validators: ISO date", () => {
 	});
 });
 
+describe("validators: numeric ranges", () => {
+	it("accepts numeric strings for range validation", () => {
+		const positive = ruleFrom({
+			$kind: "isInRange",
+			min: 1,
+			error: "e",
+		});
+
+		expect(positive("2", { count: "2" }, "count")).toBeNull();
+		expect(positive(2, { count: 2 }, "count")).toBeNull();
+		expect(positive("0", { count: "0" }, "count")).toBe("e");
+		expect(positive("abc", { count: "abc" }, "count")).toBe("e");
+	});
+});
+
 describe("validators: before/after comparisons", () => {
 	it("compares using other field and inclusive flag", () => {
 		const values = { start: "2024-01-01", end: "2024-01-02" };

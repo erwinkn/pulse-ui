@@ -21,6 +21,7 @@ def test_resolve_railway_access_token_prefers_explicit_token(
 
 	assert token.value == "explicit-token"
 	assert token.env_name is None
+	assert token.source == "explicit"
 
 
 def test_resolve_railway_access_token_prefers_railway_token(
@@ -33,6 +34,7 @@ def test_resolve_railway_access_token_prefers_railway_token(
 
 	assert token.value == "project-token"
 	assert token.env_name == "RAILWAY_TOKEN"
+	assert token.source == "env"
 	assert railway_access_token() == "project-token"
 	assert railway_access_token_name() == "RAILWAY_TOKEN"
 
@@ -46,6 +48,7 @@ def test_resolve_railway_access_token_falls_back_to_api_token(
 
 	assert token.value == "api-token"
 	assert token.env_name == "RAILWAY_API_TOKEN"
+	assert token.source == "env"
 
 
 def test_resolve_railway_access_token_falls_back_to_railway_cli_login(
@@ -60,6 +63,7 @@ def test_resolve_railway_access_token_falls_back_to_railway_cli_login(
 
 	assert token.value == "cli-access-token"
 	assert token.env_name is None
+	assert token.source == "cli"
 	assert railway_access_token() == "cli-access-token"
 	assert railway_access_token_name() is None
 
@@ -77,6 +81,7 @@ def test_resolve_railway_access_token_prefers_env_over_railway_cli_login(
 
 	assert token.value == "api-token"
 	assert token.env_name == "RAILWAY_API_TOKEN"
+	assert token.source == "env"
 
 
 def test_resolve_railway_access_token_refreshes_expired_railway_cli_token(
@@ -126,6 +131,7 @@ def test_resolve_railway_access_token_refreshes_expired_railway_cli_token(
 
 	assert token.value == "fresh-token"
 	assert token.env_name is None
+	assert token.source == "cli"
 	user = json.loads(config_path.read_text())["user"]
 	assert user["accessToken"] == "fresh-token"
 	assert user["refreshToken"] == "rotated-refresh-token"

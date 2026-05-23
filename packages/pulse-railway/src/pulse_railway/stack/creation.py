@@ -26,6 +26,7 @@ from pulse_railway.stack.common import (
 	list_baseline_services,
 	raise_for_existing_baseline,
 	resolve_router_server_address,
+	runtime_railway_token_variable,
 	stack_internals,
 )
 
@@ -109,6 +110,7 @@ async def create_stack_with_client(
 	existing = await list_baseline_services(client, project=project)
 	if existing.found:
 		raise_for_existing_baseline(existing.found)
+	runtime_railway_token_variable(project)
 
 	services = await _deploy_baseline_template(client, project=project)
 	if services.router is None or services.janitor is None:

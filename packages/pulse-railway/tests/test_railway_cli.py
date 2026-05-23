@@ -372,7 +372,7 @@ def test_main_help_excludes_baseline_repair_commands(
 	assert "upgrade" not in help_text
 
 
-def test_deploy_parser_prefers_railway_token(monkeypatch) -> None:
+def test_deploy_parser_defers_default_token_resolution(monkeypatch) -> None:
 	monkeypatch.setenv("RAILWAY_API_TOKEN", "api-token")
 	monkeypatch.setenv("RAILWAY_TOKEN", "project-token")
 	parser = argparse.ArgumentParser()
@@ -380,7 +380,7 @@ def test_deploy_parser_prefers_railway_token(monkeypatch) -> None:
 	_add_deploy_args(parser)
 	args = parser.parse_args(["main.py"])
 
-	assert args.token == "project-token"
+	assert args.token is None
 
 
 def test_deploy_parser_uses_project_token_env_for_explicit_token(monkeypatch) -> None:

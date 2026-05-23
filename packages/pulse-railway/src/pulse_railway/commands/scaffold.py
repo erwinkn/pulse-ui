@@ -5,9 +5,9 @@ import asyncio
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from pulse_railway.auth import railway_access_token
+from pulse_railway.auth import resolve_railway_access_token
 from pulse_railway.commands.common import (
 	add_railway_target_args,
 	build_target_project,
@@ -76,6 +76,7 @@ def _build_baseline_project(
 	project_id: str,
 	environment_id: str,
 	token: str,
+	token_source: Literal["explicit", "env", "cli", "missing"],
 	plugin: RailwayPlugin,
 ) -> RailwayProject:
 	return build_target_project(
@@ -84,6 +85,7 @@ def _build_baseline_project(
 		project_id=project_id,
 		environment_id=environment_id,
 		token=token,
+		token_source=token_source,
 		redis_url=args.redis_url,
 		router_replicas=args.router_replicas,
 		janitor_cron_schedule=args.janitor_cron_schedule,
@@ -100,15 +102,15 @@ async def _run_baseline(
 		app_file=args.app_file,
 		base_path=Path.cwd(),
 	)
-	token = args.token or railway_access_token()
-	if not token:
+	resolved_token = resolve_railway_access_token(args.token)
+	if not resolved_token.value:
 		raise ValueError("token is required")
 	project_id, environment_id = await resolve_railway_target_ids(
 		project_name=project_name_from_sources(args, plugin),
 		project_id=project_id_from_sources(args),
 		environment_name=environment_name_from_sources(args, plugin),
 		environment_id=environment_id_from_sources(args),
-		token=token,
+		token=resolved_token.value,
 		workspace_name=workspace_name_from_sources(args),
 		workspace_id=workspace_id_from_sources(args),
 	)
@@ -116,7 +118,8 @@ async def _run_baseline(
 		args,
 		project_id=project_id,
 		environment_id=environment_id,
-		token=token,
+		token=resolved_token.value,
+		token_source=resolved_token.source,
 		plugin=plugin,
 	)
 	if ensure:

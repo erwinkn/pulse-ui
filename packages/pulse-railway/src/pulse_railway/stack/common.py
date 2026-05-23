@@ -9,7 +9,7 @@ from pulse_railway.config import (
 	RailwayProject,
 	ServiceInstanceConfig,
 )
-from pulse_railway.constants import PULSE_INTERNAL_TOKEN
+from pulse_railway.constants import PULSE_INTERNAL_TOKEN, RAILWAY_TOKEN
 from pulse_railway.env import janitor_env, router_env
 from pulse_railway.errors import DeploymentError
 from pulse_railway.images import official_janitor_image_ref, official_router_image_ref
@@ -24,6 +24,12 @@ ROUTER_START_COMMAND = (
 	'--host 0.0.0.0 --port "${PORT:-8000}"\''
 )
 JANITOR_START_COMMAND = "sh -c 'pulse-railway janitor run'"
+CLI_RUNTIME_TOKEN_ERROR = (
+	"refusing to configure pulse-router or pulse-janitor with a local Railway CLI "
+	"OAuth token. These services run inside Railway and need a durable token. Set "
+	"RAILWAY_TOKEN to a Railway project token or RAILWAY_API_TOKEN to an account "
+	"token, then rerun."
+)
 
 
 @dataclass(slots=True)
@@ -225,7 +231,7 @@ async def configure_router_service(
 		variables={
 			PULSE_INTERNAL_TOKEN: internals.internal_token,
 			**router_env(
-				token=project.token,
+				token=runtime_railway_token_variable(project)[RAILWAY_TOKEN],
 				router_port=project.router_port,
 				service_prefix=internals.service_prefix,
 				redis_url=internals.redis_url,
@@ -251,6 +257,21 @@ def _service_variables_changed(
 		current_variables.get(name) != value
 		for name, value in desired_variables.items()
 	)
+
+
+def runtime_railway_token_variable(
+	project: RailwayProject,
+	*,
+	current_variables: dict[str, str] | None = None,
+) -> dict[str, str]:
+	if project.token_source != "cli":
+		return {RAILWAY_TOKEN: project.token}
+	existing_token = (
+		None if current_variables is None else current_variables.get(RAILWAY_TOKEN)
+	)
+	if existing_token:
+		return {RAILWAY_TOKEN: existing_token}
+	raise DeploymentError(CLI_RUNTIME_TOKEN_ERROR)
 
 
 def _service_instance_changed(
@@ -338,7 +359,7 @@ async def configure_janitor_service(
 		project=project,
 		service_id=service.id,
 		variables=janitor_env(
-			token=project.token,
+			token=runtime_railway_token_variable(project)[RAILWAY_TOKEN],
 			internal_token=internals.internal_token,
 			redis_url=internals.redis_url,
 			redis_prefix=project.redis_prefix,
@@ -416,7 +437,10 @@ async def reconcile_runtime(
 			desired_variables={
 				PULSE_INTERNAL_TOKEN: internals.internal_token,
 				**router_env(
-					token=project.token,
+					token=runtime_railway_token_variable(
+						project,
+						current_variables=router_variables,
+					)[RAILWAY_TOKEN],
 					router_port=project.router_port,
 					service_prefix=internals.service_prefix,
 					redis_url=internals.redis_url,
@@ -439,7 +463,10 @@ async def reconcile_runtime(
 			service=janitor,
 			current_variables=janitor_variables,
 			desired_variables=janitor_env(
-				token=project.token,
+				token=runtime_railway_token_variable(
+					project,
+					current_variables=janitor_variables,
+				)[RAILWAY_TOKEN],
 				internal_token=internals.internal_token,
 				redis_url=internals.redis_url,
 				redis_prefix=project.redis_prefix,

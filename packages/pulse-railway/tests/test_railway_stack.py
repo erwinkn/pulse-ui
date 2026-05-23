@@ -100,7 +100,7 @@ class RailwayHarness:
 
 
 def _project(**overrides: Any) -> RailwayProject:
-	values = {
+	values: dict[str, Any] = {
 		"project_id": "project",
 		"environment_id": "env",
 		"token": "token",
@@ -483,6 +483,20 @@ async def test_create_stack_creates_fresh_managed_baseline(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_stack_rejects_cli_token_before_template_deploy(
+	monkeypatch,
+) -> None:
+	harness = RailwayHarness()
+	_install_client(monkeypatch, harness)
+
+	with pytest.raises(DeploymentError, match="local Railway CLI OAuth token"):
+		await create_stack(project=_project(token_source="cli"))
+
+	assert harness.deployed_templates == []
+	assert harness.services == {}
+
+
+@pytest.mark.asyncio
 async def test_create_stack_waits_for_router_group_before_creating_env(
 	monkeypatch,
 ) -> None:
@@ -780,6 +794,88 @@ async def test_reconcile_stack_deploys_only_changed_runtime_service(
 		)
 	]
 	assert harness.deployed_services == ["svc-janitor"]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_stack_preserves_runtime_token_for_cli_auth(
+	monkeypatch,
+) -> None:
+	project = _project(token="cli-token", token_source="cli", drain_ttl_seconds=120)
+	harness = RailwayHarness()
+	router_vars, janitor_vars = _runtime_variables()
+	janitor_vars[PULSE_DRAIN_TTL_SECONDS] = "86400"
+	harness.add_service(
+		"pulse-router",
+		service_id="svc-router",
+		domain="pulse-router-production.up.railway.app",
+		variables=router_vars,
+		image=official_router_image_ref(),
+		num_replicas=project.router_replicas,
+		healthcheck_path="/healthz",
+		healthcheck_timeout=60,
+		overlap_seconds=30,
+		start_command=ROUTER_START_COMMAND,
+	)
+	harness.add_service(
+		"pulse-janitor",
+		service_id="svc-janitor",
+		variables=janitor_vars,
+		image=official_janitor_image_ref(),
+		num_replicas=project.janitor_replicas,
+		start_command=JANITOR_START_COMMAND,
+		cron_schedule=project.janitor_cron_schedule,
+		restart_policy_type="NEVER",
+	)
+	harness.add_service("pulse-env", service_id="svc-env", group_id="group-baseline")
+	harness.add_service(
+		"pulse-redis", service_id="svc-redis", group_id="group-baseline"
+	)
+	_install_client(monkeypatch, harness)
+
+	await reconcile_stack(project=project)
+
+	assert harness.variable_collections == [
+		(
+			"svc-janitor",
+			{
+				RAILWAY_TOKEN: "token",
+				PULSE_INTERNAL_TOKEN: "secret-token",
+				REDIS_URL: "redis://pulse-redis:6379",
+				PULSE_REDIS_PREFIX: "pulse:railway",
+				PULSE_DRAIN_TTL_SECONDS: "120",
+				PULSE_RAILWAY_SERVICE: "pulse-router",
+				PULSE_RAILWAY_JANITOR_SERVICE: "pulse-janitor",
+				PULSE_RAILWAY_REDIS_SERVICE: "pulse-redis",
+			},
+		)
+	]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_stack_rejects_cli_token_when_runtime_token_missing(
+	monkeypatch,
+) -> None:
+	harness = RailwayHarness()
+	router_vars, janitor_vars = _runtime_variables()
+	router_vars.pop(RAILWAY_TOKEN)
+	harness.add_service(
+		"pulse-router",
+		service_id="svc-router",
+		domain="pulse-router-production.up.railway.app",
+		variables=router_vars,
+	)
+	harness.add_service(
+		"pulse-janitor", service_id="svc-janitor", variables=janitor_vars
+	)
+	harness.add_service("pulse-env", service_id="svc-env")
+	harness.add_service("pulse-redis", service_id="svc-redis")
+	_install_client(monkeypatch, harness)
+
+	with pytest.raises(DeploymentError, match="local Railway CLI OAuth token"):
+		await reconcile_stack(project=_project(token="cli-token", token_source="cli"))
+
+	assert harness.variable_collections == []
+	assert harness.deployed_services == []
 
 
 @pytest.mark.asyncio

@@ -5,7 +5,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import httpx
 
@@ -20,6 +20,7 @@ RAILWAY_OAUTH_TOKEN_EXPIRY_BUFFER_SECONDS = 60
 class RailwayAccessToken:
 	value: str | None
 	env_name: str | None
+	source: Literal["explicit", "env", "cli", "missing"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,14 +174,26 @@ def resolve_railway_access_token(token: str | None = None) -> RailwayAccessToken
 		return RailwayAccessToken(
 			value=token,
 			env_name=railway_access_token_name_for_value(token),
+			source="explicit",
 		)
 	railway_token = os.environ.get(RAILWAY_TOKEN)
 	if railway_token is not None:
-		return RailwayAccessToken(value=railway_token, env_name=RAILWAY_TOKEN)
+		return RailwayAccessToken(
+			value=railway_token, env_name=RAILWAY_TOKEN, source="env"
+		)
 	railway_api_token = os.environ.get(RAILWAY_API_TOKEN)
 	if railway_api_token is not None:
-		return RailwayAccessToken(value=railway_api_token, env_name=RAILWAY_API_TOKEN)
-	return RailwayAccessToken(value=_railway_cli_access_token(), env_name=None)
+		return RailwayAccessToken(
+			value=railway_api_token,
+			env_name=RAILWAY_API_TOKEN,
+			source="env",
+		)
+	value = _railway_cli_access_token()
+	return RailwayAccessToken(
+		value=value,
+		env_name=None,
+		source="cli" if value is not None else "missing",
+	)
 
 
 def railway_access_token() -> str | None:

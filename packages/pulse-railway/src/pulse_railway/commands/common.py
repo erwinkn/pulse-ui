@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
-from typing import NotRequired, TypedDict, Unpack
+from typing import Literal, NotRequired, TypedDict, Unpack
 
 from pulse.cli.helpers import load_app_from_target
 from pulse.env import (
@@ -178,6 +178,7 @@ def build_target_project(
 	project_id: str,
 	environment_id: str,
 	token: str,
+	token_source: Literal["explicit", "env", "cli", "missing"] = "explicit",
 	redis_url: str | None = None,
 	env_vars: dict[str, str] | None = None,
 	**overrides: Unpack[RailwayProjectOverrides],
@@ -187,6 +188,7 @@ def build_target_project(
 		project_id=project_id,
 		environment_id=environment_id,
 		token=token,
+		token_source=token_source,
 		service_name=plugin.router_service_name,
 		service_prefix=normalize_optional_service_prefix(service_prefix),
 		redis_url=redis_url,

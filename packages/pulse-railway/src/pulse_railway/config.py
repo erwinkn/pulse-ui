@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from pulse_railway.constants import (
 	DEFAULT_BACKEND_HEALTH_PATH,
@@ -53,6 +54,7 @@ class RailwayProject:
 	project_id: str
 	environment_id: str
 	token: str
+	token_source: Literal["explicit", "env", "cli", "missing"] = "explicit"
 	service_name: str = "pulse-router"
 	service_prefix: str | None = None
 	backend_replicas: int = 1

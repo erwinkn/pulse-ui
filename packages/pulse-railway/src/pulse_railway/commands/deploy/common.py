@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Literal
 
 from pulse_railway.auth import (
-	railway_access_token,
 	resolve_railway_access_token,
 )
 from pulse_railway.commands.common import (
@@ -64,7 +63,7 @@ def add_shared_deploy_args(parser: argparse.ArgumentParser) -> None:
 	add_railway_target_args(parser)
 	parser.add_argument(
 		"--token",
-		default=railway_access_token(),
+		default=None,
 		help="Railway project access token",
 	)
 	parser.add_argument(
@@ -179,6 +178,7 @@ async def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployComm
 		project_id=project_id,
 		environment_id=environment_id,
 		token=token,
+		token_source=resolved_token.source,
 		env_vars=env_vars,
 		backend_replicas=args.backend_replicas,
 		server_address=args.server_address or plugin.server_address,

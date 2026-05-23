@@ -86,6 +86,35 @@ def test_react_component_key_validation():
 	assert node.key == "k1"
 
 
+def test_react_component_applies_signature_defaults():
+	"""Non-None signature defaults are filled in on the runtime call path."""
+	from typing import Literal
+
+	link_import = Import("Link", "react-router")
+
+	@react_component(link_import)
+	def Link(
+		*children: Node,
+		key: str | None = None,
+		to: str,
+		prefetch: Literal["none", "intent", "render", "viewport"] = "intent",
+		replace: bool | None = None,
+	) -> Element: ...
+
+	# Missing prefetch -> filled from default.
+	node = Link("Go", to="/dashboard")
+	assert isinstance(node, Element)
+	assert node.props == {"to": "/dashboard", "prefetch": "intent"}
+
+	# Caller-passed value wins over the default.
+	override = Link("Go", to="/dashboard", prefetch="none")
+	assert override.props == {"to": "/dashboard", "prefetch": "none"}
+
+	# None defaults are not auto-filled (they would change React semantics).
+	assert "replace" not in node.props
+	assert "replace" not in override.props
+
+
 def test_react_component_string_import():
 	"""@react_component(name, src) creates Import-backed components."""
 

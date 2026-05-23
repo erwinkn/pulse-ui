@@ -474,6 +474,14 @@ class Signature(ExprWrapper):
 	that stores the callable's signature for introspection, while delegating
 	all other behavior to the wrapped expression.
 
+	The optional ``defaults`` dict carries non-None default values from the
+	wrapped Python callable's signature. Pulse's runtime call path normally
+	receives only the kwargs the caller passed (the wrapped function body is
+	never executed), so signature defaults would silently be lost. When
+	``defaults`` is provided, ``__call__`` fills any missing kwargs from it
+	before delegating to the underlying Jsx, so the Python signature reflects
+	the actual runtime behavior.
+
 	Example:
 		button = Import("Button", "@mantine/core")
 		typed_button = Signature(button, signature_of_callable)
@@ -481,6 +489,15 @@ class Signature(ExprWrapper):
 
 	expr: Expr
 	sig: Any  # inspect.Signature, but use Any for type compatibility
+	defaults: dict[str, Any] = field(default_factory=dict)
+
+	@override
+	def __call__(self, *args: object, **kwargs: object) -> Expr:  # pyright: ignore[reportIncompatibleMethodOverride]
+		if self.defaults:
+			for name, default in self.defaults.items():
+				if name not in kwargs:
+					kwargs[name] = default
+		return self.expr(*args, **kwargs)
 
 
 @dataclass(slots=True)

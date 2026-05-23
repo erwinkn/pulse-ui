@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, ParamSpec, overload
+from inspect import Parameter, signature
+from typing import Any, ParamSpec, cast, overload
 
 from pulse.js.react import lazy as react_lazy
 from pulse.transpiler.imports import Import
-from pulse.transpiler.nodes import Element, Expr, Jsx, Node
+from pulse.transpiler.nodes import Element, Expr, Jsx, Node, Signature
 
 P = ParamSpec("P")
 
@@ -80,7 +81,18 @@ def react_component(
 		raise TypeError("react_component expects an Expr or (name, src)")
 
 	def decorator(fn: Callable[P, Any]) -> Callable[P, Element]:
-		return component.as_(fn)
+		sig = signature(fn)
+		defaults = {
+			name: p.default
+			for name, p in sig.parameters.items()
+			if p.kind in (Parameter.POSITIONAL_OR_KEYWORD, Parameter.KEYWORD_ONLY)
+			and p.default is not Parameter.empty
+			and p.default is not None
+			and name != "key"
+		}
+		if not defaults:
+			return component.as_(fn)
+		return cast(Callable[P, Element], Signature(component, sig, defaults))
 
 	return decorator
 

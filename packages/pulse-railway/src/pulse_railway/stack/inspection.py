@@ -15,6 +15,7 @@ from pulse_railway.env import PORT
 from pulse_railway.errors import DeploymentError
 from pulse_railway.railway.client import RailwayGraphQLClient
 from pulse_railway.stack.common import (
+	CLI_RUNTIME_TOKEN_ERROR,
 	StackInspection,
 	list_baseline_services,
 	raise_missing_service,
@@ -86,6 +87,11 @@ async def inspect_stack_with_client(
 			unrendered=True,
 		),
 	)
+	if project.token_source == "cli" and (
+		not router_variables.get(RAILWAY_TOKEN)
+		or not janitor_variables.get(RAILWAY_TOKEN)
+	):
+		raise DeploymentError(CLI_RUNTIME_TOKEN_ERROR)
 	_require_variables(
 		service_name=services.router.name,
 		variables=router_variables,

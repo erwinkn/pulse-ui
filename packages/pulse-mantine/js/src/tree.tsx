@@ -1,6 +1,6 @@
 import { Tree as MantineTree, useTree } from "@mantine/core";
-import { usePulseChannel } from "pulse-ui-client";
-import { type ComponentPropsWithoutRef, useEffect } from "react";
+import { usePulseClient, type ChannelBridge } from "pulse-ui-client";
+import { type ComponentPropsWithoutRef, useEffect, useRef } from "react";
 
 type ExpandedState = Record<string, boolean>;
 
@@ -18,7 +18,39 @@ export interface PulseTreeProps extends Omit<ComponentPropsWithoutRef<typeof Man
 	autoSync?: boolean;
 }
 
+type ConnectedTreeProps = PulseTreeProps & {
+	channelId: string;
+};
+
 export function Tree({
+	channelId,
+	...props
+}: PulseTreeProps) {
+	if (!channelId) {
+		return <PlainTree {...props} />;
+	}
+
+	return <ConnectedTree channelId={channelId} {...props} />;
+}
+
+function PlainTree({
+	initialExpandedState,
+	initialSelectedState,
+	initialCheckedState,
+	multiple,
+	...rest
+}: PulseTreeProps) {
+	const tree = useTree({
+		initialExpandedState: initialExpandedState ?? {},
+		initialSelectedState,
+		initialCheckedState,
+		multiple,
+	} as any);
+
+	return <MantineTree {...(rest as any)} tree={tree as any} />;
+}
+
+function ConnectedTree({
 	channelId,
 	initialExpandedState,
 	initialSelectedState,
@@ -26,9 +58,9 @@ export function Tree({
 	multiple,
 	autoSync = true,
 	...rest
-}: PulseTreeProps) {
-	// biome-ignore lint/correctness/useHookAtTopLevel: channelId is not expected to change
-	const channel = channelId ? usePulseChannel(channelId) : undefined;
+}: ConnectedTreeProps) {
+	const client = usePulseClient();
+	const channelRef = useRef<ChannelBridge | null>(null);
 
 	// Create controller with initial state and wire auto-sync callbacks
 	const tree = useTree({
@@ -37,18 +69,20 @@ export function Tree({
 		initialCheckedState,
 		multiple,
 		onNodeExpand: (value: string) => {
-			if (!autoSync || !channel) return;
-			channel.emit("nodeExpand", { value });
+			if (!autoSync) return;
+			channelRef.current?.emit("nodeExpand", { value });
 		},
 		onNodeCollapse: (value: string) => {
-			if (!autoSync || !channel) return;
-			channel.emit("nodeCollapse", { value });
+			if (!autoSync) return;
+			channelRef.current?.emit("nodeCollapse", { value });
 		},
 	} as any);
 
 	// Server -> client imperative API
 	useEffect(() => {
-		if (!channel) return;
+		if (!channelId) return;
+		const channel = client.acquireChannel(channelId);
+		channelRef.current = channel;
 		const cleanups = [
 			channel.on("toggleExpanded", (payload: { value: string }) => {
 				if (!payload) return;
@@ -126,8 +160,12 @@ export function Tree({
 		];
 		return () => {
 			for (const dispose of cleanups) dispose();
+			if (channelRef.current === channel) {
+				channelRef.current = null;
+			}
+			client.releaseChannel(channelId);
 		};
-	}, [channel, tree]);
+	}, [client, channelId, tree]);
 
 	return <MantineTree {...(rest as any)} tree={tree as any} />;
 }

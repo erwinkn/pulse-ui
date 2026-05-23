@@ -5,8 +5,8 @@ import {
 	type NotificationsProps,
 	notifications as notificationsApi,
 } from "@mantine/notifications";
-import { usePulseChannel } from "pulse-ui-client";
-import { useEffect } from "react";
+import { usePulseClient, type ChannelBridge } from "pulse-ui-client";
+import { useEffect, useRef } from "react";
 
 type NotificationUpdatePayload = Parameters<typeof notificationsApi.update>[0];
 type NotificationShowPayload = NotificationData;
@@ -14,6 +14,10 @@ type NotificationShowPayload = NotificationData;
 export interface PulseNotificationsProps extends NotificationsProps {
 	channelId?: string;
 }
+
+type ConnectedNotificationsProps = PulseNotificationsProps & {
+	channelId: string;
+};
 
 function isNotificationData(payload: unknown): payload is NotificationData {
 	return typeof payload === "object" && payload !== null;
@@ -24,12 +28,24 @@ function isUpdatePayload(payload: unknown): payload is NotificationUpdatePayload
 }
 
 export function Notifications({ channelId, ...props }: PulseNotificationsProps) {
-	const { store = defaultStore, ...rest } = props;
-	// biome-ignore lint/correctness/useHookAtTopLevel: channelId is not expected to change
-	const channel = channelId ? usePulseChannel(channelId) : undefined;
-	useEffect(() => {
-		if (!channel) return;
+	if (!channelId) {
+		const { store = defaultStore, ...rest } = props;
+		return <MantineNotifications {...rest} store={store} />;
+	}
 
+	return <ConnectedNotifications channelId={channelId} {...props} />;
+}
+
+function ConnectedNotifications({ channelId, ...props }: ConnectedNotificationsProps) {
+	const { store = defaultStore, ...rest } = props;
+	const client = usePulseClient();
+	const channelRef = useRef<ChannelBridge | null>(null);
+
+	useEffect(() => {
+		if (!channelId) return;
+
+		const channel = client.acquireChannel(channelId);
+		channelRef.current = channel;
 		const cleanups = [
 			channel.on("show", (payload: unknown) => {
 				if (!isNotificationData(payload)) return;
@@ -59,14 +75,15 @@ export function Notifications({ channelId, ...props }: PulseNotificationsProps) 
 				notificationsApi.updateState(store, () => next as NotificationData[]);
 			}),
 			store.subscribe((state) => {
-				if (!channel) return;
+				const currentChannel = channelRef.current;
+				if (!currentChannel) return;
 				const notificationIds = state.notifications
 					.map((item) => item.id)
 					.filter((id): id is string => !!id && id.length > 0);
 				const queueIds = state.queue
 					.map((item) => item.id)
 					.filter((id): id is string => !!id && id.length > 0);
-				channel.emit("stateSync", {
+				currentChannel.emit("stateSync", {
 					notifications: notificationIds,
 					queue: queueIds,
 				});
@@ -77,8 +94,12 @@ export function Notifications({ channelId, ...props }: PulseNotificationsProps) 
 			for (const dispose of cleanups) {
 				dispose();
 			}
+			if (channelRef.current === channel) {
+				channelRef.current = null;
+			}
+			client.releaseChannel(channelId);
 		};
-	}, [channel, store]);
+	}, [client, channelId, store]);
 
 	return <MantineNotifications {...rest} store={store} />;
 }

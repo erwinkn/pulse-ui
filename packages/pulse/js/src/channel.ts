@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useState } from "react";
 import type { PulseSocketIOClient } from "./client";
 import type {
 	ServerChannelMessage,
@@ -247,17 +247,19 @@ export class ChannelBridge {
 	}
 }
 
-export function usePulseChannel(channelId: string): ChannelBridge {
+export function usePulseChannel(channelId: string): ChannelBridge | null {
 	const client = usePulseClient();
-	const bridge = useMemo(() => {
+
+	const [bridge, setBridge] = useState<ChannelBridge | null>(null);
+
+	useEffect(() => {
 		if (!channelId) {
 			throw new Error("usePulseChannel requires a non-empty channelId");
 		}
-		return client.acquireChannel(channelId);
-	}, [client, channelId]);
-
-	useEffect(() => {
+		const acquired = client.acquireChannel(channelId);
+		setBridge(acquired);
 		return () => {
+			setBridge((current) => (current === acquired ? null : current));
 			client.releaseChannel(channelId);
 		};
 	}, [client, channelId]);

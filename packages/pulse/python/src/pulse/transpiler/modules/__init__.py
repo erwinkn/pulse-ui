@@ -14,6 +14,7 @@ import pulse.dom.tags as pulseTags
 from pulse.transpiler.modules.asyncio import PyAsyncio
 from pulse.transpiler.modules.json import PyJson
 from pulse.transpiler.modules.math import PyMath
+from pulse.transpiler.modules.pulse.module import PulseModule
 from pulse.transpiler.modules.pulse.tags import PulseTags
 from pulse.transpiler.modules.typing import PyTyping
 from pulse.transpiler.py_module import PyModule
@@ -29,5 +30,5 @@ PyModule.register(typing_builtin, PyTyping)
 PyModule.register(pulseTags, PulseTags)
 
 # Register main pulse module for transpilation
-# This covers `import pulse as ps; ps.div(...)`
-PyModule.register(pulse_module, PulseTags)
+# This covers `import pulse as ps; ps.div(...)`, `ps.Link(...)`, etc.
+PyModule.register(pulse_module, PulseModule)

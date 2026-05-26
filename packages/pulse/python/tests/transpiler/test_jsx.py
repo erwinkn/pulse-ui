@@ -228,6 +228,18 @@ class TestPulseModuleIntegration:
 		assert isinstance(div_expr, TagExpr)
 		assert div_expr.tag == "div"
 
+	def test_pulse_module_react_components_via_pymodule(self):
+		"""Can access built-in React components via main pulse module."""
+		import pulse as ps
+		import pulse.transpiler.modules  # noqa: F401 - triggers registration
+		from pulse.transpiler.nodes import EXPR_REGISTRY
+
+		pulse_module = EXPR_REGISTRY[id(ps)]
+		link_expr = pulse_module.transpile_getattr("Link", None)  # pyright: ignore[reportArgumentType]
+		outlet_expr = pulse_module.transpile_getattr("Outlet", None)  # pyright: ignore[reportArgumentType]
+		assert link_expr is ps.Link
+		assert outlet_expr is ps.Outlet
+
 	def test_pulse_as_ps_div_in_transpiled_function(self):
 		"""ps.div() works in @javascript(jsx=True) function with import pulse as ps."""
 		import pulse as ps
@@ -240,6 +252,31 @@ class TestPulseModuleIntegration:
 		code = emit(fn)
 		# JSX functions use props destructuring for React compatibility
 		assert code == 'function render_1({}) {\nreturn <div>{"Hello"}</div>;\n}'
+
+	def test_pulse_as_ps_link_in_transpiled_function(self):
+		"""ps.Link() works in @javascript(jsx=True) functions."""
+		import pulse as ps
+
+		@javascript(jsx=True)
+		def render() -> Any:
+			return ps.div(ps.Link("Home", to="/"))
+
+		code = emit(render.transpile())
+		assert "<div><Link_" in code
+		assert ' to="/"' in code
+		assert '{"Home"}' in code
+
+	def test_pulse_as_ps_outlet_in_transpiled_function(self):
+		"""ps.Outlet() works in @javascript(jsx=True) functions."""
+		import pulse as ps
+
+		@javascript(jsx=True)
+		def render() -> Any:
+			return ps.main(ps.Outlet())
+
+		code = emit(render.transpile())
+		assert "<main><Outlet_" in code
+		assert " /></main>" in code
 
 	def test_pulse_as_ps_nested_tags(self):
 		"""Nested ps.div/ps.span calls work in transpiled function."""

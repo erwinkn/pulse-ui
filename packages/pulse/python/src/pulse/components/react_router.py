@@ -7,7 +7,7 @@ from typing import Literal, TypedDict, Unpack
 
 from pulse.dom.props import HTMLAnchorProps
 from pulse.react_component import react_component
-from pulse.transpiler import Import
+from pulse.transpiler.imports import Import
 from pulse.transpiler.nodes import Node
 
 

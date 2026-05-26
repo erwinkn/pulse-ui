@@ -24,9 +24,9 @@ from typing import TypeVar as _TypeVar
 from typing import override as _override
 
 from pulse.component import component as _component
-from pulse.transpiler import Import as _Import
 from pulse.transpiler.errors import TranspileError as _TranspileError
 from pulse.transpiler.function import Constant as _Constant
+from pulse.transpiler.imports import Import as _Import
 from pulse.transpiler.js_module import JsModule
 from pulse.transpiler.nodes import Call as _Call
 from pulse.transpiler.nodes import Expr as _Expr

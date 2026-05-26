@@ -808,6 +808,35 @@ async def test_reconnect_flushes_queue_when_pending():
 	session.close()
 
 
+def test_prerender_of_active_path_queues_updates_until_route_sync():
+	routes = make_routes()
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	messages.clear()
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"], make_route_info("/a"))
+
+	session.execute_callback("/a", first_callback_key(session, "/a"), [])
+	session.flush()
+
+	assert messages == []
+
+	with ps.PulseContext.update(render=session):
+		session.update_route("/a", make_route_info("/a"))
+
+	updates = [message for message in messages if message["type"] == "vdom_update"]
+	assert len(updates) == 1
+
+	session.close()
+
+
 @pytest.mark.asyncio
 async def test_messages_dropped_while_disconnected():
 	"""Test that messages are dropped (not buffered) while disconnected."""
@@ -1578,13 +1607,14 @@ async def test_prerender_keeps_mounts_for_unrendered_paths():
 	assert result["type"] == "vdom_init"
 	assert session.route_mounts["/a"] is mount_a
 	assert mount_a.effect is effect_a
-	assert mount_a.state == "active"
+	assert mount_a.state == "pending"
 	assert mount_a.route.query == "page=2"
 	assert session.route_mounts["/b"] is mount_b
 	assert mount_b.effect is effect_b
 
 	messages.clear()
 	session.update_route("/a", nav_info)
+	assert mount_a.state == "active"
 	session.execute_callback("/a", "1.onClick", [])
 	session.flush()
 

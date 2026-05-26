@@ -462,6 +462,8 @@ class RenderSession:
 				mount.update_route(info)
 				if mount.effect is None:
 					mount.ensure_effect(lazy=True, flush=False)
+				if route_info is not None and mount.state == "active":
+					mount.start_pending(self.prerender_queue_timeout)
 
 			if mount.state != "active" and mount.queue_timeout is None:
 				mount.start_pending(self.prerender_queue_timeout)
@@ -511,6 +513,8 @@ class RenderSession:
 			return
 		try:
 			mount.update_route(route_info)
+			if mount.state == "pending" and self._send_message:
+				mount.activate(self._send_message)
 		except Exception as e:
 			self.report_error(path, "navigate", e)
 

@@ -342,11 +342,13 @@ class MantineForm(ps.State, Generic[TForm]):
 	def reset(self, initial_values: dict[str, Any] | None = None):
 		self._ensure_channel_open()
 		if self._sync_mode != "none":
-			values = (
-				initial_values
-				if initial_values is not None
-				else self._mantine_props.get("initialValues", {})
-			)
+			values: dict[str, Any]
+			if initial_values is not None:
+				values = initial_values
+			else:
+				values = cast(
+					dict[str, Any], self._mantine_props.get("initialValues", {})
+				)
 			if isinstance(values, dict):
 				self._replace_synced_values(values)
 		if initial_values is not None:

@@ -3,6 +3,7 @@ import {
 	type ReactNode,
 	useContext,
 	useEffect,
+	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -77,6 +78,7 @@ export interface PulseProviderProps {
 }
 
 const inBrowser = typeof window !== "undefined";
+const useIsomorphicLayoutEffect = inBrowser ? useLayoutEffect : useEffect;
 
 export function PulseProvider({ children, config, prerender }: PulseProviderProps) {
 	const [status, setStatus] = useState<ConnectionStatus>("ok");
@@ -236,7 +238,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 	}, [client, path, routeInfo]);
 	// Hack for our current prerendering setup on client-side navigation. Will be improved soon
 	const hasRendered = useRef(false);
-	useEffect(() => {
+	useIsomorphicLayoutEffect(() => {
 		// First rendering pass, no need to update the tree
 		if (!hasRendered.current) {
 			hasRendered.current = true;

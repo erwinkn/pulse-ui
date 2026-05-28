@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 import pytest_asyncio
@@ -16,14 +18,22 @@ from pulse_railway.constants import (
 	PULSE_KV_KIND,
 	PULSE_KV_PATH,
 	PULSE_KV_URL,
+	PULSE_ROUTER_CONNECTION_LIMIT,
 	RAILWAY_ENVIRONMENT_ID,
 	RAILWAY_PROJECT_ID,
 	RAILWAY_TOKEN,
 	REDIS_URL,
 	STALE_AFFINITY_RELOAD_QUERY_PARAM,
 )
-from pulse_railway.router import StaticResolver, build_app, build_app_from_env
+from pulse_railway.router import (
+	AffinityRouter,
+	StaticResolver,
+	build_app,
+	build_app_from_env,
+)
 from pulse_railway.store import MemoryDeploymentStore
+from socketio.exceptions import ConnectionError as SocketIOConnectionError
+from starlette.websockets import WebSocket
 
 
 @pytest_asyncio.fixture
@@ -196,6 +206,49 @@ async def test_build_app_from_env_uses_explicit_kv_env(
 
 
 @pytest.mark.asyncio
+async def test_router_session_uses_default_connection_limit(
+	monkeypatch: pytest.MonkeyPatch,
+	backend_servers: dict[str, str],
+) -> None:
+	monkeypatch.delenv(PULSE_ROUTER_CONNECTION_LIMIT, raising=False)
+	app = build_app(StaticResolver(backends=backend_servers, active_deployment="v2"))
+	connector = app.state.router.session.connector
+	await app.state.router.close()
+
+	assert connector.limit == 2048
+
+
+@pytest.mark.asyncio
+async def test_router_session_reads_connection_limit_env(
+	monkeypatch: pytest.MonkeyPatch,
+	backend_servers: dict[str, str],
+) -> None:
+	monkeypatch.setenv(PULSE_ROUTER_CONNECTION_LIMIT, "4096")
+	app = build_app(StaticResolver(backends=backend_servers, active_deployment="v2"))
+	connector = app.state.router.session.connector
+	await app.state.router.close()
+
+	assert connector.limit == 4096
+
+
+@pytest.mark.asyncio
+async def test_router_session_rejects_invalid_connection_limit(
+	monkeypatch: pytest.MonkeyPatch,
+	backend_servers: dict[str, str],
+) -> None:
+	monkeypatch.setenv(PULSE_ROUTER_CONNECTION_LIMIT, "0")
+	app = build_app(StaticResolver(backends=backend_servers, active_deployment="v2"))
+
+	try:
+		with pytest.raises(
+			RuntimeError, match=f"{PULSE_ROUTER_CONNECTION_LIMIT} must be >= 1"
+		):
+			_ = app.state.router.session
+	finally:
+		await app.state.router.close()
+
+
+@pytest.mark.asyncio
 async def test_router_returns_404_for_unknown_backend(
 	backend_servers: dict[str, str],
 ) -> None:
@@ -320,7 +373,9 @@ async def test_router_proxies_socketio_websocket_without_store(
 	received: dict[str, str | None] = {}
 
 	@sio.event
-	async def connect(sid: str, environ: dict[str, str], auth: dict[str, str]) -> None:
+	async def connect(  # pyright: ignore[reportUnusedFunction]
+		sid: str, environ: dict[str, str], auth: dict[str, str]
+	) -> None:
 		received["sid"] = sid
 		received["cookie"] = environ.get("HTTP_COOKIE")
 		received["render_id"] = auth.get("render_id")
@@ -337,7 +392,13 @@ async def test_router_proxies_socketio_websocket_without_store(
 		)
 	)
 	server = uvicorn.Server(
-		uvicorn.Config(app, host="127.0.0.1", port=router_port, log_level="warning")
+		uvicorn.Config(
+			app,
+			host="127.0.0.1",
+			port=router_port,
+			log_level="warning",
+			ws="wsproto",
+		)
 	)
 	server_task = asyncio.create_task(server.serve())
 	await asyncio.sleep(0.5)
@@ -359,12 +420,62 @@ async def test_router_proxies_socketio_websocket_without_store(
 			"render_id": "render-1",
 		}
 	finally:
-		if client.connected:
-			await client.disconnect()
+		await client.disconnect()
 		server.should_exit = True
 		await server_task
 		await app.state.router.close()
 		await backend_runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_router_closes_backend_websocket_when_client_accept_fails(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	class BackendWebSocket:
+		protocol: str | None = None
+		closed: bool = False
+
+		async def close(self) -> None:
+			self.closed = True
+
+	class FakeSession:
+		def __init__(self, websocket: BackendWebSocket) -> None:
+			self.websocket: BackendWebSocket = websocket
+
+		async def ws_connect(self, *_args: Any, **_kwargs: Any) -> BackendWebSocket:
+			return self.websocket
+
+	class RejectingWebSocket:
+		headers: dict[str, str] = {}
+		query_params: dict[str, str] = {}
+		url: SimpleNamespace = SimpleNamespace(query="")
+		closed: bool = False
+
+		async def accept(self, *_args: Any, **_kwargs: Any) -> None:
+			raise RuntimeError("client disconnected before accept")
+
+		async def close(self) -> None:
+			self.closed = True
+
+	backend_ws = BackendWebSocket()
+	router = AffinityRouter(
+		StaticResolver(backends={"v1": "http://backend"}, active_deployment="v1")
+	)
+	monkeypatch.setattr(
+		router.session, "ws_connect", FakeSession(backend_ws).ws_connect
+	)
+	websocket = RejectingWebSocket()
+
+	try:
+		with pytest.raises(RuntimeError, match="client disconnected"):
+			await router.proxy_websocket(
+				cast(WebSocket, cast(object, websocket)), "socket.io/"
+			)
+	finally:
+		await router.close()
+
+	assert backend_ws.closed is True
+	assert websocket.closed is True
 
 
 @pytest.mark.asyncio
@@ -383,7 +494,9 @@ async def test_router_falls_back_to_active_backend_for_stale_socket_affinity(
 	received: dict[str, str | None] = {}
 
 	@sio.event
-	async def connect(sid: str, environ: dict[str, str], auth: dict[str, str]) -> None:
+	async def connect(  # pyright: ignore[reportUnusedFunction]
+		sid: str, environ: dict[str, str], auth: dict[str, str]
+	) -> None:
 		received["sid"] = sid
 		received["cookie"] = environ.get("HTTP_COOKIE")
 		received["render_id"] = auth.get("render_id")
@@ -422,8 +535,7 @@ async def test_router_falls_back_to_active_backend_for_stale_socket_affinity(
 			"render_id": "render-1",
 		}
 	finally:
-		if client.connected:
-			await client.disconnect()
+		await client.disconnect()
 		server.should_exit = True
 		await server_task
 		await app.state.router.close()
@@ -463,7 +575,7 @@ async def test_router_rejects_stale_socket_affinity_without_reload_opt_in(
 
 	client = socketio.AsyncClient(reconnection=False)
 	try:
-		with pytest.raises(socketio.exceptions.ConnectionError):
+		with pytest.raises(SocketIOConnectionError):
 			await client.connect(
 				f"http://127.0.0.1:{router_port}?pulse_deployment=missing",
 				transports=["websocket"],
@@ -474,8 +586,7 @@ async def test_router_rejects_stale_socket_affinity_without_reload_opt_in(
 			)
 		assert client.connected is False
 	finally:
-		if client.connected:
-			await client.disconnect()
+		await client.disconnect()
 		server.should_exit = True
 		await server_task
 		await app.state.router.close()

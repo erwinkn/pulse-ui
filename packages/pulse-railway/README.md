@@ -96,6 +96,10 @@ By default, `pulse-railway deploy` uses source mode. Image deployments require `
 
 Backend services must set `PULSE_DEPLOYMENT_ID`. `RailwayPlugin` injects the affinity query into Pulse prerender and websocket directives and exposes `/_pulse/meta` for verification. Internal janitor endpoints receive `PULSE_RAILWAY_INTERNAL_TOKEN` directly on each service that needs it.
 
+Set `PULSE_RAILWAY_ROUTER_CONNECTION_LIMIT` on the router service to tune its
+aiohttp connection pool. The default is `2048`, which keeps outbound backend
+connections bounded while leaving headroom for long-lived WebSocket traffic.
+
 If your app opts into `pulse_railway.RailwaySessionStore()`:
 
 - deploy injects `PULSE_RAILWAY_REDIS_URL` into the backend app

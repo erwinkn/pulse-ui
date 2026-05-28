@@ -19,10 +19,12 @@ from pulse_railway.constants import (
 	CLIENT_LOADER_LOCATION_HEADER,
 	DEFAULT_BACKEND_PORT,
 	DEFAULT_REDIS_PREFIX,
+	DEFAULT_ROUTER_CONNECTION_LIMIT,
 	DEFAULT_ROUTER_HEALTH_PATH,
 	INTERNAL_API_PREFIX,
 	PULSE_INTERNAL_TOKEN,
 	PULSE_REDIS_PREFIX,
+	PULSE_ROUTER_CONNECTION_LIMIT,
 	PULSE_SERVICE_PREFIX,
 	STALE_AFFINITY_RELOAD_QUERY_PARAM,
 )
@@ -62,6 +64,21 @@ def _http_to_ws_url(http_url: str) -> str:
 	if http_url.startswith("http://"):
 		return http_url.replace("http://", "ws://", 1)
 	return http_url
+
+
+def _router_connection_limit() -> int:
+	value = os.environ.get(PULSE_ROUTER_CONNECTION_LIMIT)
+	if value is None:
+		return DEFAULT_ROUTER_CONNECTION_LIMIT
+	try:
+		limit = int(value)
+	except ValueError as exc:
+		raise RuntimeError(
+			f"{PULSE_ROUTER_CONNECTION_LIMIT} must be an integer"
+		) from exc
+	if limit < 1:
+		raise RuntimeError(f"{PULSE_ROUTER_CONNECTION_LIMIT} must be >= 1")
+	return limit
 
 
 class Resolver(Protocol):
@@ -105,6 +122,7 @@ class AffinityRouter:
 	def session(self) -> aiohttp.ClientSession:
 		if self._session is None:
 			self._session = aiohttp.ClientSession(
+				connector=aiohttp.TCPConnector(limit=_router_connection_limit()),
 				cookie_jar=aiohttp.DummyCookieJar(),
 				timeout=aiohttp.ClientTimeout(total=None, sock_connect=30),
 			)
@@ -264,43 +282,43 @@ class AffinityRouter:
 			autoping=True,
 		)
 		self._active_websockets.add(backend_ws)
-		await websocket.accept(subprotocol=backend_ws.protocol)
-
-		async def client_to_backend() -> None:
-			try:
-				while True:
-					message = await websocket.receive()
-					message_type = message["type"]
-					if message_type == "websocket.disconnect":
-						await backend_ws.close()
-						return
-					if message.get("text") is not None:
-						await backend_ws.send_str(cast(str, message["text"]))
-						continue
-					if message.get("bytes") is not None:
-						await backend_ws.send_bytes(cast(bytes, message["bytes"]))
-			except WebSocketDisconnect:
-				await backend_ws.close()
-
-		async def backend_to_client() -> None:
-			async for message in backend_ws:
-				if message.type == aiohttp.WSMsgType.TEXT:
-					await websocket.send_text(cast(str, message.data))
-				elif message.type == aiohttp.WSMsgType.BINARY:
-					await websocket.send_bytes(cast(bytes, message.data))
-				elif message.type == aiohttp.WSMsgType.CLOSE:
-					await websocket.close()
-					return
-				elif message.type == aiohttp.WSMsgType.ERROR:
-					raise RuntimeError("backend websocket error")
-
-		tasks = [
-			asyncio.create_task(client_to_backend()),
-			asyncio.create_task(backend_to_client()),
-		]
-		for task in tasks:
-			self._track_task(task)
 		try:
+			await websocket.accept(subprotocol=backend_ws.protocol)
+
+			async def client_to_backend() -> None:
+				try:
+					while True:
+						message = await websocket.receive()
+						message_type = message["type"]
+						if message_type == "websocket.disconnect":
+							await backend_ws.close()
+							return
+						if message.get("text") is not None:
+							await backend_ws.send_str(cast(str, message["text"]))
+							continue
+						if message.get("bytes") is not None:
+							await backend_ws.send_bytes(cast(bytes, message["bytes"]))
+				except WebSocketDisconnect:
+					await backend_ws.close()
+
+			async def backend_to_client() -> None:
+				async for message in backend_ws:
+					if message.type == aiohttp.WSMsgType.TEXT:
+						await websocket.send_text(cast(str, message.data))
+					elif message.type == aiohttp.WSMsgType.BINARY:
+						await websocket.send_bytes(cast(bytes, message.data))
+					elif message.type == aiohttp.WSMsgType.CLOSE:
+						await websocket.close()
+						return
+					elif message.type == aiohttp.WSMsgType.ERROR:
+						raise RuntimeError("backend websocket error")
+
+			tasks = [
+				asyncio.create_task(client_to_backend()),
+				asyncio.create_task(backend_to_client()),
+			]
+			for task in tasks:
+				self._track_task(task)
 			done, pending = await asyncio.wait(
 				tasks, return_when=asyncio.FIRST_COMPLETED
 			)

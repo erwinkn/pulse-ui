@@ -5,6 +5,7 @@ This module provides the main App class that users instantiate in their main.py
 to define routes and configure their Pulse application.
 """
 
+import asyncio
 import logging
 import os
 from collections import defaultdict
@@ -209,6 +210,7 @@ class App:
 	_sessions_in_request: dict[str, int]
 	_socket_to_render: dict[str, str]
 	_render_cleanups: dict[str, TimerHandleLike]
+	_render_message_locks: dict[str, asyncio.Lock]
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
 	_proxy: ReactProxy | None
@@ -288,6 +290,7 @@ class App:
 		self._socket_to_render = {}
 		# Map render_id -> cleanup timer handle for timeout-based expiry
 		self._render_cleanups = {}
+		self._render_message_locks = {}
 		self._tasks = TaskRegistry(name="app")
 		self._timers = TimerRegistry(tasks=self._tasks, name="app")
 		self._proxy = None
@@ -306,7 +309,9 @@ class App:
 			title="Pulse UI Server",
 			lifespan=self.fastapi_lifespan,
 		)
-		self.sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
+		self.sio = socketio.AsyncServer(
+			async_mode="asgi", cors_allowed_origins="*", async_handlers=False
+		)
 		self.asgi = socketio.ASGIApp(self.sio, self.fastapi)
 
 		if middleware is None:
@@ -795,26 +800,7 @@ class App:
 
 		@self.sio.event
 		async def message(sid: str, data: Serialized):  # pyright: ignore[reportUnusedFunction]
-			rid = self._socket_to_render.get(sid)
-			if not rid:
-				return
-			render = self.render_sessions.get(rid)
-			if render is None:
-				return
-			# Cancel any pending cleanup for active sessions (connected sessions stay alive)
-			self._cancel_render_cleanup(rid)
-			# Use renderId mapping to user session
-			session = self.user_sessions[self._render_to_user[rid]]
-			# Make sure to properly deserialize the message contents
-			msg = cast(ClientMessage, deserialize(data))
-			try:
-				if msg["type"] == "channel_message":
-					await self._handle_channel_message(render, session, msg)
-				else:
-					await self._handle_pulse_message(render, session, msg)
-			except Exception as e:
-				path = msg.get("path", "")
-				render.report_error(path, "server", e)
+			await self._handle_socket_message(sid, data)
 
 		self.status = AppStatus.initialized
 
@@ -852,6 +838,33 @@ class App:
 
 		handle = self._timers.later(self.session_timeout, _cleanup)
 		self._render_cleanups[rid] = handle
+
+	async def _handle_socket_message(self, sid: str, data: Serialized) -> None:
+		rid = self._socket_to_render.get(sid)
+		if not rid:
+			return
+		msg = cast(ClientMessage, deserialize(data))
+		lock = self._render_message_locks.setdefault(rid, asyncio.Lock())
+		async with lock:
+			render = self.render_sessions.get(rid)
+			if render is None:
+				return
+			owner_sid = self._render_to_user.get(rid)
+			if owner_sid is None:
+				return
+			session = self.user_sessions.get(owner_sid)
+			if session is None:
+				return
+			# Cancel any pending cleanup for active sessions (connected sessions stay alive)
+			self._cancel_render_cleanup(rid)
+			try:
+				if msg["type"] == "channel_message":
+					await self._handle_channel_message(render, session, msg)
+				else:
+					await self._handle_pulse_message(render, session, msg)
+			except Exception as e:
+				path = msg.get("path", "")
+				render.report_error(path, "server", e)
 
 	async def _handle_pulse_message(
 		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
@@ -1050,6 +1063,7 @@ class App:
 	def close_render(self, rid: str):
 		# Cancel any pending cleanup task
 		self._cancel_render_cleanup(rid)
+		self._render_message_locks.pop(rid, None)
 
 		render = self.render_sessions.pop(rid, None)
 		if not render:

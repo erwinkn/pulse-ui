@@ -84,6 +84,7 @@ from pulse.user_session import (
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 FRAMEWORK_API_PREFIX = "/_pulse"
+MAX_PENDING_SOCKET_MESSAGES = 100
 
 
 class AppStatus(IntEnum):
@@ -209,6 +210,8 @@ class App:
 	_render_to_user: dict[str, str]
 	_sessions_in_request: dict[str, int]
 	_socket_to_render: dict[str, str]
+	_connecting_sockets: set[str]
+	_pending_socket_messages: dict[str, list[Serialized]]
 	_render_cleanups: dict[str, TimerHandleLike]
 	_render_message_locks: dict[str, asyncio.Lock]
 	_tasks: TaskRegistry
@@ -288,6 +291,8 @@ class App:
 		self._sessions_in_request = {}
 		# Map websocket sid -> renderId for message routing
 		self._socket_to_render = {}
+		self._connecting_sockets = set()
+		self._pending_socket_messages = {}
 		# Map render_id -> cleanup timer handle for timeout-based expiry
 		self._render_cleanups = {}
 		self._render_message_locks = {}
@@ -723,6 +728,23 @@ class App:
 		):
 			# Expect renderId during websocket auth and require a valid user session
 			rid = auth.get("render_id") if auth else None
+			if rid:
+				self._connecting_sockets.add(sid)
+			try:
+				await _connect_socket(sid, environ, auth, rid)
+			except Exception:
+				self._connecting_sockets.discard(sid)
+				self._pending_socket_messages.pop(sid, None)
+				self._socket_to_render.pop(sid, None)
+				raise
+			await self._drain_pending_socket_messages(sid)
+
+		async def _connect_socket(  # pyright: ignore[reportUnusedFunction]
+			sid: str,
+			environ: dict[str, Any],
+			auth: dict[str, str] | None,
+			rid: str | None,
+		):
 			# Parse cookies from environ and ensure a session exists
 			cookie = self.cookie.get_from_socketio(environ)
 			if cookie is None:
@@ -787,9 +809,13 @@ class App:
 				if isinstance(res, Deny):
 					# Tear down the created session if denied
 					self.close_render(rid)
+					self._socket_to_render.pop(sid, None)
+					raise ConnectionRefusedError("Socket connection denied")
 
 		@self.sio.event
 		def disconnect(sid: str):  # pyright: ignore[reportUnusedFunction]
+			self._connecting_sockets.discard(sid)
+			self._pending_socket_messages.pop(sid, None)
 			rid = self._socket_to_render.pop(sid, None)
 			if rid is not None:
 				render = self.render_sessions.get(rid)
@@ -840,6 +866,30 @@ class App:
 		self._render_cleanups[rid] = handle
 
 	async def _handle_socket_message(self, sid: str, data: Serialized) -> None:
+		if sid in self._connecting_sockets:
+			self._queue_pending_socket_message(sid, data)
+			return
+		await self._process_socket_message(sid, data)
+
+	def _queue_pending_socket_message(self, sid: str, data: Serialized) -> None:
+		queue = self._pending_socket_messages.setdefault(sid, [])
+		if len(queue) >= MAX_PENDING_SOCKET_MESSAGES:
+			logger.warning(
+				"Dropping socket message for %s while connect is pending; queue is full",
+				sid,
+			)
+			return
+		queue.append(data)
+
+	async def _drain_pending_socket_messages(self, sid: str) -> None:
+		try:
+			while pending := self._pending_socket_messages.pop(sid, []):
+				for data in pending:
+					await self._process_socket_message(sid, data)
+		finally:
+			self._connecting_sockets.discard(sid)
+
+	async def _process_socket_message(self, sid: str, data: Serialized) -> None:
 		rid = self._socket_to_render.get(sid)
 		if not rid:
 			return

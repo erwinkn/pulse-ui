@@ -1040,16 +1040,18 @@ def reactive_dataclass(
 
 
 @overload
-def reactive(value: dict[T1, T2]) -> ReactiveDict[T1, T2]: ...
+def reactive(
+	value: dict[T1, T2], *, allow_frozen: bool = False
+) -> ReactiveDict[T1, T2]: ...
 @overload
-def reactive(value: list[T1]) -> ReactiveList[T1]: ...
+def reactive(value: list[T1], *, allow_frozen: bool = False) -> ReactiveList[T1]: ...
 @overload
-def reactive(value: set[T1]) -> ReactiveSet[T1]: ...
+def reactive(value: set[T1], *, allow_frozen: bool = False) -> ReactiveSet[T1]: ...
 @overload
-def reactive(value: T1) -> T1: ...
+def reactive(value: T1, *, allow_frozen: bool = False) -> T1: ...
 
 
-def reactive(value: _Any) -> _Any:
+def reactive(value: _Any, *, allow_frozen: bool = False) -> _Any:
 	"""Wrap built-in collections in their reactive counterparts if not already reactive.
 
 	Converts:
@@ -1057,11 +1059,16 @@ def reactive(value: _Any) -> _Any:
 		- list -> ReactiveList
 		- set -> ReactiveSet
 		- dataclass instance -> reactive dataclass with Signal-backed fields
+		- dataclass class -> reactive dataclass class
 
 	Leaves other values (primitives, already-reactive containers) untouched.
+	Frozen dataclass instances also pass through unchanged. Frozen dataclass
+	classes raise unless allow_frozen=True.
 
 	Args:
 		value: The value to make reactive.
+		allow_frozen: Allow frozen dataclass classes to use the reactive
+			class-factory path. Frozen dataclass instances still pass through.
 
 	Returns:
 		The reactive version of the value, or the original if already reactive
@@ -1083,6 +1090,9 @@ def reactive(value: _Any) -> _Any:
 		if getattr(type(value), "__is_reactive_dataclass__", False):
 			return value
 		base_cls = cast(type, type(value))
+		params = getattr(base_cls, "__dataclass_params__", None)
+		if params is not None and getattr(params, "frozen", False):
+			return value
 		reactive_cls = _get_reactive_dataclass_class(base_cls)
 		# Capture current field values
 		field_values: dict[str, _Any] = {}
@@ -1112,6 +1122,11 @@ def reactive(value: _Any) -> _Any:
 	if isinstance(value, set):
 		return ReactiveSet(value)  # pyright: ignore[reportUnknownArgumentType]
 	if isinstance(value, type) and is_dataclass(value):
+		params = getattr(value, "__dataclass_params__", None)
+		if params is not None and getattr(params, "frozen", False) and not allow_frozen:
+			raise TypeError(
+				"reactive() does not wrap frozen dataclass classes by default; pass allow_frozen=True to opt in"
+			)
 		return _get_reactive_dataclass_class(value)
 	return value
 

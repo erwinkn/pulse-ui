@@ -362,6 +362,16 @@ class Renderer:
 			old_value = previous.get(key)
 			prop_path = join_path(path, key)
 
+			if value is None:
+				if normalized is None:
+					normalized = current.copy()
+				normalized.pop(key, None)
+				if isinstance(old_value, (Element, PulseNode)):
+					unmount_element(old_value)
+				if key in previous and old_value is not None:
+					removed_keys.add(key)
+				continue
+
 			if isinstance(value, (Element, PulseNode)):
 				eval_keys.add(key)
 				if isinstance(old_value, (Element, PulseNode)):

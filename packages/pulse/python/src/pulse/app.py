@@ -921,7 +921,16 @@ class App:
 	) -> None:
 		async def _next() -> Ok[None]:
 			if msg["type"] == "attach":
-				render.attach(msg["path"], msg["routeInfo"])
+				attached = render.attach(msg["path"], msg["routeInfo"])
+				attach_id = msg.get("attachId")
+				if attached and isinstance(attach_id, str):
+					render.send(
+						{
+							"type": "attach_ack",
+							"path": msg["path"],
+							"attachId": attach_id,
+						}
+					)
 			elif msg["type"] == "update":
 				render.update_route(msg["path"], msg["routeInfo"])
 			elif msg["type"] == "callback":

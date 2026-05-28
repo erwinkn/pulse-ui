@@ -4,6 +4,7 @@ import { ChannelBridge, PulseChannelResetError } from "./channel";
 import type { RouteInfo } from "./helpers";
 import type {
 	ClientApiResultMessage,
+	ClientCallbackMessage,
 	ClientJsResultMessage,
 	ClientMessage,
 	ServerApiCallMessage,
@@ -54,6 +55,9 @@ export interface PulseClient {
 
 export class PulseSocketIOClient {
 	#activeViews: Map<string, MountedView>;
+	#activeAttachIds: Map<string, string>;
+	#ackedAttachIds: Map<string, string>;
+	#pendingCallbacks: Map<string, ClientCallbackMessage[]>;
 	#socket: Socket | null = null;
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
@@ -70,6 +74,7 @@ export class PulseSocketIOClient {
 	#connectingTimeout: ReturnType<typeof setTimeout> | null = null;
 	#errorTimeout: ReturnType<typeof setTimeout> | null = null;
 	#currentStatus: ConnectionStatus = "ok";
+	#nextAttachId = 0;
 
 	constructor(
 		url: string,
@@ -86,6 +91,9 @@ export class PulseSocketIOClient {
 		this.#frameworkNavigate = frameworkNavigate;
 		this.#socket = null;
 		this.#activeViews = new Map();
+		this.#activeAttachIds = new Map();
+		this.#ackedAttachIds = new Map();
+		this.#pendingCallbacks = new Map();
 		this.#messageQueue = [];
 		this.#connectionStatusConfig = connectionStatusConfig;
 	}
@@ -157,14 +165,7 @@ export class PulseSocketIOClient {
 				console.log("[SocketIOTransport] Connected:", this.#socket?.id);
 				// Send attach for all active views on connect/reconnect
 				for (const [path, route] of this.#activeViews) {
-					socket.emit(
-						"message",
-						serialize({
-							type: "attach",
-							path: path,
-							routeInfo: route.routeInfo,
-						}),
-					);
+					this.#sendAttach(path, route.routeInfo, socket);
 				}
 
 				for (const payload of this.#messageQueue) {
@@ -233,11 +234,7 @@ export class PulseSocketIOClient {
 			throw new Error(`Path ${path} is already attached`);
 		}
 		this.#activeViews.set(path, view);
-		void this.sendMessage({
-			type: "attach",
-			path,
-			routeInfo: view.routeInfo,
-		});
+		this.#sendAttach(path, view.routeInfo);
 	}
 
 	public updateRoute(path: string, routeInfo: RouteInfo) {
@@ -254,6 +251,9 @@ export class PulseSocketIOClient {
 
 	public detach(path: string) {
 		this.#activeViews.delete(path);
+		this.#activeAttachIds.delete(path);
+		this.#ackedAttachIds.delete(path);
+		this.#pendingCallbacks.delete(path);
 		void this.sendMessage({ type: "detach", path });
 	}
 
@@ -264,6 +264,9 @@ export class PulseSocketIOClient {
 		this.#messageQueue = [];
 		this.#connectionListeners.clear();
 		this.#activeViews.clear();
+		this.#activeAttachIds.clear();
+		this.#ackedAttachIds.clear();
+		this.#pendingCallbacks.clear();
 		for (const { bridge } of this.#channels.values()) {
 			bridge.dispose(new PulseChannelResetError("Client disconnected"));
 		}
@@ -349,6 +352,10 @@ export class PulseSocketIOClient {
 				window.location.reload();
 				break;
 			}
+			case "attach_ack": {
+				this.#handleAttachAck(message.path, message.attachId);
+				break;
+			}
 			case "channel_message": {
 				this.#routeChannelMessage(message);
 				break;
@@ -415,12 +422,18 @@ export class PulseSocketIOClient {
 	}
 
 	public invokeCallback(path: string, callback: string, args: any[]) {
-		this.sendMessage({
+		if (!this.#activeViews.has(path)) return;
+		const message: ClientCallbackMessage = {
 			type: "callback",
 			path,
 			callback,
 			args: args.map(extractEvent),
-		});
+		};
+		if (this.#isAttachAcked(path)) {
+			this.sendMessage(message);
+			return;
+		}
+		this.#queueCallback(message);
 	}
 
 	#handleJsExec(message: ServerJsExecMessage) {
@@ -496,8 +509,53 @@ export class PulseSocketIOClient {
 	}
 
 	#handleTransportDisconnect(): void {
+		this.#ackedAttachIds.clear();
 		for (const entry of this.#channels.values()) {
 			entry.bridge.handleDisconnect(new PulseChannelResetError("Connection lost"));
+		}
+	}
+
+	#sendAttach(path: string, routeInfo: RouteInfo, socket?: Socket): void {
+		const attachId = `${path}:${++this.#nextAttachId}`;
+		this.#activeAttachIds.set(path, attachId);
+		this.#ackedAttachIds.delete(path);
+		const message = {
+			type: "attach" as const,
+			path,
+			routeInfo,
+			attachId,
+		};
+		if (socket) {
+			socket.emit("message", serialize(message));
+			return;
+		}
+		this.sendMessage(message);
+	}
+
+	#isAttachAcked(path: string): boolean {
+		const attachId = this.#activeAttachIds.get(path);
+		return attachId !== undefined && this.#ackedAttachIds.get(path) === attachId;
+	}
+
+	#handleAttachAck(path: string, attachId: string): void {
+		if (this.#activeAttachIds.get(path) !== attachId) return;
+		this.#ackedAttachIds.set(path, attachId);
+		this.#flushPendingCallbacks(path);
+	}
+
+	#queueCallback(message: ClientCallbackMessage): void {
+		const queue = this.#pendingCallbacks.get(message.path) ?? [];
+		queue.push(message);
+		this.#pendingCallbacks.set(message.path, queue);
+	}
+
+	#flushPendingCallbacks(path: string): void {
+		if (!this.#activeViews.has(path) || !this.#isAttachAcked(path)) return;
+		const queue = this.#pendingCallbacks.get(path);
+		if (!queue) return;
+		this.#pendingCallbacks.delete(path);
+		for (const message of queue) {
+			this.sendMessage(message);
 		}
 	}
 

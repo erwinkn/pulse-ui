@@ -55,6 +55,12 @@ class ServerReloadMessage(TypedDict):
 	type: Literal["reload"]
 
 
+class ServerAttachAckMessage(TypedDict):
+	type: Literal["attach_ack"]
+	path: str
+	attachId: str
+
+
 class ServerApiCallMessage(TypedDict):
 	type: Literal["api_call"]
 	# Correlation id to match request/response
@@ -109,6 +115,7 @@ class ClientAttachMessage(TypedDict):
 	type: Literal["attach"]
 	path: str
 	routeInfo: RouteInfo
+	attachId: NotRequired[str]
 
 
 class ClientUpdateMessage(TypedDict):
@@ -166,6 +173,7 @@ ServerMessage = (
 	| ServerApiCallMessage
 	| ServerNavigateToMessage
 	| ServerReloadMessage
+	| ServerAttachAckMessage
 	| ServerChannelMessage
 	| ServerJsExecMessage
 )

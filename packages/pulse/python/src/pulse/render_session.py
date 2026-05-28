@@ -481,13 +481,14 @@ class RenderSession:
 
 	# ---- Client lifecycle ----
 
-	def attach(self, path: str, route_info: RouteInfo):
+	def attach(self, path: str, route_info: RouteInfo) -> bool:
 		"""
 		Client ready to receive updates for path.
 		- PENDING: flush queue, transition to ACTIVE
 		- IDLE: request reload
 		- ACTIVE: update route_info
 		- No mount: request reload
+		Returns True when callbacks can be accepted for this path.
 		"""
 		path = ensure_absolute_path(path)
 		mount = self.route_mounts.get(path)
@@ -495,12 +496,13 @@ class RenderSession:
 		if mount is None or mount.state == "idle":
 			# Initial render must come from prerender
 			self.send({"type": "reload"})
-			return
+			return False
 
 		# Update route info for active and pending mounts
 		mount.update_route(route_info)
 		if mount.state == "pending" and self._send_message:
 			mount.activate(self._send_message)
+		return mount.state == "active"
 
 	def update_route(self, path: str, route_info: RouteInfo):
 		"""Update routing state (query params, etc.) for attached path."""

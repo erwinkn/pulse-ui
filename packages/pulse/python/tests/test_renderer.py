@@ -11,7 +11,7 @@ from pulse.dom.tags import button, div, li, span, ul
 from pulse.hooks.core import HookContext
 from pulse.refs import RefHandle
 from pulse.renderer import RenderTree
-from pulse.transpiler.nodes import Element, PulseNode
+from pulse.transpiler.nodes import Element, PulseNode, Value
 from pulse.transpiler.vdom import VDOMElement, VDOMExpr
 
 
@@ -482,6 +482,54 @@ def test_diff_updates_props():
 			"data": {"set": {"class": "two"}},
 		}
 	]
+
+
+def test_render_omits_none_props():
+	tree = RenderTree(Element("div", props={"c": None, "title": "t"}))
+
+	vdom = cast(VDOMElement, tree.render())
+
+	assert vdom.get("props") == {"title": "t"}
+	assert cast(Element, tree.element).props == {"title": "t"}
+
+
+def test_none_prop_update_removes_previous_value():
+	tree = RenderTree(Element("div", props={"c": "red", "title": "t"}))
+	tree.render()
+
+	ops = tree.rerender(Element("div", props={"c": None, "title": "t"}))
+
+	assert ops == [
+		{
+			"type": "update_props",
+			"path": "",
+			"data": {"remove": ["c"]},
+		}
+	]
+	assert cast(Element, tree.element).props == {"title": "t"}
+
+
+def test_none_prop_updates_to_value_after_being_omitted():
+	tree = RenderTree(Element("div", props={"c": None}))
+	tree.render()
+
+	ops = tree.rerender(Element("div", props={"c": "red"}))
+
+	assert ops == [
+		{
+			"type": "update_props",
+			"path": "",
+			"data": {"set": {"c": "red"}},
+		}
+	]
+
+
+def test_value_none_prop_still_sends_explicit_null():
+	tree = RenderTree(Element("div", props={"value": Value(None)}))
+
+	vdom = cast(VDOMElement, tree.render())
+
+	assert vdom.get("props") == {"value": None}
 
 
 def test_keyed_move_preserves_component_nodes():

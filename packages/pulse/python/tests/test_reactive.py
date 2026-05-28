@@ -1777,6 +1777,67 @@ def test_reactive_wraps_dataclass_instance_in_place():
 	assert isinstance(i.tags, ReactiveList)
 
 
+def test_reactive_leaves_frozen_dataclass_instance_unchanged():
+	@dataclass(frozen=True)
+	class Result:
+		value: int
+		label: str
+
+	result = Result(1, "ok")
+
+	wrapped = reactive(result)
+
+	assert wrapped is result
+	assert type(wrapped) is Result
+
+
+def test_reactive_rejects_frozen_dataclass_class_by_default():
+	@dataclass(frozen=True)
+	class Result:
+		value: int
+
+	with pytest.raises(TypeError, match="allow_frozen=True"):
+		reactive(Result)
+
+
+def test_reactive_allows_frozen_dataclass_class_factory_opt_in():
+	@dataclass(frozen=True)
+	class Result:
+		value: int
+
+	ReactiveResult = reactive(Result, allow_frozen=True)
+
+	assert getattr(ReactiveResult, "__is_reactive_dataclass__", False)
+	assert getattr(ReactiveResult, "__reactive_base__", None) is Result
+
+
+def test_state_accepts_frozen_dataclass_instance():
+	@dataclass(frozen=True)
+	class Result:
+		value: int
+		label: str
+
+	class Store(ps.State):
+		result: Result | None = None
+
+	store = Store()
+	result = Result(1, "ok")
+	seen: list[Result | None] = []
+
+	@effect
+	def e():  # pyright: ignore[reportUnusedFunction]
+		seen.append(store.result)
+
+	flush_effects()
+	assert seen == [None]
+
+	store.result = result
+	flush_effects()
+
+	assert store.result is result
+	assert seen == [None, result]
+
+
 def test_reactive_list_wraps_dataclass_items():
 	@dataclass
 	class D:
@@ -1811,7 +1872,10 @@ def test_reactive_dataclass_eq_order_hash_and_repr():
 		x: int
 		y: int
 
-	RA = reactive(A)
+	with pytest.raises(TypeError, match="allow_frozen=True"):
+		reactive(A)
+
+	RA = reactive(A, allow_frozen=True)
 	a1 = RA(1, 2)
 	a2 = RA(1, 2)
 	a3 = RA(2, 1)

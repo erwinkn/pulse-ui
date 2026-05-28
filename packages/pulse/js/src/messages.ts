@@ -77,6 +77,12 @@ export interface ServerReloadMessage {
 	type: "reload";
 }
 
+export interface ServerAttachAckMessage {
+	type: "attach_ack";
+	path: string;
+	attachId: string;
+}
+
 export interface ServerJsExecMessage {
 	type: "js_exec";
 	path: string;
@@ -91,6 +97,7 @@ export type ServerMessage =
 	| ServerApiCallMessage
 	| ServerNavigateToMessage
 	| ServerReloadMessage
+	| ServerAttachAckMessage
 	| ServerChannelRequestMessage
 	| ServerChannelResponseMessage
 	| ServerJsExecMessage;
@@ -106,6 +113,7 @@ export interface ClientAttachMessage {
 	type: "attach";
 	path: string;
 	routeInfo: RouteInfo;
+	attachId: string;
 }
 export interface ClientUpdateMessage {
 	type: "update";

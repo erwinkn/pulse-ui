@@ -94,6 +94,84 @@ def test_socketio_handlers_are_ordered():
 
 
 @pytest.mark.asyncio
+async def test_attach_sends_ack_after_route_is_attached(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	app = ps.App()
+	render = RenderSession("render-1", app.routes)
+	session = SimpleNamespace(sid="session-1", data={})
+	sent: list[dict[str, str]] = []
+
+	def attach(_path: str, _route_info: object) -> bool:
+		return True
+
+	def send(message: dict[str, str]) -> None:
+		sent.append(message)
+
+	monkeypatch.setattr(render, "attach", attach)
+	monkeypatch.setattr(render, "send", send)
+
+	await app._handle_pulse_message(  # pyright: ignore[reportPrivateUsage]
+		render,
+		cast(UserSession, cast(object, session)),
+		{
+			"type": "attach",
+			"path": "/",
+			"routeInfo": {
+				"pathname": "/",
+				"hash": "",
+				"query": "",
+				"queryParams": {},
+				"pathParams": {},
+				"catchall": [],
+			},
+			"attachId": "attach-1",
+		},
+	)
+
+	assert sent == [{"type": "attach_ack", "path": "/", "attachId": "attach-1"}]
+
+
+@pytest.mark.asyncio
+async def test_attach_does_not_ack_when_route_needs_reload(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	app = ps.App()
+	render = RenderSession("render-1", app.routes)
+	session = SimpleNamespace(sid="session-1", data={})
+	sent: list[dict[str, str]] = []
+
+	def attach(_path: str, _route_info: object) -> bool:
+		return False
+
+	def send(message: dict[str, str]) -> None:
+		sent.append(message)
+
+	monkeypatch.setattr(render, "attach", attach)
+	monkeypatch.setattr(render, "send", send)
+
+	await app._handle_pulse_message(  # pyright: ignore[reportPrivateUsage]
+		render,
+		cast(UserSession, cast(object, session)),
+		{
+			"type": "attach",
+			"path": "/",
+			"routeInfo": {
+				"pathname": "/",
+				"hash": "",
+				"query": "",
+				"queryParams": {},
+				"pathParams": {},
+				"catchall": [],
+			},
+			"attachId": "attach-1",
+		},
+	)
+
+	assert sent == []
+
+
+@pytest.mark.asyncio
 async def test_socket_messages_wait_for_connect_to_finish(
 	monkeypatch: pytest.MonkeyPatch,
 ):

@@ -1821,6 +1821,44 @@ def test_update_route_missing_mount_is_noop(monkeypatch: pytest.MonkeyPatch):
 	session.close()
 
 
+def test_execute_callback_missing_mount_is_noop(monkeypatch: pytest.MonkeyPatch):
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+	reported: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+	def report_error(*args: Any, **kwargs: Any) -> None:
+		reported.append((args, kwargs))
+
+	monkeypatch.setattr(session, "report_error", report_error)
+
+	session.execute_callback("/missing", "1.onClick", [])
+
+	assert reported == []
+
+	session.close()
+
+
+def test_execute_callback_stale_key_is_noop(monkeypatch: pytest.MonkeyPatch):
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+	reported: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+	def report_error(*args: Any, **kwargs: Any) -> None:
+		reported.append((args, kwargs))
+
+	monkeypatch.setattr(session, "report_error", report_error)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	session.execute_callback("/a", "missing.onClick", [])
+
+	assert reported == []
+
+	session.close()
+
+
 @pytest.mark.asyncio
 async def test_prerender_queue_timeout_transitions_to_idle():
 	"""Test that prerender without attach eventually transitions to idle."""

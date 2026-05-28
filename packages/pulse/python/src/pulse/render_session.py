@@ -726,8 +726,15 @@ class RenderSession:
 		self._timers.discard(handle)
 
 	def execute_callback(self, path: str, key: str, args: list[Any] | tuple[Any, ...]):
-		mount = self.route_mounts[path]
-		cb = mount.tree.callbacks[key]
+		path = ensure_absolute_path(path)
+		mount = self.route_mounts.get(path)
+		if mount is None or mount.state == "closed":
+			logger.warning("Dropping callback %r for missing route %r", key, path)
+			return
+		cb = mount.tree.callbacks.get(key)
+		if cb is None:
+			logger.warning("Dropping stale callback %r for route %r", key, path)
+			return
 
 		def report(e: BaseException, is_async: bool = False):
 			self.report_error(path, "callback", e, {"callback": key, "async": is_async})

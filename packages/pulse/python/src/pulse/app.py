@@ -68,7 +68,7 @@ from pulse.middleware import (
 	Redirect,
 )
 from pulse.plugin import Plugin
-from pulse.proxy import ProxyConfig, ReactProxy
+from pulse.proxy import Proxy, ReactProxy
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
@@ -154,8 +154,9 @@ class App:
 			Falls back to server_address if not provided.
 		not_found: Path for 404 page. Defaults to "/not-found".
 		mode: Deployment mode - "single-server" (default) or "subdomains".
-		Framework endpoints are always mounted under the reserved `/_pulse/*`
+			Framework endpoints are always mounted under the reserved `/_pulse/*`
 			namespace.
+		proxy: Single-server proxy tuning. Ignored in subdomains mode.
 		cors: CORS configuration. Auto-configured based on mode if not provided.
 		fastapi: Additional FastAPI constructor options.
 		session_timeout: Session cleanup timeout in seconds. Defaults to 60.0.
@@ -217,7 +218,7 @@ class App:
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
 	_proxy: ReactProxy | None
-	proxy_config: ProxyConfig | None
+	proxy: Proxy
 	session_timeout: float
 	connection_status: ConnectionStatusConfig
 	render_loop_limit: int
@@ -238,7 +239,7 @@ class App:
 		not_found: str = "/not-found",
 		# Deployment and integration options
 		mode: PulseMode = "single-server",
-		proxy: ProxyConfig | None = None,
+		proxy: Proxy | None = None,
 		cors: CORSOptions | None = None,
 		fastapi: dict[str, Any] | None = None,
 		session_timeout: float = 60.0,
@@ -250,7 +251,7 @@ class App:
 		# Resolve mode from environment and expose on the app instance
 		self.env = envvars.pulse_env
 		self.mode = mode
-		self.proxy_config = proxy
+		self.proxy = proxy or Proxy()
 		self.status = AppStatus.created
 		# Persist the server address for use by sessions (API calls, etc.) in ci/prod.
 		self.server_address = server_address if self.env in ("ci", "prod") else None
@@ -707,7 +708,7 @@ class App:
 			proxy_handler = ReactProxy(
 				react_server_address=react_server_address,
 				server_address=server_address,
-				config=self.proxy_config,
+				config=self.proxy,
 			)
 			self._proxy = proxy_handler
 

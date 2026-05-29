@@ -133,7 +133,7 @@
     },
     "packages/pulse-mantine/js": {
       "name": "pulse-mantine",
-      "version": "0.1.34",
+      "version": "0.1.35",
       "devDependencies": {
         "@types/bun": "latest",
         "@types/node": "^24.6.0",

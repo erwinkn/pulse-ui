@@ -6,7 +6,7 @@ ps.require(
 	{
 		"pulse-mantine": __version__,
 		"@mantine/core": ">=8.0.0",
-		"@mantine/dropzone": ">=8.0.0",
+		"@mantine/dropzone": "^8.0.0",
 		"@mantine/hooks": ">=8.0.0",
 	}
 )

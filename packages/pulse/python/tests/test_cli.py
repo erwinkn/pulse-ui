@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -351,6 +352,41 @@ def test_execute_commands_streams_output(
 	assert "[server]" in output
 	assert "child-line" in output
 	assert spawns == ["server"]
+
+
+def test_execute_commands_stops_remaining_processes_when_one_exits(
+	tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+	slow = CommandSpec(
+		name="server",
+		args=[
+			sys.executable,
+			"-c",
+			"import time; print('server-started', flush=True); time.sleep(5); print('server-finished', flush=True)",
+		],
+		cwd=tmp_path,
+		env=os.environ.copy(),
+	)
+	fast = CommandSpec(
+		name="web",
+		args=[
+			sys.executable,
+			"-c",
+			"import sys; print('web-exited', flush=True); sys.exit(7)",
+		],
+		cwd=tmp_path,
+		env=os.environ.copy(),
+	)
+
+	started = time.monotonic()
+	exit_code = execute_commands([slow, fast], tag_mode="plain")
+	elapsed = time.monotonic() - started
+
+	assert exit_code == 7
+	assert elapsed < 2
+	output = capsys.readouterr().out
+	assert "web-exited" in output
+	assert "server-finished" not in output
 
 
 @pytest.mark.parametrize(

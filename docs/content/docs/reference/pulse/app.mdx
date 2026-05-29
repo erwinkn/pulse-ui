@@ -22,10 +22,14 @@ class App:
         internal_server_address: str | None = None,
         not_found: str = "/not-found",
         mode: PulseMode = "single-server",
+        proxy: Proxy | None = None,
         cors: CORSOptions | None = None,
         fastapi: dict[str, Any] | None = None,
         session_timeout: float = 60.0,
+        prerender_queue_timeout: float = 60.0,
+        disconnect_queue_timeout: float = 300.0,
         connection_status: ConnectionStatusConfig | None = None,
+        render_loop_limit: int = 50,
     ): ...
 ```
 
@@ -44,10 +48,14 @@ class App:
 | `internal_server_address` | `str` | `None` | Internal URL for server-side fetches |
 | `not_found` | `str` | `"/not-found"` | Path for 404 page |
 | `mode` | `PulseMode` | `"single-server"` | Deployment mode |
+| `proxy` | `Proxy` | `None` | Single-server proxy tuning |
 | `cors` | `CORSOptions` | `None` | CORS configuration |
 | `fastapi` | `dict` | `None` | Additional FastAPI options |
 | `session_timeout` | `float` | `60.0` | Session cleanup timeout (seconds) |
+| `prerender_queue_timeout` | `float` | `60.0` | Prerender queue timeout (seconds) |
+| `disconnect_queue_timeout` | `float` | `300.0` | Disconnected socket message queue timeout (seconds) |
 | `connection_status` | `ConnectionStatusConfig` | `None` | Connection status UI timing |
+| `render_loop_limit` | `int` | `50` | Maximum render loops before failing |
 
 Framework routes live under the reserved `/_pulse/*` namespace and are not configurable.
 
@@ -137,6 +145,27 @@ Deployment mode for the application.
 |-------|-------------|
 | `"single-server"` | Python and React on same origin (default) |
 | `"subdomains"` | Python API on subdomain (e.g., `api.example.com`) |
+
+---
+
+## Proxy
+
+Configuration for the single-server React proxy.
+
+```python
+@dataclass
+class Proxy:
+    max_concurrency: int = 100
+    incoming_streaming_threshold: int = 512 * 1024
+    outgoing_streaming_threshold: int = 5 * 1024 * 1024
+    stream_chunk_size: int = 512 * 1024
+    connect_timeout: float | None = 30.0
+    disconnect_watch_timeout: float = 30.0
+    disconnect_watch_max_sleep: float = 1.0
+    disconnect_watch_base_sleep: float = 0.001
+```
+
+Pass it to `App(proxy=ps.Proxy(...))`. Used only in `"single-server"` mode.
 
 ---
 

@@ -29,16 +29,40 @@ _INCOMING_STREAMING_THRESHOLD = 512 * 1024
 _OUTGOING_STREAMING_THRESHOLD = 5 * 1024 * 1024
 _STREAM_CHUNK_SIZE = 512 * 1024
 _MAX_CONCURRENCY = 100
+_DISCONNECT_WATCH_TIMEOUT = 30.0
+_DISCONNECT_WATCH_MAX_SLEEP = 1.0
 
 
 @dataclass
-class ProxyConfig:
+class Proxy:
 	"""Configuration for the React proxy in single-server mode."""
 
 	max_concurrency: int = _MAX_CONCURRENCY
 	incoming_streaming_threshold: int = _INCOMING_STREAMING_THRESHOLD
 	outgoing_streaming_threshold: int = _OUTGOING_STREAMING_THRESHOLD
 	stream_chunk_size: int = _STREAM_CHUNK_SIZE
+	connect_timeout: float | None = 30.0
+	disconnect_watch_timeout: float = _DISCONNECT_WATCH_TIMEOUT
+	disconnect_watch_max_sleep: float = _DISCONNECT_WATCH_MAX_SLEEP
+	disconnect_watch_base_sleep: float = 0.001
+
+	def __post_init__(self) -> None:
+		if self.max_concurrency <= 0:
+			raise ValueError("proxy.max_concurrency must be greater than 0")
+		if self.incoming_streaming_threshold < 0:
+			raise ValueError("proxy.incoming_streaming_threshold must be non-negative")
+		if self.outgoing_streaming_threshold < 0:
+			raise ValueError("proxy.outgoing_streaming_threshold must be non-negative")
+		if self.stream_chunk_size <= 0:
+			raise ValueError("proxy.stream_chunk_size must be greater than 0")
+		if self.connect_timeout is not None and self.connect_timeout <= 0:
+			raise ValueError("proxy.connect_timeout must be greater than 0 or None")
+		if self.disconnect_watch_timeout <= 0:
+			raise ValueError("proxy.disconnect_watch_timeout must be greater than 0")
+		if self.disconnect_watch_max_sleep < 0:
+			raise ValueError("proxy.disconnect_watch_max_sleep must be non-negative")
+		if self.disconnect_watch_base_sleep < 0:
+			raise ValueError("proxy.disconnect_watch_base_sleep must be non-negative")
 
 
 # Hop-by-hop headers should not be proxied per RFC 7230.
@@ -88,7 +112,7 @@ class ReactProxy:
 
 	react_server_address: str
 	server_address: str
-	config: ProxyConfig
+	config: Proxy
 	_session: aiohttp.ClientSession | None
 	_active_responses: set[aiohttp.ClientResponse]
 	_active_websockets: set[aiohttp.ClientWebSocketResponse]
@@ -100,7 +124,7 @@ class ReactProxy:
 		react_server_address: str,
 		server_address: str,
 		*,
-		config: ProxyConfig | None = None,
+		config: Proxy | None = None,
 	) -> None:
 		"""
 		Args:
@@ -110,7 +134,7 @@ class ReactProxy:
 		"""
 		self.react_server_address = react_server_address
 		self.server_address = server_address
-		self.config = config or ProxyConfig()
+		self.config = config or Proxy()
 		self._session = None
 		self._active_responses = set()
 		self._active_websockets = set()
@@ -132,7 +156,10 @@ class ReactProxy:
 		"""Lazy initialization of upstream HTTP/WebSocket client session."""
 		if self._session is None:
 			# Keep connect timeouts; avoid total/read timeouts for long streams.
-			timeout = aiohttp.ClientTimeout(total=None, sock_connect=30)
+			timeout = aiohttp.ClientTimeout(
+				total=None,
+				sock_connect=self.config.connect_timeout,
+			)
 			connector = aiohttp.TCPConnector(
 				limit=self.config.max_concurrency,
 				limit_per_host=self.config.max_concurrency,
@@ -478,15 +505,37 @@ class ReactProxy:
 			await body_complete.wait()
 			if disconnect_event.is_set() or self._closing.is_set():
 				return
+			empty_request_polls = 0
+			deadline = (
+				asyncio.get_running_loop().time() + self.config.disconnect_watch_timeout
+			)
 			while not self._closing.is_set():
-				message = await receive()
+				remaining = deadline - asyncio.get_running_loop().time()
+				if remaining <= 0:
+					return
+				try:
+					message = await asyncio.wait_for(receive(), timeout=remaining)
+				except asyncio.TimeoutError:
+					return
 				if message["type"] == "http.disconnect":
 					disconnect_event.set()
 					return
 				if message["type"] != "http.request":
 					continue
 				if not message.get("more_body", False):
+					empty_request_polls += 1
+					delay = (
+						0.0
+						if empty_request_polls == 1
+						else min(
+							self.config.disconnect_watch_max_sleep,
+							self.config.disconnect_watch_base_sleep
+							* 2**empty_request_polls,
+						)
+					)
+					await asyncio.sleep(delay)
 					continue
+				empty_request_polls = 0
 
 		watch_task = asyncio.create_task(_watch_disconnect())
 		self._track_task(watch_task)

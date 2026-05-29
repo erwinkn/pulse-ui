@@ -9,7 +9,7 @@ import aiohttp
 import pytest
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.helpers import get_client_address, get_client_address_socketio
-from pulse.proxy import ProxyConfig, ReactProxy
+from pulse.proxy import Proxy, ReactProxy
 from starlette.datastructures import URL, Headers
 from starlette.requests import Request
 from starlette.types import Message
@@ -218,18 +218,35 @@ class TestReactProxyUrlRewrite:
 
 
 class TestReactProxySessionLimits:
+	def test_proxy_rejects_invalid_numeric_config(self):
+		with pytest.raises(ValueError, match="max_concurrency"):
+			Proxy(max_concurrency=0)
+		with pytest.raises(ValueError, match="disconnect_watch_timeout"):
+			Proxy(disconnect_watch_timeout=0)
+
 	@pytest.mark.asyncio
 	async def test_session_uses_connector_limits(self):
 		proxy = ReactProxy(
 			react_server_address="http://localhost:5173",
 			server_address="http://localhost:8000",
-			config=ProxyConfig(max_concurrency=7),
+			config=Proxy(max_concurrency=7),
 		)
 		session = proxy.session
 		connector = session.connector
 		assert connector is not None
 		assert connector.limit == 7
 		assert connector.limit_per_host == 7
+		assert session.timeout.sock_connect == 30.0
+		await proxy.close()
+
+	@pytest.mark.asyncio
+	async def test_session_uses_configured_connect_timeout(self):
+		proxy = ReactProxy(
+			react_server_address="http://localhost:5173",
+			server_address="http://localhost:8000",
+			config=Proxy(connect_timeout=3.5),
+		)
+		assert proxy.session.timeout.sock_connect == 3.5
 		await proxy.close()
 
 
@@ -576,6 +593,45 @@ class TestReactProxyStreaming:
 		bodies = [msg["body"] for msg in sent if msg["type"] == "http.response.body"]
 		assert bodies == [b"one", b"two", b""]
 		assert response.close.call_count >= 1
+
+	@pytest.mark.asyncio
+	async def test_terminal_empty_request_does_not_spin_disconnect_watcher(self):
+		proxy = ReactProxy(
+			react_server_address="http://localhost:5173",
+			server_address="http://localhost:8000",
+			config=Proxy(
+				disconnect_watch_base_sleep=0.05,
+				disconnect_watch_max_sleep=0.05,
+			),
+		)
+
+		async def _request(**_: Any) -> _StubResponse:
+			await asyncio.sleep(0.02)
+			return _StubResponse(
+				status=200,
+				raw_headers=[(b"content-type", b"text/plain")],
+				read_body=b"ok",
+				content_length=2,
+			)
+
+		session = MagicMock()
+		session.request = AsyncMock(side_effect=_request)
+		session.close = AsyncMock()
+		proxy._session = session  # pyright: ignore[reportPrivateUsage]
+
+		receive_count = 0
+
+		async def receive() -> Message:
+			nonlocal receive_count
+			receive_count += 1
+			return {"type": "http.request", "body": b"", "more_body": False}
+
+		async def send(_: Message) -> None:
+			return None
+
+		await proxy(_make_asgi_scope("/"), receive, send)
+
+		assert receive_count <= 2
 
 	@pytest.mark.asyncio
 	async def test_disconnect_stops_stream_and_closes_upstream(self):

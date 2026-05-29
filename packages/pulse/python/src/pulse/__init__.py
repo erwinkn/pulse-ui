@@ -1335,7 +1335,7 @@ from pulse.middleware import (
 from pulse.plugin import Plugin as Plugin
 
 # Proxy
-from pulse.proxy import ProxyConfig as ProxyConfig
+from pulse.proxy import Proxy as Proxy
 from pulse.queries.client import QueryClient as QueryClient
 from pulse.queries.client import QueryFilter as QueryFilter
 from pulse.queries.client import queries as queries

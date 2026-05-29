@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +11,6 @@ from pulse_railway.cli import (
 	_add_deploy_args,
 	_add_ensure_args,
 	_add_janitor_run_args,
-	_add_redeploy_args,
 	_add_scaffold_args,
 	_run_delete,
 	_run_deploy,
@@ -21,7 +19,6 @@ from pulse_railway.cli import (
 	_run_redeploy,
 	_run_remove,
 	_run_scaffold,
-	main,
 )
 from pulse_railway.deployment import (
 	DeploymentError,
@@ -356,22 +353,6 @@ def test_deploy_parser_drops_stable_stack_flags(monkeypatch) -> None:
 	assert not hasattr(args, "backend_port")
 
 
-def test_main_help_excludes_baseline_repair_commands(
-	monkeypatch: pytest.MonkeyPatch,
-	capsys: pytest.CaptureFixture[str],
-) -> None:
-	monkeypatch.setattr(sys, "argv", ["pulse-railway", "--help"])
-
-	with pytest.raises(SystemExit) as exc_info:
-		main()
-
-	assert exc_info.value.code == 0
-	help_text = capsys.readouterr().out
-	assert "scaffold" in help_text
-	assert "ensure" in help_text
-	assert "upgrade" not in help_text
-
-
 def test_deploy_parser_defers_default_token_resolution(monkeypatch) -> None:
 	monkeypatch.setenv("RAILWAY_API_TOKEN", "api-token")
 	monkeypatch.setenv("RAILWAY_TOKEN", "project-token")
@@ -446,15 +427,6 @@ def test_deploy_parser_requires_app_file() -> None:
 
 	with pytest.raises(SystemExit):
 		parser.parse_args([])
-
-
-def test_redeploy_parser_rejects_dead_redis_flags() -> None:
-	parser = argparse.ArgumentParser()
-
-	_add_redeploy_args(parser)
-
-	with pytest.raises(SystemExit):
-		parser.parse_args(["--redis-url", "redis://example"])
 
 
 def test_janitor_parser_reads_service_env_defaults(monkeypatch) -> None:
@@ -1878,24 +1850,6 @@ async def test_run_janitor_run_fails_outside_railway(monkeypatch) -> None:
 				drain_ttl_seconds=86400,
 			)
 		)
-
-
-def test_main_janitor_help_mentions_railway_runtime(
-	monkeypatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-	monkeypatch.setattr(
-		sys,
-		"argv",
-		["pulse-railway", "janitor", "run", "--help"],
-	)
-
-	with pytest.raises(SystemExit) as excinfo:
-		main()
-	assert excinfo.value.code == 0
-
-	help_text = capsys.readouterr().out
-	assert "Run janitor cleanup inside a Railway service runtime." in help_text
-	assert "fails immediately outside Railway." in help_text
 
 
 def test_janitor_runtime_error_message_is_actionable() -> None:

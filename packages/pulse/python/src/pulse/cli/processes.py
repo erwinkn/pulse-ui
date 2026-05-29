@@ -92,6 +92,7 @@ def _run_with_pty(
 	tag_mode: TagMode,
 ) -> int:
 	procs: list[tuple[str, int, int]] = []
+	completed_codes: list[int] = []
 	fd_to_spec: dict[int, CommandSpec] = {}
 	buffers: dict[int, bytearray] = {}
 	ready_flags: dict[int, bool] = {}
@@ -118,12 +119,16 @@ def _run_with_pty(
 					wpid, status = os.waitpid(pid, os.WNOHANG)
 					if wpid == pid:
 						procs.remove((tag, pid, fd))
+						completed_codes.append(
+							os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1
+						)
 						_close_fd(fd)
 				except ChildProcessError:
 					procs.remove((tag, pid, fd))
+					completed_codes.append(1)
 					_close_fd(fd)
 
-			if not procs:
+			if completed_codes or not procs:
 				break
 
 			readable = [fd for _, _, fd in procs]
@@ -149,16 +154,7 @@ def _run_with_pty(
 				except OSError:
 					continue
 
-		exit_codes: list[int] = []
-		for _tag, pid, fd in procs:
-			try:
-				_, status = os.waitpid(pid, 0)
-				exit_codes.append(os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1)
-			except Exception:
-				pass
-			_close_fd(fd)
-
-		return max(exit_codes) if exit_codes else 0
+		return max(completed_codes) if completed_codes else 0
 
 	except KeyboardInterrupt:
 		for _tag, pid, _fd in procs:
@@ -234,6 +230,8 @@ def _run_without_pty(
 							selector.unregister(proc.stdout)
 							proc.stdout.close()
 			procs = remaining
+			if completed_codes:
+				break
 	except KeyboardInterrupt:
 		for _name, proc, _spec in procs:
 			with contextlib.suppress(Exception):

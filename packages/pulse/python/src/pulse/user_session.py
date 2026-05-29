@@ -78,10 +78,14 @@ class UserSession(Disposable):
 	def dispose(self):
 		self._effect.dispose()
 
-	def handle_response(self, res: Response):
+	async def handle_response(self, res: Response):
 		# For cookie sessions, run the effect now if it's scheduled, in order to set the updated cookie
 		if self.is_cookie_session:
 			self._effect.flush()
+		else:
+			assert isinstance(self._effect, AsyncEffect)
+			if self._effect.is_scheduled:
+				await self._effect.wait()
 		for cookie in self._queued_cookies.values():
 			cookie.set_on_fastapi(res, cookie.value)
 		self._queued_cookies.clear()

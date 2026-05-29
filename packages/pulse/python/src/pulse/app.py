@@ -540,7 +540,7 @@ class App:
 			try:
 				with PulseContext.update(session=session, render=render):
 					res: Response = await call_next(request)
-				session.handle_response(res)
+				await session.handle_response(res)
 				return res
 			except RuntimeError as exc:
 				# Client disconnected before response was sent. This happens when
@@ -660,17 +660,17 @@ class App:
 			# Handle redirect/notFound responses
 			if isinstance(result, Redirect):
 				resp = JSONResponse({"redirect": result.path})
-				session.handle_response(resp)
+				await session.handle_response(resp)
 				return resp
 			if isinstance(result, NotFound):
 				resp = JSONResponse({"notFound": True})
-				session.handle_response(resp)
+				await session.handle_response(resp)
 				return resp
 
 			# Handle Ok result - serialize the payload (PrerenderResultData)
 			if isinstance(result, Ok):
 				resp = JSONResponse(serialize(result.payload))
-				session.handle_response(resp)
+				await session.handle_response(resp)
 				return resp
 
 			# Fallback (shouldn't happen)

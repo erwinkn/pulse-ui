@@ -7,6 +7,7 @@ import pulse as ps
 
 from pulse_mantine.core.box import BoxProps
 from pulse_mantine.core.styles import StyleFn
+from pulse_mantine.core.theme import MantineRadius
 
 DropzoneStatus = Literal["idle", "accept", "reject"]
 DropzoneStylesNames = Literal["root", "inner"]
@@ -60,6 +61,8 @@ class DropzoneProps(BoxProps, total=False):
 	"""Minimum individual file size in bytes."""
 	multiple: bool
 	"""Determines whether multiple files can be selected @default `true`."""
+	radius: MantineRadius
+	"""Controls border radius, key of `theme.radius` or any valid CSS value."""
 	onDrop: ps.EventHandler1[list[DropzoneFile]]
 	"""Called with accepted files when files are dropped or selected."""
 	onReject: ps.EventHandler1[list[FileRejection]]

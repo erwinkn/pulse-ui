@@ -5,6 +5,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from types import NoneType
 from typing import Any, NamedTuple, TypeAlias, cast
+from typing import Literal as TypingLiteral
 
 from pulse.debounce import Debounced
 from pulse.helpers import values_equal
@@ -45,6 +46,7 @@ CALLBACK_PLACEHOLDER = "$cb"
 class Callback(NamedTuple):
 	fn: Callable[..., Any]
 	n_args: int
+	accepts_varargs: bool = False
 
 
 Callbacks = dict[str, Callback]
@@ -107,7 +109,10 @@ class RenderTree:
 
 
 class Renderer:
-	def __init__(self) -> None:
+	def __init__(
+		self, *, mode: TypingLiteral["persistent", "snapshot"] = "persistent"
+	) -> None:
+		self.mode: TypingLiteral["persistent", "snapshot"] = mode
 		self.callbacks: Callbacks = {}
 		self.operations: list[VDOMOperation] = []
 
@@ -417,6 +422,11 @@ class Renderer:
 				continue
 
 			if isinstance(value, RefHandle):
+				if self.mode == "snapshot":
+					if normalized is None:
+						normalized = current.copy()
+					normalized.pop(key, None)
+					continue
 				if key != "ref":
 					raise TypeError("RefHandle can only be used as the 'ref' prop")
 				eval_keys.add(key)
@@ -436,6 +446,11 @@ class Renderer:
 					}
 				continue
 			if isinstance(value, Debounced):
+				if self.mode == "snapshot":
+					if normalized is None:
+						normalized = current.copy()
+					normalized.pop(key, None)
+					continue
 				eval_keys.add(key)
 				if isinstance(old_value, (Element, PulseNode)):
 					unmount_element(old_value)
@@ -451,6 +466,11 @@ class Renderer:
 				continue
 
 			if callable(value):
+				if self.mode == "snapshot":
+					if normalized is None:
+						normalized = current.copy()
+					normalized.pop(key, None)
+					continue
 				eval_keys.add(key)
 				if isinstance(old_value, (Element, PulseNode)):
 					unmount_element(old_value)
@@ -595,8 +615,22 @@ def register_callback(
 	path: str,
 	fn: Callable[..., Any],
 ) -> None:
-	n_args = len(inspect.signature(fn).parameters)
-	callbacks[path] = Callback(fn=fn, n_args=n_args)
+	# Only forward client event args to parameters the handler explicitly
+	# requires (positional, no default). Defaulted params keep their defaults,
+	# which keeps Python's late-binding closure-capture idiom safe:
+	#     onClick=lambda i=i: handler(i)
+	# Without this, the event would clobber `i`. Handlers that actually want
+	# the event still declare it without a default (`lambda e: ...`), and
+	# `*args` opts in to receiving every event arg the client sent.
+	params = inspect.signature(fn).parameters.values()
+	accepts_varargs = any(p.kind is p.VAR_POSITIONAL for p in params)
+	n_args = sum(
+		1
+		for p in params
+		if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+		and p.default is p.empty
+	)
+	callbacks[path] = Callback(fn=fn, n_args=n_args, accepts_varargs=accepts_varargs)
 
 
 def join_path(prefix: str, path: str | int) -> str:

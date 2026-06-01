@@ -50,6 +50,9 @@ const view = {
 	onUpdate: vi.fn(),
 	onJsExec: vi.fn(),
 	onServerError: vi.fn(),
+	deserializeMessage: vi.fn((data) =>
+		deserialize(data as any, { coerceNullsToUndefined: true }),
+	),
 };
 
 async function makeClient() {
@@ -126,5 +129,46 @@ describe("PulseSocketIOClient attach ack", () => {
 			"attach",
 			"detach",
 		]);
+	});
+
+	it("deserializes channel messages with the endpoint view deserializer", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		const viewA = {
+			...view,
+			deserializeMessage: vi.fn(() => ({
+				type: "channel_message",
+				channel: "chan-1",
+				event: "ping",
+				payload: { source: "a" },
+			} as const)),
+		};
+		const viewB = {
+			...view,
+			deserializeMessage: vi.fn(() => {
+				throw new Error("wrong view");
+			}),
+		};
+		client.attach("/a", viewA);
+		client.attach("/b", viewB);
+		const bridge = client.acquireChannel("chan-1", "/a");
+		const handler = vi.fn();
+		bridge.on("ping", handler);
+		socket.trigger("connect");
+		await connected;
+
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel_message",
+				channel: "chan-1",
+				event: "ping",
+				payload: { source: "wire" },
+			}),
+		);
+
+		expect(viewA.deserializeMessage).toHaveBeenCalledTimes(1);
+		expect(viewB.deserializeMessage).not.toHaveBeenCalled();
+		expect(handler).toHaveBeenCalledWith({ source: "a" });
 	});
 });

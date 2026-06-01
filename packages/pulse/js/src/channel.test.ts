@@ -1,15 +1,19 @@
 import { describe, expect, it, vi } from "bun:test";
-import { ChannelBridge, PulseChannelResetError } from "./channel";
+import {
+	ChannelBridge,
+	createPulseChannelManager,
+	PulseChannelResetError,
+} from "./channel";
 import { PulseSocketIOClient } from "./client";
-import type { ClientChannelMessage } from "./messages";
+import type { ClientMessage } from "./messages";
 
 function makeClient() {
-	const sent: ClientChannelMessage[] = [];
-	const sendMessage = vi.fn(async (message: ClientChannelMessage) => {
+	const sent: ClientMessage[] = [];
+	const sendMessage = vi.fn(async (message: ClientMessage) => {
 		sent.push(message);
 	});
 	const client = { sendMessage } as any;
-	const bridge = new ChannelBridge(client, "chan-1");
+	const bridge = new ChannelBridge(client, "chan-1", "/view");
 	return { bridge, sent, sendMessage };
 }
 
@@ -18,7 +22,15 @@ describe("ChannelBridge", () => {
 		const { bridge, sent } = makeClient();
 		const pending = bridge.request("echo", { foo: 1 });
 		expect(sent).toHaveLength(1);
-		const requestId = sent[0]!.requestId!;
+		expect(sent[0]).toEqual(
+			expect.objectContaining({
+				type: "channel_message",
+				channel: "chan-1",
+				event: "echo",
+			}),
+		);
+		expect(sent[0]).not.toHaveProperty("path");
+		const requestId = (sent[0] as any).requestId!;
 		bridge.handleServerMessage({
 			type: "channel_message",
 			channel: "chan-1",
@@ -84,13 +96,125 @@ describe("ChannelBridge", () => {
 			},
 		);
 
-		const first = client.acquireChannel("chan-1");
-		client.releaseChannel("chan-1");
+		const first = client.acquireChannel("chan-1", "/view");
+		client.releaseChannel("chan-1", "/view");
 
 		expect(() => first.on("event", vi.fn())).toThrow(PulseChannelResetError);
 
-		const second = client.acquireChannel("chan-1");
+		const second = client.acquireChannel("chan-1", "/view");
 		expect(second).not.toBe(first);
 		expect(() => second.on("event", vi.fn())).not.toThrow();
+	});
+
+	it("connects once per channel id and rejects duplicate endpoints", () => {
+		const client = new PulseSocketIOClient(
+			"http://pulse.test",
+			{},
+			vi.fn() as any,
+			{
+				initialConnectingDelay: 0,
+				initialErrorDelay: 0,
+				reconnectErrorDelay: 0,
+			},
+		);
+		const sent: ClientMessage[] = [];
+		vi.spyOn(client, "sendMessage").mockImplementation((message: any) => {
+			sent.push(message);
+		});
+
+		const first = client.acquireChannel("chan-1", "/a");
+
+		expect(() => client.acquireChannel("chan-1", "/b")).toThrow(
+			"Pulse channel 'chan-1' is already acquired",
+		);
+		expect(() => first.on("event", vi.fn())).not.toThrow();
+		expect(sent).toEqual([
+			expect.objectContaining({ type: "channel_connect", channel: "chan-1", path: "/a" }),
+		]);
+
+		client.releaseChannel("chan-1", "/a");
+		expect(sent.at(-1)).toEqual({
+			type: "channel_disconnect",
+			channel: "chan-1",
+		});
+	});
+
+	it("channel manager acquires with its view path and releases idempotently", () => {
+		const client = new PulseSocketIOClient(
+			"http://pulse.test",
+			{},
+			vi.fn() as any,
+			{
+				initialConnectingDelay: 0,
+				initialErrorDelay: 0,
+				reconnectErrorDelay: 0,
+			},
+		);
+		const sent: ClientMessage[] = [];
+		vi.spyOn(client, "sendMessage").mockImplementation((message: any) => {
+			sent.push(message);
+		});
+
+		const manager = createPulseChannelManager(client, "/view");
+		const lease = manager.acquire("chan-1");
+		lease.release();
+		lease.release();
+
+		expect(sent).toEqual([
+			expect.objectContaining({ type: "channel_connect", path: "/view" }),
+			expect.objectContaining({ type: "channel_disconnect", channel: "chan-1" }),
+		]);
+	});
+
+	it("channel manager rejects duplicate acquires", () => {
+		const client = new PulseSocketIOClient(
+			"http://pulse.test",
+			{},
+			vi.fn() as any,
+			{
+				initialConnectingDelay: 0,
+				initialErrorDelay: 0,
+				reconnectErrorDelay: 0,
+			},
+		);
+		vi.spyOn(client, "sendMessage").mockImplementation(() => {});
+
+		const manager = createPulseChannelManager(client, "/view");
+		manager.acquire("chan-1");
+
+		expect(() => manager.acquire("chan-1")).toThrow(
+			"PulseChannelManager already acquired channel 'chan-1'",
+		);
+	});
+
+	it("channel manager disposes outstanding leases", () => {
+		const client = new PulseSocketIOClient(
+			"http://pulse.test",
+			{},
+			vi.fn() as any,
+			{
+				initialConnectingDelay: 0,
+				initialErrorDelay: 0,
+				reconnectErrorDelay: 0,
+			},
+		);
+		const sent: ClientMessage[] = [];
+		vi.spyOn(client, "sendMessage").mockImplementation((message: any) => {
+			sent.push(message);
+		});
+
+		const manager = createPulseChannelManager(client, "/view");
+		manager.acquire("chan-a");
+		const released = manager.acquire("chan-b");
+		released.release();
+		manager.dispose();
+		manager.dispose();
+
+		expect(
+			sent
+				.filter((message) => message.type === "channel_disconnect")
+				.map((message) => message.channel),
+		).toEqual(["chan-b", "chan-a"]);
+		expect(() => manager.acquire("chan-c")).toThrow("PulseChannelManager is disposed");
 	});
 });

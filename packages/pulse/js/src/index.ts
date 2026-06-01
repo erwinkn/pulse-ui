@@ -1,7 +1,7 @@
 // Public API surface for pulse-client
 
-export type { ChannelBridge } from "./channel";
-export { PulseChannelResetError, usePulseChannel } from "./channel";
+export type { ChannelBridge, PulseChannelLease, PulseChannelManager } from "./channel";
+export { PulseChannelResetError } from "./channel";
 // Client implementation (types only - implementation is internal)
 export type {
 	ConnectionStatusListener,
@@ -38,7 +38,13 @@ export type {
 } from "./messages";
 export type { PulseConfig, PulsePrerender, PulseProviderProps } from "./pulse";
 // Core React bindings
-export { PulseProvider, PulseView, usePulseClient } from "./pulse";
+export {
+	PulseProvider,
+	PulseView,
+	usePulseChannel,
+	usePulseChannelManager,
+	usePulseClient,
+} from "./pulse";
 // Renderer helpers
 // Renderer (structural expressions + eval-keyed props)
 export { VDOMRenderer } from "./renderer";

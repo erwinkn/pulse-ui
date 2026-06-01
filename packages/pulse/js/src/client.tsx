@@ -15,7 +15,7 @@ import type {
 } from "./messages";
 import type { PulsePrerenderView } from "./pulse";
 import { extractEvent } from "./serialize/events";
-import { deserialize, serialize } from "./serialize/serializer";
+import { deserialize, serialize, type Serialized } from "./serialize/serializer";
 import type { VDOMUpdate } from "./vdom";
 
 
@@ -35,6 +35,7 @@ export interface MountedView {
 	onUpdate: (ops: VDOMUpdate[]) => void;
 	onJsExec: (msg: ServerJsExecMessage) => void;
 	onServerError: (error: ServerError) => void;
+	deserializeMessage: (data: Serialized) => ServerMessage;
 }
 export type ConnectionStatus = "ok" | "connecting" | "reconnecting" | "error";
 export type ConnectionStatusListener = (status: ConnectionStatus) => void;
@@ -61,7 +62,7 @@ export class PulseSocketIOClient {
 	#socket: Socket | null = null;
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
-	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
+	#channels: Map<string, { path: string; bridge: ChannelBridge }> = new Map();
 	#url: string;
 	#frameworkNavigate: NavigateFunction;
 	#directives: Directives;
@@ -167,10 +168,26 @@ export class PulseSocketIOClient {
 				for (const [path, route] of this.#activeViews) {
 					this.#sendAttach(path, route.routeInfo, socket);
 				}
+				for (const [channel, endpoint] of this.#channels) {
+					socket.emit(
+						"message",
+						serialize({
+							type: "channel_connect",
+							channel,
+							path: endpoint.path,
+						}),
+					);
+				}
 
 				for (const payload of this.#messageQueue) {
 					// Already sent above
 					if (payload.type === "attach" && this.#activeViews.has(payload.path)) {
+						continue;
+					}
+					if (
+						payload.type === "channel_connect" &&
+						this.#channels.get(payload.channel)?.path === payload.path
+					) {
 						continue;
 					}
 					// We're reattaching all the routes, so no need to send update
@@ -198,9 +215,7 @@ export class PulseSocketIOClient {
 			});
 
 			// Wrap in an arrow function to avoid losing the `this` reference
-			socket.on("message", (data) =>
-				this.#handleServerMessage(deserialize(data, { coerceNullsToUndefined: true })),
-			);
+			socket.on("message", (data) => this.#handleSerializedServerMessage(data));
 		});
 	}
 
@@ -254,6 +269,11 @@ export class PulseSocketIOClient {
 		this.#activeAttachIds.delete(path);
 		this.#ackedAttachIds.delete(path);
 		this.#pendingCallbacks.delete(path);
+		for (const [channel, endpoint] of [...this.#channels]) {
+			if (endpoint.path === path) {
+				this.#releaseChannel(channel, endpoint);
+			}
+		}
 		void this.sendMessage({ type: "detach", path });
 	}
 
@@ -273,6 +293,61 @@ export class PulseSocketIOClient {
 		this.#channels.clear();
 		this.#currentStatus = "ok";
 		this.#hasConnectedOnce = false;
+	}
+
+	#handleSerializedServerMessage(data: Serialized) {
+		const raw = data[1];
+		if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+			const type = (raw as { type?: unknown }).type;
+			if (type === "channel_message") {
+				const channel = (raw as { channel?: unknown }).channel;
+				if (typeof channel !== "string") return;
+				const endpoint = this.#channels.get(channel);
+				if (!endpoint) return;
+				const view = this.#activeViews.get(endpoint.path);
+				if (!view) {
+					this.#dropChannel(
+						channel,
+						new PulseChannelResetError("Channel view is no longer active"),
+					);
+					return;
+				}
+				let message: ServerMessage;
+				try {
+					message = view.deserializeMessage(data);
+				} catch (error) {
+					const errorMessage = error instanceof Error ? error.message : String(error);
+					throw new Error(
+						`[Pulse] Failed to deserialize channel_message for path '${endpoint.path}': ${errorMessage}`,
+					);
+				}
+				this.#handleServerMessage(message);
+				return;
+			}
+			const path = (raw as { path?: unknown }).path;
+			if (typeof path === "string") {
+				const view = this.#activeViews.get(path);
+				if (view && type === "js_exec") {
+					let message: ServerMessage;
+					try {
+						message = view.deserializeMessage(data);
+					} catch (error) {
+						const errorMessage = error instanceof Error ? error.message : String(error);
+						throw new Error(
+							`[Pulse] Failed to deserialize ${type} for path '${path}': ${errorMessage}`,
+						);
+					}
+					this.#handleServerMessage(message);
+					return;
+				}
+				if (type === "js_exec") {
+					const id = (raw as { id?: unknown }).id;
+					if (typeof id === "string") this.#sendJsResult(id, undefined, null);
+					return;
+				}
+			}
+		}
+		this.#handleServerMessage(deserialize(data, { coerceNullsToUndefined: true }));
 	}
 
 	#handleServerMessage(message: ServerMessage) {
@@ -461,57 +536,43 @@ export class PulseSocketIOClient {
 		this.sendMessage(msg);
 	}
 
-	public acquireChannel(id: string): ChannelBridge {
-		const entry = this.#ensureChannelEntry(id);
-		entry.refCount += 1;
-		return entry.bridge;
+	public acquireChannel(id: string, path: string): ChannelBridge {
+		if (this.#channels.has(id)) {
+			throw new Error(`Pulse channel '${id}' is already acquired`);
+		}
+		const bridge = new ChannelBridge(this, id, path);
+		this.#channels.set(id, { path, bridge });
+		this.sendMessage({
+			type: "channel_connect",
+			channel: id,
+			path,
+		});
+		return bridge;
 	}
 
-	public releaseChannel(id: string): void {
-		const entry = this.#channels.get(id);
-		if (!entry) {
+	public releaseChannel(id: string, path: string): void {
+		const endpoint = this.#channels.get(id);
+		if (!endpoint || endpoint.path !== path) {
 			return;
 		}
-		entry.refCount = Math.max(0, entry.refCount - 1);
-		if (entry.refCount === 0) {
-			entry.bridge.dispose(new PulseChannelResetError("Channel released"));
-			this.sendMessage({
-				type: "channel_message",
-				channel: id,
-				event: "__close__",
-				payload: { reason: "refcount_zero" },
-			});
-			this.#channels.delete(id);
-		}
-	}
-
-	#ensureChannelEntry(id: string): {
-		bridge: ChannelBridge;
-		refCount: number;
-	} {
-		let entry = this.#channels.get(id);
-		if (!entry) {
-			entry = {
-				bridge: new ChannelBridge(this, id),
-				refCount: 0,
-			};
-			this.#channels.set(id, entry);
-		}
-		return entry;
+		this.#releaseChannel(id, endpoint);
 	}
 
 	#routeChannelMessage(message: ServerChannelMessage): void {
-		const entry = this.#ensureChannelEntry(message.channel);
-		const closed = entry.bridge.handleServerMessage(message);
-		if (closed && entry.refCount === 0) {
+		const endpoint = this.#channels.get(message.channel);
+		if (!endpoint) {
+			return;
+		}
+		const closed = endpoint.bridge.handleServerMessage(message);
+		if (closed) {
 			this.#channels.delete(message.channel);
 		}
 	}
 
 	#handleTransportDisconnect(): void {
 		this.#ackedAttachIds.clear();
-		for (const entry of this.#channels.values()) {
-			entry.bridge.handleDisconnect(new PulseChannelResetError("Connection lost"));
+		for (const { bridge } of this.#channels.values()) {
+			bridge.handleDisconnect(new PulseChannelResetError("Connection lost"));
 		}
 	}
 
@@ -559,10 +620,26 @@ export class PulseSocketIOClient {
 		}
 	}
 
-	_ensureChannelEntry(id: string): {
-		bridge: ChannelBridge;
-		refCount: number;
-	} {
-		return this.#ensureChannelEntry(id);
+	#releaseChannel(
+		id: string,
+		endpoint: { path: string; bridge: ChannelBridge },
+	): void {
+		this.#channels.delete(id);
+		endpoint.bridge.dispose(new PulseChannelResetError("Channel released"));
+		this.sendMessage({
+			type: "channel_disconnect",
+			channel: id,
+		});
+	}
+
+	#dropChannel(id: string, reason: PulseChannelResetError): void {
+		const endpoint = this.#channels.get(id);
+		if (!endpoint) return;
+		this.#channels.delete(id);
+		endpoint.bridge.dispose(reason);
+		this.sendMessage({
+			type: "channel_disconnect",
+			channel: id,
+		});
 	}
 }

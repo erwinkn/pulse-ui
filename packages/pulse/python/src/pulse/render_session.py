@@ -26,6 +26,7 @@ from pulse.routing import (
 	Route,
 	RouteContext,
 	RouteInfo,
+	RouteOrigin,
 	RouteTree,
 	ensure_absolute_path,
 )
@@ -525,6 +526,7 @@ class RenderSession:
 		if current is not mount:
 			return
 		try:
+			self.channels.remove_route_mount(path, mount.mount_id)
 			self.route_mounts.pop(path, None)
 			self._ref_channels_by_route.pop(path, None)
 			mount.dispose()
@@ -538,6 +540,7 @@ class RenderSession:
 		mount = self.route_mounts.get(path)
 		if not mount:
 			return
+		self.channels.remove_route_mount(path, mount.mount_id)
 		mount.renew_mount_id()
 		if self.dev_strict_mode_detach_timeout > 0:
 			# React StrictMode in development intentionally replays mount effects as
@@ -575,16 +578,14 @@ class RenderSession:
 		ctx = PulseContext.get()
 		render_session = ctx.session if session is None else session
 		with Untrack():
-			source_path = mount.route.pathname
-			source_route_path = mount.route.route_path
-			source_mount_id = mount.mount_id
+			origin = RouteOrigin.from_route(mount.route)
+			mount_id = mount.mount_id
 		with PulseContext.update(
 			session=render_session,
 			render=self,
 			route=mount.route,
-			source_route_path=source_route_path,
-			source_path=source_path,
-			source_mount_id=source_mount_id,
+			origin=origin,
+			mount_id=mount_id,
 		):
 			try:
 				self._check_render_loop(mount, path)
@@ -688,7 +689,7 @@ class RenderSession:
 		if ctx.route is None:
 			if self._ref_channel is not None and not self._ref_channel.closed:
 				return self._ref_channel
-			self._ref_channel = self.channels.create(bind_route=False)
+			self._ref_channel = self.channels.create()
 			return self._ref_channel
 
 		route_path = ctx.route.route_path
@@ -697,7 +698,7 @@ class RenderSession:
 			self._ref_channels_by_route.pop(route_path, None)
 			channel = None
 		if channel is None:
-			channel = self.channels.create(bind_route=True)
+			channel = self.channels.create()
 			self._ref_channels_by_route[route_path] = channel
 		return channel
 
@@ -743,17 +744,15 @@ class RenderSession:
 
 		try:
 			with Untrack():
-				source_path = mount.route.pathname
-				source_route_path = mount.route.route_path
-				source_mount_id = mount.mount_id
+				origin = RouteOrigin.from_route(mount.route)
+				mount_id = mount.mount_id
 			with PulseContext.update(
 				render=self,
 				route=mount.route,
-				source_route_path=source_route_path,
-				source_path=source_path,
-				source_mount_id=source_mount_id,
+				origin=origin,
+				mount_id=mount_id,
 			):
-				res = cb.fn(*args[: cb.n_args])
+				res = cb.fn(*(args if cb.accepts_varargs else args[: cb.n_args]))
 				if iscoroutine(res):
 
 					def _on_done(t: asyncio.Task[Any]) -> None:

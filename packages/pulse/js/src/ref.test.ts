@@ -39,10 +39,20 @@ class FakeBridge {
 	}
 }
 
+function makeRegistry(bridge: FakeBridge, acquire = vi.fn()) {
+	return new RefRegistry({
+		acquire: (channelId: string) => {
+			acquire(channelId);
+			return { bridge, release: () => {} } as any;
+		},
+		dispose() {},
+	});
+}
+
 describe("RefRegistry", () => {
 	it("emits mount and unmount", () => {
 		const bridge = new FakeBridge();
-		const registry = new RefRegistry(() => bridge as any);
+		const registry = makeRegistry(bridge);
 		const cb = registry.getCallback("chan-1", "ref-1");
 
 		cb({});
@@ -56,7 +66,7 @@ describe("RefRegistry", () => {
 
 	it("handles request ops", () => {
 		const bridge = new FakeBridge();
-		const registry = new RefRegistry(() => bridge as any);
+		const registry = makeRegistry(bridge);
 		const cb = registry.getCallback("chan-1", "ref-1");
 
 		const element = {
@@ -75,7 +85,7 @@ describe("RefRegistry", () => {
 
 	it("handles call ops", () => {
 		const bridge = new FakeBridge();
-		const registry = new RefRegistry(() => bridge as any);
+		const registry = makeRegistry(bridge);
 		const cb = registry.getCallback("chan-1", "ref-1");
 
 		const focus = vi.fn();
@@ -92,12 +102,24 @@ describe("RefRegistry", () => {
 
 	it("locks to a single channel until disposed", () => {
 		const bridge = new FakeBridge();
-		const registry = new RefRegistry(() => bridge as any);
-		registry.getCallback("chan-1", "ref-1");
-		expect(() => registry.getCallback("chan-2", "ref-2")).toThrow(
+		const registry = makeRegistry(bridge);
+		registry.getCallback("chan-1", "ref-1")({});
+		expect(() => registry.getCallback("chan-2", "ref-2")({})).toThrow(
 			"[Pulse] Ref channel changed unexpectedly",
 		);
 		registry.dispose();
-		expect(() => registry.getCallback("chan-2", "ref-2")).not.toThrow();
+		expect(() => registry.getCallback("chan-2", "ref-2")({})).not.toThrow();
+	});
+
+	it("acquires a ref channel when the ref mounts", () => {
+		const bridge = new FakeBridge();
+		const acquire = vi.fn();
+		const registry = makeRegistry(bridge, acquire);
+		const cb = registry.getCallback("chan-1", "ref-1");
+
+		expect(acquire).not.toHaveBeenCalled();
+		cb({});
+
+		expect(acquire).toHaveBeenCalledWith("chan-1");
 	});
 });

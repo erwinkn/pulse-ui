@@ -318,6 +318,67 @@ def test_render_tree_initial_callbacks():
 	assert set(tree.callbacks.keys()) == {"0.onClick"}
 
 
+def test_callback_arg_count_skips_defaulted_params():
+	# Event args are forwarded only to required positional params; defaulted
+	# params keep their defaults so the closure-capture idiom is safe:
+	#     onClick=lambda i=i: handler(i)
+	# *args opts in to receiving every event arg.
+	received: list[tuple[str, tuple[Any, ...]]] = []
+
+	def no_args() -> None:
+		received.append(("no_args", ()))
+
+	def one_required(e: Any) -> None:
+		received.append(("one_required", (e,)))
+
+	def defaulted_capture(i: Any = "captured") -> None:
+		received.append(("defaulted_capture", (i,)))
+
+	def varargs(*a: Any) -> None:
+		received.append(("varargs", a))
+
+	def required_plus_default(a: Any, b: Any = "default-b") -> None:
+		received.append(("required_plus_default", (a, b)))
+
+	root = Element(
+		"div",
+		children=[
+			Element("button", props={"onClick": no_args}, children=["a"]),
+			Element("button", props={"onClick": one_required}, children=["b"]),
+			Element("button", props={"onClick": defaulted_capture}, children=["c"]),
+			Element("button", props={"onClick": varargs}, children=["d"]),
+			Element("button", props={"onClick": required_plus_default}, children=["e"]),
+		],
+	)
+
+	tree = RenderTree(root)
+	tree.render()
+
+	cbs = tree.callbacks
+	assert cbs["0.onClick"].n_args == 0
+	assert cbs["0.onClick"].accepts_varargs is False
+	assert cbs["1.onClick"].n_args == 1
+	assert cbs["2.onClick"].n_args == 0  # the fix: default keeps default
+	assert cbs["3.onClick"].n_args == 0
+	assert cbs["3.onClick"].accepts_varargs is True
+	assert cbs["4.onClick"].n_args == 1
+
+	# Simulate the dispatch site in render_session: pass a fake event payload
+	# and confirm each handler receives the expected slice.
+	event = ({"type": "click", "x": 10},)
+	for path, cb in cbs.items():
+		cb.fn(*(event if cb.accepts_varargs else event[: cb.n_args]))
+		_ = path
+
+	assert received == [
+		("no_args", ()),
+		("one_required", (event[0],)),
+		("defaulted_capture", ("captured",)),
+		("varargs", event),
+		("required_plus_default", (event[0], "default-b")),
+	]
+
+
 def test_render_tree_debounced_callbacks():
 	def on_click() -> None:
 		pass
@@ -1232,6 +1293,13 @@ async def test_ref_on_mount_uses_route_context():
 		render.prerender(["/"])
 
 	assert handle is not None
+	render.channels.handle_client_connect(
+		{
+			"type": "channel_connect",
+			"channel": handle.channel_id,
+			"path": "/",
+		}
+	)
 	render.channels.handle_client_event(
 		render=render,
 		session=session,

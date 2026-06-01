@@ -350,6 +350,60 @@ def test_render_tree_debounced_callbacks():
 	assert set(tree.callbacks.keys()) == {"0.onClick"}
 
 
+def test_callback_arg_count_skips_defaulted_params():
+	received: list[tuple[str, tuple[Any, ...]]] = []
+
+	def no_args() -> None:
+		received.append(("no_args", ()))
+
+	def one_required(e: Any) -> None:
+		received.append(("one_required", (e,)))
+
+	def defaulted_capture(i: Any = "captured") -> None:
+		received.append(("defaulted_capture", (i,)))
+
+	def varargs(*a: Any) -> None:
+		received.append(("varargs", a))
+
+	def required_plus_default(a: Any, b: Any = "default-b") -> None:
+		received.append(("required_plus_default", (a, b)))
+
+	root = Element(
+		"div",
+		children=[
+			Element("button", props={"onClick": no_args}, children=["a"]),
+			Element("button", props={"onClick": one_required}, children=["b"]),
+			Element("button", props={"onClick": defaulted_capture}, children=["c"]),
+			Element("button", props={"onClick": varargs}, children=["d"]),
+			Element("button", props={"onClick": required_plus_default}, children=["e"]),
+		],
+	)
+
+	tree = RenderTree(root)
+	tree.render()
+
+	cbs = tree.callbacks
+	assert cbs["0.onClick"].n_args == 0
+	assert cbs["0.onClick"].accepts_varargs is False
+	assert cbs["1.onClick"].n_args == 1
+	assert cbs["2.onClick"].n_args == 0
+	assert cbs["3.onClick"].n_args == 0
+	assert cbs["3.onClick"].accepts_varargs is True
+	assert cbs["4.onClick"].n_args == 1
+
+	event = ({"type": "click", "x": 10},)
+	for cb in cbs.values():
+		cb.fn(*(event if cb.accepts_varargs else event[: cb.n_args]))
+
+	assert received == [
+		("no_args", ()),
+		("one_required", (event[0],)),
+		("defaulted_capture", ("captured",)),
+		("varargs", event),
+		("required_plus_default", (event[0], "default-b")),
+	]
+
+
 def test_debounced_to_immediate_updates_placeholder():
 	def on_click() -> None:
 		pass

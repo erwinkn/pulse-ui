@@ -308,6 +308,18 @@ form.reset()                           # Reset to initial values
 form.reset(initial_values={"email": ""})  # Reset with new initial values
 ```
 
+### Submission State
+
+Use `form.is_submitting` for loading indicators on submit buttons:
+
+```python
+Button(
+    "Saving..." if form.is_submitting else "Save",
+    type="submit",
+    loading=form.is_submitting,
+)
+```
+
 ---
 
 ## Dynamic Forms

@@ -357,6 +357,10 @@ class MantineForm(ps.State, Generic[TForm]):
 			self._channel.emit("reset")
 
 	@property
+	def is_submitting(self) -> bool:
+		return self._form.is_submitting
+
+	@property
 	def values(self) -> ReactiveDict[str, Any]:
 		if self._sync_mode == "none":
 			raise ValueError(

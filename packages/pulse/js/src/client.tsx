@@ -61,7 +61,7 @@ export class PulseSocketIOClient {
 	#socket: Socket | null = null;
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
-	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
+	#channels: Map<string, { path: string; bridge: ChannelBridge }> = new Map();
 	#url: string;
 	#frameworkNavigate: NavigateFunction;
 	#directives: Directives;
@@ -254,6 +254,11 @@ export class PulseSocketIOClient {
 		this.#activeAttachIds.delete(path);
 		this.#ackedAttachIds.delete(path);
 		this.#pendingCallbacks.delete(path);
+		for (const [channel, endpoint] of [...this.#channels]) {
+			if (endpoint.path === path) {
+				this.#releaseChannel(channel, endpoint);
+			}
+		}
 		void this.sendMessage({ type: "detach", path });
 	}
 
@@ -461,49 +466,28 @@ export class PulseSocketIOClient {
 		this.sendMessage(msg);
 	}
 
-	public acquireChannel(id: string): ChannelBridge {
-		const entry = this.#ensureChannelEntry(id);
-		entry.refCount += 1;
-		return entry.bridge;
+	public acquireChannel(id: string, path = ""): ChannelBridge {
+		if (this.#channels.has(id)) {
+			throw new Error(`Pulse channel '${id}' is already acquired`);
+		}
+		const bridge = new ChannelBridge(this, id);
+		this.#channels.set(id, { path, bridge });
+		return bridge;
 	}
 
-	public releaseChannel(id: string): void {
-		const entry = this.#channels.get(id);
-		if (!entry) {
+	public releaseChannel(id: string, path = ""): void {
+		const endpoint = this.#channels.get(id);
+		if (!endpoint || endpoint.path !== path) {
 			return;
 		}
-		entry.refCount = Math.max(0, entry.refCount - 1);
-		if (entry.refCount === 0) {
-			entry.bridge.dispose(new PulseChannelResetError("Channel released"));
-			this.sendMessage({
-				type: "channel_message",
-				channel: id,
-				event: "__close__",
-				payload: { reason: "refcount_zero" },
-			});
-			this.#channels.delete(id);
-		}
-	}
-
-	#ensureChannelEntry(id: string): {
-		bridge: ChannelBridge;
-		refCount: number;
-	} {
-		let entry = this.#channels.get(id);
-		if (!entry) {
-			entry = {
-				bridge: new ChannelBridge(this, id),
-				refCount: 0,
-			};
-			this.#channels.set(id, entry);
-		}
-		return entry;
+		this.#releaseChannel(id, endpoint);
 	}
 
 	#routeChannelMessage(message: ServerChannelMessage): void {
-		const entry = this.#ensureChannelEntry(message.channel);
-		const closed = entry.bridge.handleServerMessage(message);
-		if (closed && entry.refCount === 0) {
+		const endpoint = this.#channels.get(message.channel);
+		if (!endpoint) return;
+		const closed = endpoint.bridge.handleServerMessage(message);
+		if (closed) {
 			this.#channels.delete(message.channel);
 		}
 	}
@@ -559,10 +543,17 @@ export class PulseSocketIOClient {
 		}
 	}
 
-	_ensureChannelEntry(id: string): {
-		bridge: ChannelBridge;
-		refCount: number;
-	} {
-		return this.#ensureChannelEntry(id);
+	#releaseChannel(
+		id: string,
+		endpoint: { path: string; bridge: ChannelBridge },
+	): void {
+		this.#channels.delete(id);
+		endpoint.bridge.dispose(new PulseChannelResetError("Channel released"));
+		this.sendMessage({
+			type: "channel_message",
+			channel: id,
+			event: "__close__",
+			payload: { reason: "refcount_zero" },
+		});
 	}
 }

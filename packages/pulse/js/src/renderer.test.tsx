@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "bun:test";
 import React from "react";
-import { ChannelBridge } from "./channel";
+import { ChannelBridge, createPulseChannelManager } from "./channel";
 import { VDOMRenderer } from "./renderer";
 
 import type { VDOMNode, VDOMUpdate } from "./vdom";
@@ -20,21 +20,24 @@ describe("VDOMRenderer", () => {
 		const client: any = {
 			sendMessage,
 			invokeCallback,
-			_ensureChannelEntry: (id: string) => {
-				let bridge = bridges.get(id);
+			acquireChannel: (id: string, path: string) => {
+				const key = `${path}:${id}`;
+				let bridge = bridges.get(key);
 				if (!bridge) {
 					bridge = new ChannelBridge(client, id);
-					bridges.set(id, bridge);
+					bridges.set(key, bridge);
 				}
-				return { bridge, refCount: 0 };
+				return bridge;
 			},
+			releaseChannel: vi.fn(),
 		};
 		return { client, invokeCallback, sent };
 	}
 
 	function makeRenderer(registry: Record<string, unknown> = {}) {
 		const { client, invokeCallback, sent } = makeClient();
-		const renderer = new VDOMRenderer(client, "/test", registry);
+		const channels = createPulseChannelManager(client, "/test");
+		const renderer = new VDOMRenderer(client, channels, "/test", registry);
 		return { renderer, invokeCallback, sent };
 	}
 
@@ -149,8 +152,18 @@ describe("VDOMRenderer", () => {
 
 	it("handles multiple ref channels across renderers", () => {
 		const shared = makeClient();
-		const rendererA = new VDOMRenderer(shared.client, "/a", {});
-		const rendererB = new VDOMRenderer(shared.client, "/b", {});
+		const rendererA = new VDOMRenderer(
+			shared.client,
+			createPulseChannelManager(shared.client, "/a"),
+			"/a",
+			{},
+		);
+		const rendererB = new VDOMRenderer(
+			shared.client,
+			createPulseChannelManager(shared.client, "/b"),
+			"/b",
+			{},
+		);
 
 		const treeA = rendererA.renderNode({
 			tag: "input",

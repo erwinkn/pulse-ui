@@ -748,21 +748,20 @@ class Element(Expr):
 		return result
 
 	@override
-	def render(self):
-		"""Element rendering is handled by Renderer.render_node(), not render().
-
-		This method validates render-time constraints and raises TypeError
-		because Element produces VDOMElement, not VDOMExpr.
-		"""
+	def render(self, renderer: Any = None, path: str = ""):
+		"""Render this element as one-shot VDOM."""
 		# Validate key is string or numeric (not arbitrary Expr) during rendering
 		if self.key is not None and not isinstance(self.key, (str, int)):
 			raise TypeError(
 				f"Element key must be a string or int for rendering, got {type(self.key).__name__}. "
 				+ "Expression keys are only valid during transpilation (emit)."
 			)
-		raise TypeError(
-			"Element cannot be rendered as VDOMExpr; use Renderer.render_node() instead"
-		)
+		if renderer is None:
+			from pulse.renderer import Renderer
+
+			renderer = Renderer(mode="snapshot")
+		vdom, _normalized = renderer.render_node(self, path)
+		return vdom
 
 
 @dataclass(slots=True)
@@ -811,6 +810,51 @@ class PulseNode:
 			key=self.key,
 			name=self.name,
 		)
+
+	def render(self, renderer: Any = None, path: str = ""):
+		"""Render this component as one-shot VDOM."""
+		if renderer is None:
+			from pulse.renderer import Renderer
+
+			renderer = Renderer(mode="snapshot")
+		vdom, _normalized = renderer.render_component(self, path)
+		return vdom
+
+
+def clone_renderable(value: Any) -> Any:
+	if isinstance(value, Element):
+		props = None
+		if isinstance(value.props, dict):
+			props = {key: clone_renderable(entry) for key, entry in value.props.items()}
+		elif value.props is not None:
+			props = [
+				prop
+				if isinstance(prop, Spread)
+				else (prop[0], clone_renderable(prop[1]))
+				for prop in value.props
+			]
+		children = (
+			[clone_renderable(child) for child in value.children]
+			if value.children is not None
+			else None
+		)
+		return Element(
+			tag=value.tag,
+			props=props,
+			children=children,
+			key=value.key,
+		)
+	if isinstance(value, PulseNode):
+		return PulseNode(
+			fn=value.fn,
+			args=tuple(clone_renderable(arg) for arg in value.args),
+			kwargs={
+				key: clone_renderable(entry) for key, entry in value.kwargs.items()
+			},
+			key=value.key,
+			name=value.name,
+		)
+	return value
 
 
 # =============================================================================

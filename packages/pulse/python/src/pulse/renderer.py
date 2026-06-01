@@ -5,6 +5,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from types import NoneType
 from typing import Any, NamedTuple, TypeAlias, cast
+from typing import Literal as TypingLiteral
 
 from pulse.debounce import Debounced
 from pulse.helpers import values_equal
@@ -107,7 +108,10 @@ class RenderTree:
 
 
 class Renderer:
-	def __init__(self) -> None:
+	def __init__(
+		self, *, mode: TypingLiteral["persistent", "snapshot"] = "persistent"
+	) -> None:
+		self.mode: TypingLiteral["persistent", "snapshot"] = mode
 		self.callbacks: Callbacks = {}
 		self.operations: list[VDOMOperation] = []
 
@@ -417,6 +421,11 @@ class Renderer:
 				continue
 
 			if isinstance(value, RefHandle):
+				if self.mode == "snapshot":
+					if normalized is None:
+						normalized = current.copy()
+					normalized.pop(key, None)
+					continue
 				if key != "ref":
 					raise TypeError("RefHandle can only be used as the 'ref' prop")
 				eval_keys.add(key)
@@ -436,6 +445,11 @@ class Renderer:
 					}
 				continue
 			if isinstance(value, Debounced):
+				if self.mode == "snapshot":
+					if normalized is None:
+						normalized = current.copy()
+					normalized.pop(key, None)
+					continue
 				eval_keys.add(key)
 				if isinstance(old_value, (Element, PulseNode)):
 					unmount_element(old_value)
@@ -451,6 +465,11 @@ class Renderer:
 				continue
 
 			if callable(value):
+				if self.mode == "snapshot":
+					if normalized is None:
+						normalized = current.copy()
+					normalized.pop(key, None)
+					continue
 				eval_keys.add(key)
 				if isinstance(old_value, (Element, PulseNode)):
 					unmount_element(old_value)

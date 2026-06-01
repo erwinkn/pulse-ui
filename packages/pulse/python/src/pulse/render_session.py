@@ -753,7 +753,7 @@ class RenderSession:
 				source_path=source_path,
 				source_mount_id=source_mount_id,
 			):
-				res = cb.fn(*args[: cb.n_args])
+				res = cb.fn(*(args if cb.accepts_varargs else args[: cb.n_args]))
 				if iscoroutine(res):
 
 					def _on_done(t: asyncio.Task[Any]) -> None:

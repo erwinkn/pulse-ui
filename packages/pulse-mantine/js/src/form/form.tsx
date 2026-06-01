@@ -295,74 +295,87 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 		channelRef.current = channel;
 		const cleanups = [
 			channel.on("setValues", (payload: { values: TValues }) => {
-				if (payload?.values !== undefined) {
-					form.setValues(payload.values);
-					// Always sync back after programmatic value updates
-					sendSync("change");
-				}
+				const currentForm = formRef.current;
+				if (payload?.values === undefined || !currentForm) return;
+				currentForm.setValues(payload.values);
+				// Always sync back after programmatic value updates
+				sendSync("change");
 			}),
 			channel.on("setFieldValue", (payload: { path: string; value: any }) => {
-				if (!payload) return;
-				form.setFieldValue(payload.path, payload.value);
+				const currentForm = formRef.current;
+				if (!payload || !currentForm) return;
+				currentForm.setFieldValue(payload.path, payload.value);
 				sendSync("change", payload.path);
 			}),
 			channel.on("insertListItem", (payload: { path: string; item: any; index?: number }) => {
-				if (!payload) return;
-				form.insertListItem(payload.path, payload.item, payload.index);
+				const currentForm = formRef.current;
+				if (!payload || !currentForm) return;
+				currentForm.insertListItem(payload.path, payload.item, payload.index);
 				sendSync("change", payload.path);
 			}),
 			channel.on("removeListItem", (payload: { path: string; index: number }) => {
-				if (!payload) return;
-				form.removeListItem(payload.path, payload.index);
+				const currentForm = formRef.current;
+				if (!payload || !currentForm) return;
+				currentForm.removeListItem(payload.path, payload.index);
 				sendSync("change", payload.path);
 			}),
 			channel.on("reorderListItem", (payload: { path: string; from: number; to: number }) => {
-				if (!payload) return;
-				form.reorderListItem(payload.path, {
+				const currentForm = formRef.current;
+				if (!payload || !currentForm) return;
+				currentForm.reorderListItem(payload.path, {
 					from: payload.from,
 					to: payload.to,
 				});
 				sendSync("change", payload.path);
 			}),
 			channel.on("setErrors", (payload: { errors: Record<string, any> }) => {
-				if (!payload) return;
-				form.setErrors(payload.errors);
+				const currentForm = formRef.current;
+				if (!payload || !currentForm) return;
+				currentForm.setErrors(payload.errors);
 			}),
 			channel.on("setFieldError", (payload: { path: string; error: any }) => {
-				if (!payload) return;
-				form.setFieldError(payload.path, payload.error);
+				const currentForm = formRef.current;
+				if (!payload || !currentForm) return;
+				currentForm.setFieldError(payload.path, payload.error);
 			}),
 			channel.on("clearErrors", (payload?: { paths?: string[] }) => {
+				const currentForm = formRef.current;
+				if (!currentForm) return;
 				const paths = payload?.paths;
 				if (Array.isArray(paths) && paths.length > 0) {
 					paths.forEach((p) => {
-						form.clearFieldError(p);
+						currentForm.clearFieldError(p);
 					});
 				} else {
-					form.clearErrors();
+					currentForm.clearErrors();
 				}
 			}),
 			channel.on("setTouched", (payload: { touched: Record<string, boolean> }) => {
-				if (!payload) return;
-				form.setTouched(payload.touched);
+				const currentForm = formRef.current;
+				if (!payload || !currentForm) return;
+				currentForm.setTouched(payload.touched);
 			}),
 			channel.on("validate", () => {
+				const currentForm = formRef.current;
+				if (!currentForm) return;
 				// Client-side validation of all fields. Server-side validation is triggered on Python side.
-				form.validate();
+				currentForm.validate();
 			}),
 			channel.on("reset", (payload?: { initialValues?: TValues }) => {
+				const currentForm = formRef.current;
+				if (!currentForm) return;
 				if (payload?.initialValues) {
 					// Same behavior as form.reset(), except we allow modifying the initialValues
-					form.resetTouched();
-					form.resetDirty();
-					form.setValues(payload.initialValues);
+					currentForm.resetTouched();
+					currentForm.resetDirty();
+					currentForm.setValues(payload.initialValues);
 					sendSync("change");
 				} else {
-					form.reset();
+					currentForm.reset();
 					sendSync("change");
 				}
 			}),
-			channel.on("getFormValues", () => form.getValues()),
+			channel.on("getFormValues", () => formRef.current?.getValues()),
 		];
 
 		return () => {
@@ -372,7 +385,7 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 			}
 			client.releaseChannel(channelId);
 		};
-	}, [client, channelId, form, sendSync]);
+	}, [client, channelId, sendSync]);
 
 	const submitHandler = useMemo(
 		() =>

@@ -45,6 +45,7 @@ CALLBACK_PLACEHOLDER = "$cb"
 class Callback(NamedTuple):
 	fn: Callable[..., Any]
 	n_args: int
+	accepts_varargs: bool = False
 
 
 Callbacks = dict[str, Callback]
@@ -595,8 +596,15 @@ def register_callback(
 	path: str,
 	fn: Callable[..., Any],
 ) -> None:
-	n_args = len(inspect.signature(fn).parameters)
-	callbacks[path] = Callback(fn=fn, n_args=n_args)
+	params = inspect.signature(fn).parameters.values()
+	accepts_varargs = any(p.kind is p.VAR_POSITIONAL for p in params)
+	n_args = sum(
+		1
+		for p in params
+		if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+		and p.default is p.empty
+	)
+	callbacks[path] = Callback(fn=fn, n_args=n_args, accepts_varargs=accepts_varargs)
 
 
 def join_path(prefix: str, path: str | int) -> str:

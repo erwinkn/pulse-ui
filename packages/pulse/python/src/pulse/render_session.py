@@ -26,6 +26,7 @@ from pulse.routing import (
 	Route,
 	RouteContext,
 	RouteInfo,
+	RouteOrigin,
 	RouteTree,
 	ensure_absolute_path,
 )
@@ -575,16 +576,14 @@ class RenderSession:
 		ctx = PulseContext.get()
 		render_session = ctx.session if session is None else session
 		with Untrack():
-			source_path = mount.route.pathname
-			source_route_path = mount.route.route_path
-			source_mount_id = mount.mount_id
+			origin = RouteOrigin.from_route(mount.route)
+			mount_id = mount.mount_id
 		with PulseContext.update(
 			session=render_session,
 			render=self,
 			route=mount.route,
-			source_route_path=source_route_path,
-			source_path=source_path,
-			source_mount_id=source_mount_id,
+			origin=origin,
+			mount_id=mount_id,
 		):
 			try:
 				self._check_render_loop(mount, path)
@@ -743,15 +742,13 @@ class RenderSession:
 
 		try:
 			with Untrack():
-				source_path = mount.route.pathname
-				source_route_path = mount.route.route_path
-				source_mount_id = mount.mount_id
+				origin = RouteOrigin.from_route(mount.route)
+				mount_id = mount.mount_id
 			with PulseContext.update(
 				render=self,
 				route=mount.route,
-				source_route_path=source_route_path,
-				source_path=source_path,
-				source_mount_id=source_mount_id,
+				origin=origin,
+				mount_id=mount_id,
 			):
 				res = cb.fn(*args[: cb.n_args])
 				if iscoroutine(res):

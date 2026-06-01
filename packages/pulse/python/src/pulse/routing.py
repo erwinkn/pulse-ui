@@ -614,3 +614,63 @@ class RouteContext:
 			f"query='{self.query}', queryParams={self.queryParams}, "
 			f"pathParams={self.pathParams}, catchall={self.catchall})"
 		)
+
+
+@dataclass(frozen=True)
+class RouteOrigin:
+	"""Immutable snapshot of the route context that originated work."""
+
+	info: RouteInfo
+	pulse_route: Route | Layout
+	route_path: str
+
+	@classmethod
+	def from_route(cls, route: RouteContext) -> "RouteOrigin":
+		return cls(
+			info={
+				"pathname": route.pathname,
+				"hash": route.hash,
+				"query": route.query,
+				"queryParams": dict(route.queryParams),
+				"pathParams": dict(route.pathParams),
+				"catchall": list(route.catchall),
+			},
+			pulse_route=route.pulse_route,
+			route_path=route.route_path,
+		)
+
+	@property
+	def pathname(self) -> str:
+		return self.info["pathname"]
+
+	@property
+	def hash(self) -> str:
+		return self.info["hash"]
+
+	@property
+	def query(self) -> str:
+		return self.info["query"]
+
+	@property
+	def queryParams(self) -> dict[str, str]:
+		return self.info["queryParams"]
+
+	@property
+	def pathParams(self) -> dict[str, str]:
+		return self.info["pathParams"]
+
+	@property
+	def catchall(self) -> list[str]:
+		return self.info["catchall"]
+
+	@override
+	def __str__(self) -> str:
+		return f"RouteOrigin(pathname='{self.pathname}', params={self.pathParams})"
+
+	@override
+	def __repr__(self) -> str:
+		return (
+			f"RouteOrigin(pathname='{self.pathname}', hash='{self.hash}', "
+			f"query='{self.query}', queryParams={self.queryParams}, "
+			f"pathParams={self.pathParams}, catchall={self.catchall})"
+		)

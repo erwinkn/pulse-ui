@@ -26,6 +26,7 @@ from pulse.helpers import Disposable, values_equal
 from pulse.messages import ServerNavigateToMessage
 from pulse.reactive import Effect, Scope, Signal, Untrack
 from pulse.reactive_extensions import reactive, unwrap
+from pulse.routing import RouteOrigin
 from pulse.state.property import InitializableProperty, StateProperty
 
 T = TypeVar("T")
@@ -488,11 +489,9 @@ class QueryParamSync(Disposable):
 			info = self.route.info
 			raw_params = info["queryParams"]
 			current_params = dict(cast(Mapping[str, str], raw_params))
-			pathname = info["pathname"]
-			source_route_path = self.route.route_path
-			source_path = pathname
-			mount = self.render.route_mounts.get(source_route_path)
-			source_mount_id = mount.mount_id if mount is not None else None
+			origin = RouteOrigin.from_route(self.route)
+			mount = self.render.route_mounts.get(origin.route_path)
+			mount_id = mount.mount_id if mount is not None else None
 			hash_frag = info["hash"]
 		query_params = dict(current_params)
 		for binding in self._bindings.values():
@@ -514,7 +513,7 @@ class QueryParamSync(Disposable):
 
 		if query_params == current_params:
 			return
-		path = pathname
+		path = origin.pathname
 		query = urlencode(query_params)
 		if query:
 			path += "?" + query
@@ -528,11 +527,11 @@ class QueryParamSync(Disposable):
 			path=path,
 			replace=True,
 			hard=False,
-			sourceRoutePath=source_route_path,
-			sourcePath=source_path,
+			sourceRoutePath=origin.route_path,
+			sourcePath=origin.pathname,
 		)
-		if source_mount_id is not None:
-			message["sourceMountId"] = source_mount_id
+		if mount_id is not None:
+			message["sourceMountId"] = mount_id
 		self.render.send(message)
 
 	@override

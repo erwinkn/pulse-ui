@@ -5,7 +5,7 @@ import {
 	type NotificationsProps,
 	notifications as notificationsApi,
 } from "@mantine/notifications";
-import { usePulseClient, type ChannelBridge } from "pulse-ui-client";
+import { usePulseChannel, type ChannelBridge } from "pulse-ui-client";
 import { useEffect, useRef } from "react";
 
 type NotificationUpdatePayload = Parameters<typeof notificationsApi.update>[0];
@@ -38,13 +38,12 @@ export function Notifications({ channelId, ...props }: PulseNotificationsProps) 
 
 function ConnectedNotifications({ channelId, ...props }: ConnectedNotificationsProps) {
 	const { store = defaultStore, ...rest } = props;
-	const client = usePulseClient();
+	const channel = usePulseChannel(channelId);
 	const channelRef = useRef<ChannelBridge | null>(null);
 
 	useEffect(() => {
-		if (!channelId) return;
+		if (!channel) return;
 
-		const channel = client.acquireChannel(channelId);
 		channelRef.current = channel;
 		const cleanups = [
 			channel.on("show", (payload: unknown) => {
@@ -97,9 +96,8 @@ function ConnectedNotifications({ channelId, ...props }: ConnectedNotificationsP
 			if (channelRef.current === channel) {
 				channelRef.current = null;
 			}
-			client.releaseChannel(channelId);
 		};
-	}, [client, channelId, store]);
+	}, [channel, store]);
 
 	return <MantineNotifications {...rest} store={store} />;
 }

@@ -213,6 +213,15 @@ form.reset()  # to initialValues
 form.reset(initial_values={"email": ""})  # with new initial values
 ```
 
+### Submission State
+```python
+Button(
+    "Saving..." if form.is_submitting else "Save",
+    type="submit",
+    loading=form.is_submitting,
+)
+```
+
 ## Synced Values (Dynamic Forms)
 
 Access form values on server with `syncMode`:

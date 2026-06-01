@@ -15,7 +15,7 @@ from pulse import javascript
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import ServerMessage
 from pulse.render_session import RenderSession
-from pulse.routing import Route, RouteInfo, RouteTree
+from pulse.routing import Route, RouteInfo, RouteOrigin, RouteTree
 from pulse.test_helpers import wait_for
 
 
@@ -144,7 +144,7 @@ def first_callback_key(session: RenderSession, path: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_pulse_context_update_can_clear_route_source():
+async def test_pulse_context_update_can_clear_route_origin():
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
 
@@ -156,21 +156,47 @@ async def test_pulse_context_update_can_clear_route_source():
 	with ps.PulseContext.update(
 		render=session,
 		route=route,
-		source_route_path=route.route_path,
-		source_path=route.pathname,
-		source_mount_id=session.route_mounts["/a"].mount_id,
+		origin=RouteOrigin.from_route(route),
+		mount_id=session.route_mounts["/a"].mount_id,
 	):
 		with ps.PulseContext.update(
 			route=None,
-			source_route_path=None,
-			source_path=None,
-			source_mount_id=None,
+			origin=None,
+			mount_id=None,
 		):
 			ctx = ps.PulseContext.get()
 			assert ctx.route is None
-			assert ctx.source_route_path is None
-			assert ctx.source_path is None
-			assert ctx.source_mount_id is None
+			assert ctx.origin is None
+			assert ctx.mount_id is None
+
+	session.close()
+
+
+def test_route_origin_snapshots_route_context():
+	routes = RouteTree([Route("items/:id/*", simple_component)])
+	session = RenderSession("test-id", routes)
+	first_info = make_route_info("/items/123/a", path_params={"id": "123"})
+	first_info["catchall"] = ["a"]
+	first_info["queryParams"] = {"q": "one"}
+	first_info["query"] = "q=one"
+	next_info = make_route_info("/items/456/b", path_params={"id": "456"})
+	next_info["catchall"] = ["b"]
+	next_info["queryParams"] = {"q": "two"}
+	next_info["query"] = "q=two"
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/items/:id/*"], first_info)
+		session.attach("/items/:id/*", first_info)
+
+	route = session.route_mounts["/items/:id/*"].route
+	origin = RouteOrigin.from_route(route)
+	route.update(next_info)
+
+	assert origin.route_path == "/items/:id/*"
+	assert origin.pathname == "/items/123/a"
+	assert origin.queryParams == {"q": "one"}
+	assert origin.pathParams == {"id": "123"}
+	assert origin.catchall == ["a"]
 
 	session.close()
 
@@ -584,8 +610,7 @@ def test_route_bound_navigation_validates_source_route_identity():
 	with ps.PulseContext.update(
 		render=session,
 		route=mount.route,
-		source_route_path=mount.route.route_path,
-		source_path=mount.route.pathname,
+		origin=RouteOrigin.from_route(mount.route),
 	):
 		session.detach("/a")
 		ps.navigate("/after")
@@ -696,8 +721,7 @@ def test_queued_route_bound_navigation_is_revalidated_on_reconnect():
 	with ps.PulseContext.update(
 		render=session,
 		route=mount.route,
-		source_route_path=mount.route.route_path,
-		source_path=mount.route.pathname,
+		origin=RouteOrigin.from_route(mount.route),
 	):
 		ps.navigate("/after")
 

@@ -73,6 +73,7 @@ class TestQueryParam:
 		assert msg["type"] == "navigate_to"
 		assert msg.get("sourceRoutePath") == "/"
 		assert msg.get("sourcePath") == "/"
+		assert isinstance(msg.get("sourceMountId"), str)
 		parsed = urlparse(str(msg["path"]))
 		query = parse_qs(parsed.query)
 		assert query["q"] == ["next"]

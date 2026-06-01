@@ -90,6 +90,7 @@ import { usePulseChannel } from "pulse-client";
 
 function Chat() {
   const channel = usePulseChannel("chat");
+  if (!channel) return null;
 
   channel.on("new_message", (msg) => {
     // Handle incoming message
@@ -144,6 +145,7 @@ const data = deserialize(wire);
 **Hooks:**
 - `usePulseClient()` - Access the client instance
 - `usePulseChannel(name)` - Real-time messaging
+- `usePulseChannelManager()` - Advanced dynamic channel acquisition
 
 **Functions:**
 - `serialize` - Convert data for wire transfer

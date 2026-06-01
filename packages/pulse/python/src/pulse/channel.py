@@ -174,6 +174,36 @@ class ChannelsManager:
 
 		channel.connected = True
 
+	def resume_client_channel(self, channel_id: str, path: str) -> bool:
+		channel = self._channels.get(channel_id)
+		if channel is None or channel.closed:
+			return False
+
+		path = ensure_absolute_path(path)
+		if channel.route_path is not None and path != channel.route_path:
+			logger.warning(
+				"Rejecting channel resume for wrong path: %s path=%s owner=%s",
+				channel_id,
+				path,
+				channel.route_path,
+			)
+			return False
+
+		if channel.route_path is not None:
+			mount = self._render_session.route_mounts.get(channel.route_path)
+			if (
+				mount is None
+				or mount.state != "active"
+				or mount.mount_id != channel.mount_id
+			):
+				logger.warning(
+					"Rejecting stale channel resume: %s path=%s", channel_id, path
+				)
+				return False
+
+		channel.connected = True
+		return True
+
 	def handle_client_disconnect(self, message: ClientChannelDisconnectMessage) -> None:
 		channel_id = str(message.get("channel"))
 		channel = self._channels.get(channel_id)

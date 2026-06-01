@@ -13,7 +13,7 @@ Bidirectional communication channels for real-time messaging between server and 
 def channel(identifier: str | None = None) -> Channel
 ```
 
-Create a channel bound to the current render session.
+Create a channel owned by the current rendered view. The browser view connects to that channel when client code calls `usePulseChannel(channel.id)`.
 
 **Parameters:**
 - `identifier` - Optional channel ID. Auto-generated UUID if not provided.
@@ -27,12 +27,12 @@ import pulse as ps
 
 @ps.component
 def ChatRoom():
-    ch = ps.channel("chat")
+    ch = ps.channel()
 
     @ch.on("message")
     def handle_message(payload):
         # Handle incoming message from client
-        ch.emit("broadcast", payload)
+        ch.emit("echo", payload)
 
     return ps.div("Chat room")
 ```
@@ -48,9 +48,9 @@ Bidirectional communication channel bound to a render session.
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `id` | `str` | Channel identifier |
-| `render_id` | `str` | Associated render session ID |
-| `session_id` | `str` | Associated user session ID |
-| `route_path` | `str \| None` | Route path this channel is bound to |
+| `path` | `str` | Server view path that created the channel |
+| `mount_id` | `str` | Route mount generation that created the channel |
+| `connected` | `bool` | Whether the owning client endpoint is connected |
 | `closed` | `bool` | Whether the channel is closed |
 
 #### Methods
@@ -69,7 +69,7 @@ Register a handler for an incoming event.
 
 **Returns:** Callable that removes the handler when invoked.
 
-**Raises:** `ChannelClosed` if channel is closed.
+**Raises:** `ChannelClosed` if channel is closed or has no connected client endpoint.
 
 ```python
 ch = ps.channel()
@@ -92,7 +92,7 @@ Send a fire-and-forget event to the client.
 - `event` - Event name.
 - `payload` - Data to send (optional).
 
-**Raises:** `ChannelClosed` if channel is closed.
+**Raises:** `ChannelClosed` if channel is closed or has no connected client endpoint.
 
 ```python
 ch.emit("notification", {"message": "Hello"})

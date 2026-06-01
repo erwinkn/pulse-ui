@@ -4,6 +4,7 @@ from typing import Any, cast
 
 import pulse as ps
 import pytest
+from pulse.channel import Channel
 from pulse.messages import ClientChannelRequestMessage
 from pulse.routing import Route, RouteInfo, RouteTree
 from pulse.user_session import UserSession
@@ -56,6 +57,12 @@ def build_context():
 	return app, render, session, real_render, route_ctx
 
 
+def connect_channel(real_render: ps.RenderSession, channel: Channel) -> None:
+	real_render.channels.handle_client_connect(
+		{"type": "channel_connect", "channel": channel.id, "path": "/"}
+	)
+
+
 def test_form_recreates_channel_after_client_release():
 	app, render, session, real_render, route_ctx = build_context()
 
@@ -81,6 +88,8 @@ def test_form_recreates_channel_after_client_release():
 		render=real_render,
 		route=route_ctx,
 	):
+		form.render()
+		connect_channel(real_render, form._channel)  # pyright: ignore[reportPrivateUsage]
 		form.reset()
 
 	assert not form._channel.closed
@@ -110,6 +119,7 @@ async def test_form_sync_handler_survives_channel_recreation():
 		route=route_ctx,
 	):
 		form.render()
+		connect_channel(real_render, form._channel)  # pyright: ignore[reportPrivateUsage]
 		real_render.channels.handle_client_event(
 			render=real_render,
 			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]

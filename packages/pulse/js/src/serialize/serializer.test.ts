@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import React from "react";
 import { deserialize, serialize, type Serialized } from "./serializer";
 
 describe("v4 serialization", () => {
@@ -141,13 +142,20 @@ describe("v4 serialization", () => {
 		expect(parsed.when).toBe(parsed.same);
 	});
 	it("decodes date literals as UTC midnight dates", () => {
-		const ser: Serialized = [[[], [0], [], []], "2024-01-02"];
+		const ser: Serialized = [[[], [0], [], [], []], "2024-01-02"];
 		const parsed = deserialize(ser) as Date;
 		expect(parsed).toBeInstanceOf(Date);
 		expect(parsed.toISOString()).toBe("2024-01-02T00:00:00.000Z");
 	});
+	it("decodes dates after primitive siblings", () => {
+		const ser = serialize(["x", new Date(Date.UTC(2024, 0, 2))]);
+		const parsed = deserialize(ser) as [string, Date];
+		expect(parsed[0]).toBe("x");
+		expect(parsed[1]).toBeInstanceOf(Date);
+		expect(parsed[1].toISOString()).toBe("2024-01-02T00:00:00.000Z");
+	});
 	it("throws on invalid date literals", () => {
-		const ser: Serialized = [[[], [0], [], []], "2024-02-30"];
+		const ser: Serialized = [[[], [0], [], [], []], "2024-02-30"];
 		expect(() => deserialize(ser)).toThrow("Invalid date literal: 2024-02-30");
 	});
 
@@ -200,5 +208,85 @@ describe("v4 serialization", () => {
 		const ser = serialize(data);
 		const parsed = deserialize(ser);
 		expect(parsed).toEqual(data);
+	});
+
+	it("leaves user VDOM-looking dictionaries alone without metadata", () => {
+		const payload: Serialized = [[[], [], [], [], []], { __pulse_vdom__: { tag: "span" } }];
+		expect(deserialize<any>(payload)).toEqual({ __pulse_vdom__: { tag: "span" } });
+	});
+
+	it("throws when pulse node metadata is present without a renderer or registry", () => {
+		const payload: Serialized = [
+			[[], [], [], [], [1]],
+			{ title: { tag: "span", children: ["Feedback"] } },
+		];
+		expect(() => deserialize(payload)).toThrow(
+			"Payload contains VDOM nodes but no renderer or registry was provided",
+		);
+	});
+
+	it("renders pulse node metadata with a one-shot renderer from a registry", () => {
+		const Badge = (props: { label: string }) => React.createElement("strong", props.label);
+		const payload: Serialized = [
+			[[], [], [], [], [1]],
+			{ title: { tag: "$$Badge", props: { label: "Feedback" } } },
+		];
+		const parsed = deserialize(payload, { registry: { Badge } }) as any;
+		expect(React.isValidElement(parsed.title)).toBe(true);
+		expect(parsed.title.type).toBe(Badge);
+		expect(parsed.title.props.label).toBe("Feedback");
+	});
+
+	it("reconstructs pulse node props before rendering VDOM", () => {
+		const Badge = (_props: { when: Date; tags: Set<string> }) => null;
+		const payload: Serialized = [
+			[[], [4], [5], [], [1]],
+			{
+				title: {
+					tag: "$$Badge",
+					props: {
+						when: "2024-04-05T06:07:08.000Z",
+						tags: ["saved"],
+					},
+				},
+			},
+		];
+		const parsed = deserialize(payload, { registry: { Badge } }) as any;
+		expect(parsed.title.type).toBe(Badge);
+		expect(parsed.title.props.when).toBeInstanceOf(Date);
+		expect(parsed.title.props.when.toISOString()).toBe("2024-04-05T06:07:08.000Z");
+		expect(parsed.title.props.tags).toBeInstanceOf(Set);
+		expect(Array.from(parsed.title.props.tags)).toEqual(["saved"]);
+	});
+
+	it("renders pulse nodes without consuming primitive children as traversal nodes", () => {
+		const payload: Serialized = [
+			[[], [5], [], [], [1]],
+			[{ tag: "span", children: ["x"] }, "2024-01-02"],
+		];
+		const parsed = deserialize(payload, { registry: {} }) as any;
+		expect(React.isValidElement(parsed[0])).toBe(true);
+		expect(parsed[0].props.children).toBe("x");
+		expect(parsed[1]).toBeInstanceOf(Date);
+		expect(parsed[1].toISOString()).toBe("2024-01-02T00:00:00.000Z");
+	});
+
+	it("preserves repeated pulse node references", () => {
+		const payload: Serialized = [
+			[[5], [], [], [], [1]],
+			[{ tag: "span", children: ["x"] }, 1],
+		];
+		const parsed = deserialize(payload, { registry: {} }) as any;
+		expect(React.isValidElement(parsed[0])).toBe(true);
+		expect(parsed[0].props.children).toBe("x");
+		expect(parsed[1]).toBe(parsed[0]);
+	});
+
+	it("requires the route-local registry for imported component pulse nodes", () => {
+		const payload: Serialized = [
+			[[], [], [], [], [1]],
+			{ title: { tag: "$$RouteOnly", props: { value: 1 } } },
+		];
+		expect(() => deserialize(payload, { registry: {} })).toThrow("Missing component 'RouteOnly'");
 	});
 });

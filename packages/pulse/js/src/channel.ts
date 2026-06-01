@@ -1,11 +1,9 @@
-import { useEffect, useState } from "react";
 import type { PulseSocketIOClient } from "./client";
 import type {
 	ServerChannelMessage,
 	ServerChannelRequestMessage,
 	ServerChannelResponseMessage,
 } from "./messages";
-import { usePulseClient } from "./pulse";
 
 export class PulseChannelResetError extends Error {
 	constructor(message: string) {
@@ -15,6 +13,16 @@ export class PulseChannelResetError extends Error {
 }
 
 export type ChannelEventHandler = (payload: any) => any | Promise<any>;
+
+export type PulseChannelLease = {
+	bridge: ChannelBridge;
+	release: () => void;
+};
+
+export interface PulseChannelManager {
+	acquire(channelId: string): PulseChannelLease;
+	dispose(): void;
+}
 
 interface PendingRequest {
 	resolve: (value: any) => void;
@@ -59,6 +67,7 @@ export class ChannelBridge {
 	constructor(
 		private client: PulseSocketIOClient,
 		public readonly id: string,
+		private readonly path: string,
 	) {}
 
 	emit(event: string, payload?: any): void {
@@ -134,7 +143,7 @@ export class ChannelBridge {
 	}
 
 	handleDisconnect(reason: PulseChannelResetError): void {
-		this.close(reason);
+		this.rejectPending(reason);
 	}
 
 	dispose(reason: PulseChannelResetError): void {
@@ -237,32 +246,73 @@ export class ChannelBridge {
 			return;
 		}
 		this.closed = true;
-		for (const request of this.pending.values()) {
-			request.reject(reason);
-		}
-		this.pending.clear();
+		this.rejectPending(reason);
 		this.handlers.clear();
 		this.backlog = [];
 		// No-op: owning client manages registry lifecycle.
 	}
+
+	private rejectPending(reason: PulseChannelResetError): void {
+		for (const request of this.pending.values()) {
+			request.reject(reason);
+		}
+		this.pending.clear();
+	}
 }
 
-export function usePulseChannel(channelId: string): ChannelBridge | null {
-	const client = usePulseClient();
+class ClientPulseChannelManager implements PulseChannelManager {
+	#client: PulseSocketIOClient;
+	#path: string;
+	#leases = new Map<string, { channelId: string; released: boolean }>();
+	#disposed = false;
 
-	const [bridge, setBridge] = useState<ChannelBridge | null>(null);
+	constructor(client: PulseSocketIOClient, path: string) {
+		this.#client = client;
+		this.#path = path;
+	}
 
-	useEffect(() => {
+	acquire(channelId: string): PulseChannelLease {
 		if (!channelId) {
-			throw new Error("usePulseChannel requires a non-empty channelId");
+			throw new Error("PulseChannelManager.acquire requires a non-empty channelId");
 		}
-		const acquired = client.acquireChannel(channelId);
-		setBridge(acquired);
-		return () => {
-			setBridge((current) => (current === acquired ? null : current));
-			client.releaseChannel(channelId);
+		if (this.#disposed) {
+			throw new Error("PulseChannelManager is disposed");
+		}
+		if (this.#leases.has(channelId)) {
+			throw new Error(`PulseChannelManager already acquired channel '${channelId}'`);
+		}
+		const bridge = this.#client.acquireChannel(channelId, this.#path);
+		const lease = { channelId, released: false };
+		this.#leases.set(channelId, lease);
+		return {
+			bridge,
+			release: () => {
+				this.#release(lease);
+			},
 		};
-	}, [client, channelId]);
+	}
 
-	return bridge;
+	dispose(): void {
+		if (this.#disposed) return;
+		this.#disposed = true;
+		const leases = [...this.#leases.values()];
+		this.#leases.clear();
+		for (const lease of leases) {
+			this.#release(lease);
+		}
+	}
+
+	#release(lease: { channelId: string; released: boolean }): void {
+		if (lease.released) return;
+		lease.released = true;
+		this.#leases.delete(lease.channelId);
+		this.#client.releaseChannel(lease.channelId, this.#path);
+	}
+}
+
+export function createPulseChannelManager(
+	client: PulseSocketIOClient,
+	path: string,
+): PulseChannelManager {
+	return new ClientPulseChannelManager(client, path);
 }

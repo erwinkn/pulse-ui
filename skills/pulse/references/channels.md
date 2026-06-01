@@ -19,7 +19,7 @@ class ChatState(ps.State):
         self._cleanup()
 ```
 
-`ps.channel()` creates a unique channel ID. Pass `channel.id` to client components.
+`ps.channel()` creates a unique channel ID owned by the view currently rendering. Pass `channel.id` to one client component in that view. `usePulseChannel(channel.id)` connects that browser endpoint.
 
 ## Server → Client
 
@@ -28,6 +28,8 @@ class ChatState(ps.State):
 ```python
 self.channel.emit("server:notify", {"type": "update", "data": {...}})
 ```
+
+Channels are one-to-one. Pulse sends each channel message to the connected endpoint for the view that created the channel. Renderable payloads deserialize with that view's component registry.
 
 ### Request (with response)
 
@@ -82,6 +84,8 @@ from pulse.js.pulse import usePulseChannel
 @ps.javascript(jsx=True)
 def ChatClient(*, channelId: str):
     bridge = usePulseChannel(channelId)
+    if bridge is None:
+        return None
 
     # Send event to server
     def sendMessage(text: str):
@@ -135,7 +139,7 @@ class ChatRoom(ps.State):
     def _on_send(self, payload: dict):
         msg = {"user": "User", "text": payload["text"]}
         self.messages.append(msg)
-        # Broadcast to client
+        # Send to the connected client endpoint
         self.channel.emit("server:message", msg)
 
     def on_dispose(self):
@@ -217,9 +221,9 @@ except ps.ChannelClosed:
 
 ## Channel Lifecycle
 
-1. **Created** — `ps.channel()` in State `__init__`
-2. **Active** — While component is mounted
-3. **Closed** — When component unmounts or user disconnects
+1. **Created** — `ps.channel()` during a route render
+2. **Connected** — One browser endpoint calls `usePulseChannel(channel.id)` for that route
+3. **Closed** — The owning route mount unmounts, the render session closes, or server code calls `channel.close()`
 
 Always clean up handlers in `on_dispose()`:
 

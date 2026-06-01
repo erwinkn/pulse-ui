@@ -1,4 +1,4 @@
-import type { ChannelBridge } from "./channel";
+import type { ChannelBridge, PulseChannelLease, PulseChannelManager } from "./channel";
 import type { PulseRefSpec } from "./vdom";
 
 type RefPayload = {
@@ -10,11 +10,10 @@ type RefPayload = {
 type RefOpResult = any;
 
 type RefEntry = {
+	channelId: string;
 	node: any;
 	callback: (node: any) => void;
 };
-
-type ChannelBridgeProvider = (channelId: string) => ChannelBridge;
 
 const ATTR_ALIASES: Record<string, string> = {
 	className: "class",
@@ -180,24 +179,30 @@ export function isPulseRefSpec(v: unknown): v is PulseRefSpec {
 }
 
 export class RefRegistry {
-	#getBridge: ChannelBridgeProvider;
+	#channels: PulseChannelManager;
 	#bridge: ChannelBridge | null = null;
+	#releaseBridge: (() => void) | null = null;
 	#channelId: string | null = null;
 	#entries: Map<string, RefEntry> = new Map();
 	#cleanup: Array<() => void> = [];
 
-	constructor(getBridge: ChannelBridgeProvider) {
-		this.#getBridge = getBridge;
+	constructor(channels: PulseChannelManager) {
+		this.#channels = channels;
 	}
 
 	getCallback(channelId: string, refId: string): (node: any) => void {
-		this.#ensureChannel(channelId);
 		let entry = this.#entries.get(refId);
+		if (entry && entry.channelId !== channelId) {
+			throw new Error("[Pulse] Ref channel changed unexpectedly");
+		}
 		if (!entry) {
 			const callback = (node: any) => {
+				if (node) {
+					this.#ensureChannel(channelId);
+				}
 				this.#setNode(refId, node ?? null);
 			};
-			entry = { node: null, callback };
+			entry = { channelId, node: null, callback };
 			this.#entries.set(refId, entry);
 		}
 		return entry.callback;
@@ -214,14 +219,15 @@ export class RefRegistry {
 			}
 			return;
 		}
-		const bridge = this.#getBridge(channelId);
-		this.#bridge = bridge;
+		const lease: PulseChannelLease = this.#channels.acquire(channelId);
+		this.#bridge = lease.bridge;
+		this.#releaseBridge = lease.release;
 		this.#channelId = channelId;
 		this.#cleanup.push(
-			bridge.on("ref:call", (payload) => {
+			lease.bridge.on("ref:call", (payload) => {
 				this.#handleCall(payload);
 			}),
-			bridge.on("ref:request", (payload) => {
+			lease.bridge.on("ref:request", (payload) => {
 				return this.#handleRequest(payload);
 			}),
 		);
@@ -230,6 +236,8 @@ export class RefRegistry {
 	#teardown(): void {
 		for (const fn of this.#cleanup) fn();
 		this.#cleanup = [];
+		this.#releaseBridge?.();
+		this.#releaseBridge = null;
 		this.#entries.clear();
 		this.#bridge = null;
 		this.#channelId = null;

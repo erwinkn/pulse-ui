@@ -4,16 +4,19 @@ import uuid
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from pulse.context import PulseContext
 from pulse.messages import (
+	ClientChannelConnectMessage,
+	ClientChannelDisconnectMessage,
 	ClientChannelRequestMessage,
 	ClientChannelResponseMessage,
 	ServerChannelMessage,
 	ServerChannelRequestMessage,
 	ServerChannelResponseMessage,
 )
+from pulse.routing import RouteOrigin
 from pulse.scheduling import create_future
 
 if TYPE_CHECKING:
@@ -71,58 +74,91 @@ class ChannelsManager:
 
 	_render_session: "RenderSession"
 	_channels: dict[str, "Channel"]
-	_channels_by_route: dict[str, set[str]]
 	pending_requests: dict[str, PendingRequest]
 
 	def __init__(self, render_session: "RenderSession") -> None:
 		self._render_session = render_session
 		self._channels = {}
-		self._channels_by_route = defaultdict(set)
 		self.pending_requests = {}
 
 	# ------------------------------------------------------------------
-	def create(
-		self, identifier: str | None = None, *, bind_route: bool = True
-	) -> "Channel":
+	def create(self, identifier: str | None = None) -> "Channel":
 		ctx = PulseContext.get()
 		render = ctx.render
 		session = ctx.session
 		if render is None or session is None:
 			raise RuntimeError("Channels require an active render and session")
+		origin = ctx.origin or (
+			RouteOrigin.from_route(ctx.route) if ctx.route is not None else None
+		)
+		path = origin.route_path if origin is not None else "/"
+		mount_id = ctx.mount_id
+		if mount_id is None:
+			try:
+				mount_id = render.get_route_mount(path).mount_id
+			except ValueError:
+				mount_id = ""
 
 		channel_id = identifier or uuid.uuid4().hex
 		if channel_id in self._channels:
 			raise ValueError(f"Channel id '{channel_id}' is already in use")
 
-		route_path: str | None = None
-		if bind_route and ctx.route is not None:
-			route_path = ctx.route.route_path
-
 		channel = Channel(
 			self,
 			channel_id,
-			render_id=render.id,
-			session_id=session.sid,
-			route_path=route_path,
+			path=path,
+			mount_id=mount_id,
 		)
 		self._channels[channel_id] = channel
-		if route_path is not None:
-			self._channels_by_route[route_path].add(channel_id)
 		return channel
 
 	# ------------------------------------------------------------------
+	def remove_route_mount(self, path: str, mount_id: str) -> None:
+		for channel in list(self._channels.values()):
+			if channel.path == path and channel.mount_id == mount_id:
+				channel.closed = True
+				self.dispose_channel(channel, reason="route.unmount")
+
 	def remove_route(self, path: str) -> None:
-		# route_path is already an absolute path
-		route_channels = list(self._channels_by_route.get(path, set()))
-		# if route_channels:
-		# 	print(f"Disposing {len(route_channels)} channel(s) for route {route_path}")
-		for channel_id in route_channels:
-			channel = self._channels.get(channel_id)
-			if channel is None:
-				continue
-			channel.closed = True
-			self.dispose_channel(channel, reason="route.unmount")
-		self._channels_by_route.pop(path, None)
+		for channel in list(self._channels.values()):
+			if channel.path == path:
+				channel.closed = True
+				self.dispose_channel(channel, reason="route.unmount")
+
+	def handle_client_connect(self, message: ClientChannelConnectMessage) -> None:
+		channel_id = str(message.get("channel"))
+		channel = self._channels.get(channel_id)
+		if channel is None or channel.closed:
+			return
+
+		path = str(message.get("path"))
+		if path != channel.path:
+			logger.warning(
+				"Rejecting channel connect for wrong path: %s path=%s owner=%s",
+				channel_id,
+				path,
+				channel.path,
+			)
+			return
+
+		mount = self._render_session.route_mounts.get(path)
+		if mount is None or mount.mount_id != channel.mount_id:
+			logger.warning(
+				"Rejecting stale channel connect: %s path=%s", channel_id, path
+			)
+			return
+
+		channel.connected = True
+
+	def handle_client_disconnect(self, message: ClientChannelDisconnectMessage) -> None:
+		channel_id = str(message.get("channel"))
+		channel = self._channels.get(channel_id)
+		if channel is None:
+			return
+		channel.connected = False
+		self._cancel_pending_for_channel(
+			channel_id, message="Channel has no connected client"
+		)
 
 	# ------------------------------------------------------------------
 	def handle_client_response(self, message: ClientChannelResponseMessage) -> None:
@@ -145,41 +181,33 @@ class ChannelsManager:
 	) -> None:
 		channel_id = str(message.get("channel"))
 		channel = self._channels.get(channel_id)
-		if channel is None:
+		if channel is None or channel.closed:
 			if request_id := message.get("requestId"):
 				self._send_error_response(channel_id, request_id, "Channel closed")
 			return
 
-		if channel.render_id != render.id or channel.session_id != session.sid:
-			logger.warning(
-				"Ignoring channel message for mismatched context: %s", channel_id
-			)
+		if not channel.connected:
+			if request_id := message.get("requestId"):
+				self._send_error_response(
+					channel_id, request_id, "Channel has no connected client"
+				)
 			return
 
 		event = message["event"]
 		payload = message.get("payload")
 		request_id = message.get("requestId")
 
-		if event == "__close__":
-			reason: str | None = None
-			if isinstance(payload, str):
-				reason = payload
-			elif isinstance(payload, dict):
-				raw_reason = cast(Any, payload.get("reason"))
-				if raw_reason is not None:
-					reason = str(raw_reason)
-			self.release_channel(channel.id, reason=reason)
-			return
-
 		route_ctx = None
-		source_mount_id = None
-		if channel.route_path is not None:
-			try:
-				mount = render.get_route_mount(channel.route_path)
+		origin = None
+		mount_id = None
+		try:
+			mount = render.get_route_mount(channel.path)
+			if mount.mount_id == channel.mount_id:
 				route_ctx = mount.route
-				source_mount_id = mount.mount_id
-			except Exception:
-				route_ctx = None
+				origin = RouteOrigin.from_route(route_ctx)
+				mount_id = mount.mount_id
+		except Exception:
+			route_ctx = None
 
 		async def _invoke() -> None:
 			try:
@@ -187,11 +215,8 @@ class ChannelsManager:
 					session=session,
 					render=render,
 					route=route_ctx,
-					source_route_path=(
-						route_ctx.route_path if route_ctx is not None else None
-					),
-					source_path=route_ctx.pathname if route_ctx is not None else None,
-					source_mount_id=source_mount_id,
+					origin=origin,
+					mount_id=mount_id,
 				):
 					result = await channel.dispatch(event, payload, request_id)
 			except Exception as exc:
@@ -209,10 +234,13 @@ class ChannelsManager:
 					responseTo=request_id,
 					payload=result,
 				)
-				self.send_to_client(
-					channel=channel,
-					msg=msg,
-				)
+				try:
+					self.send_to_client(
+						channel=channel,
+						msg=msg,
+					)
+				except ChannelClosed:
+					return
 
 		render.create_task(_invoke(), name=f"channel:{channel_id}:{event}")
 
@@ -272,12 +300,14 @@ class ChannelsManager:
 	def send_error(self, channel_id: str, request_id: str, message: str) -> None:
 		self._send_error_response(channel_id, request_id, message)
 
-	def _cancel_pending_for_channel(self, channel_id: str) -> None:
+	def _cancel_pending_for_channel(
+		self, channel_id: str, *, message: str = "Channel closed"
+	) -> None:
 		for key, pending in list(self.pending_requests.items()):
 			if pending.channel_id != channel_id:
 				continue
 			if not pending.future.done():
-				pending.future.set_exception(ChannelClosed("Channel closed"))
+				pending.future.set_exception(ChannelClosed(message))
 			self.pending_requests.pop(key, None)
 
 	# ------------------------------------------------------------------
@@ -300,50 +330,44 @@ class ChannelsManager:
 		return True
 
 	# ------------------------------------------------------------------
-	def _cleanup_channel_refs(self, channel: "Channel") -> None:
-		if channel.route_path is not None:
-			route_bucket = self._channels_by_route.get(channel.route_path)
-			if route_bucket is not None:
-				route_bucket.discard(channel.id)
-				if not route_bucket:
-					self._channels_by_route.pop(channel.route_path, None)
-
 	def dispose_channel(
 		self,
 		channel: "Channel",
 		*,
 		reason: str | None = None,
 	) -> None:
-		# pending = sum(
-		# 	1
-		# 	for pending in self.pending_requests.values()
-		# 	if pending.channel_id == channel.id
-		# )
-		# print(f"Disposing channel id={channel.id} render={channel.render_id} session={channel.session_id} route={channel.route_path} reason={reason or 'unspecified'} pending={pending}")
-		self._cleanup_channel_refs(channel)
 		self._cancel_pending_for_channel(channel.id)
-		self._channels.pop(channel.id, None)
 		# Notify client that the channel has been closed
-		try:
-			msg = ServerChannelRequestMessage(
-				type="channel_message",
-				channel=channel.id,
-				event="__close__",
-				payload=None,
-			)
-			self.send_to_client(
-				channel=channel,
-				msg=msg,
-			)
-		except Exception:
-			print(f"Failed to send close notification for channel {channel.id}")
+		if channel.connected:
+			try:
+				msg = ServerChannelRequestMessage(
+					type="channel_message",
+					channel=channel.id,
+					event="__close__",
+					payload=None,
+				)
+				self.send_to_client(
+					channel=channel,
+					msg=msg,
+					allow_closed=True,
+				)
+			except Exception:
+				print(f"Failed to send close notification for channel {channel.id}")
+		channel.connected = False
+		channel.clear_handlers()
+		self._channels.pop(channel.id, None)
 
 	def send_to_client(
 		self,
 		*,
 		channel: "Channel",
 		msg: ServerChannelMessage,
+		allow_closed: bool = False,
 	) -> None:
+		if channel.closed and not allow_closed:
+			raise ChannelClosed(f"Channel '{channel.id}' is closed")
+		if not channel.connected:
+			raise ChannelClosed("Channel has no connected client")
 		self._render_session.send(msg)
 
 
@@ -355,9 +379,9 @@ class Channel:
 
 	Attributes:
 		id: Channel identifier (auto-generated UUID or user-provided).
-		render_id: Associated render session ID.
-		session_id: Associated user session ID.
-		route_path: Route path this channel is bound to, or None.
+		path: Server view path that owns the channel.
+		mount_id: Route mount generation that created the channel.
+		connected: Whether the owning client endpoint is attached.
 		closed: Whether the channel has been closed.
 
 	Example:
@@ -365,11 +389,11 @@ class Channel:
 	```python
 	@ps.component
 	def ChatRoom():
-	    ch = ps.channel("chat")
+	    ch = ps.channel()
 
 	    @ch.on("message")
 	    def handle_message(payload):
-	        ch.emit("broadcast", payload)
+	        ch.emit("echo", payload)
 
 	    return ps.div("Chat room")
 	```
@@ -377,9 +401,9 @@ class Channel:
 
 	_manager: ChannelsManager
 	id: str
-	render_id: str
-	session_id: str
-	route_path: str | None
+	path: str
+	mount_id: str
+	connected: bool
 	_handlers: dict[str, list[ChannelHandler]]
 	closed: bool
 
@@ -388,15 +412,14 @@ class Channel:
 		manager: ChannelsManager,
 		identifier: str,
 		*,
-		render_id: str,
-		session_id: str,
-		route_path: str | None,
+		path: str,
+		mount_id: str,
 	) -> None:
 		self._manager = manager
 		self.id = identifier
-		self.render_id = render_id
-		self.session_id = session_id
-		self.route_path = route_path
+		self.path = path
+		self.mount_id = mount_id
+		self.connected = False
 		self._handlers = defaultdict(list)
 		self.closed = False
 
@@ -464,6 +487,7 @@ class Channel:
 		"""
 
 		self._ensure_open()
+		self._ensure_connected()
 		msg = ServerChannelRequestMessage(
 			type="channel_message",
 			channel=self.id,
@@ -504,9 +528,9 @@ class Channel:
 		"""
 
 		self._ensure_open()
+		self._ensure_connected()
 		request_id = uuid.uuid4().hex
 		fut = create_future()
-		self._manager.register_pending(request_id, fut, self.id)
 		msg = ServerChannelRequestMessage(
 			type="channel_message",
 			channel=self.id,
@@ -518,6 +542,7 @@ class Channel:
 			channel=self,
 			msg=msg,
 		)
+		self._manager.register_pending(request_id, fut, self.id)
 		try:
 			if timeout is None:
 				return await fut
@@ -548,6 +573,13 @@ class Channel:
 	def _ensure_open(self) -> None:
 		if self.closed:
 			raise ChannelClosed(f"Channel '{self.id}' is closed")
+
+	def _ensure_connected(self) -> None:
+		if not self.connected:
+			raise ChannelClosed("Channel has no connected client")
+
+	def clear_handlers(self) -> None:
+		self._handlers.clear()
 
 	async def dispatch(
 		self, event: str, payload: Any, request_id: str | None
@@ -593,11 +625,11 @@ def channel(identifier: str | None = None) -> Channel:
 
 	@ps.component
 	def ChatRoom():
-	    ch = ps.channel("chat")
+	    ch = ps.channel()
 
 	    @ch.on("message")
 	    def handle_message(payload):
-	        ch.emit("broadcast", payload)
+	        ch.emit("echo", payload)
 
 	    return ps.div("Chat room")
 	```

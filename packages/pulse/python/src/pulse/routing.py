@@ -614,3 +614,69 @@ class RouteContext:
 			f"query='{self.query}', queryParams={self.queryParams}, "
 			f"pathParams={self.pathParams}, catchall={self.catchall})"
 		)
+
+
+@dataclass(frozen=True)
+class RouteOrigin:
+	"""Immutable snapshot of a route context that originated work."""
+
+	info: RouteInfo
+	pulse_route: Route | Layout
+	route_path: str
+
+	@classmethod
+	def from_route(cls, route: RouteContext) -> "RouteOrigin":
+		return cls(
+			info=RouteInfo(
+				pathname=route.pathname,
+				hash=route.hash,
+				query=route.query,
+				queryParams=dict(route.queryParams),
+				pathParams=dict(route.pathParams),
+				catchall=list(route.catchall),
+			),
+			pulse_route=route.pulse_route,
+			route_path=route.route_path,
+		)
+
+	@property
+	def pathname(self) -> str:
+		"""Current URL path (e.g., "/users/123")."""
+		return self.info["pathname"]
+
+	@property
+	def hash(self) -> str:
+		"""URL hash fragment (without #)."""
+		return self.info["hash"]
+
+	@property
+	def query(self) -> str:
+		"""Raw query string (without ?)."""
+		return self.info["query"]
+
+	@property
+	def queryParams(self) -> dict[str, str]:
+		"""Parsed query parameters as dict."""
+		return self.info["queryParams"]
+
+	@property
+	def pathParams(self) -> dict[str, str]:
+		"""Dynamic path parameters (e.g., {"id": "123"} for ":id")."""
+		return self.info["pathParams"]
+
+	@property
+	def catchall(self) -> list[str]:
+		"""Catch-all segments as list."""
+		return self.info["catchall"]
+
+	@override
+	def __str__(self) -> str:
+		return f"RouteOrigin(pathname='{self.pathname}', params={self.pathParams})"
+
+	@override
+	def __repr__(self) -> str:
+		return (
+			f"RouteOrigin(pathname='{self.pathname}', hash='{self.hash}', "
+			f"query='{self.query}', queryParams={self.queryParams}, "
+			f"pathParams={self.pathParams}, catchall={self.catchall})"
+		)

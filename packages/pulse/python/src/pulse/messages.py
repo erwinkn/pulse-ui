@@ -156,6 +156,17 @@ class ClientChannelResponseMessage(TypedDict):
 	error: NotRequired[Any]
 
 
+class ClientChannelConnectMessage(TypedDict):
+	type: Literal["channel_connect"]
+	channel: str
+	path: str
+
+
+class ClientChannelDisconnectMessage(TypedDict):
+	type: Literal["channel_disconnect"]
+	channel: str
+
+
 class ClientJsResultMessage(TypedDict):
 	"""Result of client-side JS execution."""
 
@@ -188,7 +199,12 @@ ClientPulseMessage = (
 	| ClientJsResultMessage
 )
 ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage
-ClientMessage = ClientPulseMessage | ClientChannelMessage
+ClientChannelLifecycleMessage = (
+	ClientChannelConnectMessage | ClientChannelDisconnectMessage
+)
+ClientMessage = (
+	ClientPulseMessage | ClientChannelMessage | ClientChannelLifecycleMessage
+)
 
 
 class PrerenderPayload(TypedDict):

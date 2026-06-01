@@ -67,6 +67,7 @@ export class ChannelBridge {
 	constructor(
 		private client: PulseSocketIOClient,
 		public readonly id: string,
+		public readonly path: string,
 	) {}
 
 	emit(event: string, payload?: any): void {
@@ -142,7 +143,7 @@ export class ChannelBridge {
 	}
 
 	handleDisconnect(reason: PulseChannelResetError): void {
-		this.close(reason);
+		this.rejectPending(reason);
 	}
 
 	dispose(reason: PulseChannelResetError): void {

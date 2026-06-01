@@ -33,6 +33,7 @@ def build_context():
 
 	real_render = ps.RenderSession(render.id, routes, server_address="http://localhost")
 	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
+	real_render.connect(render.send)
 	with ps.PulseContext(app=app):
 		real_render.prerender(
 			["/"],
@@ -48,12 +49,19 @@ def build_context():
 				},
 			),
 		)
+		real_render.attach("/", route.default_route_info())
 	route_ctx = real_render.route_mounts["/"].route
 
 	app.render_sessions[render.id] = real_render
 	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
 	app.user_sessions[session.sid] = session  # pyright: ignore[reportArgumentType]
 	return app, render, session, real_render, route_ctx
+
+
+def connect_channel(real_render: ps.RenderSession, channel_id: str) -> None:
+	real_render.channels.handle_client_connect(
+		{"type": "channel_connect", "channel": channel_id, "path": "/"}
+	)
 
 
 def test_form_recreates_channel_after_client_release():
@@ -81,6 +89,8 @@ def test_form_recreates_channel_after_client_release():
 		render=real_render,
 		route=route_ctx,
 	):
+		form.render()
+		connect_channel(real_render, form._channel.id)
 		form.reset()
 
 	assert not form._channel.closed
@@ -110,6 +120,7 @@ async def test_form_sync_handler_survives_channel_recreation():
 		route=route_ctx,
 	):
 		form.render()
+		connect_channel(real_render, form._channel.id)
 		real_render.channels.handle_client_event(
 			render=real_render,
 			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]

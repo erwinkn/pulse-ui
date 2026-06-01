@@ -156,6 +156,17 @@ export interface ClientChannelResponseMessage {
 
 export type ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage;
 
+export interface ClientChannelConnectMessage {
+	type: "channel_connect";
+	channel: string;
+	path: string;
+}
+
+export interface ClientChannelDisconnectMessage {
+	type: "channel_disconnect";
+	channel: string;
+}
+
 export interface ClientJsResultMessage {
 	type: "js_result";
 	id: string;
@@ -171,4 +182,6 @@ export type ClientMessage =
 	| ClientApiResultMessage
 	| ClientChannelRequestMessage
 	| ClientChannelResponseMessage
+	| ClientChannelConnectMessage
+	| ClientChannelDisconnectMessage
 	| ClientJsResultMessage;

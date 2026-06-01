@@ -41,7 +41,6 @@ src/
 ├── form.tsx            # PulseForm component
 ├── helpers.ts          # Route info extraction utilities
 ├── vdom.ts             # VDOM types (VDOMNode, VDOMElement)
-├── usePulseChannel.ts  # React hook for channels
 │
 └── serialize/          # Data serialization
     ├── serializer.ts   # Main serialize/deserialize
@@ -106,16 +105,20 @@ import { usePulseChannel } from "pulse-client";
 
 function Chat() {
   const channel = usePulseChannel("chat");
+  if (!channel) return null;
+
   channel.on("new_message", (msg) => { /* handle */ });
   channel.emit("message", { text: "Hello" });
 }
 ```
 
+`usePulseChannel` must run under a `PulseView`. It returns `null` before the channel is acquired.
+
 ## Main Exports
 
 **Components**: `PulseProvider`, `PulseView`, `PulseForm`, `RenderLazy`
 
-**Hooks**: `usePulseClient()`, `usePulseChannel(name)`
+**Hooks**: `usePulseClient()`, `usePulseViewPath()`, `usePulseChannelManager()`, `usePulseChannelManagerForPath(path)`, `usePulseChannel(name)`
 
 **Functions**: `serialize`, `deserialize`, `extractServerRouteInfo`, `submitForm`
 

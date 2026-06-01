@@ -85,15 +85,22 @@ def ChatClient(*, channelId: str):
 
     # Send event to server
     def sendMessage(text: str):
+        if not bridge:
+            return
         bridge.emit("client:message", {"text": text})
 
     # Request with response
     async def askServer():
+        if not bridge:
+            return
         response = await bridge.request("client:request", {"data": "..."})
         print(response)
 
     # Listen for server events
     def setupListeners():
+        if not bridge:
+            return
+
         def onNotify(payload):
             print("Server notified:", payload)
 
@@ -150,6 +157,9 @@ def ChatWidget(*, channelId: str):
     draft, setDraft = useState("")
 
     def subscribe():
+        if not bridge:
+            return
+
         def onMessage(msg):
             setMessages(lambda prev: [*prev, msg])
 
@@ -158,7 +168,7 @@ def ChatWidget(*, channelId: str):
     useEffect(subscribe, [bridge])
 
     def send():
-        if draft.strip():
+        if bridge and draft.strip():
             bridge.emit("client:send", {"text": draft})
             setDraft("")
 

@@ -9,6 +9,11 @@ import {
 	useState,
 } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
+import {
+	createPulseChannelManager,
+	type ChannelBridge,
+	type PulseChannelManager,
+} from "./channel";
 import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
 import type { RouteInfo } from "./helpers";
 import type { ServerError } from "./messages";
@@ -46,6 +51,7 @@ export type PulsePrerender = {
 // Context for the client, provided by PulseProvider
 const PulseClientContext = createContext<PulseSocketIOClient | null>(null);
 const PulsePrerenderContext = createContext<PulsePrerender | null>(null);
+export const PulseViewPathContext = createContext<string | null>(null);
 
 export const usePulseClient = () => {
 	const client = useContext(PulseClientContext);
@@ -66,6 +72,63 @@ export const usePulsePrerender = (path: string) => {
 	}
 	return view;
 };
+
+export const usePulseViewPath = () => {
+	const path = useContext(PulseViewPathContext);
+	if (!path) {
+		throw new Error("usePulseViewPath must be used within a PulseView");
+	}
+	return path;
+};
+
+export function usePulseChannelManager(): PulseChannelManager {
+	const path = usePulseViewPath();
+	return usePulseChannelManagerForPath(path);
+}
+
+export function usePulseChannelManagerForPath(path: string): PulseChannelManager {
+	const client = usePulseClient();
+	const manager = useMemo(() => createPulseChannelManager(client, path), [client, path]);
+	const pendingDispose = useRef<{
+		manager: PulseChannelManager;
+		timer: ReturnType<typeof setTimeout>;
+	} | null>(null);
+	useEffect(() => {
+		if (pendingDispose.current?.manager === manager) {
+			clearTimeout(pendingDispose.current.timer);
+			pendingDispose.current = null;
+		}
+		return () => {
+			const timer = setTimeout(() => {
+				manager.dispose();
+				if (pendingDispose.current?.manager === manager) {
+					pendingDispose.current = null;
+				}
+			}, 0);
+			pendingDispose.current = { manager, timer };
+		};
+	}, [manager]);
+	return manager;
+}
+
+export function usePulseChannel(channelId: string): ChannelBridge | null {
+	const manager = usePulseChannelManager();
+	const [bridge, setBridge] = useState<ChannelBridge | null>(null);
+
+	useEffect(() => {
+		if (!channelId) {
+			throw new Error("usePulseChannel requires a non-empty channelId");
+		}
+		const lease = manager.acquire(channelId);
+		setBridge(lease.bridge);
+		return () => {
+			setBridge((current) => (current === lease.bridge ? null : current));
+			lease.release();
+		};
+	}, [manager, channelId]);
+
+	return bridge;
+}
 
 // =================================================================
 // Provider
@@ -166,10 +229,11 @@ export interface PulseViewProps {
 
 export function PulseView({ path, registry }: PulseViewProps) {
 	const client = usePulseClient();
+	const channels = usePulseChannelManagerForPath(path);
 	const initialView = usePulsePrerender(path);
 	const renderer = useMemo(
-		() => new VDOMRenderer(client, path, registry),
-		[client, path, registry],
+		() => new VDOMRenderer(client, channels, path, registry),
+		[client, channels, path, registry],
 	);
 	const [tree, setTree] = useState<ReactNode>(() => renderer.init(initialView));
 	const [serverError, setServerError] = useState<ServerError | null>(null);
@@ -256,7 +320,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 		return <ServerErrorPopup error={serverError} />;
 	}
 
-	return tree;
+	return <PulseViewPathContext.Provider value={path}>{tree}</PulseViewPathContext.Provider>;
 }
 
 function ServerErrorPopup({ error }: { error: ServerError }) {

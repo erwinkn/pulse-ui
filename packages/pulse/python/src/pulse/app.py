@@ -949,6 +949,8 @@ class App:
 							"attachId": attach_id,
 						}
 					)
+			elif msg["type"] == "client_resume":
+				render.resume(msg["resumeId"], msg["views"], msg["channels"])
 			elif msg["type"] == "update":
 				render.update_route(msg["path"], msg["routeInfo"])
 			elif msg["type"] == "callback":

@@ -808,6 +808,81 @@ async def test_reconnect_flushes_queue_when_pending():
 	session.close()
 
 
+def test_resume_missing_mount_requests_reload():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		ok = session.resume(
+			"resume-1",
+			[
+				{
+					"path": "/a",
+					"routeInfo": make_route_info("/a"),
+					"attachId": "attach-1",
+				}
+			],
+			[],
+		)
+
+	assert ok is False
+	assert messages == [
+		{"type": "server_resume", "resumeId": "resume-1", "status": "reload"}
+	]
+
+	session.close()
+
+
+def test_resume_accepts_pending_mount_and_flushes_queue_after_snapshot():
+	routes = RouteTree([Route("a", StatefulCounter)])
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"], make_route_info("/a"))
+		session.attach("/a", make_route_info("/a"))
+
+	session.disconnect()
+	mount = session.route_mounts["/a"]
+	session.execute_callback("/a", first_callback_key(session, "/a"), [])
+	session.flush()
+	assert mount.queue is not None
+	assert len(mount.queue) == 1
+
+	resume_messages: list[ServerMessage] = []
+	session.connect(resume_messages.append)
+	with ps.PulseContext.update(render=session):
+		ok = session.resume(
+			"resume-1",
+			[
+				{
+					"path": "/a",
+					"routeInfo": make_route_info("/a"),
+					"attachId": "attach-1",
+				}
+			],
+			[],
+		)
+
+	assert ok is True
+	assert [message["type"] for message in resume_messages] == [
+		"vdom_update",
+		"server_resume",
+	]
+	assert resume_messages[1] == {
+		"type": "server_resume",
+		"resumeId": "resume-1",
+		"status": "ok",
+		"views": [{"path": "/a", "attachId": "attach-1"}],
+		"channels": [],
+	}
+
+	session.close()
+
+
 def test_prerender_of_active_path_queues_updates_until_route_sync():
 	routes = make_routes()
 	session = RenderSession("test-id", routes)

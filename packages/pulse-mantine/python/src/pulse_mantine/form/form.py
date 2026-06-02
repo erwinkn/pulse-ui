@@ -62,6 +62,7 @@ class MantineForm(ps.State, Generic[TForm]):
 	_validation: "Validation | None"
 	_mantine_props: dict[str, Any]
 	_on_submit: ps.EventHandler1[TForm] | None
+	_on_sync_values_handler: ps.EventHandler1[dict[str, Any]] | None
 
 	def __init__(
 		self,
@@ -77,11 +78,13 @@ class MantineForm(ps.State, Generic[TForm]):
 		touchTrigger: Literal["change", "focus"] | None = None,
 		syncMode: Literal["none", "blur", "change"] = "none",
 		debounceMs: int | None = None,
+		onSyncValues: ps.EventHandler1[dict[str, Any]] | None = None,
 	):
 		self._form = ps.ManualForm(on_submit=self._handle_form_data)
 		self._sync_mode: Literal["none", "blur", "change"] = syncMode
 		self._synced_values = ReactiveDict(initialValues or {})
 		self._validation = validate
+		self._on_sync_values_handler = onSyncValues
 		self._mantine_props = {
 			"mode": mode,
 			"validate": serialize_validation(validate) if validate else None,
@@ -382,6 +385,10 @@ class MantineForm(ps.State, Generic[TForm]):
 			return
 		values = cast(dict[str, Any], values)
 		self._replace_synced_values(values)
+		if self._on_sync_values_handler is not None:
+			create_task(
+				maybe_await(call_flexible(self._on_sync_values_handler, values))
+			)
 
 	# Channel handler for server validation (single entrypoint)
 	async def _on_server_validate(self, payload: dict[str, Any]) -> None:

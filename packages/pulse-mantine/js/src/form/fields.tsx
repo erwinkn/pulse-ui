@@ -1,5 +1,6 @@
 import {
 	AngleSlider as MantineAngleSlider,
+	Autocomplete as MantineAutocomplete,
 	Checkbox as MantineCheckbox,
 	Chip as MantineChip,
 	ColorInput as MantineColorInput,
@@ -24,6 +25,10 @@ import {
 import { createConnectedField } from "./connect";
 
 export const TextInput = createConnectedField(MantineTextInput, {
+	debounceOnChange: true,
+	coerceEmptyString: true,
+});
+export const Autocomplete = createConnectedField(MantineAutocomplete, {
 	debounceOnChange: true,
 	coerceEmptyString: true,
 });

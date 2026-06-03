@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import platform as platform_module
+import signal
 import socket
 import time
 from dataclasses import dataclass
@@ -148,6 +149,45 @@ def active_lock_info(
 	if info.pid <= 0 or not is_process_alive(info.pid):
 		return None
 	return info
+
+
+def interrupt_active_dev_server(
+	web_root: Path,
+	*,
+	timeout: float = 5.0,
+	filename: str = DEFAULT_LOCK_FILENAME,
+) -> LockInfo | None:
+	"""Interrupt the live Pulse dev server for a web root, if one exists."""
+	info = active_lock_info(web_root, filename=filename)
+	if info is None:
+		return None
+	if info.pid == os.getpid():
+		raise RuntimeError("Cannot interrupt the current Pulse process.")
+
+	_interrupt_process(info.pid)
+	deadline = time.monotonic() + timeout
+	while time.monotonic() < deadline:
+		if active_lock_info(web_root, filename=filename) is None:
+			return info
+		time.sleep(0.05)
+
+	raise RuntimeError(
+		f"Pulse dev server at {info.url} (pid={info.pid}) did not stop after "
+		+ f"{timeout:g}s."
+	)
+
+
+def _interrupt_process(pid: int) -> None:
+	try:
+		os.kill(pid, signal.SIGINT)
+	except ProcessLookupError:
+		return
+	except PermissionError as exc:
+		raise RuntimeError(
+			f"Permission denied interrupting Pulse process {pid}."
+		) from exc
+	except Exception as exc:
+		raise RuntimeError(f"Failed to interrupt Pulse process {pid}: {exc}") from exc
 
 
 def _write_gitignore_for_lock(lock_path: Path) -> None:

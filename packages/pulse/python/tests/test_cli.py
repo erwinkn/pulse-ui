@@ -49,6 +49,15 @@ class _GenerateAppStub:
 		self.codegen_calls.append(address)
 
 
+class _RunAppStub:
+	def __init__(self, web_root: Path):
+		self.codegen: Any = SimpleNamespace(
+			cfg=SimpleNamespace(web_root=web_root, pulse_dir="_pulse")
+		)
+		self.mode: str = "multi-server"
+		self.env: str = "dev"
+
+
 def _make_generate_app_ctx(
 	tmp_path: Path, web_root: Path
 ) -> tuple[AppLoadResult, _GenerateAppStub]:
@@ -64,6 +73,19 @@ def _make_generate_app_ctx(
 		server_cwd=tmp_path,
 	)
 	return app_ctx, app
+
+
+def _make_run_app_ctx(tmp_path: Path, web_root: Path) -> AppLoadResult:
+	return AppLoadResult(
+		target="demo.py",
+		mode="path",
+		app=cast(Any, _RunAppStub(web_root)),
+		module_name="demo",
+		app_var="app",
+		app_file=tmp_path / "demo.py",
+		app_dir=tmp_path,
+		server_cwd=tmp_path,
+	)
 
 
 def test_parse_app_target_file_default(tmp_path: Path):
@@ -188,9 +210,61 @@ def test_generate_ignores_stale_dev_server_lock(
 
 	result = runner.invoke(cmd_mod.cli, ["generate", "demo.py", "--plain"])
 
-	assert result.exit_code == 0
+	assert result.exit_code == 0, result.output
 	assert "Generated 1 route" in result.output
 	assert app.codegen_calls == ["http://localhost:8000"]
+
+
+def test_run_interrupt_stops_existing_server_before_finding_port(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	calls: list[tuple[str, object]] = []
+	commands: list[CommandSpec] = []
+	stopped = LockInfo(
+		pid=123,
+		created_at=1,
+		hostname="host",
+		platform="test-platform",
+		python="3.12.0",
+		cwd=str(tmp_path),
+		address="localhost",
+		port=8000,
+	)
+
+	def load_app(target: str, logger: object) -> AppLoadResult:
+		return app_ctx
+
+	def interrupt(web_root_arg: Path) -> LockInfo:
+		calls.append(("interrupt", web_root_arg))
+		return stopped
+
+	def find_port(port: int) -> int:
+		calls.append(("find", port))
+		return port
+
+	def check_deps(web_root_arg: Path, *, pulse_version: str) -> list[str]:
+		return []
+
+	def execute(command_specs: list[CommandSpec], *, tag_mode: str) -> int:
+		commands.extend(command_specs)
+		return 0
+
+	monkeypatch.setattr(cmd_mod, "load_app_from_target", load_app)
+	monkeypatch.setattr(cmd_mod, "interrupt_active_dev_server", interrupt)
+	monkeypatch.setattr(cmd_mod, "find_available_port", find_port)
+	monkeypatch.setattr(cmd_mod, "check_web_dependencies", check_deps)
+	monkeypatch.setattr(cmd_mod, "execute_commands", execute)
+
+	result = runner.invoke(cmd_mod.cli, ["run", "demo.py", "--plain", "--interrupt"])
+
+	assert result.exit_code == 0, result.output
+	assert calls[:2] == [("interrupt", web_root), ("find", 8000)]
+	assert ("find", 5173) in calls
+	assert "Stopped existing Pulse dev server at http://localhost:8000" in result.output
+	assert [command.name for command in commands] == ["web", "server"]
 
 
 def test_resolve_dev_secret_creates_and_reuses_secret(tmp_path: Path):

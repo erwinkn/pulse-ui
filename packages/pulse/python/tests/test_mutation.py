@@ -4,6 +4,7 @@ from typing import ParamSpec, TypeVar
 import pulse as ps
 import pytest
 from pulse.render_session import RenderSession
+from pulse.renderer import RenderTree
 from pulse.routing import RouteTree
 from pulse.test_helpers import wait_for
 
@@ -237,3 +238,29 @@ async def test_mutation_with_parameters():
 
 	# Check data property
 	assert mutation.data == 9
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_zero_arg_mutation_as_callback_does_not_receive_event():
+	class S(ps.State):
+		paused: bool = False
+
+		@ps.mutation
+		async def toggle_pause(self) -> None:
+			self.paused = not self.paused
+
+	s = S()
+	tree = RenderTree(ps.div(ps.button(onClick=s.toggle_pause)["Toggle"]))
+	tree.render()
+
+	callback = tree.callbacks["0.onClick"]
+	assert callback.n_args == 0
+	assert callback.accepts_varargs is False
+
+	event = ({"type": "click"},)
+	await callback.fn(
+		*(event if callback.accepts_varargs else event[: callback.n_args])
+	)
+
+	assert s.paused is True

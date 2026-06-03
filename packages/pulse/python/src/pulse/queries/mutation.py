@@ -53,6 +53,7 @@ class MutationResult(Generic[T, P]):
 	_fn: Callable[P, Awaitable[T]]
 	_on_success: Callable[[T], Any] | None
 	_on_error: Callable[[Exception], Any] | None
+	__signature__: inspect.Signature
 
 	def __init__(
 		self,
@@ -73,6 +74,7 @@ class MutationResult(Generic[T, P]):
 		self._fn = fn
 		self._on_success = on_success
 		self._on_error = on_error
+		self.__signature__ = inspect.signature(fn)
 
 	@property
 	def data(self) -> T | None:

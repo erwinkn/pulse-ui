@@ -24,7 +24,7 @@ from pulse.cli.dependencies import (
 	prepare_web_dependencies,
 )
 from pulse.cli.helpers import load_app_from_target
-from pulse.cli.lock import FolderLock, active_lock_info
+from pulse.cli.lock import FolderLock, active_lock_info, interrupt_active_dev_server
 from pulse.cli.logging import CLILogger
 from pulse.cli.models import AppLoadResult, CommandSpec
 from pulse.cli.processes import execute_commands
@@ -79,6 +79,11 @@ def run(
 	),
 	reload: bool | None = typer.Option(None, "--reload/--no-reload"),
 	find_port: bool = typer.Option(True, "--find-port/--no-find-port"),
+	interrupt: bool = typer.Option(
+		False,
+		"--interrupt",
+		help="Stop any existing Pulse dev server for this app before starting.",
+	),
 	verbose: bool = typer.Option(
 		False, "--verbose", help="Show all logs without filtering"
 	),
@@ -105,9 +110,6 @@ def run(
 		logger.error("Cannot use --server-only and --web-only at the same time.")
 		raise typer.Exit(1)
 
-	if find_port:
-		port = find_available_port(port)
-
 	logger.print(f"Loading app from {app_file}")
 	app_ctx = load_app_from_target(app_file, logger)
 	_apply_app_context_to_env(app_ctx)
@@ -130,6 +132,20 @@ def run(
 	if not web_root.exists() and not server_only:
 		logger.error(f"Directory not found: {web_root.absolute()}")
 		raise typer.Exit(1)
+
+	if interrupt:
+		try:
+			stopped = interrupt_active_dev_server(web_root)
+		except RuntimeError as exc:
+			logger.error(str(exc))
+			raise typer.Exit(1) from None
+		if stopped:
+			logger.warning(
+				f"Stopped existing Pulse dev server at {stopped.url} (pid={stopped.pid})."
+			)
+
+	if find_port:
+		port = find_available_port(port)
 
 	dev_secret: str | None = None
 	if app_instance.env != "prod":
@@ -233,16 +249,17 @@ def run(
 		)
 		commands.append(server_cmd)
 
+	exit_code = 1
 	with FolderLock(web_root, address=address, port=port):
 		try:
 			exit_code = execute_commands(
 				commands,
 				tag_mode=logger.get_tag_mode(),
 			)
-			raise typer.Exit(exit_code)
 		except RuntimeError as exc:
 			logger.error(str(exc))
 			raise typer.Exit(1) from None
+	raise typer.Exit(exit_code)
 
 
 @cli.command("generate")

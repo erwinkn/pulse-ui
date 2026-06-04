@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Generic, Never, TypeVar, override
 
+from pulse.context import wrap_with_forked_context
 from pulse.reactive import AsyncEffect, Computed, Effect, Signal
 from pulse.reactive_extensions import ReactiveProperty
 
@@ -192,20 +193,21 @@ class StateEffect(Generic[T], InitializableProperty):
 
 	@override
 	def initialize(self, state: "State", name: str):
-		bound_method = self.fn.__get__(state, state.__class__)
-		# Select sync/async effect type based on bound method
-		if inspect.iscoroutinefunction(bound_method):
-			effect: Effect = AsyncEffect(
-				bound_method,  # type: ignore[arg-type]
-				name=self.name or f"{state.__class__.__name__}.{name}",
-				lazy=self.lazy,
-				on_error=self.on_error,
-				deps=self.deps,
-				update_deps=self.update_deps,
-				interval=self.interval,
-			)
-		else:
-			effect = Effect(
+		bound_method = wrap_with_forked_context(self.fn.__get__(state, state.__class__))
+
+		def create_effect() -> Effect:
+			# Select sync/async effect type based on bound method
+			if inspect.iscoroutinefunction(bound_method):
+				return AsyncEffect(
+					bound_method,  # type: ignore[arg-type]
+					name=self.name or f"{state.__class__.__name__}.{name}",
+					lazy=self.lazy,
+					on_error=self.on_error,
+					deps=self.deps,
+					update_deps=self.update_deps,
+					interval=self.interval,
+				)
+			return Effect(
 				bound_method,  # type: ignore[arg-type]
 				name=self.name or f"{state.__class__.__name__}.{name}",
 				immediate=self.immediate,
@@ -215,4 +217,6 @@ class StateEffect(Generic[T], InitializableProperty):
 				update_deps=self.update_deps,
 				interval=self.interval,
 			)
+
+		effect = create_effect()
 		setattr(state, name, effect)

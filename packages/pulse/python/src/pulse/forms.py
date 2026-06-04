@@ -22,7 +22,6 @@ from pulse.hooks.runtime import server_address
 from pulse.hooks.stable import stable
 from pulse.react_component import react_component
 from pulse.reactive import Signal
-from pulse.routing import RouteOrigin
 from pulse.serializer import deserialize
 from pulse.transpiler.imports import Import
 from pulse.transpiler.nodes import Node
@@ -190,9 +189,7 @@ class FormRegistry(Disposable):
 
 		with PulseContext.update(
 			render=self._render,
-			route=mount.route,
-			origin=RouteOrigin.from_route(mount.route),
-			mount_id=mount.mount_id,
+			route=mount.route_snapshot(),
 		):
 			await call_flexible(registration.on_submit, data)
 

@@ -4,6 +4,7 @@ import traceback
 import uuid
 from asyncio import iscoroutine
 from collections.abc import Awaitable, Callable
+from contextvars import Context
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 
 from pulse.channel import Channel
@@ -26,7 +27,6 @@ from pulse.routing import (
 	Route,
 	RouteContext,
 	RouteInfo,
-	RouteOrigin,
 	RouteTree,
 	ensure_absolute_path,
 )
@@ -36,6 +36,7 @@ from pulse.scheduling import (
 	TimerRegistry,
 	create_future,
 )
+from pulse.state.query_param import QueryParamSync
 from pulse.state.state import State
 from pulse.transpiler.id import next_id
 from pulse.transpiler.nodes import Expr
@@ -94,8 +95,8 @@ class RouteMount:
 	path: str
 	route: RouteContext
 	tree: RenderTree
+	query_params: QueryParamSync
 	effect: Effect | None
-	_pulse_ctx: PulseContext | None
 	initialized: bool
 	state: MountState
 	pending_action: PendingAction | None
@@ -114,16 +115,16 @@ class RouteMount:
 	) -> None:
 		self.render = render
 		self.path = ensure_absolute_path(path)
-		self.route = RouteContext(route_info, route, render, self.path)
+		self.mount_id = uuid.uuid4().hex
+		self.route = RouteContext(route_info, route, self.path, mount_id=self.mount_id)
+		self.query_params = QueryParamSync(render, self.route)
 		self.effect = None
-		self._pulse_ctx = None
 		self.tree = RenderTree(route.render())
 		self.initialized = False
 		self.state = "pending"
 		self.pending_action = None
 		self.queue = []
 		self.queue_timeout = None
-		self.mount_id = uuid.uuid4().hex
 		self.render_batch_id = -1
 		self.render_batch_renders = 0
 
@@ -132,6 +133,10 @@ class RouteMount:
 
 	def renew_mount_id(self) -> None:
 		self.mount_id = uuid.uuid4().hex
+		self.route.mount_id = self.mount_id
+
+	def route_snapshot(self) -> RouteContext:
+		return self.route.snapshot(mount_id=self.mount_id)
 
 	def _cancel_pending_timeout(self) -> None:
 		if self.queue_timeout is not None:
@@ -245,6 +250,7 @@ class RouteMount:
 		self.tree.unmount()
 		if self.effect:
 			self.effect.dispose()
+		self.query_params.dispose()
 
 
 class RenderSession:
@@ -575,15 +581,10 @@ class RenderSession:
 	) -> T_Render | ServerNavigateToMessage:
 		ctx = PulseContext.get()
 		render_session = ctx.session if session is None else session
-		with Untrack():
-			origin = RouteOrigin.from_route(mount.route)
-			mount_id = mount.mount_id
 		with PulseContext.update(
 			session=render_session,
 			render=self,
 			route=mount.route,
-			origin=origin,
-			mount_id=mount_id,
 		):
 			try:
 				self._check_render_loop(mount, path)
@@ -674,6 +675,19 @@ class RenderSession:
 			raise ValueError(f"No active route for '{path}'")
 		return mount
 
+	def current_query_param_sync(self) -> QueryParamSync:
+		ctx = PulseContext.get()
+		if ctx.route is None:
+			raise RuntimeError(
+				"QueryParam properties require a route render context. Create the state inside a component render."
+			)
+		mount = self.route_mounts.get(ctx.route.route_path)
+		if mount is None:
+			raise RuntimeError("QueryParam route is no longer mounted")
+		if ctx.route.mount_id is not None and mount.mount_id != ctx.route.mount_id:
+			raise RuntimeError("QueryParam route mount is stale")
+		return mount.query_params
+
 	def get_global_state(self, key: str, factory: Callable[[], Any]) -> Any:
 		"""Return a per-session singleton for the provided key."""
 		inst = self._global_states.get(key)
@@ -710,11 +724,22 @@ class RenderSession:
 		*,
 		name: str | None = None,
 		on_done: Callable[[asyncio.Task[Any]], None] | None = None,
+		context: Context | None = None,
 	) -> asyncio.Task[Any]:
 		"""Create a tracked task tied to this render session."""
 		if callable(coroutine):
-			return self._tasks.create_task(coroutine(), name=name, on_done=on_done)
-		return self._tasks.create_task(coroutine, name=name, on_done=on_done)
+			return self._tasks.create_task(
+				coroutine(),
+				name=name,
+				on_done=on_done,
+				context=context,
+			)
+		return self._tasks.create_task(
+			coroutine,
+			name=name,
+			on_done=on_done,
+			context=context,
+		)
 
 	def schedule_later(
 		self, delay: float, fn: Callable[..., Any], *args: Any, **kwargs: Any
@@ -741,15 +766,7 @@ class RenderSession:
 			self.report_error(path, "callback", e, {"callback": key, "async": is_async})
 
 		try:
-			with Untrack():
-				origin = RouteOrigin.from_route(mount.route)
-				mount_id = mount.mount_id
-			with PulseContext.update(
-				render=self,
-				route=mount.route,
-				origin=origin,
-				mount_id=mount_id,
-			):
+			with PulseContext.update(render=self, route=mount.route_snapshot()):
 				res = cb.fn(*args[: cb.n_args])
 				if iscoroutine(res):
 
@@ -763,7 +780,11 @@ class RenderSession:
 						if exc:
 							report(exc, True)
 
-					self.create_task(res, name=f"callback:{key}", on_done=_on_done)
+					self.create_task(
+						res,
+						name=f"callback:{key}",
+						on_done=_on_done,
+					)
 		except Exception as e:
 			report(e)
 

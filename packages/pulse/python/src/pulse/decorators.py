@@ -4,6 +4,7 @@ import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any, ParamSpec, Protocol, TypeVar, cast, overload
 
+from pulse.context import wrap_with_forked_context
 from pulse.hooks.core import HOOK_CONTEXT
 from pulse.hooks.effects import effect_state
 from pulse.hooks.state import collect_component_identity
@@ -288,9 +289,10 @@ def effect(
 		ctx = HOOK_CONTEXT.get()
 
 		def create_effect() -> Effect | AsyncEffect:
+			wrapped_func = wrap_with_forked_context(func)
 			if inspect.iscoroutinefunction(func):
 				return AsyncEffect(
-					func,  # type: ignore[arg-type]
+					wrapped_func,  # type: ignore[arg-type]
 					name=name or func.__name__,
 					lazy=lazy,
 					on_error=on_error,
@@ -299,7 +301,7 @@ def effect(
 					interval=interval,
 				)
 			return Effect(
-				func,  # type: ignore[arg-type]
+				wrapped_func,  # type: ignore[arg-type]
 				name=name or func.__name__,
 				immediate=immediate,
 				lazy=lazy,

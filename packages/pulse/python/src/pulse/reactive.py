@@ -793,39 +793,40 @@ class AsyncEffect(Effect):
 		self.cancel(cancel_interval=False)
 		this_task: asyncio.Task[None] | None = None
 
+		async def _run_body():
+			self._task_started = True
+			# Perform cleanups in the new task
+			with Untrack():
+				try:
+					self._cleanup_before_run()
+				except Exception as e:
+					self.handle_error(e)
+
+			# Capture last_change for explicit deps before running
+			captured_last_changes: dict[Signal[Any] | Computed[Any], int] | None = None
+			if not self.update_deps:
+				captured_last_changes = {dep: dep.last_change for dep in self.deps}
+
+			with Scope() as scope:
+				try:
+					result = self.fn()
+					self.cleanup_fn = await maybe_await(result)
+				except asyncio.CancelledError:
+					# Re-raise so finally block executes to clear task reference
+					raise
+				except Exception as e:
+					self.handle_error(e)
+				self.runs += 1
+				self.last_run = execution_epoch
+			self._apply_scope_results(scope, captured_last_changes)
+			# Start/restart interval if set and not currently scheduled
+			if self._interval is not None and self._interval_handle is None:
+				self._schedule_interval()
+
 		async def _runner():
 			nonlocal execution_epoch, this_task
 			try:
-				self._task_started = True
-				# Perform cleanups in the new task
-				with Untrack():
-					try:
-						self._cleanup_before_run()
-					except Exception as e:
-						self.handle_error(e)
-
-				# Capture last_change for explicit deps before running
-				captured_last_changes: dict[Signal[Any] | Computed[Any], int] | None = (
-					None
-				)
-				if not self.update_deps:
-					captured_last_changes = {dep: dep.last_change for dep in self.deps}
-
-				with Scope() as scope:
-					try:
-						result = self.fn()
-						self.cleanup_fn = await maybe_await(result)
-					except asyncio.CancelledError:
-						# Re-raise so finally block executes to clear task reference
-						raise
-					except Exception as e:
-						self.handle_error(e)
-					self.runs += 1
-					self.last_run = execution_epoch
-				self._apply_scope_results(scope, captured_last_changes)
-				# Start/restart interval if set and not currently scheduled
-				if self._interval is not None and self._interval_handle is None:
-					self._schedule_interval()
+				await _run_body()
 			finally:
 				# Clear the task reference when it finishes
 				if self._task is this_task:

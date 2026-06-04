@@ -1,17 +1,23 @@
 # pyright: reportImportCycles=false
+import inspect
+from collections.abc import Callable
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
+from functools import wraps
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, ParamSpec, TypeVar, cast
 
-from pulse.routing import RouteContext, RouteOrigin
+from pulse.routing import RouteContext
 
 if TYPE_CHECKING:
 	from pulse.app import App
 	from pulse.render_session import RenderSession
 	from pulse.user_session import UserSession
 
+P = ParamSpec("P")
+T = TypeVar("T")
 _UNSET = object()
+_WRAPPED_ATTR = "__pulse_forked_context__"
 
 
 @dataclass
@@ -25,9 +31,7 @@ class PulseContext:
 		app: Application instance.
 		session: Per-user session (UserSession or None).
 		render: Per-connection render session (RenderSession or None).
-		route: Active live route context (RouteContext or None).
-		origin: Immutable route context that originated the active callback/effect.
-		mount_id: Route mount lifecycle id that originated the active callback/effect.
+		route: Active route context (RouteContext or None).
 
 	Example:
 		```python
@@ -43,8 +47,6 @@ class PulseContext:
 	session: "UserSession | None" = None
 	render: "RenderSession | None" = None
 	route: "RouteContext | None" = None
-	origin: "RouteOrigin | None" = None
-	mount_id: str | None = None
 	_token: "Token[PulseContext | None] | None" = None
 
 	@classmethod
@@ -68,8 +70,6 @@ class PulseContext:
 		session: Any = _UNSET,
 		render: Any = _UNSET,
 		route: Any = _UNSET,
-		origin: Any = _UNSET,
-		mount_id: Any = _UNSET,
 	) -> "PulseContext":
 		"""Create a new context with updated values.
 
@@ -79,8 +79,6 @@ class PulseContext:
 			session: New session (optional, inherits if not provided).
 			render: New render session (optional, inherits if not provided).
 			route: New route context (optional, inherits if not provided).
-			origin: New origin route context (optional, inherits if not provided).
-			mount_id: New origin mount id (optional, inherits if not provided).
 
 		Returns:
 			New PulseContext instance with updated values.
@@ -91,9 +89,30 @@ class PulseContext:
 			session=ctx.session if session is _UNSET else session,
 			render=ctx.render if render is _UNSET else render,
 			route=ctx.route if route is _UNSET else route,
-			origin=ctx.origin if origin is _UNSET else origin,
-			mount_id=ctx.mount_id if mount_id is _UNSET else mount_id,
 		)
+
+	def copy(self) -> "PulseContext":
+		return PulseContext(
+			app=self.app,
+			session=self.session,
+			render=self.render,
+			route=self.route,
+		)
+
+	@classmethod
+	def fork(cls) -> "PulseContext":
+		return cls.get().forked()
+
+	def forked(self) -> "PulseContext":
+		return PulseContext(
+			app=self.app,
+			session=self.session,
+			render=self.render,
+			route=self.route.snapshot() if self.route is not None else None,
+		)
+
+	def snapshot(self) -> "PulseContext":
+		return self.forked()
 
 	def __enter__(self):
 		self._token = PULSE_CONTEXT.set(self)
@@ -115,6 +134,39 @@ PULSE_CONTEXT: ContextVar["PulseContext | None"] = ContextVar(
 	"pulse_context", default=None
 )
 
+
+def wrap_with_forked_context(fn: Callable[P, T]) -> Callable[P, T]:
+	if getattr(fn, _WRAPPED_ATTR, False):
+		return fn
+	if inspect.iscoroutinefunction(fn):
+
+		@wraps(fn)
+		async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
+			with PulseContext.fork():
+				return await fn(*args, **kwargs)
+
+		setattr(async_wrapper, _WRAPPED_ATTR, True)
+		return cast(Callable[P, T], async_wrapper)
+
+	@wraps(fn)
+	def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+		ctx = PulseContext.fork()
+		with ctx:
+			result = fn(*args, **kwargs)
+		if inspect.isawaitable(result):
+
+			async def await_result() -> Any:
+				with ctx:
+					return await result
+
+			return cast(T, await_result())
+		return result
+
+	setattr(wrapper, _WRAPPED_ATTR, True)
+	return wrapper
+
+
 __all__ = [
 	"PULSE_CONTEXT",
+	"wrap_with_forked_context",
 ]

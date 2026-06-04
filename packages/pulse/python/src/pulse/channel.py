@@ -14,7 +14,6 @@ from pulse.messages import (
 	ServerChannelRequestMessage,
 	ServerChannelResponseMessage,
 )
-from pulse.routing import RouteOrigin
 from pulse.scheduling import create_future
 
 if TYPE_CHECKING:
@@ -173,14 +172,10 @@ class ChannelsManager:
 			return
 
 		route_ctx = None
-		origin = None
-		mount_id = None
 		if channel.route_path is not None:
 			try:
 				mount = render.get_route_mount(channel.route_path)
-				route_ctx = mount.route
-				origin = RouteOrigin.from_route(route_ctx)
-				mount_id = mount.mount_id
+				route_ctx = mount.route_snapshot()
 			except Exception:
 				route_ctx = None
 
@@ -190,8 +185,6 @@ class ChannelsManager:
 					session=session,
 					render=render,
 					route=route_ctx,
-					origin=origin,
-					mount_id=mount_id,
 				):
 					result = await channel.dispatch(event, payload, request_id)
 			except Exception as exc:

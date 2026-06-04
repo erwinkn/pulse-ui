@@ -418,6 +418,15 @@ class TestDate:
 		code = emit(fn)
 		assert code == "function make_date_1() {\nreturn new Date();\n}"
 
+	def test_date_constructor_with_float(self):
+		@javascript
+		def make_date():
+			return Date(1705321800000.5)
+
+		fn = make_date.transpile()
+		code = emit(fn)
+		assert code == "function make_date_1() {\nreturn new Date(1705321800000.5);\n}"
+
 	def test_date_static_methods(self):
 		@javascript
 		def get_timestamp():

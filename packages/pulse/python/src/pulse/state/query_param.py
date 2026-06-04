@@ -26,7 +26,6 @@ from pulse.helpers import Disposable, values_equal
 from pulse.messages import ServerNavigateToMessage
 from pulse.reactive import Effect, Scope, Signal, Untrack
 from pulse.reactive_extensions import reactive, unwrap
-from pulse.routing import RouteOrigin
 from pulse.state.property import InitializableProperty, StateProperty
 
 T = TypeVar("T")
@@ -357,11 +356,11 @@ class QueryParamProperty(StateProperty, InitializableProperty):
 	@override
 	def initialize(self, state: "State", name: str) -> None:
 		ctx = PulseContext.get()
-		if ctx.render is None or ctx.route is None:
+		if ctx.render is None:
 			raise RuntimeError(
 				"QueryParam properties require a route render context. Create the state inside a component render."
 			)
-		sync = ctx.route.query_param_sync
+		sync = ctx.render.current_query_param_sync()
 		registration = sync.register(state, name, self)
 		setattr(state, f"_query_param_reg_{name}", registration)
 
@@ -489,9 +488,9 @@ class QueryParamSync(Disposable):
 			info = self.route.info
 			raw_params = info["queryParams"]
 			current_params = dict(cast(Mapping[str, str], raw_params))
-			origin = RouteOrigin.from_route(self.route)
-			mount = self.render.route_mounts.get(origin.route_path)
-			mount_id = mount.mount_id if mount is not None else None
+			pathname = self.route.pathname
+			route_path = self.route.route_path
+			mount_id = self.route.mount_id
 			hash_frag = info["hash"]
 		query_params = dict(current_params)
 		for binding in self._bindings.values():
@@ -513,7 +512,7 @@ class QueryParamSync(Disposable):
 
 		if query_params == current_params:
 			return
-		path = origin.pathname
+		path = pathname
 		query = urlencode(query_params)
 		if query:
 			path += "?" + query
@@ -527,8 +526,8 @@ class QueryParamSync(Disposable):
 			path=path,
 			replace=True,
 			hard=False,
-			sourceRoutePath=origin.route_path,
-			sourcePath=origin.pathname,
+			sourceRoutePath=route_path,
+			sourcePath=pathname,
 		)
 		if mount_id is not None:
 			message["sourceMountId"] = mount_id

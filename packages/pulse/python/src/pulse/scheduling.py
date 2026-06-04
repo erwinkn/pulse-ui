@@ -1,7 +1,9 @@
 import asyncio
+import inspect
 import os
-from collections.abc import Awaitable, Callable
-from typing import Any, ParamSpec, Protocol, TypeVar, override
+from collections.abc import Awaitable, Callable, Coroutine
+from contextvars import Context, copy_context
+from typing import Any, ParamSpec, Protocol, TypeVar, cast, override
 
 from anyio import from_thread
 
@@ -36,7 +38,7 @@ def call_soon(
 ) -> TimerHandleLike | None:
 	"""Schedule a callback to run ASAP on the main event loop from any thread."""
 	_, timer_registry = _resolve_registries()
-	return timer_registry.call_soon(fn, *args, **kwargs)
+	return timer_registry.call_soon(fn, *args, context=copy_context(), **kwargs)
 
 
 def create_task(
@@ -69,7 +71,7 @@ def later(
 	"""
 
 	_, timer_registry = _resolve_registries()
-	return timer_registry.later(delay, fn, *args, **kwargs)
+	return timer_registry.later(delay, fn, *args, context=copy_context(), **kwargs)
 
 
 class RepeatHandle:
@@ -104,7 +106,7 @@ def repeat(interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwa
 	"""
 
 	_, timer_registry = _resolve_registries()
-	return timer_registry.repeat(interval, fn, *args, **kwargs)
+	return timer_registry.repeat(interval, fn, *args, context=copy_context(), **kwargs)
 
 
 class TaskRegistry:
@@ -126,25 +128,32 @@ class TaskRegistry:
 		*,
 		name: str | None = None,
 		on_done: Callable[[asyncio.Task[T]], None] | None = None,
+		context: Context | None = None,
 	) -> asyncio.Task[T]:
 		"""Create and schedule a coroutine task on the main loop from any thread."""
-		try:
-			asyncio.get_running_loop()
-			task = asyncio.ensure_future(coroutine)
+
+		def _create() -> asyncio.Task[T]:
+			if asyncio.iscoroutine(coroutine):
+				task = asyncio.get_running_loop().create_task(
+					cast(Coroutine[Any, Any, T], coroutine),
+					context=context,
+				)
+			else:
+				task = asyncio.ensure_future(coroutine)
 			if name is not None:
 				task.set_name(name)
 			if on_done:
 				task.add_done_callback(on_done)
+			return task
+
+		try:
+			asyncio.get_running_loop()
+			task = _create()
 		except RuntimeError:
 
 			async def _runner():
 				asyncio.get_running_loop()
-				task = asyncio.ensure_future(coroutine)
-				if name is not None:
-					task.set_name(name)
-				if on_done:
-					task.add_done_callback(on_done)
-				return task
+				return _create()
 
 			task = from_thread.run(_runner)
 
@@ -190,17 +199,24 @@ class TimerRegistry:
 	def later(
 		self,
 		delay: float,
-		fn: Callable[P, Any],
-		*args: P.args,
-		**kwargs: P.kwargs,
+		fn: Callable[..., Any],
+		*args: Any,
+		context: Context | None = None,
+		**kwargs: Any,
 	) -> TimerHandleLike:
-		return self._schedule(delay, fn, args, dict(kwargs), untrack=True)
+		return self._schedule(
+			delay, fn, args, dict(kwargs), context=context, untrack=True
+		)
 
 	def call_soon(
-		self, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
+		self,
+		fn: Callable[..., Any],
+		*args: Any,
+		context: Context | None = None,
+		**kwargs: Any,
 	) -> TimerHandleLike | None:
 		def _schedule():
-			return self._schedule_soon(fn, args, dict(kwargs))
+			return self._schedule_soon(fn, args, dict(kwargs), context=context)
 
 		try:
 			asyncio.get_running_loop()
@@ -218,7 +234,12 @@ class TimerRegistry:
 				return None
 
 	def repeat(
-		self, interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
+		self,
+		interval: float,
+		fn: Callable[..., Any],
+		*args: Any,
+		context: Context | None = None,
+		**kwargs: Any,
 	) -> RepeatHandle:
 		from pulse.reactive import Untrack
 
@@ -227,6 +248,11 @@ class TimerRegistry:
 
 		async def _runner():
 			nonlocal handle
+			target = fn
+			if context is not None:
+				from pulse.context import wrap_with_forked_context
+
+				target = wrap_with_forked_context(fn)
 			try:
 				while not handle.cancelled:
 					# Start counting the next interval AFTER the previous execution completes
@@ -235,9 +261,16 @@ class TimerRegistry:
 						break
 					try:
 						with Untrack():
-							result = fn(*args, **kwargs)
-							if asyncio.iscoroutine(result):
-								await result
+							if context is None:
+								result = target(*args, **kwargs)
+							else:
+								result = context.run(target, *args, **kwargs)
+							if inspect.isawaitable(result):
+								if context is None:
+									await result
+								else:
+									task = context.run(asyncio.ensure_future, result)
+									await task
 					except asyncio.CancelledError:
 						# Propagate to outer handler to finish cleanly
 						raise
@@ -269,6 +302,7 @@ class TimerRegistry:
 		args: tuple[Any, ...],
 		kwargs: dict[str, Any],
 		*,
+		context: Context | None,
 		untrack: bool,
 	) -> TimerHandleLike:
 		"""
@@ -288,7 +322,15 @@ class TimerRegistry:
 				raise RuntimeError("later() requires an event loop") from exc
 
 		tracked_box: list[TimerHandleLike] = []
-		_run = self._prepare_run(loop, tracked_box, fn, args, kwargs, untrack=untrack)
+		_run = self._prepare_run(
+			loop,
+			tracked_box,
+			fn,
+			args,
+			kwargs,
+			context=context,
+			untrack=untrack,
+		)
 
 		handle = loop.call_later(delay, _run)
 		tracked = _TrackedTimerHandle(handle, self)
@@ -301,6 +343,8 @@ class TimerRegistry:
 		fn: Callable[..., Any],
 		args: tuple[Any, ...],
 		kwargs: dict[str, Any],
+		*,
+		context: Context | None,
 	) -> TimerHandleLike:
 		try:
 			loop = asyncio.get_running_loop()
@@ -311,7 +355,15 @@ class TimerRegistry:
 				raise RuntimeError("call_soon() requires an event loop") from exc
 
 		tracked_box: list[TimerHandleLike] = []
-		_run = self._prepare_run(loop, tracked_box, fn, args, kwargs, untrack=False)
+		_run = self._prepare_run(
+			loop,
+			tracked_box,
+			fn,
+			args,
+			kwargs,
+			context=context,
+			untrack=False,
+		)
 
 		handle = loop.call_soon(_run)
 		tracked = _TrackedHandle(handle, self, when=loop.time())
@@ -327,19 +379,32 @@ class TimerRegistry:
 		args: tuple[Any, ...],
 		kwargs: dict[str, Any],
 		*,
+		context: Context | None,
 		untrack: bool,
 	) -> Callable[[], None]:
 		def _run():
 			from pulse.reactive import Untrack
 
+			target = fn
+			if context is not None:
+				from pulse.context import wrap_with_forked_context
+
+				target = wrap_with_forked_context(fn)
+
 			try:
 				if untrack:
 					with Untrack():
-						res = fn(*args, **kwargs)
+						if context is None:
+							res = target(*args, **kwargs)
+						else:
+							res = context.run(target, *args, **kwargs)
 				else:
-					res = fn(*args, **kwargs)
-				if asyncio.iscoroutine(res):
-					task = self._tasks.create_task(res)
+					if context is None:
+						res = target(*args, **kwargs)
+					else:
+						res = context.run(target, *args, **kwargs)
+				if inspect.isawaitable(res):
+					task = self._tasks.create_task(res, context=context)
 
 					def _log_task_exception(t: asyncio.Task[Any]):
 						try:

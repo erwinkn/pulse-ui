@@ -76,6 +76,7 @@ class InitContext:
 	pre_keys: set[str]
 	saved: dict[str, Any]
 	key: str | None
+	_scope: Any | None
 
 	def __init__(self, *, key: str | None = None):
 		self.callsite = None
@@ -84,6 +85,7 @@ class InitContext:
 		self.pre_keys = set()
 		self.saved = {}
 		self.key = key
+		self._scope = None
 
 	def __enter__(self):
 		self.frame = previous_frame()
@@ -99,6 +101,11 @@ class InitContext:
 		else:
 			self.first_render = False
 			self.saved = entry["vars"]
+		if self.first_render:
+			from pulse.reactive import Scope
+
+			self._scope = Scope()
+			self._scope.__enter__()
 		return self
 
 	def restore_variables(self):
@@ -132,12 +139,21 @@ class InitContext:
 		exc_value: BaseException | None,
 		exc_tb: Any,
 	) -> Literal[False]:
-		if exc_type is None:
-			captured = self._capture_new_locals()
-			assert self.callsite is not None, "callsite  None"
-			storage = _init_hook().storage
-			storage[self.callsite] = {"vars": captured, "key": self.key}
-		self.frame = None
+		try:
+			if exc_type is None:
+				captured = self._capture_new_locals()
+				assert self.callsite is not None, "callsite  None"
+				storage = _init_hook().storage
+				storage[self.callsite] = {"vars": captured, "key": self.key}
+		finally:
+			if self._scope is not None:
+				from pulse.context import wrap_with_forked_context
+
+				for effect in self._scope.effects:
+					effect.fn = wrap_with_forked_context(effect.fn)
+				self._scope.__exit__(exc_type, exc_value, exc_tb)
+				self._scope = None
+			self.frame = None
 		return False
 
 

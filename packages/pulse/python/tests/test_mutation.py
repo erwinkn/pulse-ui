@@ -1,10 +1,11 @@
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import ParamSpec, TypeVar
 
 import pulse as ps
 import pytest
 from pulse.render_session import RenderSession
-from pulse.routing import RouteTree
+from pulse.routing import Route, RouteContext, RouteInfo, RouteTree
 from pulse.test_helpers import wait_for
 
 P = ParamSpec("P")
@@ -31,6 +32,17 @@ def with_render_session(fn: Callable[P, Awaitable[R]]):
 			return await fn(*args, **kwargs)
 
 	return wrapper
+
+
+def make_route_info(query: str) -> RouteInfo:
+	return {
+		"pathname": "/items",
+		"hash": "",
+		"query": query,
+		"queryParams": {"q": query},
+		"pathParams": {},
+		"catchall": [],
+	}
 
 
 @pytest.mark.asyncio
@@ -237,3 +249,42 @@ async def test_mutation_with_parameters():
 
 	# Check data property
 	assert mutation.data == 9
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_mutation_forks_context_for_full_execution():
+	seen: list[str] = []
+	started = asyncio.Event()
+	continue_mutation = asyncio.Event()
+	route = Route("items", ps.component(lambda: ps.div()))
+	route_ctx = RouteContext(make_route_info("one"), route, "/items")
+
+	class S(ps.State):
+		@ps.mutation
+		async def load(self) -> str:
+			ctx = ps.PulseContext.get()
+			assert ctx.route is not None
+			seen.append(ctx.route.query)
+			started.set()
+			await continue_mutation.wait()
+			ctx = ps.PulseContext.get()
+			assert ctx.route is not None
+			seen.append(ctx.route.query)
+			return "ok"
+
+		@load.on_success
+		def _on_success(self, _data: str):
+			ctx = ps.PulseContext.get()
+			assert ctx.route is not None
+			seen.append(ctx.route.query)
+
+	s = S()
+	with ps.PulseContext.update(route=route_ctx):
+		task = asyncio.create_task(s.load())
+		assert await wait_for(lambda: started.is_set(), timeout=0.2)
+		route_ctx.update(make_route_info("two"))
+		continue_mutation.set()
+		assert await task == "ok"
+
+	assert seen == ["one", "one", "one"]

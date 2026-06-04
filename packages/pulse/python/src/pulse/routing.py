@@ -1,15 +1,12 @@
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, TypedDict, cast, override
+from typing import TypedDict, cast, override
 
 from pulse.component import Component
 from pulse.env import env
+from pulse.reactive import Untrack
 from pulse.reactive_extensions import ReactiveDict
-
-if TYPE_CHECKING:
-	from pulse.render_session import RenderSession
-	from pulse.state.query_param import QueryParamSync
 
 # angle brackets cannot appear in a regular URL path, this ensures no name conflicts
 LAYOUT_INDICATOR = "<layout>"
@@ -549,21 +546,20 @@ class RouteContext:
 	info: RouteInfo
 	pulse_route: Route | Layout
 	route_path: str
-	query_param_sync: "QueryParamSync"
+	mount_id: str | None
 
 	def __init__(
 		self,
 		info: RouteInfo,
 		pulse_route: Route | Layout,
-		render: "RenderSession",
 		route_path: str | None = None,
+		*,
+		mount_id: str | None = None,
 	):
-		self.info = cast(RouteInfo, cast(object, ReactiveDict(info)))
+		self.info = cast(RouteInfo, cast(object, ReactiveDict(copy_route_info(info))))
 		self.pulse_route = pulse_route
 		self.route_path = ensure_absolute_path(route_path or pulse_route.unique_path())
-		from pulse.state.query_param import QueryParamSync
-
-		self.query_param_sync = QueryParamSync(render, self)
+		self.mount_id = mount_id
 
 	def update(self, info: RouteInfo) -> None:
 		"""Update the route info with new values.
@@ -572,6 +568,15 @@ class RouteContext:
 			info: New route info to apply.
 		"""
 		self.info.update(info)
+
+	def snapshot(self, *, mount_id: str | None = None) -> "RouteContext":
+		with Untrack():
+			return RouteContext(
+				self.info,
+				self.pulse_route,
+				self.route_path,
+				mount_id=self.mount_id if mount_id is None else mount_id,
+			)
 
 	@property
 	def pathname(self) -> str:
@@ -616,61 +621,12 @@ class RouteContext:
 		)
 
 
-@dataclass(frozen=True)
-class RouteOrigin:
-	"""Immutable snapshot of the route context that originated work."""
-
-	info: RouteInfo
-	pulse_route: Route | Layout
-	route_path: str
-
-	@classmethod
-	def from_route(cls, route: RouteContext) -> "RouteOrigin":
-		return cls(
-			info={
-				"pathname": route.pathname,
-				"hash": route.hash,
-				"query": route.query,
-				"queryParams": dict(route.queryParams),
-				"pathParams": dict(route.pathParams),
-				"catchall": list(route.catchall),
-			},
-			pulse_route=route.pulse_route,
-			route_path=route.route_path,
-		)
-
-	@property
-	def pathname(self) -> str:
-		return self.info["pathname"]
-
-	@property
-	def hash(self) -> str:
-		return self.info["hash"]
-
-	@property
-	def query(self) -> str:
-		return self.info["query"]
-
-	@property
-	def queryParams(self) -> dict[str, str]:
-		return self.info["queryParams"]
-
-	@property
-	def pathParams(self) -> dict[str, str]:
-		return self.info["pathParams"]
-
-	@property
-	def catchall(self) -> list[str]:
-		return self.info["catchall"]
-
-	@override
-	def __str__(self) -> str:
-		return f"RouteOrigin(pathname='{self.pathname}', params={self.pathParams})"
-
-	@override
-	def __repr__(self) -> str:
-		return (
-			f"RouteOrigin(pathname='{self.pathname}', hash='{self.hash}', "
-			f"query='{self.query}', queryParams={self.queryParams}, "
-			f"pathParams={self.pathParams}, catchall={self.catchall})"
-		)
+def copy_route_info(info: RouteInfo) -> RouteInfo:
+	return {
+		"pathname": info["pathname"],
+		"hash": info["hash"],
+		"query": info["query"],
+		"queryParams": dict(info["queryParams"]),
+		"pathParams": dict(info["pathParams"]),
+		"catchall": list(info["catchall"]),
+	}

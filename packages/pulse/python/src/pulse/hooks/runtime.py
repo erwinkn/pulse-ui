@@ -14,7 +14,7 @@ from pulse.context import PulseContext
 from pulse.hooks.core import HOOK_CONTEXT
 from pulse.messages import ServerNavigateToMessage
 from pulse.reactive_extensions import ReactiveDict
-from pulse.routing import Layout, Route, RouteInfo, RouteOrigin
+from pulse.routing import Layout, Route, RouteInfo
 from pulse.state.state import State
 
 
@@ -260,11 +260,10 @@ def navigate(
 		"hard": hard,
 	}
 	if not force and ctx.route is not None:
-		origin = ctx.origin or RouteOrigin.from_route(ctx.route)
-		message["sourceRoutePath"] = origin.route_path
-		message["sourcePath"] = origin.pathname
-		if ctx.mount_id is not None:
-			message["sourceMountId"] = ctx.mount_id
+		message["sourceRoutePath"] = ctx.route.route_path
+		message["sourcePath"] = ctx.route.pathname
+		if ctx.route.mount_id is not None:
+			message["sourceMountId"] = ctx.route.mount_id
 	ctx.render.send(message)
 
 

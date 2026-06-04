@@ -41,9 +41,9 @@ def make_context(route_info: RouteInfo):
 	return app, session, route_ctx
 
 
-def flush_query_param_sync(route_ctx: RouteContext) -> None:
+def flush_query_param_sync(session: RenderSession, route_ctx: RouteContext) -> None:
 	flush_effects()
-	effect = route_ctx.query_param_sync._state_effect  # pyright: ignore[reportPrivateUsage]
+	effect = session.route_mounts[route_ctx.route_path].query_params._state_effect  # pyright: ignore[reportPrivateUsage]
 	if effect is not None:
 		effect.flush()
 
@@ -66,7 +66,7 @@ class TestQueryParam:
 			flush_effects()
 			messages.clear()
 			state.q = "next"
-			flush_query_param_sync(route_ctx)
+			flush_query_param_sync(session, route_ctx)
 
 		assert len(messages) == 1
 		msg = messages[0]
@@ -126,7 +126,7 @@ class TestQueryParam:
 			flush_effects()
 			messages.clear()
 			state.tags = ["x,y", "z\\w"]
-			flush_query_param_sync(route_ctx)
+			flush_query_param_sync(session, route_ctx)
 
 		assert len(messages) == 1
 		msg = messages[0]
@@ -148,7 +148,7 @@ class TestQueryParam:
 			flush_effects()
 			messages.clear()
 			state.tags.append("alpha")
-			flush_query_param_sync(route_ctx)
+			flush_query_param_sync(session, route_ctx)
 
 		assert len(messages) == 1
 		msg = messages[0]
@@ -172,7 +172,7 @@ class TestQueryParam:
 			flush_effects()
 			messages.clear()
 			state.q = "hello"
-			flush_query_param_sync(route_ctx)
+			flush_query_param_sync(session, route_ctx)
 
 		assert len(messages) == 1
 		msg = messages[0]
@@ -205,7 +205,7 @@ class TestQueryParam:
 			flush_effects()
 			messages.clear()
 			state.tags = []
-			flush_query_param_sync(route_ctx)
+			flush_query_param_sync(session, route_ctx)
 
 		assert len(messages) == 1
 		msg = messages[0]
@@ -228,7 +228,7 @@ class TestQueryParam:
 			state = QState()
 			messages.clear()
 			state.q = "next"
-			flush_query_param_sync(route_ctx)
+			flush_query_param_sync(session, route_ctx)
 
 		assert len(messages) == 1
 		msg = messages[0]

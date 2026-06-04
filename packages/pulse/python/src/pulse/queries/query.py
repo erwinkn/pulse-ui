@@ -231,34 +231,35 @@ async def run_fetch_with_retries(
 		untrack: If True, wrap fetch_fn in Untrack() to prevent dependency tracking.
 		         Use for keyed queries where fetch is triggered via create_task().
 	"""
-	state.reset_retries()
+	with PulseContext.fork():
+		state.reset_retries()
 
-	while True:
-		try:
-			if untrack:
-				with Untrack():
-					result = await fetch_fn()
-			else:
-				result = await fetch_fn()
-			state.set_success(result)
-			if on_success:
-				with Untrack():
-					await maybe_await(call_flexible(on_success, result))
-			return
-		except asyncio.CancelledError:
-			raise
-		except Exception as e:
-			current_retries = state.retries.read()
-			if current_retries < state.cfg.retries:
-				state.failed_retry(e)
-				await asyncio.sleep(state.cfg.retry_delay)
-			else:
-				state.retry_reason.write(e)
-				state.apply_error(e)
-				if on_error:
+		while True:
+			try:
+				if untrack:
 					with Untrack():
-						await maybe_await(call_flexible(on_error, e))
+						result = await fetch_fn()
+				else:
+					result = await fetch_fn()
+				state.set_success(result)
+				if on_success:
+					with Untrack():
+						await maybe_await(call_flexible(on_success, result))
 				return
+			except asyncio.CancelledError:
+				raise
+			except Exception as e:
+				current_retries = state.retries.read()
+				if current_retries < state.cfg.retries:
+					state.failed_retry(e)
+					await asyncio.sleep(state.cfg.retry_delay)
+				else:
+					state.retry_reason.write(e)
+					state.apply_error(e)
+					if on_error:
+						with Untrack():
+							await maybe_await(call_flexible(on_error, e))
+					return
 
 
 class KeyedQuery(Generic[T], Disposable):

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, ParamSpec, TypeVar, cast, override
 
+from pulse.context import PulseContext, wrap_with_forked_context
 from pulse.hooks.core import HookMetadata, HookState, hooks
 from pulse.reactive import Effect, Scope, Signal
 
@@ -64,8 +65,11 @@ class SetupState(HookState):
 	) -> Any:
 		self.dispose_effects()
 		with Scope() as scope:
-			self.value = init_func(*args, **kwargs)
+			with PulseContext.fork():
+				self.value = init_func(*args, **kwargs)
 			self.effects = list(scope.effects)
+			for effect in self.effects:
+				effect.fn = wrap_with_forked_context(effect.fn)
 		self.args = [Signal(arg) for arg in args]
 		self.kwargs = {name: Signal(value) for name, value in kwargs.items()}
 		self.initialized = True

@@ -6,16 +6,20 @@ Each session mounts both routes and mutates state via callbacks. We assert
 that updates from one session do not leak into the other.
 """
 
+import ast
 import asyncio
+import inspect
 from typing import Any, cast, override
 
 import pulse as ps
+import pulse.reactive as reactive_module
 import pytest
 from pulse import javascript
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import ServerMessage
+from pulse.reactive import flush_effects
 from pulse.render_session import RenderSession
-from pulse.routing import Route, RouteInfo, RouteOrigin, RouteTree
+from pulse.routing import Route, RouteInfo, RouteTree
 from pulse.test_helpers import wait_for
 
 
@@ -75,6 +79,16 @@ def make_route_info(
 def transition_mount_to_idle(session: RenderSession, path: str) -> None:
 	mount = session.route_mounts[path]
 	mount.to_idle()
+
+
+def test_reactive_module_does_not_import_pulse_context():
+	source = inspect.getsource(reactive_module)
+	tree = ast.parse(source)
+	for node in ast.walk(tree):
+		if isinstance(node, ast.Import):
+			assert all(alias.name != "pulse.context" for alias in node.names)
+		if isinstance(node, ast.ImportFrom):
+			assert node.module != "pulse.context"
 
 
 # TODO: clean this up - this was refactored using GPT-5 and is thus quite hacky
@@ -144,7 +158,7 @@ def first_callback_key(session: RenderSession, path: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_pulse_context_update_can_clear_route_origin():
+async def test_pulse_context_update_can_clear_route():
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
 
@@ -153,26 +167,15 @@ async def test_pulse_context_update_can_clear_route_origin():
 		session.attach("/a", make_route_info("/a"))
 
 	route = session.route_mounts["/a"].route
-	with ps.PulseContext.update(
-		render=session,
-		route=route,
-		origin=RouteOrigin.from_route(route),
-		mount_id=session.route_mounts["/a"].mount_id,
-	):
-		with ps.PulseContext.update(
-			route=None,
-			origin=None,
-			mount_id=None,
-		):
+	with ps.PulseContext.update(render=session, route=route):
+		with ps.PulseContext.update(route=None):
 			ctx = ps.PulseContext.get()
 			assert ctx.route is None
-			assert ctx.origin is None
-			assert ctx.mount_id is None
 
 	session.close()
 
 
-def test_route_origin_snapshots_route_context():
+def test_route_context_snapshot_does_not_track_route_updates():
 	routes = RouteTree([Route("items/:id/*", simple_component)])
 	session = RenderSession("test-id", routes)
 	first_info = make_route_info("/items/123/a", path_params={"id": "123"})
@@ -189,14 +192,14 @@ def test_route_origin_snapshots_route_context():
 		session.attach("/items/:id/*", first_info)
 
 	route = session.route_mounts["/items/:id/*"].route
-	origin = RouteOrigin.from_route(route)
+	snapshot = route.snapshot()
 	route.update(next_info)
 
-	assert origin.route_path == "/items/:id/*"
-	assert origin.pathname == "/items/123/a"
-	assert origin.queryParams == {"q": "one"}
-	assert origin.pathParams == {"id": "123"}
-	assert origin.catchall == ["a"]
+	assert snapshot.route_path == "/items/:id/*"
+	assert snapshot.pathname == "/items/123/a"
+	assert snapshot.queryParams == {"q": "one"}
+	assert snapshot.pathParams == {"id": "123"}
+	assert snapshot.catchall == ["a"]
 
 	session.close()
 
@@ -607,11 +610,7 @@ def test_route_bound_navigation_validates_source_route_identity():
 		session.attach("/b", route_info)
 
 	mount = session.route_mounts["/a"]
-	with ps.PulseContext.update(
-		render=session,
-		route=mount.route,
-		origin=RouteOrigin.from_route(mount.route),
-	):
+	with ps.PulseContext.update(render=session, route=mount.route_snapshot()):
 		session.detach("/a")
 		ps.navigate("/after")
 
@@ -669,12 +668,15 @@ async def test_async_callback_navigation_after_route_update_is_ignored_by_defaul
 	started = asyncio.Event()
 	release = asyncio.Event()
 	completed = asyncio.Event()
+	seen_ids: list[str] = []
 
 	@ps.component
 	def Page():
 		async def on_click():
+			seen_ids.append(ps.route()["pathParams"]["id"])
 			started.set()
 			await release.wait()
+			seen_ids.append(ps.route()["pathParams"]["id"])
 			ps.navigate("/after")
 			completed.set()
 
@@ -702,6 +704,293 @@ async def test_async_callback_navigation_after_route_update_is_ignored_by_defaul
 
 	assert not [msg for msg in messages if msg["type"] == "navigate_to"]
 	assert not [msg for msg in messages if msg["type"] == "server_error"]
+	assert seen_ids == ["123", "123"]
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_async_effect_sees_route_snapshot_after_route_update():
+	started = asyncio.Event()
+	release = asyncio.Event()
+	completed = asyncio.Event()
+	seen_ids: list[str] = []
+
+	@ps.component
+	def Page():
+		@ps.effect
+		async def load():  # pyright: ignore[reportUnusedFunction]
+			seen_ids.append(ps.route()["pathParams"]["id"])
+			started.set()
+			await release.wait()
+			seen_ids.append(ps.route()["pathParams"]["id"])
+			completed.set()
+
+		return ps.div()
+
+	routes = RouteTree([Route("items/:id", Page)])
+	session = RenderSession("test-id", routes)
+	first_info = make_route_info("/items/123", path_params={"id": "123"})
+	next_info = make_route_info("/items/456", path_params={"id": "456"})
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/items/:id"], first_info)
+		session.attach("/items/:id", first_info)
+
+	await started.wait()
+	session.attach("/items/:id", next_info)
+	release.set()
+	await asyncio.wait_for(completed.wait(), timeout=0.2)
+	await asyncio.sleep(0)
+
+	assert seen_ids == ["123", "123"]
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_state_async_effect_sees_route_snapshot_after_route_update():
+	started = asyncio.Event()
+	release = asyncio.Event()
+	completed = asyncio.Event()
+	seen_ids: list[str] = []
+
+	class RouteState(ps.State):
+		@ps.effect
+		async def load(self):
+			seen_ids.append(ps.route()["pathParams"]["id"])
+			started.set()
+			await release.wait()
+			seen_ids.append(ps.route()["pathParams"]["id"])
+			completed.set()
+
+	@ps.component
+	def Page():
+		ps.state(RouteState)
+		return ps.div()
+
+	routes = RouteTree([Route("items/:id", Page)])
+	session = RenderSession("test-id", routes)
+	first_info = make_route_info("/items/123", path_params={"id": "123"})
+	next_info = make_route_info("/items/456", path_params={"id": "456"})
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/items/:id"], first_info)
+		session.attach("/items/:id", first_info)
+
+	await started.wait()
+	session.attach("/items/:id", next_info)
+	release.set()
+	await asyncio.wait_for(completed.wait(), timeout=0.2)
+
+	assert seen_ids == ["123", "123"]
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_state_constructor_task_sees_route_snapshot_after_route_update():
+	started = asyncio.Event()
+	release = asyncio.Event()
+	completed = asyncio.Event()
+	seen_ids: list[str] = []
+
+	class RouteState(ps.State):
+		_task: asyncio.Task[None]
+
+		def __init__(self):
+			async def work():
+				seen_ids.append(ps.route()["pathParams"]["id"])
+				started.set()
+				await release.wait()
+				seen_ids.append(ps.route()["pathParams"]["id"])
+				completed.set()
+
+			self._task = asyncio.create_task(work())
+
+	@ps.component
+	def Page():
+		state = ps.state(RouteState)
+		return ps.div(str(state._task.done()))  # pyright: ignore[reportPrivateUsage]
+
+	routes = RouteTree([Route("items/:id", Page)])
+	session = RenderSession("test-id", routes)
+	first_info = make_route_info("/items/123", path_params={"id": "123"})
+	next_info = make_route_info("/items/456", path_params={"id": "456"})
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/items/:id"], first_info)
+		session.attach("/items/:id", first_info)
+
+	session.attach("/items/:id", next_info)
+	await started.wait()
+	release.set()
+	await asyncio.wait_for(completed.wait(), timeout=0.2)
+
+	assert seen_ids == ["123", "123"]
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_setup_task_sees_route_snapshot_after_route_update():
+	started = asyncio.Event()
+	release = asyncio.Event()
+	completed = asyncio.Event()
+	seen_ids: list[str] = []
+
+	@ps.component
+	def Page():
+		def init():
+			async def work():
+				seen_ids.append(ps.route()["pathParams"]["id"])
+				started.set()
+				await release.wait()
+				seen_ids.append(ps.route()["pathParams"]["id"])
+				completed.set()
+
+			return asyncio.create_task(work())
+
+		task = ps.setup(init)
+		return ps.div(str(task.done()))
+
+	routes = RouteTree([Route("items/:id", Page)])
+	session = RenderSession("test-id", routes)
+	first_info = make_route_info("/items/123", path_params={"id": "123"})
+	next_info = make_route_info("/items/456", path_params={"id": "456"})
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/items/:id"], first_info)
+		session.attach("/items/:id", first_info)
+
+	session.attach("/items/:id", next_info)
+	await started.wait()
+	release.set()
+	await asyncio.wait_for(completed.wait(), timeout=0.2)
+
+	assert seen_ids == ["123", "123"]
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_init_effect_sees_route_snapshot_after_route_update():
+	started = asyncio.Event()
+	release = asyncio.Event()
+	completed = asyncio.Event()
+	seen_ids: list[str] = []
+
+	@ps.component
+	def Page():
+		async def work():
+			seen_ids.append(ps.route()["pathParams"]["id"])
+			started.set()
+			await release.wait()
+			seen_ids.append(ps.route()["pathParams"]["id"])
+			completed.set()
+
+		with ps.init():
+			effect = ps.AsyncEffect(work, name="init-work")
+
+		return ps.div(str(effect.runs))
+
+	routes = RouteTree([Route("items/:id", Page)])
+	session = RenderSession("test-id", routes)
+	first_info = make_route_info("/items/123", path_params={"id": "123"})
+	next_info = make_route_info("/items/456", path_params={"id": "456"})
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/items/:id"], first_info)
+		session.attach("/items/:id", first_info)
+
+	session.attach("/items/:id", next_info)
+	await started.wait()
+	release.set()
+	await asyncio.wait_for(completed.wait(), timeout=0.2)
+
+	assert seen_ids == ["456", "456"]
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_later_callback_sees_route_snapshot_after_route_update():
+	started = asyncio.Event()
+	completed = asyncio.Event()
+	seen_ids: list[str] = []
+
+	@ps.component
+	def Page():
+		def on_click():
+			def run_later():
+				seen_ids.append(ps.route()["pathParams"]["id"])
+				completed.set()
+
+			started.set()
+			ps.later(0.01, run_later)
+
+		return ps.button(onClick=on_click)["go"]
+
+	routes = RouteTree([Route("items/:id", Page)])
+	session = RenderSession("test-id", routes)
+	first_info = make_route_info("/items/123", path_params={"id": "123"})
+	next_info = make_route_info("/items/456", path_params={"id": "456"})
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/items/:id"], first_info)
+		session.attach("/items/:id", first_info)
+
+	session.execute_callback(
+		"/items/:id", first_callback_key(session, "/items/:id"), []
+	)
+	await started.wait()
+	session.attach("/items/:id", next_info)
+	await asyncio.wait_for(completed.wait(), timeout=0.2)
+
+	assert seen_ids == ["123"]
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_async_repeat_callback_sees_route_snapshot_after_route_update():
+	started = asyncio.Event()
+	completed = asyncio.Event()
+	seen_ids: list[str] = []
+	handle_box: list[Any] = []
+
+	@ps.component
+	def Page():
+		def on_click():
+			async def run_repeat():
+				seen_ids.append(ps.route()["pathParams"]["id"])
+				await asyncio.sleep(0)
+				seen_ids.append(ps.route()["pathParams"]["id"])
+				handle_box[0].cancel()
+				completed.set()
+
+			started.set()
+			handle_box.append(ps.repeat(0.01, run_repeat))
+
+		return ps.button(onClick=on_click)["go"]
+
+	routes = RouteTree([Route("items/:id", Page)])
+	session = RenderSession("test-id", routes)
+	first_info = make_route_info("/items/123", path_params={"id": "123"})
+	next_info = make_route_info("/items/456", path_params={"id": "456"})
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/items/:id"], first_info)
+		session.attach("/items/:id", first_info)
+
+	session.execute_callback(
+		"/items/:id", first_callback_key(session, "/items/:id"), []
+	)
+	await started.wait()
+	session.attach("/items/:id", next_info)
+	await asyncio.wait_for(completed.wait(), timeout=0.2)
+
+	assert seen_ids == ["123", "123"]
 
 	session.close()
 
@@ -718,11 +1007,7 @@ def test_queued_route_bound_navigation_is_revalidated_on_reconnect():
 
 	session.disconnect()
 	mount = session.route_mounts["/a"]
-	with ps.PulseContext.update(
-		render=session,
-		route=mount.route,
-		origin=RouteOrigin.from_route(mount.route),
-	):
+	with ps.PulseContext.update(render=session, route=mount.route_snapshot()):
 		ps.navigate("/after")
 
 	session.detach("/a")
@@ -1422,6 +1707,101 @@ async def test_session_close_cancels_cleanup_timers():
 
 	await asyncio.sleep(0.1)
 	assert state_box[0].fired is False
+
+
+@pytest.mark.asyncio
+async def test_later_forks_latest_context_for_async_callback_lifetime():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+	seen: list[str] = []
+	started = asyncio.Event()
+	continue_callback = asyncio.Event()
+	done = asyncio.Event()
+
+	async def on_fire() -> None:
+		ctx = ps.PulseContext.get()
+		assert ctx.route is not None
+		seen.append(ctx.route.query)
+		started.set()
+		await continue_callback.wait()
+		ctx = ps.PulseContext.get()
+		assert ctx.route is not None
+		seen.append(ctx.route.query)
+		done.set()
+
+	initial_info = make_route_info("/a")
+	initial_info["query"] = "one"
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"], initial_info)
+		session.attach("/a", initial_info)
+
+	mount = session.route_mounts["/a"]
+	with ps.PulseContext.update(render=session, route=mount.route):
+		ps.later(0.01, on_fire)
+
+	next_info = make_route_info("/a")
+	next_info["query"] = "two"
+	session.update_route("/a", next_info)
+
+	assert await wait_for(lambda: started.is_set(), timeout=0.2)
+
+	final_info = make_route_info("/a")
+	final_info["query"] = "three"
+	session.update_route("/a", final_info)
+	continue_callback.set()
+
+	assert await wait_for(lambda: done.is_set(), timeout=0.2)
+	assert seen == ["two", "two"]
+
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_inline_effect_forks_latest_context_at_execution_start():
+	trigger = ps.Signal(0)
+	seen: list[str] = []
+
+	@ps.component
+	def component():
+		@ps.effect
+		def watch_route():
+			trigger()
+			ctx = ps.PulseContext.get()
+			assert ctx.route is not None
+			seen.append(ctx.route.query)
+
+		_ = watch_route
+		return ps.div()
+
+	routes = RouteTree([Route("a", component)])
+	session = RenderSession("test-id", routes)
+	initial_info = make_route_info("/a")
+	initial_info["query"] = "one"
+
+	try:
+		with ps.PulseContext.update(render=session):
+			session.prerender(["/a"], initial_info)
+			session.attach("/a", initial_info)
+
+		mount = session.route_mounts["/a"]
+		with ps.PulseContext.update(render=session, route=mount.route):
+			flush_effects()
+
+		assert seen == ["one"]
+
+		with ps.PulseContext.update(render=session, route=mount.route):
+			trigger.write(1)
+
+		next_info = make_route_info("/a")
+		next_info["query"] = "two"
+		session.update_route("/a", next_info)
+
+		with ps.PulseContext.update(render=session, route=mount.route):
+			flush_effects()
+
+		assert seen == ["one", "two"]
+	finally:
+		session.close()
 
 
 def test_handle_api_result_ignores_unknown_id():

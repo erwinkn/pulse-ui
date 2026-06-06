@@ -104,7 +104,7 @@ ps.button(
 )
 ```
 
-Automatically resets to `False` after `onSubmit` handler completes.
+Automatically resets to `False` after `onSubmit` handler completes or raises.
 
 ## FormData Handling
 

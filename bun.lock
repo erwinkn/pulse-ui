@@ -133,7 +133,7 @@
     },
     "packages/pulse-mantine/js": {
       "name": "pulse-mantine",
-      "version": "0.1.40",
+      "version": "0.1.41",
       "devDependencies": {
         "@types/bun": "latest",
         "@types/node": "^24.6.0",
@@ -161,7 +161,7 @@
     },
     "packages/pulse/js": {
       "name": "pulse-ui-client",
-      "version": "0.1.98",
+      "version": "0.1.99",
       "dependencies": {
         "socket.io-client": "^4.8.1",
         "ws": "^8.18.3",

@@ -10,7 +10,7 @@ export type {
 } from "./client";
 export type { PulseFormProps } from "./form";
 // Form helpers
-export { PulseForm, submitForm } from "./form";
+export { FormSubmissionError, PulseForm, submitForm } from "./form";
 export type { RouteInfo } from "./helpers";
 // Server helpers
 export { extractServerRouteInfo } from "./helpers";

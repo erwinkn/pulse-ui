@@ -250,15 +250,24 @@ def run(
 		commands.append(server_cmd)
 
 	exit_code = 1
-	with FolderLock(web_root, address=address, port=port):
-		try:
-			exit_code = execute_commands(
-				commands,
-				tag_mode=logger.get_tag_mode(),
-			)
-		except RuntimeError as exc:
-			logger.error(str(exc))
-			raise typer.Exit(1) from None
+	try:
+		with FolderLock(web_root, address=address, port=port):
+			try:
+				exit_code = execute_commands(
+					commands,
+					tag_mode=logger.get_tag_mode(),
+				)
+			except RuntimeError as exc:
+				logger.error(str(exc))
+				raise typer.Exit(1) from None
+	except typer.Exit:
+		raise
+	except RuntimeError as exc:
+		message = str(exc)
+		logger.error(message)
+		if message.startswith("Another Pulse dev instance is running at "):
+			logger.print("Run again with --interrupt to stop it and start this app.")
+		raise typer.Exit(1) from None
 	raise typer.Exit(exit_code)
 
 

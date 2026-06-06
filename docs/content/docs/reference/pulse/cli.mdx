@@ -31,6 +31,7 @@ pulse run <app_file> [options]
 | `--react-server-address` | `str` | - | React server URL (required for single-server + server-only) |
 | `--reload/--no-reload` | flag | auto | Enable/disable hot reload (auto-enabled in dev) |
 | `--find-port/--no-find-port` | flag | `True` | Auto-find available port if specified is busy |
+| `--interrupt` | flag | - | Stop an existing Pulse dev instance for this app before starting |
 | `--verbose` | flag | - | Show all logs without filtering |
 
 ### Examples
@@ -48,6 +49,8 @@ pulse run app.py --address 0.0.0.0 --port 8080
 # Run only backend (for separate frontend deployment)
 pulse run app.py --server-only --react-server-address http://localhost:5173
 ```
+
+If another Pulse dev instance is already running for the same app, stop it first or rerun with `--interrupt`.
 
 ---
 

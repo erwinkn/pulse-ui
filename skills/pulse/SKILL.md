@@ -513,6 +513,7 @@ app = ps.App(
 ```bash
 uv run pulse run app.py          # Dev server :8000
 uv run pulse run app.py --port 3000
+uv run pulse run app.py --interrupt  # Stop existing dev instance first
 make all                         # Format, lint, typecheck, test
 ```
 

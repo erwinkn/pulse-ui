@@ -267,6 +267,40 @@ def test_run_interrupt_stops_existing_server_before_finding_port(
 	assert [command.name for command in commands] == ["web", "server"]
 
 
+def test_run_existing_lock_suggests_interrupt(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+	web_root = tmp_path / "web"
+	create_lock(lock_path_for_web_root(web_root), address="localhost", port=8123)
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+
+	def load_app(target: str, logger: object) -> AppLoadResult:
+		return app_ctx
+
+	monkeypatch.setattr(cmd_mod, "load_app_from_target", load_app)
+
+	result = runner.invoke(
+		cmd_mod.cli,
+		[
+			"run",
+			"demo.py",
+			"--server-only",
+			"--no-reload",
+			"--plain",
+			"--port",
+			"8123",
+		],
+	)
+
+	assert result.exit_code == 1
+	assert (
+		"Error: Another Pulse dev instance is running at http://localhost:8123"
+		in result.output
+	)
+	assert "Run again with --interrupt to stop it and start this app." in result.output
+	assert "Traceback" not in result.output
+
+
 def test_resolve_dev_secret_creates_and_reuses_secret(tmp_path: Path):
 	app_path = tmp_path / "app.py"
 	app_path.write_text("pass\n")

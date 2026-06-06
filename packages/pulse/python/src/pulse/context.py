@@ -91,28 +91,15 @@ class PulseContext:
 			route=ctx.route if route is _UNSET else route,
 		)
 
-	def copy(self) -> "PulseContext":
-		return PulseContext(
-			app=self.app,
-			session=self.session,
-			render=self.render,
-			route=self.route,
-		)
-
 	@classmethod
 	def fork(cls) -> "PulseContext":
-		return cls.get().forked()
-
-	def forked(self) -> "PulseContext":
+		ctx = cls.get()
 		return PulseContext(
-			app=self.app,
-			session=self.session,
-			render=self.render,
-			route=self.route.snapshot() if self.route is not None else None,
+			app=ctx.app,
+			session=ctx.session,
+			render=ctx.render,
+			route=ctx.route.snapshot() if ctx.route is not None else None,
 		)
-
-	def snapshot(self) -> "PulseContext":
-		return self.forked()
 
 	def __enter__(self):
 		self._token = PULSE_CONTEXT.set(self)

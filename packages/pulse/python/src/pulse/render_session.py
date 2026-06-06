@@ -102,7 +102,6 @@ class RouteMount:
 	pending_action: PendingAction | None
 	queue: list[ServerMessage] | None
 	queue_timeout: TimerHandleLike | None
-	mount_id: str
 	render_batch_id: int
 	render_batch_renders: int
 
@@ -115,8 +114,9 @@ class RouteMount:
 	) -> None:
 		self.render = render
 		self.path = ensure_absolute_path(path)
-		self.mount_id = uuid.uuid4().hex
-		self.route = RouteContext(route_info, route, self.path, mount_id=self.mount_id)
+		self.route = RouteContext(
+			route_info, route, self.path, mount_id=uuid.uuid4().hex
+		)
 		self.query_params = QueryParamSync(render, self.route)
 		self.effect = None
 		self.tree = RenderTree(route.render())
@@ -131,9 +131,14 @@ class RouteMount:
 	def update_route(self, route_info: RouteInfo) -> None:
 		self.route.update(route_info)
 
+	@property
+	def mount_id(self) -> str:
+		if self.route.mount_id is None:
+			raise RuntimeError("Route mount id is missing")
+		return self.route.mount_id
+
 	def renew_mount_id(self) -> None:
-		self.mount_id = uuid.uuid4().hex
-		self.route.mount_id = self.mount_id
+		self.route.mount_id = uuid.uuid4().hex
 
 	def route_snapshot(self) -> RouteContext:
 		return self.route.snapshot(mount_id=self.mount_id)
@@ -728,8 +733,9 @@ class RenderSession:
 	) -> asyncio.Task[Any]:
 		"""Create a tracked task tied to this render session."""
 		if callable(coroutine):
+			awaitable = context.run(coroutine) if context is not None else coroutine()
 			return self._tasks.create_task(
-				coroutine(),
+				awaitable,
 				name=name,
 				on_done=on_done,
 				context=context,

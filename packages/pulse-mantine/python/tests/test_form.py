@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -6,6 +7,7 @@ import pulse as ps
 import pytest
 from pulse.messages import ClientChannelRequestMessage
 from pulse.routing import Route, RouteInfo, RouteTree
+from pulse.serializer import serialize
 from pulse.user_session import UserSession
 from pulse_mantine import MantineForm
 
@@ -152,3 +154,102 @@ def test_form_exposes_submit_state():
 	form._form._start_submit()  # pyright: ignore[reportPrivateUsage]
 
 	assert form.is_submitting
+
+
+@pytest.mark.asyncio
+async def test_submit_state_resets_after_successful_submit():
+	app, _render, session, real_render, route_ctx = build_context()
+	started = asyncio.Event()
+	release = asyncio.Event()
+	received: list[dict[str, Any]] = []
+
+	async def handle_submit(values: dict[str, Any]):
+		received.append(values)
+		started.set()
+		await release.wait()
+
+	with ps.PulseContext(
+		app=app,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		render=real_render,
+		route=route_ctx,
+	):
+		form = MantineForm()
+		form.render(onSubmit=handle_submit)
+
+	form._form._start_submit()  # pyright: ignore[reportPrivateUsage]
+	task = asyncio.create_task(
+		form._form.registration.on_submit(  # pyright: ignore[reportPrivateUsage]
+			{"__data__": json.dumps(serialize({"name": "Ada"}))}
+		)
+	)
+	await asyncio.wait_for(started.wait(), timeout=1)
+
+	assert form.is_submitting
+
+	release.set()
+	await task
+
+	assert received == [{"name": "Ada"}]
+	assert not form.is_submitting
+
+
+@pytest.mark.asyncio
+async def test_submit_accepts_registry_deserialized_data():
+	app, _render, session, real_render, route_ctx = build_context()
+	received: list[dict[str, Any]] = []
+
+	async def handle_submit(values: dict[str, Any]):
+		received.append(values)
+
+	with ps.PulseContext(
+		app=app,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		render=real_render,
+		route=route_ctx,
+	):
+		form = MantineForm()
+		form.render(onSubmit=handle_submit)
+
+	await form._form.registration.on_submit(  # pyright: ignore[reportPrivateUsage]
+		{"name": "Ada", "profile": {"role": "admin"}}
+	)
+
+	assert received == [{"name": "Ada", "profile": {"role": "admin"}}]
+
+
+@pytest.mark.asyncio
+async def test_submit_state_resets_after_failed_submit():
+	app, _render, session, real_render, route_ctx = build_context()
+	started = asyncio.Event()
+	release = asyncio.Event()
+
+	async def handle_submit(_values: dict[str, Any]):
+		started.set()
+		await release.wait()
+		raise RuntimeError("boom")
+
+	with ps.PulseContext(
+		app=app,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		render=real_render,
+		route=route_ctx,
+	):
+		form = MantineForm()
+		form.render(onSubmit=handle_submit)
+
+	form._form._start_submit()  # pyright: ignore[reportPrivateUsage]
+	task = asyncio.create_task(
+		form._form.registration.on_submit(  # pyright: ignore[reportPrivateUsage]
+			{"__data__": json.dumps(serialize({"name": "Ada"}))}
+		)
+	)
+	await asyncio.wait_for(started.wait(), timeout=1)
+
+	assert form.is_submitting
+
+	release.set()
+	with pytest.raises(RuntimeError, match="boom"):
+		await task
+
+	assert not form.is_submitting

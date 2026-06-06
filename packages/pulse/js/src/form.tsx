@@ -34,6 +34,23 @@ interface SubmitForm {
 	force?: boolean;
 }
 
+export class FormSubmissionError extends Error {
+	status: number;
+	statusText: string;
+	body: string;
+	response: Response;
+
+	constructor(response: Response, body: string) {
+		const statusText = response.statusText ? ` ${response.statusText}` : "";
+		super(`Form submission failed with HTTP ${response.status}${statusText}`);
+		this.name = "FormSubmissionError";
+		this.status = response.status;
+		this.statusText = response.statusText;
+		this.body = body;
+		this.response = response;
+	}
+}
+
 export async function submitForm({ event, action, onSubmit, formData, force }: SubmitForm) {
 	onSubmit?.(event);
 	if (!force && event.defaultPrevented) {
@@ -47,17 +64,23 @@ export async function submitForm({ event, action, onSubmit, formData, force }: S
 	}
 	const url = new URL(action, window.location.href);
 	try {
-		await fetch(url, {
+		const response = await fetch(url, {
 			method: "POST",
 			// Required for our hosting scenarios of same host + different ports or 2 subdomains
 			credentials: "include",
 			body: formData,
 		});
+		if (!response.ok) {
+			let body = "";
+			try {
+				body = await response.text();
+			} catch {}
+			throw new FormSubmissionError(response, body);
+		}
 	} catch (err) {
 		if (process.env.NODE_ENV !== "production") {
 			console.error("[Pulse] Form submission failed", err);
-		} else {
-			throw err;
 		}
+		throw err;
 	}
 }

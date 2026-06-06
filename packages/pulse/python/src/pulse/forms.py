@@ -397,9 +397,11 @@ class ManualForm(Disposable):
 
 	def wrap_on_submit(self, on_submit: EventHandler1[FormData] | None):
 		async def on_submit_handler(data: FormData):
-			if on_submit:
-				await maybe_await(call_flexible(on_submit, data))
-			self._submit_signal.write(False)
+			try:
+				if on_submit:
+					await maybe_await(call_flexible(on_submit, data))
+			finally:
+				self._submit_signal.write(False)
 
 		return on_submit_handler
 

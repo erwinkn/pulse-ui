@@ -267,10 +267,12 @@ export async function loader(args: LoaderFunctionArgs) {
 Programmatically submits a form via fetch. This is what `PulseForm` uses internally.
 
 ```ts
-import { submitForm } from "pulse-ui-client";
+import { FormSubmissionError, submitForm } from "pulse-ui-client";
 
 async function submitForm(options: SubmitFormOptions): Promise<void>
 ```
+
+Rejects with `FormSubmissionError` when the form endpoint returns a non-2xx response.
 
 ### Parameters
 

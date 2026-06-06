@@ -16,6 +16,7 @@ import {
 	useRef,
 } from "react";
 import { FormProvider } from "./context";
+import { extractDataAndFiles, stripFilesForSync } from "./payload";
 import { isValidatorSchema, splitValidationSchema, type ValidatorSchema } from "./validators";
 
 type SyncMode = "none" | "blur" | "change";
@@ -97,7 +98,11 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 		(reason: "change" | "blur", path?: string) => {
 			const values = formRef.current?.getValues();
 			if (!values) return;
-			emitChannel("syncValues", { reason, path, values });
+			emitChannel("syncValues", {
+				reason,
+				path,
+				values: stripFilesForSync(values),
+			});
 		},
 		[emitChannel],
 	);
@@ -193,8 +198,8 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 						if (!latestValues) return;
 						const value = getValueAtPath(latestValues, path);
 						emitChannel("serverValidate", {
-							value,
-							values: latestValues,
+							value: stripFilesForSync(value),
+							values: stripFilesForSync(latestValues),
 							path,
 						});
 					},
@@ -255,7 +260,11 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 			const latestValues = formRef.current?.getValues();
 			if (!latestValues) return;
 			const value = getValueAtPath(latestValues, path);
-			emitChannel("serverValidate", { value, values: latestValues, path });
+			emitChannel("serverValidate", {
+				value: stripFilesForSync(value),
+				values: stripFilesForSync(latestValues),
+				path,
+			});
 		},
 		[getValueAtPath, syncMode, sendSync, serverRulesByPath, shouldValidateOnBlur, emitChannel],
 	);
@@ -433,61 +442,4 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 			</form>
 		</FormProvider>
 	);
-}
-
-function extractDataAndFiles(values: any) {
-	const filesByPath = new Map<string, File[]>();
-
-	function isFileLike(v: any): v is File {
-		return typeof File !== "undefined" && v instanceof File;
-	}
-
-	function pushFile(path: string, file: File) {
-		const existing = filesByPath.get(path);
-		if (existing) existing.push(file);
-		else filesByPath.set(path, [file]);
-	}
-
-	function visit(node: any, path: string): any {
-		if (node == null) return node;
-
-		// File or FileList
-		if (isFileLike(node)) {
-			pushFile(path, node);
-			return undefined;
-		}
-		if (typeof FileList !== "undefined" && node instanceof FileList) {
-			for (let i = 0; i < node.length; i++) pushFile(path, node.item(i)!);
-			return undefined;
-		}
-
-		// Array
-		if (Array.isArray(node)) {
-			const result = new Array(node.length);
-			for (let i = 0; i < node.length; i++) {
-				const childPath = path ? `${path}.${i}` : String(i);
-				result[i] = visit(node[i], childPath);
-			}
-			return result;
-		}
-
-		// Plain object
-		if (typeof node === "object") {
-			const out: Record<string, any> = {};
-			const keys = Object.keys(node);
-			for (let i = 0; i < keys.length; i++) {
-				const key = keys[i];
-				const childPath = path ? `${path}.${key}` : key;
-				const value = visit(node[key], childPath);
-				if (value !== undefined) out[key] = value;
-			}
-			return out;
-		}
-
-		// Primitive or other serializable values (Date, Map, Set handled by serializer)
-		return node;
-	}
-
-	const dataWithoutFiles = visit(values, "");
-	return { dataWithoutFiles, filesByPath } as const;
 }

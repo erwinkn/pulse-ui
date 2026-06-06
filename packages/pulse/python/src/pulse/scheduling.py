@@ -241,18 +241,12 @@ class TimerRegistry:
 		context: Context | None = None,
 		**kwargs: Any,
 	) -> RepeatHandle:
-		from pulse.reactive import Untrack
-
 		loop = asyncio.get_running_loop()
 		handle = RepeatHandle()
 
 		async def _runner():
 			nonlocal handle
-			target = fn
-			if context is not None:
-				from pulse.context import wrap_with_forked_context
-
-				target = wrap_with_forked_context(fn)
+			target = self._context_target(fn, context)
 			try:
 				while not handle.cancelled:
 					# Start counting the next interval AFTER the previous execution completes
@@ -260,17 +254,19 @@ class TimerRegistry:
 					if handle.cancelled:
 						break
 					try:
-						with Untrack():
+						result = self._call_target(
+							target,
+							args,
+							kwargs,
+							context=context,
+							untrack=True,
+						)
+						if inspect.isawaitable(result):
 							if context is None:
-								result = target(*args, **kwargs)
+								await result
 							else:
-								result = context.run(target, *args, **kwargs)
-							if inspect.isawaitable(result):
-								if context is None:
-									await result
-								else:
-									task = context.run(asyncio.ensure_future, result)
-									await task
+								task = context.run(asyncio.ensure_future, result)
+								await task
 					except asyncio.CancelledError:
 						# Propagate to outer handler to finish cleanly
 						raise
@@ -382,27 +378,17 @@ class TimerRegistry:
 		context: Context | None,
 		untrack: bool,
 	) -> Callable[[], None]:
+		target = self._context_target(fn, context)
+
 		def _run():
-			from pulse.reactive import Untrack
-
-			target = fn
-			if context is not None:
-				from pulse.context import wrap_with_forked_context
-
-				target = wrap_with_forked_context(fn)
-
 			try:
-				if untrack:
-					with Untrack():
-						if context is None:
-							res = target(*args, **kwargs)
-						else:
-							res = context.run(target, *args, **kwargs)
-				else:
-					if context is None:
-						res = target(*args, **kwargs)
-					else:
-						res = context.run(target, *args, **kwargs)
+				res = self._call_target(
+					target,
+					args,
+					kwargs,
+					context=context,
+					untrack=untrack,
+				)
 				if inspect.isawaitable(res):
 					task = self._tasks.create_task(res, context=context)
 
@@ -435,6 +421,36 @@ class TimerRegistry:
 				self.discard(tracked_box[0] if tracked_box else None)
 
 		return _run
+
+	def _context_target(
+		self, fn: Callable[..., Any], context: Context | None
+	) -> Callable[..., Any]:
+		if context is None:
+			return fn
+		from pulse.context import wrap_with_forked_context
+
+		return wrap_with_forked_context(fn)
+
+	def _call_target(
+		self,
+		target: Callable[..., Any],
+		args: tuple[Any, ...],
+		kwargs: dict[str, Any],
+		*,
+		context: Context | None,
+		untrack: bool,
+	) -> Any:
+		from pulse.reactive import Untrack
+
+		def invoke() -> Any:
+			if context is None:
+				return target(*args, **kwargs)
+			return context.run(target, *args, **kwargs)
+
+		if untrack:
+			with Untrack():
+				return invoke()
+		return invoke()
 
 
 class _TrackedTimerHandle:

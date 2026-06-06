@@ -1300,7 +1300,7 @@ requires-dist = [{ name = "pulse-framework", editable = "packages/pulse/python" 
 
 [[package]]
 name = "pulse-aws"
-version = "0.1.10"
+version = "0.1.11"
 source = { editable = "packages/pulse-aws" }
 dependencies = [
     { name = "aws-cdk-lib" },
@@ -1323,7 +1323,7 @@ requires-dist = [
 
 [[package]]
 name = "pulse-framework"
-version = "0.1.97"
+version = "0.1.98"
 source = { editable = "packages/pulse/python" }
 dependencies = [
     { name = "aiohttp" },
@@ -1418,7 +1418,7 @@ dev = [{ name = "redis", specifier = ">=6.4.0" }]
 
 [[package]]
 name = "pulse-railway"
-version = "0.3.9"
+version = "0.3.10"
 source = { editable = "packages/pulse-railway" }
 dependencies = [
     { name = "aiohttp" },

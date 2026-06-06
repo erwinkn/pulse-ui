@@ -19,6 +19,7 @@ from collections.abc import Callable as _Callable
 from collections.abc import Iterable as _Iterable
 from typing import Any as _Any
 
+from pulse.js.blob import Blob
 from pulse.transpiler.js_module import JsModule
 
 
@@ -68,6 +69,12 @@ class URL:
 	"""URL parser and serializer."""
 
 	def __init__(self, url: str, base: str | None = None, /) -> None: ...
+
+	@staticmethod
+	def createObjectURL(obj: Blob, /) -> str: ...
+
+	@staticmethod
+	def revokeObjectURL(url: str, /) -> None: ...
 
 	@property
 	def href(self) -> str: ...

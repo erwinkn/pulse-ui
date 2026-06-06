@@ -113,6 +113,10 @@ _MODULE_EXPORTS_ATTRIBUTE: dict[str, str] = {
 	"WeakMap": "pulse.js.weakmap",
 	"WeakSet": "pulse.js.weakset",
 	"XMLSerializer": "pulse.js.dom_parser",
+	"decodeURI": "pulse.js.uri",
+	"decodeURIComponent": "pulse.js.uri",
+	"encodeURI": "pulse.js.uri",
+	"encodeURIComponent": "pulse.js.uri",
 	"fetch": "pulse.js.fetch_api",
 	"Number": "pulse.js.number",
 }

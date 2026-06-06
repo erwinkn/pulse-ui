@@ -57,6 +57,10 @@ from pulse.js import (
 	WeakSet,
 	XMLSerializer,
 	crypto,
+	decodeURI,
+	decodeURIComponent,
+	encodeURI,
+	encodeURIComponent,
 	fetch,
 	obj,
 	undefined,
@@ -513,6 +517,41 @@ class TestURL:
 		assert (
 			code
 			== 'function url_ops_1() {\nlet params, url;\nurl = new URL("https://example.com?foo=1");\nparams = new URLSearchParams(url.search);\nparams.append("bar", "2");\nreturn [url.href, params.toString()];\n}'
+		)
+
+	def test_url_object_url_static_methods(self):
+		@javascript
+		def object_url_ops(blob: Any):
+			url = URL.createObjectURL(blob)
+			URL.revokeObjectURL(url)
+			return url
+
+		fn = object_url_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function object_url_ops_1(blob) {\nlet url;\nurl = URL.createObjectURL(blob);\nURL.revokeObjectURL(url);\nreturn url;\n}"
+		)
+
+
+class TestURI:
+	def test_uri_functions(self):
+		@javascript
+		def uri_ops(value: str):
+			encoded_uri = encodeURI(value)
+			encoded_component = encodeURIComponent(value)
+			return (
+				encoded_uri,
+				decodeURI(encoded_uri),
+				encoded_component,
+				decodeURIComponent(encoded_component),
+			)
+
+		fn = uri_ops.transpile()
+		code = emit(fn)
+		assert (
+			code
+			== "function uri_ops_1(value) {\nlet encoded_component, encoded_uri;\nencoded_uri = encodeURI(value);\nencoded_component = encodeURIComponent(value);\nreturn [encoded_uri, decodeURI(encoded_uri), encoded_component, decodeURIComponent(encoded_component)];\n}"
 		)
 
 

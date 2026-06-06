@@ -334,6 +334,10 @@ from pulse.js import (
     URLSearchParams,
     Uint8Array,
     XMLSerializer,
+    decodeURI,
+    decodeURIComponent,
+    encodeURI,
+    encodeURIComponent,
 )
 
 @ps.javascript

@@ -57,6 +57,10 @@ from pulse.js import (
     WeakMap,
     WeakSet,
     XMLSerializer,
+    decodeURI,
+    decodeURIComponent,
+    encodeURI,
+    encodeURIComponent,
 )
 ```
 
@@ -509,8 +513,32 @@ def example():
 
 | Method | Description |
 |--------|-------------|
+| `URL.createObjectURL(obj)` | Create an object URL for a `Blob` |
+| `URL.revokeObjectURL(url)` | Release an object URL |
 | `toString()` | Serialize to string (same as `href`) |
 | `toJSON()` | JSON serialization |
+
+---
+
+## URI functions
+
+Encode and decode URI strings.
+
+```python
+from pulse.js import encodeURIComponent, decodeURIComponent
+
+@ps.javascript
+def example(value: str):
+    encoded = encodeURIComponent(value)
+    return decodeURIComponent(encoded)
+```
+
+| Function | Description |
+|----------|-------------|
+| `encodeURI(uri)` | Encode a full URI |
+| `decodeURI(encodedURI)` | Decode a full URI |
+| `encodeURIComponent(uriComponent)` | Encode one URI component |
+| `decodeURIComponent(encodedURIComponent)` | Decode one URI component |
 
 ---
 

@@ -133,6 +133,10 @@ from pulse.js.set import Set as Set
 from pulse.js.string import String as String
 from pulse.js.text_encoding import TextDecoder as TextDecoder
 from pulse.js.text_encoding import TextEncoder as TextEncoder
+from pulse.js.uri import decodeURI as decodeURI
+from pulse.js.uri import decodeURIComponent as decodeURIComponent
+from pulse.js.uri import encodeURI as encodeURI
+from pulse.js.uri import encodeURIComponent as encodeURIComponent
 from pulse.js.url import URL as URL
 from pulse.js.url import URLSearchParams as URLSearchParams
 from pulse.js.weakmap import WeakMap as WeakMap

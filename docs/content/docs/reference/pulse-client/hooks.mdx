@@ -80,6 +80,8 @@ The returned client has these methods:
 interface PulseClient {
   // Connection
   connect(): Promise<void>;
+  suspend(): void;
+  resume(): Promise<void>;
   disconnect(): void;
   isConnected(): boolean;
   onConnectionChange(listener: ConnectionStatusListener): () => void;

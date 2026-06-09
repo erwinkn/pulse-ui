@@ -80,6 +80,10 @@ export interface PulseProviderProps {
 const inBrowser = typeof window !== "undefined";
 const useIsomorphicLayoutEffect = inBrowser ? useLayoutEffect : useEffect;
 
+function reportConnectionError(err: unknown) {
+	console.error("[PulseProvider] Connection failed:", err);
+}
+
 export function PulseProvider({ children, config, prerender }: PulseProviderProps) {
 	const [status, setStatus] = useState<ConnectionStatus>("ok");
 	const rrNavigate = useNavigate();
@@ -106,11 +110,29 @@ export function PulseProvider({ children, config, prerender }: PulseProviderProp
 		const unsubscribe = client.onConnectionChange(handleConnectionChange);
 
 		// Start connection attempt
-		client.connect();
+		void client.connect().catch(reportConnectionError);
 
 		return () => {
 			unsubscribe();
 			client.disconnect();
+		};
+	}, [client]);
+
+	useEffect(() => {
+		if (!inBrowser) return;
+
+		const handleVisibilityChange = () => {
+			if (document.visibilityState === "hidden") {
+				client.suspend();
+				return;
+			}
+			void client.resume().catch(reportConnectionError);
+		};
+
+		document.addEventListener("visibilitychange", handleVisibilityChange);
+		handleVisibilityChange();
+		return () => {
+			document.removeEventListener("visibilitychange", handleVisibilityChange);
 		};
 	}, [client]);
 

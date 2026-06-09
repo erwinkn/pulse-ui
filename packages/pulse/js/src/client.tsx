@@ -18,6 +18,13 @@ import { extractEvent } from "./serialize/events";
 import { deserialize, serialize } from "./serialize/serializer";
 import type { VDOMUpdate } from "./vdom";
 
+function documentIsHidden(): boolean {
+	return typeof document !== "undefined" && document.visibilityState === "hidden";
+}
+
+function browserIsOnline(): boolean {
+	return typeof navigator === "undefined" || navigator.onLine !== false;
+}
 
 export interface SocketIODirectives {
 	headers?: Record<string, string>;
@@ -42,6 +49,8 @@ export type ConnectionStatusListener = (status: ConnectionStatus) => void;
 export interface PulseClient {
 	// Connection management
 	connect(): Promise<void>;
+	suspend(): void;
+	resume(): Promise<void>;
 	disconnect(): void;
 	isConnected(): boolean;
 	onConnectionChange(listener: ConnectionStatusListener): () => void;
@@ -75,6 +84,8 @@ export class PulseSocketIOClient {
 	#errorTimeout: ReturnType<typeof setTimeout> | null = null;
 	#currentStatus: ConnectionStatus = "ok";
 	#nextAttachId = 0;
+	#suspended = false;
+	#reloadOnReconnectTimeout = false;
 
 	constructor(
 		url: string,
@@ -123,6 +134,7 @@ export class PulseSocketIOClient {
 
 	#handleConnected(): void {
 		this.#hasConnectedOnce = true;
+		this.#reloadOnReconnectTimeout = false;
 		this.#setStatus("ok");
 	}
 
@@ -138,20 +150,45 @@ export class PulseSocketIOClient {
 	}
 
 	#handleDisconnected(): void {
+		if (this.#currentStatus === "reconnecting" && this.#errorTimeout) return;
+		if (this.#currentStatus === "error") return;
 		// Reconnection after losing connection - show reconnecting immediately
 		this.#setStatus("reconnecting");
 		this.#errorTimeout = setTimeout(() => {
-			this.#setStatus("error");
+			this.#handleReconnectTimedOut();
 		}, this.#connectionStatusConfig.reconnectErrorDelay);
+	}
+
+	#handleConnectionError(): void {
+		if (this.#hasConnectedOnce) {
+			this.#handleDisconnected();
+		}
+	}
+
+	#handleReconnectTimedOut(): void {
+		this.#setStatus("error");
+		if (
+			this.#hasConnectedOnce &&
+			!this.#suspended &&
+			this.#reloadOnReconnectTimeout &&
+			!documentIsHidden() &&
+			browserIsOnline() &&
+			typeof window !== "undefined"
+		) {
+			window.location.reload();
+		}
 	}
 
 	public async connect(): Promise<void> {
 		if (this.#socket) {
 			return;
 		}
+		this.#suspended = false;
 		// Start timing logic for connection attempt
 		if (!this.#hasConnectedOnce) {
 			this.#setInitialConnectionStatus();
+		} else {
+			this.#handleDisconnected();
 		}
 		return new Promise((resolve, reject) => {
 			const socket = io(this.#url, {
@@ -162,6 +199,7 @@ export class PulseSocketIOClient {
 			this.#socket = socket;
 
 			socket.on("connect", () => {
+				if (this.#socket !== socket) return;
 				console.log("[SocketIOTransport] Connected:", this.#socket?.id);
 				// Send attach for all active views on connect/reconnect
 				for (const [path, route] of this.#activeViews) {
@@ -186,21 +224,24 @@ export class PulseSocketIOClient {
 			});
 
 			socket.on("connect_error", (err) => {
+				if (this.#socket !== socket) return;
 				console.error("[SocketIOTransport] Connection failed:", err);
-				this.#handleDisconnected();
+				this.#handleConnectionError();
 				reject(err);
 			});
 
 			socket.on("disconnect", () => {
+				if (this.#socket !== socket) return;
 				console.log("[SocketIOTransport] Disconnected");
 				this.#handleTransportDisconnect();
 				this.#handleDisconnected();
 			});
 
 			// Wrap in an arrow function to avoid losing the `this` reference
-			socket.on("message", (data) =>
-				this.#handleServerMessage(deserialize(data, { coerceNullsToUndefined: true })),
-			);
+			socket.on("message", (data) => {
+				if (this.#socket !== socket) return;
+				this.#handleServerMessage(deserialize(data, { coerceNullsToUndefined: true }));
+			});
 		});
 	}
 
@@ -257,10 +298,30 @@ export class PulseSocketIOClient {
 		void this.sendMessage({ type: "detach", path });
 	}
 
-	public disconnect() {
+	public suspend() {
+		if (this.#suspended) return;
+		this.#suspended = true;
+		this.#reloadOnReconnectTimeout = false;
 		this.#clearTimeouts();
-		this.#socket?.disconnect();
-		this.#socket = null;
+		this.#closeSocket();
+		this.#setStatus("ok");
+	}
+
+	public resume(): Promise<void> {
+		if (!this.#suspended && this.#socket) {
+			return Promise.resolve();
+		}
+		const wasSuspended = this.#suspended;
+		this.#suspended = false;
+		this.#reloadOnReconnectTimeout = wasSuspended;
+		return this.connect();
+	}
+
+	public disconnect() {
+		this.#suspended = false;
+		this.#reloadOnReconnectTimeout = false;
+		this.#clearTimeouts();
+		this.#closeSocket();
 		this.#messageQueue = [];
 		this.#connectionListeners.clear();
 		this.#activeViews.clear();
@@ -273,6 +334,14 @@ export class PulseSocketIOClient {
 		this.#channels.clear();
 		this.#currentStatus = "ok";
 		this.#hasConnectedOnce = false;
+	}
+
+	#closeSocket(): void {
+		const socket = this.#socket;
+		if (!socket) return;
+		this.#socket = null;
+		this.#handleTransportDisconnect();
+		socket.disconnect();
 	}
 
 	#handleServerMessage(message: ServerMessage) {

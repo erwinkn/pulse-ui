@@ -4,6 +4,7 @@ from typing import cast
 import pulse as ps
 import pytest
 from pulse import HookContext, Signal
+from pulse.context import PULSE_CONTEXT
 from pulse.reactive import AsyncEffect, Batch, Computed, Effect
 from pulse.test_helpers import wait_for
 
@@ -422,6 +423,21 @@ class TestContextDetection:
 
 		assert runs["count"] == 1
 		assert isinstance(module_effect, Effect)
+
+	def test_standalone_immediate_effect_runs_without_pulse_context(self):
+		runs = {"count": 0}
+		token = PULSE_CONTEXT.set(None)
+		try:
+
+			@ps.effect(immediate=True)
+			def standalone_effect():
+				runs["count"] += 1
+
+		finally:
+			PULSE_CONTEXT.reset(token)
+
+		assert runs["count"] == 1
+		assert isinstance(standalone_effect, Effect)
 
 	def test_state_class_effect_unchanged(self):
 		from pulse.state.property import StateEffect

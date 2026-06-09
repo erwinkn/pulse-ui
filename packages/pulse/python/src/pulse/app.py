@@ -13,13 +13,15 @@ from collections.abc import Awaitable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Callable, Literal, TypeVar, cast
+from functools import wraps
+from typing import Any, Callable, Literal, TypeVar, cast, override
 
 import socketio
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from starlette.types import ASGIApp
 from starlette.websockets import WebSocket
 
@@ -69,6 +71,7 @@ from pulse.middleware import (
 )
 from pulse.plugin import Plugin
 from pulse.proxy import Proxy, ReactProxy
+from pulse.reactive_extensions import unwrap
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
@@ -85,6 +88,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 FRAMEWORK_API_PREFIX = "/_pulse"
 MAX_PENDING_SOCKET_MESSAGES = 100
+PULSE_ENDPOINT_UNWRAP_MARKER = "__pulse_endpoint_unwrap__"
 
 
 class AppStatus(IntEnum):
@@ -131,6 +135,56 @@ class ConnectionStatusConfig:
 	initial_connecting_delay: float = 2.0
 	initial_error_delay: float = 8.0
 	reconnect_error_delay: float = 8.0
+
+
+class PulseAPIRoute(APIRoute):
+	def __init__(
+		self,
+		path: str,
+		endpoint: Callable[..., Any],
+		**kwargs: Any,
+	) -> None:
+		super().__init__(path, _wrap_fastapi_endpoint(endpoint), **kwargs)
+
+
+class PulseFastAPI(FastAPI):
+	@override
+	def include_router(self, router: APIRouter, **kwargs: Any) -> None:
+		_wrap_router_endpoints(router)
+		super().include_router(router, **kwargs)
+
+
+def _wrap_router_endpoints(router: APIRouter) -> None:
+	for route in router.routes:
+		if isinstance(route, APIRoute):
+			route.endpoint = _wrap_fastapi_endpoint(route.endpoint)
+
+
+def _wrap_fastapi_endpoint(endpoint: Callable[..., Any]) -> Callable[..., Any]:
+	if endpoint.__dict__.get(PULSE_ENDPOINT_UNWRAP_MARKER):
+		return endpoint
+
+	if asyncio.iscoroutinefunction(endpoint):
+
+		@wraps(endpoint)
+		async def async_endpoint(*args: Any, **kwargs: Any) -> Any:
+			return _unwrap_fastapi_response(await endpoint(*args, **kwargs))
+
+		async_endpoint.__dict__[PULSE_ENDPOINT_UNWRAP_MARKER] = True
+		return async_endpoint
+
+	@wraps(endpoint)
+	def sync_endpoint(*args: Any, **kwargs: Any) -> Any:
+		return _unwrap_fastapi_response(endpoint(*args, **kwargs))
+
+	sync_endpoint.__dict__[PULSE_ENDPOINT_UNWRAP_MARKER] = True
+	return sync_endpoint
+
+
+def _unwrap_fastapi_response(value: Any) -> Any:
+	if isinstance(value, Response):
+		return value
+	return unwrap(value, untrack=True)
 
 
 class App:
@@ -311,10 +365,11 @@ class App:
 			config=codegen or CodegenConfig(),
 		)
 
-		self.fastapi = FastAPI(
+		self.fastapi = PulseFastAPI(
 			title="Pulse UI Server",
 			lifespan=self.fastapi_lifespan,
 		)
+		self.fastapi.router.route_class = PulseAPIRoute
 		self.sio = socketio.AsyncServer(
 			async_mode="asgi", cors_allowed_origins="*", async_handlers=False
 		)

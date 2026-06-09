@@ -129,6 +129,8 @@ def wrap_with_forked_context(fn: Callable[P, T]) -> Callable[P, T]:
 
 		@wraps(fn)
 		async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
+			if PULSE_CONTEXT.get() is None:
+				return await fn(*args, **kwargs)
 			with PulseContext.fork():
 				return await fn(*args, **kwargs)
 
@@ -137,6 +139,8 @@ def wrap_with_forked_context(fn: Callable[P, T]) -> Callable[P, T]:
 
 	@wraps(fn)
 	def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+		if PULSE_CONTEXT.get() is None:
+			return fn(*args, **kwargs)
 		ctx = PulseContext.fork()
 		with ctx:
 			result = fn(*args, **kwargs)

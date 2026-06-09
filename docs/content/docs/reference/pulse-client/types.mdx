@@ -581,6 +581,8 @@ Interface for the Pulse client.
 ```ts
 interface PulseClient {
   connect(): Promise<void>;
+  suspend(): void;
+  resume(): Promise<void>;
   disconnect(): void;
   isConnected(): boolean;
   onConnectionChange(listener: ConnectionStatusListener): () => void;

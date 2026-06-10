@@ -146,7 +146,9 @@ serialized = ps.serialize(data)
 **Supported types:**
 - Primitives: `None`, `bool`, `int`, `float`, `str`
 - Collections: `list`, `tuple`, `dict`, `set`
-- `datetime.datetime` (as milliseconds since Unix epoch)
+- `datetime.datetime` (as UTC ISO 8601 strings)
+- `datetime.date` (as ISO date strings)
+- Pulse renderables: `Element`, `PulseNode`, and VDOM `Expr`
 - Dataclasses (as dict of fields)
 - Objects with `__dict__` (public attributes only)
 
@@ -168,6 +170,7 @@ wire = ps.serialize(data)
 - `NaN` floats become `None`
 - `Infinity` raises `ValueError`
 - Dict keys must be strings
+- Pulse renderables are snapshot-rendered; callbacks and refs are stripped
 - Private attributes (`_name`) excluded
 - Shared references/cycles preserved
 

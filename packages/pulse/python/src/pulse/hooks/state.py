@@ -5,6 +5,7 @@ from typing import Any, TypeVar, override
 
 from pulse.component import is_component_code
 from pulse.hooks.core import HookMetadata, HookState, hooks
+from pulse.reactive import Untrack
 from pulse.state.state import State
 
 S = TypeVar("S", bound=State)
@@ -91,7 +92,14 @@ class StateHookState(HookState):
 
 
 def _instantiate_state(arg: State | Callable[[], State]) -> State:
-	instance = arg() if callable(arg) else arg
+	if callable(arg):
+		# Shield the factory from the ambient scope: this hook owns the
+		# instance, so a surrounding ps.init/ps.setup scope must not capture
+		# (and later dispose) it too.
+		with Untrack():
+			instance = arg()
+	else:
+		instance = arg
 	if not isinstance(instance, State):
 		raise TypeError(
 			"`pulse.state` expects a State instance or a callable returning a State instance"

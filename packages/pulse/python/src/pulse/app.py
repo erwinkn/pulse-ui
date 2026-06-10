@@ -29,6 +29,7 @@ from fastapi.responses import (
 	PlainTextResponse,
 )
 from fastapi.routing import APIRoute
+from starlette.requests import ClientDisconnect
 from starlette.types import ASGIApp
 from starlette.websockets import WebSocket
 
@@ -603,6 +604,10 @@ class App:
 					res: Response = await call_next(request)
 				await session.handle_response(res)
 				return res
+			except ClientDisconnect:
+				# The client gave up on the request (e.g. navigated away while
+				# an asset was streaming). Nothing to respond to.
+				return Response(status_code=499)
 			except RuntimeError as exc:
 				# Client disconnected before response was sent. This happens when
 				# ASGI handlers (like the proxy) return early on disconnect without

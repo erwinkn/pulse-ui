@@ -1,4 +1,4 @@
-from typing import override
+from typing import Any, override
 
 import pulse as ps
 import pytest
@@ -396,3 +396,101 @@ def test_pulse_route_returns_definition():
 	with ps.PulseContext(app=app, render=session, route=route_ctx):
 		definition = ps.pulse_route()
 		assert definition is route
+
+
+class TestSetupOwnership:
+	"""Effects/states created in a setup init function are owned by the setup
+	hook alone: never inline-cached, survive re-renders, disposed exactly once."""
+
+	def test_setup_effect_not_inline_cached_and_disposed_once(self):
+		from pulse.reactive import Signal, flush_effects
+		from pulse.renderer import RenderTree
+
+		sig = Signal(0)
+		events: list[str] = []
+
+		@ps.component
+		def Leaf():
+			def _init() -> dict[str, Any]:
+				@ps.effect
+				def on_mount():  # pyright: ignore[reportUnusedFunction]
+					events.append("mount")
+					return lambda: events.append("unmount")
+
+				return {}
+
+			ps.setup(_init)
+			return ps.div(f"{sig()}")
+
+		tree = RenderTree(Leaf())
+		tree.render()
+		flush_effects()
+		assert events == ["mount"]
+
+		# Re-render: the mount effect must survive (it used to be GC'd by the
+		# inline-effects hook because its callsite is unseen after render 1).
+		sig.write(1)
+		flush_effects()
+		assert events == ["mount"]
+
+		# Unmount disposes it exactly once (no dev-mode double-dispose error).
+		tree.unmount()
+		assert events == ["mount", "unmount"]
+
+	def test_setup_states_disposed_on_unmount(self):
+		from pulse.reactive import flush_effects
+		from pulse.renderer import RenderTree
+
+		instances: list[DummyState] = []
+
+		@ps.component
+		def Comp():
+			def _init():
+				st = DummyState()
+				instances.append(st)
+				return st
+
+			ps.setup(_init)
+			return ps.div()
+
+		tree = RenderTree(Comp())
+		tree.render()
+		flush_effects()
+		assert len(instances) == 1
+
+		tree.unmount()
+		assert instances[0].__disposed__
+		assert instances[0].dispose_calls == 1
+
+	def test_setup_key_change_disposes_previous_owned(self):
+		ctx = HookContext()
+		events: list[str] = []
+		instances: list[DummyState] = []
+
+		def _init(label: str):
+			st = DummyState()
+			instances.append(st)
+
+			@ps.effect
+			def eff():  # pyright: ignore[reportUnusedFunction]
+				events.append(f"run:{label}")
+				return lambda: events.append(f"cleanup:{label}")
+
+			return st
+
+		with ctx:
+			setup_key("a")
+			setup(_init, "a")
+		from pulse.reactive import flush_effects
+
+		flush_effects()
+		assert events == ["run:a"]
+
+		with ctx:
+			setup_key("b")
+			setup(_init, "b")
+		flush_effects()
+		assert instances[0].__disposed__
+		assert not instances[1].__disposed__
+		assert "cleanup:a" in events
+		assert "run:b" in events

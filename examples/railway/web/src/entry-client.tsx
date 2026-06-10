@@ -1,4 +1,4 @@
-import { deserialize, preloadRoutesForPath, type PulsePrerender } from "pulse-ui-client";
+import { deserialize, type PulsePrerender, preloadRoutesForPath } from "pulse-ui-client";
 import { hydrateRoot } from "react-dom/client";
 import { PulseApp } from "../app/pulse/_layout";
 import { pulseRouteTree, routeLoaders } from "../app/pulse/routes";

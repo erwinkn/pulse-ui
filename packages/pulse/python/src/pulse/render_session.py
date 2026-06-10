@@ -755,7 +755,11 @@ class RenderSession:
 		"""Return a per-session singleton for the provided key."""
 		inst = self._global_states.get(key)
 		if inst is None:
-			inst = factory()
+			# Shield creation from the ambient scope: this session owns the
+			# instance, not whatever component (or ps.init block) first
+			# happened to access it.
+			with Untrack():
+				inst = factory()
 			self._global_states[key] = inst
 		return inst
 

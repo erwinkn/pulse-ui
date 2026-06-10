@@ -13,6 +13,7 @@ from typing import (
 from pulse.context import PulseContext
 from pulse.hooks.core import HOOK_CONTEXT
 from pulse.messages import ServerNavigateToMessage
+from pulse.reactive import Untrack
 from pulse.reactive_extensions import ReactiveDict
 from pulse.routing import Layout, Route, RouteInfo
 from pulse.state.state import State
@@ -458,7 +459,11 @@ def global_state(
 			shared_key = f"{base_key}|{id}"
 			inst = cast(S | None, GLOBAL_STATES.get(shared_key))
 			if inst is None:
-				inst = mk(*args, **kwargs)
+				# Shield creation from the ambient scope: shared instances
+				# must not be owned (and later disposed) by whichever
+				# component or ps.init block first accessed them.
+				with Untrack():
+					inst = mk(*args, **kwargs)
 				GLOBAL_STATES[shared_key] = inst
 			return inst
 

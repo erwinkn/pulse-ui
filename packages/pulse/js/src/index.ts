@@ -37,9 +37,15 @@ export type {
 	ServerNavigateToMessage,
 	ServerUpdateMessage,
 } from "./messages";
-export type { PulseConfig, PulsePrerender, PulseProviderProps } from "./pulse";
+export type {
+	PulseAppProps,
+	PulseConfig,
+	PulsePrerender,
+	PulseProviderProps,
+} from "./pulse";
 // Core React bindings
 export {
+	PulseApp,
 	PulseViewIdContext,
 	PulseProvider,
 	PulseView,

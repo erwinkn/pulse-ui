@@ -80,6 +80,21 @@ class ServerResumeMessage(TypedDict):
 	channels: NotRequired[list[ServerResumeChannel]]
 
 
+class ServerNavigateResultMessage(TypedDict):
+	"""Reply to a client navigate/prefetch request.
+
+	`views` maps each matched route pattern path to its freshly rendered init
+	message, or None when the client should keep using its live view for that
+	pattern (state persists across navigation).
+	"""
+
+	type: Literal["navigate_result"]
+	nav: str
+	status: Literal["ok", "redirect", "notFound", "error"]
+	redirect: NotRequired[str]
+	views: NotRequired[dict[str, "ServerInitMessage | None"]]
+
+
 class ServerAttachAckMessage(TypedDict):
 	type: Literal["attach_ack"]
 	view: str
@@ -156,6 +171,21 @@ class ClientDetachMessage(TypedDict):
 	view: str
 
 
+class ClientNavigateMessage(TypedDict):
+	"""Client-side navigation (or hover prefetch) over the socket.
+
+	The server re-matches `routeInfo.pathname` against the route tree (Python
+	is the source of truth), renders views for route patterns the session does
+	not have live yet, and replies with a navigate_result correlated by `nav`.
+	Prefetch requests render upcoming views without disturbing live ones.
+	"""
+
+	type: Literal["navigate"]
+	nav: str
+	routeInfo: RouteInfo
+	prefetch: NotRequired[bool]
+
+
 class ClientResumeView(TypedDict):
 	view: str
 	routeInfo: RouteInfo
@@ -230,6 +260,7 @@ ServerMessage = (
 	| ServerNavigateToMessage
 	| ServerReloadMessage
 	| ServerResumeMessage
+	| ServerNavigateResultMessage
 	| ServerAttachAckMessage
 	| ServerChannelMessage
 	| ServerJsExecMessage
@@ -241,6 +272,7 @@ ClientPulseMessage = (
 	| ClientAttachMessage
 	| ClientUpdateMessage
 	| ClientDetachMessage
+	| ClientNavigateMessage
 	| ClientResumeMessage
 	| ClientApiResultMessage
 	| ClientJsResultMessage

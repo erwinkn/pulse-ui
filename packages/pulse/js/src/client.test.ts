@@ -68,12 +68,7 @@ async function makeClient(
 	},
 ) {
 	const { PulseSocketIOClient } = await import("./client");
-	return new PulseSocketIOClient(
-		"http://pulse.test",
-		{},
-		vi.fn() as any,
-		connectionStatus,
-	);
+	return new PulseSocketIOClient("http://pulse.test", {}, connectionStatus);
 }
 
 function sentMessages(target: FakeSocket = socket) {
@@ -633,6 +628,7 @@ describe("PulseProvider connection handling", () => {
 		const { PulseProvider } = await import("./pulse");
 		const { PulseRouterProvider } = await import("./router");
 		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+		const client = await makeClient();
 
 		render(
 			React.createElement(
@@ -645,15 +641,7 @@ describe("PulseProvider connection handling", () => {
 				React.createElement(
 					PulseProvider,
 					{
-						config: {
-							serverAddress: "http://pulse.test",
-							apiPrefix: "/_pulse",
-							connectionStatus: {
-								initialConnectingDelay: 0,
-								initialErrorDelay: 0,
-								reconnectErrorDelay: 0,
-							},
-						},
+						client,
 						prerender: { views: {}, directives: {} },
 						children: React.createElement("div", null, "child"),
 					},

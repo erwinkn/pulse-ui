@@ -245,8 +245,7 @@ class TestCodegen:
 		)
 
 		layout_content = (pulse_app_dir / "_layout.tsx").read_text()
-		assert "PulseRouterProvider" in layout_content
-		assert "PulseRoutes" in layout_content
+		assert "PulseAppShell" in layout_content
 		assert (
 			'import { pulseRouteTree, routeLoaders } from "./routes";' in layout_content
 		)

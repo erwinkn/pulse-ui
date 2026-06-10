@@ -197,12 +197,19 @@ export function PulseRouterProvider({
 				return;
 			}
 
+			// Same-pathname navigations (query/hash changes) cannot change the
+			// matched views; commit directly and let mounted views sync their
+			// route info over the socket.
+			const samePath = nextLocation.pathname === latestLocationRef.current.pathname;
+
 			setIsNavigating(true);
 			try {
-				await preloadRoutesForPath(routes, routeLoaders, nextLocation.pathname);
 				let commit: (() => void) | undefined;
-				if (onNavigate) {
-					commit = (await onNavigate({ location: nextLocation, match })) ?? undefined;
+				if (!samePath) {
+					await preloadRoutesForPath(routes, routeLoaders, nextLocation.pathname);
+					if (onNavigate) {
+						commit = (await onNavigate({ location: nextLocation, match })) ?? undefined;
+					}
 				}
 				if (seq !== navSeqRef.current) {
 					// Superseded by a newer navigation; drop this one.

@@ -448,6 +448,37 @@ class RenderSession:
 
 		return results
 
+	def navigate_views(
+		self, paths: list[str], route_info: RouteInfo
+	) -> dict[str, ServerInitMessage | ServerNavigateToMessage | None]:
+		"""Render views for a client navigation or prefetch.
+
+		Route patterns the session already has live (active or pending) views
+		for are returned as None: the client keeps using them and their route
+		info updates reactively after the navigation commits. Idle views are
+		disposed and rendered fresh. New views start pending with a dispose
+		TTL, so prefetched views that are never attached clean themselves up.
+		"""
+		results: dict[str, ServerInitMessage | ServerNavigateToMessage | None] = {}
+		for path in [ensure_absolute_path(p) for p in paths]:
+			view = self._views_by_path.get(path)
+			if view is not None and view.state == "idle":
+				self.dispose_view(view)
+				view = None
+			if view is not None:
+				results[path] = None
+				continue
+			route = self.routes.find(path)
+			view = View(self, path, route, route_info)
+			self.views[view.id] = view
+			self._views_by_path[path] = view
+			view.start_pending(self.prerender_queue_timeout, action="dispose")
+			message = self.render(view)
+			results[path] = message
+			if message["type"] == "navigate_to":
+				self.dispose_view(view)
+		return results
+
 	# ---- Client lifecycle ----
 
 	def attach(self, view_id: str, route_info: RouteInfo) -> bool:

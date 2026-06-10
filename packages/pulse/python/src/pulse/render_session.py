@@ -341,6 +341,7 @@ class RenderSession:
 		"""WebSocket disconnected. Start queuing briefly before pausing."""
 		self._send_message = None
 		self.connected = False
+		self.channels.disconnect_all()
 
 		for mount in self.route_mounts.values():
 			if mount.state == "active":
@@ -525,6 +526,7 @@ class RenderSession:
 		if current is not mount:
 			return
 		try:
+			self.channels.remove_route(path)
 			self.route_mounts.pop(path, None)
 			self._ref_channels_by_route.pop(path, None)
 			mount.dispose()
@@ -534,11 +536,12 @@ class RenderSession:
 	def detach(self, path: str):
 		"""Client route unmounted. Dispose immediately outside dev StrictMode replay."""
 		path = ensure_absolute_path(path)
-		self._ref_channels_by_route.pop(path, None)
 		mount = self.route_mounts.get(path)
 		if not mount:
 			return
+		old_mount_id = mount.mount_id
 		mount.renew_mount_id()
+		self.channels.rebind_route_mount(path, old_mount_id, mount.mount_id)
 		if self.dev_strict_mode_detach_timeout > 0:
 			# React StrictMode in development intentionally replays mount effects as
 			# attach -> detach -> attach without another prerender. Keep the mount for

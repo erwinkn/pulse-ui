@@ -150,6 +150,43 @@ describe("PulseSocketIOClient attach ack", () => {
 		]);
 	});
 
+	it("coalesces queued channel lifecycle messages on initial connect", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+
+		client.acquireChannel("chan-1", "/view");
+		client.releaseChannel("chan-1", "/view");
+		client.acquireChannel("chan-1", "/view");
+
+		socket.trigger("connect");
+		await connected;
+
+		expect(sentMessages()).toEqual([
+			{ type: "channel_connect", channel: "chan-1", path: "/view" },
+		]);
+	});
+
+	it("rejects channel requests on transport disconnect and reconnects endpoint", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+
+		const bridge = client.acquireChannel("chan-1", "/view");
+		const pending = bridge.request("needs-response");
+
+		socket.trigger("disconnect");
+		await expect(pending).rejects.toThrow("Connection lost");
+
+		socket.emitted = [];
+		socket.trigger("connect");
+
+		expect(sentMessages()).toEqual([
+			{ type: "channel_connect", channel: "chan-1", path: "/view" },
+		]);
+		expect(() => bridge.emit("after-reconnect")).not.toThrow();
+	});
+
 	it("suspends hidden tabs without clearing active views and reattaches on resume", async () => {
 		const client = await makeClient();
 		const connected = client.connect();

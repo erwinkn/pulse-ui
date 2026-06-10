@@ -32,7 +32,8 @@ ENV_PULSE_APP_FILE = "PULSE_APP_FILE"
 ENV_PULSE_APP_DIR = "PULSE_APP_DIR"
 ENV_PULSE_HOST = "PULSE_HOST"
 ENV_PULSE_PORT = "PULSE_PORT"
-ENV_PULSE_REACT_SERVER_ADDRESS = "PULSE_REACT_SERVER_ADDRESS"
+ENV_PULSE_ASSET_SERVER_ADDRESS = "PULSE_ASSET_SERVER_ADDRESS"
+ENV_PULSE_SSR_SERVER_ADDRESS = "PULSE_SSR_SERVER_ADDRESS"
 ENV_PULSE_SECRET = "PULSE_SECRET"
 ENV_PULSE_DISABLE_CODEGEN = "PULSE_DISABLE_CODEGEN"
 
@@ -118,12 +119,20 @@ class EnvVars:
 		self._set(ENV_PULSE_PORT, str(value))
 
 	@property
-	def react_server_address(self) -> str | None:
-		return self._get(ENV_PULSE_REACT_SERVER_ADDRESS)
+	def asset_server_address(self) -> str | None:
+		return self._get(ENV_PULSE_ASSET_SERVER_ADDRESS)
 
-	@react_server_address.setter
-	def react_server_address(self, value: str | None) -> None:
-		self._set(ENV_PULSE_REACT_SERVER_ADDRESS, value)
+	@asset_server_address.setter
+	def asset_server_address(self, value: str | None) -> None:
+		self._set(ENV_PULSE_ASSET_SERVER_ADDRESS, value)
+
+	@property
+	def ssr_server_address(self) -> str | None:
+		return self._get(ENV_PULSE_SSR_SERVER_ADDRESS)
+
+	@ssr_server_address.setter
+	def ssr_server_address(self, value: str | None) -> None:
+		self._set(ENV_PULSE_SSR_SERVER_ADDRESS, value)
 
 	# Secrets
 	@property

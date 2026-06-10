@@ -1,34 +1,19 @@
-# Pulse Mantine + React Router example
+# Pulse Mantine web example
 
-This project shows how to host Pulse UI alongside the Mantine component registry inside a React Router app. It keeps the tooling surface small so you can focus on wiring Pulse into your own Mantine projects.
+The web project for the Pulse Mantine examples. It hosts the generated Pulse
+app (`app/pulse/`) on a plain Vite + React setup with the custom Pulse router,
+and wraps the app in `MantineProvider` from the user-owned entry files
+(`src/entry-client.tsx` / `src/entry-server.tsx`).
 
 ## What's included
-- React Router SSR with `react-router-serve`
 - Mantine core, dates, and charts packages with the Pulse Mantine bridge
-- Pulse component loading through the `~/` alias
+- Vite dev server for assets and HMR, plus a Bun SSR server (`server/ssr.ts`)
+- PostCSS configured with `postcss-preset-mantine`
 
-## Setup
+## Usage
 
-Install dependencies:
-
-```bash
-npm install
-```
-
-Start the development server:
+Run any example via the Pulse CLI, e.g.:
 
 ```bash
-npm run dev
-```
-
-Create a production build:
-
-```bash
-npm run build
-```
-
-Refresh generated types when needed:
-
-```bash
-npm run typecheck
+uv run pulse run ../form.py
 ```

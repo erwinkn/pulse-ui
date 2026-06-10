@@ -44,7 +44,7 @@ class BlockingSessionStore(ps.SessionStore):
 async def test_server_session_save_blocks_http_response_until_persisted(
 	monkeypatch: pytest.MonkeyPatch,
 ):
-	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
+	monkeypatch.setenv("PULSE_SSR_SERVER_ADDRESS", "http://localhost:3001")
 	store = BlockingSessionStore()
 	app = ps.App(routes=[], session_store=store)
 
@@ -79,7 +79,7 @@ async def test_server_session_save_blocks_http_response_until_persisted(
 async def test_server_session_response_wait_survives_superseded_save(
 	monkeypatch: pytest.MonkeyPatch,
 ):
-	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
+	monkeypatch.setenv("PULSE_SSR_SERVER_ADDRESS", "http://localhost:3001")
 	store = BlockingSessionStore()
 	app = ps.App(routes=[], session_store=store)
 	app.setup("http://example.com")

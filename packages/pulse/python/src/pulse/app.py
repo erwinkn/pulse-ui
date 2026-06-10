@@ -14,13 +14,20 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import IntEnum
 from functools import wraps
+from pathlib import Path
 from typing import Any, Callable, Literal, TypeVar, cast, override
 
+import httpx
 import socketio
 import uvicorn
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import (
+	FileResponse,
+	HTMLResponse,
+	JSONResponse,
+	PlainTextResponse,
+)
 from fastapi.routing import APIRoute
 from starlette.types import ASGIApp
 from starlette.websockets import WebSocket
@@ -72,11 +79,11 @@ from pulse.middleware import (
 	Redirect,
 )
 from pulse.plugin import Plugin
-from pulse.proxy import Proxy, ReactProxy
+from pulse.proxy import DevServerProxy
 from pulse.reactive_extensions import unwrap
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
-from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
+from pulse.routing import Layout, Route, RouteInfo, RouteTree, ensure_absolute_path
 from pulse.scheduling import TaskRegistry, TimerHandleLike, TimerRegistry
 from pulse.serializer import Serialized, deserialize, serialize
 from pulse.user_session import (
@@ -197,7 +204,7 @@ class App:
 
 	Args:
 		routes: Route definitions for the application.
-		codegen: Code generation settings for React Router output.
+		codegen: Code generation settings for the generated web app files.
 		middleware: Request middleware, either a single middleware or sequence.
 		plugins: Application plugins that can contribute routes, middleware,
 			and lifecycle hooks.
@@ -212,7 +219,6 @@ class App:
 		mode: Deployment mode - "single-server" (default) or "subdomains".
 			Framework endpoints are always mounted under the reserved `/_pulse/*`
 			namespace.
-		proxy: Single-server proxy tuning. Ignored in subdomains mode.
 		cors: CORS configuration. Auto-configured based on mode if not provided.
 		fastapi: Additional FastAPI constructor options.
 		session_timeout: Session cleanup timeout in seconds. Defaults to 60.0.
@@ -273,13 +279,15 @@ class App:
 	_render_message_locks: dict[str, asyncio.Lock]
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
-	_proxy: ReactProxy | None
-	proxy: Proxy
+	_asset_proxy: DevServerProxy | None
+	_ssr_client: httpx.AsyncClient | None
 	session_timeout: float
 	connection_status: ConnectionStatusConfig
 	render_loop_limit: int
 	prerender_queue_timeout: float
 	disconnect_queue_timeout: float
+	asset_server_address: str | None
+	ssr_server_address: str | None
 
 	def __init__(
 		self,
@@ -295,7 +303,6 @@ class App:
 		not_found: str = "/not-found",
 		# Deployment and integration options
 		mode: PulseMode = "single-server",
-		proxy: Proxy | None = None,
 		cors: CORSOptions | None = None,
 		fastapi: dict[str, Any] | None = None,
 		session_timeout: float = 60.0,
@@ -307,7 +314,6 @@ class App:
 		# Resolve mode from environment and expose on the app instance
 		self.env = envvars.pulse_env
 		self.mode = mode
-		self.proxy = proxy or Proxy()
 		self.status = AppStatus.created
 		# Persist the server address for use by sessions (API calls, etc.) in ci/prod.
 		self.server_address = server_address if self.env in ("ci", "prod") else None
@@ -315,6 +321,8 @@ class App:
 		self.dev_server_address = dev_server_address
 		# Optional internal address used by server-side loader fetches
 		self.internal_server_address = internal_server_address
+		self.asset_server_address = None
+		self.ssr_server_address = None
 
 		self.api_prefix = FRAMEWORK_API_PREFIX
 
@@ -355,7 +363,8 @@ class App:
 		self._render_message_locks = {}
 		self._tasks = TaskRegistry(name="app")
 		self._timers = TimerRegistry(tasks=self._tasks, name="app")
-		self._proxy = None
+		self._asset_proxy = None
+		self._ssr_client = None
 		self.session_timeout = session_timeout
 		self.prerender_queue_timeout = prerender_queue_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
@@ -424,10 +433,15 @@ class App:
 			plugin.on_startup(self)
 
 		if self.mode == "single-server":
-			react_server_address = envvars.react_server_address
-			if react_server_address:
+			asset_server_address = envvars.asset_server_address
+			ssr_server_address = envvars.ssr_server_address
+			if asset_server_address:
 				logger.info(
-					f"Single-server mode: React Router running at {react_server_address}"
+					f"Single-server mode: asset server running at {asset_server_address}"
+				)
+			if ssr_server_address:
+				logger.info(
+					f"Single-server mode: SSR server running at {ssr_server_address}"
 				)
 
 		try:
@@ -447,9 +461,9 @@ class App:
 	def run_codegen(
 		self, address: str | None = None, internal_address: str | None = None
 	) -> None:
-		"""Generate React Router code for all routes.
+		"""Generate web code for all routes.
 
-		Generates TypeScript/JSX files for React Router integration based on
+		Generates TypeScript/JSX files for the Pulse web runtime based on
 		the application's route definitions.
 
 		Args:
@@ -615,26 +629,13 @@ class App:
 		# Apply prefix to all routes
 		prefix = self.api_prefix
 
-		@self.fastapi.get(f"{prefix}/health")
-		def healthcheck():  # pyright: ignore[reportUnusedFunction]
-			return {"health": "ok", "message": "Pulse server is running"}
-
-		@self.fastapi.get(f"{prefix}/set-cookies")
-		def set_cookies():  # pyright: ignore[reportUnusedFunction]
-			return {"health": "ok", "message": "Cookies updated"}
-
-		# RouteInfo is the request body
-		@self.fastapi.post(f"{prefix}/prerender")
-		async def prerender(payload: PrerenderPayload, request: Request):  # pyright: ignore[reportUnusedFunction]
-			"""
-			POST /prerender
-			Body: { paths: string[], routeInfo: RouteInfo, ttlSeconds?: number }
-			Headers: X-Pulse-Render-Id (optional, for render session reuse)
-			Returns: { renderId: string, <path>: VDOM, ... }
-			"""
+		async def run_prerender(
+			payload: PrerenderPayload, request: Request
+		) -> PrerenderResponse:
 			session = PulseContext.get().session
 			if session is None:
 				raise RuntimeError("Internal error: couldn't resolve user session")
+
 			paths = payload.get("paths") or []
 			if len(paths) == 0:
 				raise HTTPException(
@@ -708,12 +709,34 @@ class App:
 
 					return Ok(result_data)
 
-				result = await self.middleware.prerender(
+				return await self.middleware.prerender(
 					payload=payload,
 					request=PulseRequest.from_fastapi(request),
 					session=session.data,
 					next=_process_routes,
 				)
+
+		@self.fastapi.get(f"{prefix}/health")
+		def healthcheck():  # pyright: ignore[reportUnusedFunction]
+			return {"health": "ok", "message": "Pulse server is running"}
+
+		@self.fastapi.get(f"{prefix}/set-cookies")
+		def set_cookies():  # pyright: ignore[reportUnusedFunction]
+			return {"health": "ok", "message": "Cookies updated"}
+
+		# RouteInfo is the request body
+		@self.fastapi.post(f"{prefix}/prerender")
+		async def prerender(payload: PrerenderPayload, request: Request):  # pyright: ignore[reportUnusedFunction]
+			"""
+			POST /prerender
+			Body: { paths: string[], routeInfo: RouteInfo, ttlSeconds?: number }
+			Headers: X-Pulse-Render-Id (optional, for render session reuse)
+			Returns: { renderId: string, <path>: VDOM, ... }
+			"""
+			result = await run_prerender(payload, request)
+			session = PulseContext.get().session
+			if session is None:
+				raise RuntimeError("Internal error: couldn't resolve user session")
 
 			# Handle redirect/notFound responses
 			if isinstance(result, Redirect):
@@ -752,33 +775,156 @@ class App:
 		for plugin in self.plugins:
 			plugin.on_setup(self)
 
-		# In single-server mode, add catch-all route to proxy unmatched requests to React server.
-		# This route must be registered last so FastAPI tries all specific routes first.
+		# In single-server mode, serve HTML via SSR and proxy dev assets when needed.
 		if self.mode == "single-server":
-			react_server_address = envvars.react_server_address
-			if not react_server_address:
+			self.asset_server_address = envvars.asset_server_address
+			self.ssr_server_address = envvars.ssr_server_address
+
+			if not self.ssr_server_address:
 				raise RuntimeError(
-					"PULSE_REACT_SERVER_ADDRESS must be set in single-server mode. "
-					+ "Use 'pulse run' CLI command or set the environment variable."
+					"PULSE_SSR_SERVER_ADDRESS must be set in single-server mode. "
+					+ "Use the 'pulse run' CLI command or set the environment variable."
 				)
 
-			proxy_handler = ReactProxy(
-				react_server_address=react_server_address,
-				server_address=server_address,
-				config=self.proxy,
-			)
-			self._proxy = proxy_handler
+			if self.env == "dev" and self.asset_server_address:
+				self._asset_proxy = DevServerProxy(
+					dev_server_address=self.asset_server_address,
+					server_address=server_address,
+				)
 
-			# In dev mode, proxy WebSocket connections to React Router (e.g. Vite HMR)
-			# Socket.IO handles /socket.io/ at ASGI level before reaching FastAPI
-			if self.env == "dev":
-
+				# Proxy WebSocket connections to the dev server (e.g. Vite HMR)
+				# Socket.IO handles /socket.io/ at ASGI level before reaching FastAPI
 				@self.fastapi.websocket("/{path:path}")
 				async def websocket_proxy(websocket: WebSocket, path: str):  # pyright: ignore[reportUnusedFunction]
-					await proxy_handler.proxy_websocket(websocket)
+					asset_proxy = self._asset_proxy
+					if asset_proxy is None:
+						await websocket.close(
+							code=1011, reason="Asset proxy unavailable"
+						)
+						return
+					await asset_proxy.proxy_websocket(websocket)
 
-			# Register ASGI-level catch-all last.
-			self.fastapi.mount("/", proxy_handler, name="react-proxy")
+			web_root = Path(self.codegen.cfg.web_root)
+			static_roots: list[Path] = []
+			public_dir = web_root / "public"
+			if public_dir.exists():
+				static_roots.append(public_dir)
+			dist_client = web_root / "dist" / "client"
+			dist_root = dist_client if dist_client.exists() else (web_root / "dist")
+			if dist_root.exists():
+				static_roots.append(dist_root)
+
+			def _resolve_static(pathname: str) -> Path | None:
+				trimmed = pathname.lstrip("/")
+				for root in static_roots:
+					candidate = root / trimmed
+					if candidate.is_file():
+						return candidate
+				return None
+
+			def _is_dev_asset_request(pathname: str, accept: str | None) -> bool:
+				prefixes = (
+					"/@vite",
+					"/@fs",
+					"/@id",
+					"/@react-refresh",
+					"/__vite_ping",
+					"/src/",
+					"/node_modules/",
+				)
+				if any(pathname.startswith(prefix) for prefix in prefixes):
+					return True
+				if accept and "text/html" not in accept:
+					return True
+				return False
+
+			async def _render_ssr(request: Request) -> Response:
+				pathname = request.url.path
+				match = self.routes.match(pathname)
+				if match is None:
+					return PlainTextResponse("Not Found", status_code=404)
+				matched_routes, params = match
+				paths = [route.unique_path() for route in matched_routes]
+				normalized_pathname = ensure_absolute_path(pathname)
+				if normalized_pathname != "/" and normalized_pathname.endswith("/"):
+					normalized_pathname = normalized_pathname[:-1]
+				route_info: RouteInfo = {
+					"pathname": normalized_pathname,
+					"hash": "",
+					"query": request.url.query and f"?{request.url.query}",
+					"queryParams": dict(request.query_params),
+					"pathParams": params.params,
+					"catchall": params.splat,
+				}
+				payload: PrerenderPayload = {
+					"paths": paths,
+					"routeInfo": route_info,
+				}
+				result = await run_prerender(payload, request)
+				session = PulseContext.get().session
+				if session is None:
+					raise RuntimeError("Internal error: couldn't resolve user session")
+				if isinstance(result, Redirect):
+					resp = Response(
+						status_code=302, headers={"Location": result.path or "/"}
+					)
+					await session.handle_response(resp)
+					return resp
+				if isinstance(result, NotFound):
+					resp = PlainTextResponse("Not Found", status_code=404)
+					await session.handle_response(resp)
+					return resp
+				if not isinstance(result, Ok):
+					resp = PlainTextResponse("Not Found", status_code=404)
+					await session.handle_response(resp)
+					return resp
+
+				serialized: Serialized = serialize(result.payload)
+				ssr_client = self._ssr_client
+				if ssr_client is None:
+					ssr_client = httpx.AsyncClient(timeout=httpx.Timeout(30.0))
+					self._ssr_client = ssr_client
+				try:
+					ssr_res = await ssr_client.post(
+						f"{self.ssr_server_address}/render",
+						json={"url": str(request.url), "prerender": serialized},
+					)
+				except httpx.RequestError as exc:
+					logger.error("SSR server request failed: %s", exc)
+					resp = PlainTextResponse("SSR server unavailable", status_code=502)
+					await session.handle_response(resp)
+					return resp
+
+				if ssr_res.status_code >= 400:
+					resp = PlainTextResponse(
+						f"SSR server error: {ssr_res.status_code}", status_code=502
+					)
+					await session.handle_response(resp)
+					return resp
+
+				resp = HTMLResponse(ssr_res.text)
+				await session.handle_response(resp)
+				return resp
+
+			@self.fastapi.api_route(
+				"/{path:path}",
+				methods=["GET", "HEAD"],
+				include_in_schema=False,
+			)
+			async def render_app(request: Request, path: str):  # pyright: ignore[reportUnusedFunction]
+				pathname = request.url.path
+				if pathname.startswith(prefix):
+					return PlainTextResponse("Not Found", status_code=404)
+
+				static_file = _resolve_static(pathname)
+				if static_file is not None:
+					return FileResponse(static_file)
+
+				accept = request.headers.get("accept")
+				if self._asset_proxy and _is_dev_asset_request(pathname, accept):
+					return await self._asset_proxy(request)
+
+				return await _render_ssr(request)
 
 		@self.sio.event
 		async def connect(  # pyright: ignore[reportUnusedFunction]
@@ -1289,11 +1435,16 @@ class App:
 		# Cancel any remaining app-level tasks/timers
 		self._tasks.cancel_all()
 		self._timers.cancel_all()
-		if self._proxy is not None:
+		if self._asset_proxy is not None:
 			try:
-				await self._proxy.close()
+				await self._asset_proxy.close()
 			except Exception:
-				logger.exception("Error during ReactProxy.close()")
+				logger.exception("Error during DevServerProxy.close()")
+		if self._ssr_client is not None:
+			try:
+				await self._ssr_client.aclose()
+			except Exception:
+				logger.exception("Error during SSR client close()")
 
 		# Update status
 		self.status = AppStatus.stopped

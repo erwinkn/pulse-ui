@@ -641,7 +641,7 @@ describe("PulseProvider connection handling", () => {
 					routes: [{ id: "/", index: true }],
 					routeLoaders: {},
 					initialUrl: "http://pulse.test/",
-				},
+				} as React.ComponentProps<typeof PulseRouterProvider>,
 				React.createElement(
 					PulseProvider,
 					{

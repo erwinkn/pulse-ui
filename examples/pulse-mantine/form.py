@@ -1,7 +1,7 @@
 from typing import Any, Literal, cast
 
 import pulse as ps
-from pulse.components.react_router import Link
+from pulse.components.router import Link
 from pulse_mantine import (
 	AllowedFileTypes,
 	Button,

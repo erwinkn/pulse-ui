@@ -1,5 +1,5 @@
 import { Tree as MantineTree, useTree } from "@mantine/core";
-import { usePulseClient, type ChannelBridge } from "pulse-ui-client";
+import { usePulseChannel, type ChannelBridge } from "pulse-ui-client";
 import { type ComponentPropsWithoutRef, useEffect, useRef } from "react";
 
 type ExpandedState = Record<string, boolean>;
@@ -59,7 +59,7 @@ function ConnectedTree({
 	autoSync = true,
 	...rest
 }: ConnectedTreeProps) {
-	const client = usePulseClient();
+	const channel = usePulseChannel(channelId);
 	const channelRef = useRef<ChannelBridge | null>(null);
 
 	// Create controller with initial state and wire auto-sync callbacks
@@ -80,8 +80,7 @@ function ConnectedTree({
 
 	// Server -> client imperative API
 	useEffect(() => {
-		if (!channelId) return;
-		const channel = client.acquireChannel(channelId);
+		if (!channel) return;
 		channelRef.current = channel;
 		const cleanups = [
 			channel.on("toggleExpanded", (payload: { value: string }) => {
@@ -163,9 +162,8 @@ function ConnectedTree({
 			if (channelRef.current === channel) {
 				channelRef.current = null;
 			}
-			client.releaseChannel(channelId);
 		};
-	}, [client, channelId, tree]);
+	}, [channel, tree]);
 
 	return <MantineTree {...(rest as any)} tree={tree as any} />;
 }

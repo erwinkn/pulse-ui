@@ -3,7 +3,7 @@ import { useForm } from "@mantine/form";
 import {
 	serialize,
 	submitForm,
-	usePulseClient,
+	usePulseChannel,
 	type ChannelBridge,
 } from "pulse-ui-client";
 import {
@@ -64,7 +64,7 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 	cascadeUpdates,
 	...formProps
 }: MantineFormProps<TValues>) {
-	const client = usePulseClient();
+	const channel = usePulseChannel(channelId);
 	const channelRef = useRef<ChannelBridge | null>(null);
 	const formRef = useRef<UseFormReturnType<TValues> | null>(null);
 	// Timers for server-validation per path
@@ -300,7 +300,7 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 	}, []);
 
 	useEffect(() => {
-		const channel = client.acquireChannel(channelId);
+		if (!channel) return;
 		channelRef.current = channel;
 		const cleanups = [
 			channel.on("setValues", (payload: { values: TValues }) => {
@@ -392,9 +392,8 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 			if (channelRef.current === channel) {
 				channelRef.current = null;
 			}
-			client.releaseChannel(channelId);
 		};
-	}, [client, channelId, sendSync]);
+	}, [channel, sendSync]);
 
 	const submitHandler = useMemo(
 		() =>

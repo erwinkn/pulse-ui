@@ -427,7 +427,7 @@ async function fetchPrerenderViews(
 		return { status: "redirect", redirect: body.redirect };
 	}
 	if (body.notFound) {
-		return { status: "notFound" };
+		return { status: "notFound", redirect: body.redirect };
 	}
 	const prerender = deserialize(body) as PulsePrerender;
 	return {
@@ -502,14 +502,19 @@ export function PulseApp({ routes, routeLoaders, config, prerender, url }: Pulse
 	);
 
 	const requestViews = useCallback(
-		async (target: NavigationTarget, prefetch: boolean): Promise<NavigationViews> => {
+		async (target: NavigationTarget): Promise<NavigationViews> => {
 			const routeInfo = buildRouteInfo(
 				target.location,
 				target.match.params,
 				target.match.catchall,
 			);
 			if (client.isConnected()) {
-				return client.navigateViews(routeInfo, { prefetch });
+				try {
+					return await client.navigateViews(routeInfo);
+				} catch {
+					// Socket unusable (resume in flight, dropped mid-request,
+					// timeout) - fall through to the HTTP prerender.
+				}
 			}
 			const paths = target.match.matches.map((route) => route.id);
 			return fetchPrerenderViews(config, paths, routeInfo);
@@ -533,29 +538,41 @@ export function PulseApp({ routes, routeLoaders, config, prerender, url }: Pulse
 				}
 			}
 			if (result === null || result.status === "error") {
-				result = await requestViews(target, false);
+				result = await requestViews(target);
 			}
 			if (result.status === "redirect") {
 				if (inBrowser) {
 					window.location.assign(result.redirect || "/");
 				}
-				return;
+				return false;
 			}
 			if (result.status === "notFound") {
 				if (inBrowser) {
 					window.location.assign(result.redirect || "/not-found");
 				}
-				return;
+				return false;
 			}
 			if (result.status === "error" || !result.views) {
 				throw new Error("Navigation failed on the server");
 			}
 			const { views, directives } = result;
 			return () => {
-				setCurrent((previous) => ({
-					views: mergeNavigationViews(previous.views, views),
-					directives: directives ?? previous.directives,
-				}));
+				setCurrent((previous) => {
+					try {
+						return {
+							views: mergeNavigationViews(previous.views, views),
+							directives: directives ?? previous.directives,
+						};
+					} catch (error) {
+						// The server marked a view as reused that this client
+						// never committed; a hard reload resyncs everything.
+						console.error("[Pulse] Navigation state mismatch:", error);
+						if (inBrowser) {
+							setTimeout(() => window.location.reload(), 0);
+						}
+						return previous;
+					}
+				});
 			};
 		},
 		[requestViews],
@@ -566,9 +583,15 @@ export function PulseApp({ routes, routeLoaders, config, prerender, url }: Pulse
 			if (!client.isConnected()) {
 				return;
 			}
+			const now = Date.now();
+			for (const [staleKey, entry] of prefetches.current) {
+				if (now - entry.at >= PREFETCH_TTL_MS) {
+					prefetches.current.delete(staleKey);
+				}
+			}
 			const key = target.location.pathname + target.location.search;
 			const existing = prefetches.current.get(key);
-			if (existing && Date.now() - existing.at < PREFETCH_TTL_MS) {
+			if (existing && now - existing.at < PREFETCH_TTL_MS) {
 				return;
 			}
 			const routeInfo = buildRouteInfo(

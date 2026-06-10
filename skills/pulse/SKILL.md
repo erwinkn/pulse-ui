@@ -511,9 +511,11 @@ app = ps.App(
 ## Commands
 
 ```bash
-uv run pulse run app.py          # Dev server :8000
+uv run pulse run app.py          # Dev server :8000 (uvicorn + Vite assets + Bun SSR)
 uv run pulse run app.py --port 3000
 uv run pulse run app.py --interrupt  # Stop existing dev instance first
+uv run pulse build app.py        # Production build (client + SSR bundles)
+uv run pulse run app.py --prod   # Production servers (uvicorn + Bun SSR)
 make all                         # Format, lint, typecheck, test
 ```
 
@@ -686,7 +688,7 @@ app = ps.App(
     routes=[...],
     mode="single-server",  # or "subdomains" for multi-tenant
     server_address="https://myapp.com",  # Required for production
-    codegen=ps.CodegenConfig(router="@tanstack/react-router"),  # Optional
+    codegen=ps.CodegenConfig(web_dir="web"),  # Optional, where the web project lives
     session_store=ps.CookieSessionStore(secret_key="..."),  # Production sessions
 )
 ```

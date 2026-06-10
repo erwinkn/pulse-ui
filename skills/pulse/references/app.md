@@ -23,7 +23,7 @@ app = ps.App(
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `codegen` | `CodegenConfig` | `CodegenConfig()` | React Router code generation settings |
+| `codegen` | `CodegenConfig` | `CodegenConfig()` | Web code generation settings |
 | `middleware` | `PulseMiddleware \| list` | `None` | Request middleware |
 | `plugins` | `list[Plugin]` | `None` | Application plugins |
 | `cookie` | `Cookie` | Auto | Session cookie configuration |
@@ -33,7 +33,6 @@ app = ps.App(
 | `internal_server_address` | `str` | `None` | Internal URL for SSR fetches |
 | `not_found` | `str` | `"/not-found"` | 404 page path |
 | `mode` | `"single-server" \| "subdomains"` | `"single-server"` | Deployment mode |
-| `api_prefix` | `str` | `"/_pulse"` | API route prefix |
 | `cors` | `CORSOptions` | Auto | CORS configuration |
 | `fastapi` | `dict` | `None` | FastAPI constructor options |
 | `session_timeout` | `float` | `60.0` | Session cleanup timeout (seconds) |
@@ -42,7 +41,7 @@ app = ps.App(
 
 ### Single-Server Mode (Default)
 
-Python and React served from the same origin. Pulse proxies non-API requests to React Router.
+Python and React served from the same origin. The Python server serves static assets, forwards page requests to the Bun SSR server, and proxies Vite dev assets in dev.
 
 ```python
 app = ps.App(
@@ -98,7 +97,7 @@ In dev mode, `server_address` is auto-resolved from CLI flags or defaults to `de
 
 ## Codegen Configuration
 
-Control where React Router files are generated.
+Control where the generated web files (route manifest + route modules) are written.
 
 ```python
 app = ps.App(
@@ -310,6 +309,8 @@ app = ps.App(
 | `PULSE_SECRET` | Session signing secret (required in prod) |
 | `PULSE_HOST` | Server host (set by CLI) |
 | `PULSE_PORT` | Server port (set by CLI) |
+| `PULSE_SSR_SERVER_ADDRESS` | SSR server URL (set by CLI; required in single-server mode when running uvicorn yourself) |
+| `PULSE_ASSET_SERVER_ADDRESS` | Vite asset dev server URL (set by CLI in dev) |
 
 ## Complete Example
 

@@ -223,8 +223,8 @@ class Route:
 		)
 
 	def _path_list(self, include_layouts: bool = False) -> list[str]:
-		# Question marks cause problems for the URL of our prerendering requests +
-		# React-Router file loading
+		# Question marks cause problems in prerender request URLs and in
+		# generated module file names
 		path = self.path.replace("?", "^")
 		if self.parent:
 			return [*self.parent._path_list(include_layouts=include_layouts), path]  # pyright: ignore[reportPrivateUsage]

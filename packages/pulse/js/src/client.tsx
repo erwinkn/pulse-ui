@@ -92,6 +92,8 @@ export class PulseSocketIOClient {
 	#reloadOnReconnectTimeout = false;
 	#resumePending = false;
 	#pendingResumeId: string | null = null;
+	#resumeSnapshotViews: Set<string> = new Set();
+	#resumeSnapshotChannels: Set<string> = new Set();
 	#nextNavId = 0;
 	#pendingNavigations: Map<
 		string,
@@ -696,6 +698,8 @@ export class PulseSocketIOClient {
 		for (const [channel, endpoint] of this.#channels) {
 			channels.push({ channel, view: endpoint.view });
 		}
+		this.#resumeSnapshotViews = new Set(views.map((view) => view.view));
+		this.#resumeSnapshotChannels = new Set(channels.map((c) => c.channel));
 		socket.emit(
 			"message",
 			serialize({
@@ -727,8 +731,10 @@ export class PulseSocketIOClient {
 			(message.channels ?? []).map((channel) => [channel.channel, channel.view]),
 		);
 
+		// Drop queued callbacks only for views we no longer hold; views mounted
+		// during the resume window re-attach below and flush on their ack.
 		for (const viewId of [...this.#pendingCallbacks.keys()]) {
-			if (!acceptedViews.has(viewId)) {
+			if (!acceptedViews.has(viewId) && !this.#activeViews.has(viewId)) {
 				this.#pendingCallbacks.delete(viewId);
 			}
 		}
@@ -738,7 +744,12 @@ export class PulseSocketIOClient {
 				this.#ackedAttachIds.set(view.view, attachId);
 			}
 		}
+		// Channels acquired after the resume snapshot were never declared:
+		// connect them now. Snapshot channels the server refused are dead.
 		for (const [channel, endpoint] of [...this.#channels]) {
+			if (!this.#resumeSnapshotChannels.has(channel)) {
+				continue;
+			}
 			if (acceptedChannels.get(channel) !== endpoint.view) {
 				endpoint.bridge.dispose(
 					new PulseChannelResetError("Channel was not resumed"),
@@ -750,6 +761,23 @@ export class PulseSocketIOClient {
 		const queued = this.#messageQueue;
 		this.#messageQueue = [];
 		this.#resumePending = false;
+		// Views mounted while the resume was in flight (e.g. a navigation
+		// committing as the tab became visible) were not in the snapshot;
+		// attach them now. The server replies reload for ids it lost.
+		for (const [viewId, view] of this.#activeViews) {
+			if (!acceptedViews.has(viewId) && !this.#resumeSnapshotViews.has(viewId)) {
+				this.#sendAttach(viewId, view.routeInfo);
+			}
+		}
+		for (const [channel, endpoint] of this.#channels) {
+			if (!this.#resumeSnapshotChannels.has(channel)) {
+				this.sendMessage({
+					type: "channel_connect",
+					channel,
+					view: endpoint.view,
+				});
+			}
+		}
 		for (const viewId of acceptedViews) {
 			this.#flushPendingCallbacks(viewId);
 		}
@@ -768,14 +796,23 @@ export class PulseSocketIOClient {
 	): boolean {
 		if (
 			payload.type === "attach" ||
-			payload.type === "detach" ||
 			payload.type === "update" ||
 			payload.type === "navigate" ||
 			payload.type === "channel_connect" ||
-			payload.type === "channel_disconnect" ||
 			payload.type === "client_resume"
 		) {
+			// attach/channel_connect for surviving endpoints are re-sent by the
+			// resume logic itself; update is superseded by the attach payloads.
 			return false;
+		}
+		if (payload.type === "detach") {
+			// Tear-downs issued while offline must reach the server (which
+			// tolerates unknown ids) unless the endpoint was re-established
+			// in the meantime (dev StrictMode replay).
+			return !this.#activeViews.has(payload.view);
+		}
+		if (payload.type === "channel_disconnect") {
+			return !this.#channels.has(payload.channel);
 		}
 		if (payload.type === "callback") {
 			return acceptedViews.has(payload.view);

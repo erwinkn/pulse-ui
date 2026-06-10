@@ -194,3 +194,52 @@ async def test_navigate_disposes_idle_views_and_renders_fresh():
 	assert about is not None
 	assert about["view"] != old_view.id
 	assert render.view_for_path("/about").id == about["view"]
+
+
+@pytest.mark.asyncio
+async def test_navigate_does_not_reuse_undelivered_prefetched_views():
+	"""A pending view from an unconsumed prefetch was never committed
+	client-side; navigating there must render fresh instead of sending a
+	dangling reuse marker."""
+	app = make_app()
+	render, session, sent = setup_session(app)
+	render_sent[id(render)] = sent
+
+	first = await run_navigate(app, render, session, "/about", nav="prefetch-1")
+	assert first["status"] == "ok"
+	views = first.get("views")
+	assert views is not None
+	prefetched = views["/about"]
+	assert prefetched is not None
+	# Never consumed: the view stays pending and undelivered.
+
+	second = await run_navigate(app, render, session, "/about", nav="nav-2")
+	assert second["status"] == "ok"
+	views2 = second.get("views")
+	assert views2 is not None
+	fresh = views2["/about"]
+	assert fresh is not None, "undelivered pending view must not be reused"
+	assert fresh["view"] != prefetched["view"]
+
+
+@pytest.mark.asyncio
+async def test_navigate_reuses_attached_views_only_after_delivery():
+	app = make_app()
+	render, session, sent = setup_session(app)
+	render_sent[id(render)] = sent
+
+	first = await run_navigate(app, render, session, "/about", nav="nav-1")
+	views = first.get("views")
+	assert views is not None
+	about = views["/about"]
+	assert about is not None
+	# The client commits and attaches: the view becomes delivered.
+	with ps.PulseContext(
+		app=app, session=cast(UserSession, cast(object, session)), render=render
+	):
+		render.attach(about["view"], make_route_info("/about"))
+
+	second = await run_navigate(app, render, session, "/about", nav="nav-2")
+	views2 = second.get("views")
+	assert views2 is not None
+	assert views2["/about"] is None, "attached views are reused"

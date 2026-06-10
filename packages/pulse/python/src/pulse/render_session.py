@@ -110,6 +110,10 @@ class View:
 	tree: RenderTree
 	session: Any
 	initialized: bool
+	# True once the client provably holds this view (HTTP prerender delivered
+	# it, or the client attached). Navigation reuse markers are only valid for
+	# delivered views.
+	delivered: bool
 	state: ViewState
 	pending_action: PendingAction | None
 	queue: list[ServerMessage] | None
@@ -132,6 +136,7 @@ class View:
 		self.tree = RenderTree(route.render())
 		self.tree.dispatch = self._dispatch_render
 		self.initialized = False
+		self.delivered = False
 		self.state = "pending"
 		self.pending_action = None
 		self.queue = []
@@ -197,6 +202,7 @@ class View:
 	def activate(self, send_message: Callable[[ServerMessage], Any]) -> None:
 		if self.state != "pending":
 			return
+		self.delivered = True
 		self._cancel_pending_timeout()
 		if self.queue:
 			for msg in self.queue:
@@ -439,7 +445,13 @@ class RenderSession:
 
 			if view.state != "active" and view.queue_timeout is None:
 				view.start_pending(self.prerender_queue_timeout)
+			if view.state == "pending":
+				# The full re-render below supersedes anything queued; ops
+				# computed against the previous tree must not flush onto the
+				# client's freshly initialized one.
+				view.queue = []
 			message = self.render(view)
+			view.delivered = True
 
 			results[path] = message
 			if message["type"] == "navigate_to":
@@ -462,7 +474,10 @@ class RenderSession:
 		results: dict[str, ServerInitMessage | ServerNavigateToMessage | None] = {}
 		for path in [ensure_absolute_path(p) for p in paths]:
 			view = self._views_by_path.get(path)
-			if view is not None and view.state == "idle":
+			if view is not None and (view.state == "idle" or not view.delivered):
+				# Idle views are stale; undelivered pending views (an expired
+				# prefetch or a superseded navigation) were never committed
+				# client-side, so a reuse marker would dangle.
 				self.dispose_view(view)
 				view = None
 			if view is not None:

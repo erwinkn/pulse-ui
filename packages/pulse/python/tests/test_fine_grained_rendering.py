@@ -304,3 +304,35 @@ def test_sibling_updates_in_one_batch_emit_separate_precise_ops():
 	ops = tree.take_ops()
 	assert sorted(op["path"] for op in ops) == ["0", "1"]
 	assert all(op["type"] == "reconciliation" for op in ops)
+
+
+def test_parent_unmounting_child_in_same_batch_skips_child_effect():
+	"""Parent and child both read the same signal; the parent's re-render
+	unmounts the child, whose queued effect must not run afterwards."""
+	show = Signal(True)
+	renders = {"parent": 0, "child": 0}
+
+	@ps.component
+	def Child():
+		renders["child"] += 1
+		return ps.span(f"child sees {show()}")
+
+	@ps.component
+	def Parent():
+		renders["parent"] += 1
+		if show():
+			return ps.div(Child())
+		return ps.div(ps.span("empty"))
+
+	tree = RenderTree(Parent())
+	tree.render()
+	assert renders == {"parent": 1, "child": 1}
+
+	show.write(False)
+	flush_effects()
+
+	# The child was unmounted by the parent's pass; its queued run is skipped.
+	assert renders == {"parent": 2, "child": 1}
+	ops = tree.take_ops()
+	assert ops and all(op["path"].startswith("") for op in ops)
+	assert len(list(tree.iter_runtimes())) == 1

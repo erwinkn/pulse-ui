@@ -659,3 +659,71 @@ describe("PulseProvider connection handling", () => {
 		consoleError.mockRestore();
 	});
 });
+
+describe("resume window message handling", () => {
+	beforeEach(() => {
+		io.mockClear();
+	});
+
+	it("attaches views mounted during the resume handshake after it completes", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		client.attach("view-a", makeView());
+		socket.trigger("connect");
+		await connected;
+
+		socket.trigger("disconnect");
+		socket.emitted = [];
+		socket.trigger("connect");
+
+		// A navigation commits while the resume is pending.
+		client.attach("view-b", makeView());
+
+		const resume = sentMessages()[0]!;
+		expect(resume.type).toBe("client_resume");
+		socket.trigger(
+			"message",
+			serialize({
+				type: "server_resume",
+				resumeId: resume.resumeId,
+				status: "ok",
+				views: [{ view: "view-a" }],
+				channels: [],
+			}),
+		);
+
+		const attaches = sentMessages().filter((m) => m.type === "attach");
+		expect(attaches.map((m) => m.view)).toEqual(["view-b"]);
+	});
+
+	it("replays offline detach unless the view was re-attached", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		client.attach("view-a", makeView());
+		client.attach("view-b", makeView());
+		socket.trigger("connect");
+		await connected;
+
+		socket.trigger("disconnect");
+		client.detach("view-a");
+		client.detach("view-b");
+		client.attach("view-b", makeView()); // StrictMode-style replay
+		socket.emitted = [];
+		socket.trigger("connect");
+
+		const resume = sentMessages()[0]!;
+		socket.trigger(
+			"message",
+			serialize({
+				type: "server_resume",
+				resumeId: resume.resumeId,
+				status: "ok",
+				views: [{ view: "view-b" }],
+				channels: [],
+			}),
+		);
+
+		const replayed = sentMessages().filter((m) => m.type === "detach");
+		expect(replayed.map((m) => m.view)).toEqual(["view-a"]);
+	});
+});

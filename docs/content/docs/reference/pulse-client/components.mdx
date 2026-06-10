@@ -9,31 +9,36 @@ React components for building Pulse applications.
 
 ---
 
-## PulseProvider
+## PulseApp
 
-Root context provider that establishes the WebSocket connection and provides the Pulse client to descendant components. Wrap your entire app (or the portion using Pulse) with this component.
+The all-in-one app shell. Composes the Pulse router (`PulseRouterProvider`), the WebSocket client (`PulseProvider`), and the route renderer (`PulseRoutes`). The generated `web/app/pulse/_layout.tsx` exports a `PulseApp` wrapper with your app's configuration baked in—your entry files render it, and global providers wrap it.
 
 ```tsx
-import { PulseProvider } from "pulse-ui-client";
+import { PulseApp } from "pulse-ui-client";
 
-function PulseProvider(props: PulseProviderProps): ReactNode
+function PulseApp(props: PulseAppProps): ReactNode
 ```
 
 ### Props
 
 ```ts
-interface PulseProviderProps {
-  children: ReactNode;
+interface PulseAppProps {
+  routes: PulseRoute[];
+  routeLoaders: RouteLoaderMap;
   config: PulseConfig;
   prerender: PulsePrerender;
+  /** URL of the initial request; required for SSR. */
+  url?: string;
 }
 ```
 
 | Prop | Type | Description |
 |------|------|-------------|
-| `children` | `ReactNode` | Child components to render |
+| `routes` | `PulseRoute[]` | The generated route manifest (`pulseRouteTree`) |
+| `routeLoaders` | `RouteLoaderMap` | Dynamic imports for each route's module |
 | `config` | `PulseConfig` | Connection and status configuration |
 | `prerender` | `PulsePrerender` | Prerendered views and directives from SSR |
+| `url` | `string` | URL of the initial request (required for SSR) |
 
 ### PulseConfig
 
@@ -53,7 +58,7 @@ interface ConnectionStatusConfig {
 
 The connection status configuration controls when status messages appear:
 
-- **initialConnectingDelay** - How long to wait before showing "Connecting..." on first load. A small delay (e.g., 500ms) prevents flash on fast connections.
+- **initialConnectingDelay** - How long to wait before showing "Connecting..." on first load. A small delay prevents flash on fast connections.
 - **initialErrorDelay** - How long to wait before showing an error if initial connection fails.
 - **reconnectErrorDelay** - How long to wait before showing an error when reconnecting after disconnect.
 
@@ -71,57 +76,85 @@ interface PulsePrerender {
 }
 
 interface PulsePrerenderView {
+  view: string;       // Unique id of the server-side view
+  routePath: string;  // Route pattern path (e.g. "/users/:id")
   vdom: VDOM;
 }
 
 interface Directives {
   headers?: Record<string, string>;
+  query?: Record<string, string>;
   socketio?: SocketIODirectives;
 }
 
 interface SocketIODirectives {
   headers?: Record<string, string>;
   auth?: Record<string, string>;
+  query?: Record<string, string>;
 }
 ```
 
-The `prerender` prop contains server-side rendered content and connection directives. In a typical setup, this comes from your SSR loader.
+The `prerender` prop contains the server-rendered views (keyed by route pattern path) and connection directives. In a typical setup, the SSR server embeds it in the HTML as `window.__PULSE_PRERENDER__` and `src/entry-client.tsx` deserializes it.
 
 ### Example
 
 ```tsx
-import { PulseProvider } from "pulse-ui-client";
-import { BrowserRouter } from "react-router";
+// src/entry-client.tsx
+import { deserialize, preloadRoutesForPath, type PulsePrerender } from "pulse-ui-client";
+import { hydrateRoot } from "react-dom/client";
+import { PulseApp } from "../app/pulse/_layout";
+import { pulseRouteTree, routeLoaders } from "../app/pulse/routes";
 
-function App() {
-  return (
-    <BrowserRouter>
-      <PulseProvider
-        config={{
-          serverAddress: "http://localhost:8000",
-          apiPrefix: "/_pulse",
-          connectionStatus: {
-            initialConnectingDelay: 500,
-            initialErrorDelay: 5000,
-            reconnectErrorDelay: 3000,
-          },
-        }}
-        prerender={{ views: {}, directives: {} }}
-      >
-        <Routes />
-      </PulseProvider>
-    </BrowserRouter>
+async function main() {
+  const prerender = deserialize(window.__PULSE_PRERENDER__) as PulsePrerender;
+  await preloadRoutesForPath(pulseRouteTree, routeLoaders, window.location.pathname);
+
+  hydrateRoot(
+    document.getElementById("root")!,
+    <PulseApp prerender={prerender} url={window.location.href} />,
   );
 }
+
+void main();
 ```
 
 ### Connection Status UI
 
-PulseProvider automatically shows connection status in a fixed toast at the bottom-right corner:
+PulseApp automatically shows connection status in a fixed toast at the bottom-right corner:
 
 - **"Connecting..."** - Shown after `initialConnectingDelay` during initial connection
 - **"Reconnecting..."** - Shown immediately when connection is lost
 - **"Failed to connect to the server."** - Shown after timeout if connection fails
+
+---
+
+## PulseProvider
+
+Context provider that supplies the Pulse WebSocket client and prerender data to descendant components. `PulseApp` renders it for you—you only need it directly if you're assembling the shell yourself.
+
+```tsx
+import { PulseProvider } from "pulse-ui-client";
+
+function PulseProvider(props: PulseProviderProps): ReactNode
+```
+
+### Props
+
+```ts
+interface PulseProviderProps {
+  children: ReactNode;
+  client: PulseSocketIOClient;
+  prerender: PulsePrerender;
+}
+```
+
+| Prop | Type | Description |
+|------|------|-------------|
+| `children` | `ReactNode` | Child components to render |
+| `client` | `PulseSocketIOClient` | The Pulse WebSocket client instance |
+| `prerender` | `PulsePrerender` | Prerendered views and directives from SSR |
+
+The client class is not exported—`PulseApp` constructs it from `PulseConfig`. Prefer `PulseApp` unless you have a strong reason not to.
 
 ---
 

@@ -166,24 +166,43 @@ app = ps.App(
 
 ## Running in production
 
-Run your app with a production-grade ASGI server like Uvicorn:
+A production deployment has two steps: build the web assets, then run the servers.
+
+### Step 1: Build
 
 ```bash
-uvicorn app:app.asgi --host 0.0.0.0 --port 8000
+pulse build app.py
 ```
 
-For more control over initialization, use the factory pattern:
+`pulse build` regenerates the routes, then runs the Vite client and SSR builds. You should now see a `dist/` folder inside your web directory:
 
-```python
-# app.py
-def create_app():
-    app = ps.App(routes=[...], server_address="https://api.example.com")
-    app.run_codegen(address="https://api.example.com")
-    return app.asgi
-```
+- `dist/client/` — hashed JS/CSS bundles and static assets
+- `dist/server/` — the server-side rendering bundle
+
+The build requires `server_address` to be set (in your `App` constructor or via the `PULSE_SERVER_ADDRESS` environment variable).
+
+### Step 2: Run
 
 ```bash
-uvicorn app:create_app --factory --host 0.0.0.0 --port 8000
+pulse run app.py --prod --address 0.0.0.0
+```
+
+In production mode, `pulse run` starts two processes:
+
+1. **A Bun SSR server** — renders HTML for incoming page requests using the built `dist/server` bundle
+2. **The Python server (uvicorn)** — your Pulse app
+
+In single-server mode (the default), the Python server is the only thing you expose publicly: it serves static assets from `dist/client` and `public/`, forwards page requests to the SSR server, and handles all WebSocket traffic. The SSR server only needs to be reachable from the Python server.
+
+If you manage the processes yourself (e.g., separate containers), run uvicorn with the factory pattern and point it at the SSR server:
+
+```bash
+# SSR server (from the web directory)
+bun run start
+
+# Python server
+PULSE_SSR_SERVER_ADDRESS=http://localhost:3001 \
+  uvicorn app:app.asgi_factory --factory --host 0.0.0.0 --port 8000
 ```
 
 ### Environment variables
@@ -193,6 +212,7 @@ uvicorn app:create_app --factory --host 0.0.0.0 --port 8000
 | `PULSE_ENV` | Set to `prod` for production mode | `prod` |
 | `PULSE_HOST` | Server host to bind to | `0.0.0.0` |
 | `PULSE_PORT` | Server port | `8000` |
+| `PULSE_SSR_SERVER_ADDRESS` | URL of the SSR server (required in single-server mode when not using `pulse run`) | `http://localhost:3001` |
 
 Setting `PULSE_ENV=prod` enables production optimizations and disables hot reloading.
 

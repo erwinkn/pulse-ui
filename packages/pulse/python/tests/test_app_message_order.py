@@ -27,7 +27,10 @@ async def test_socket_messages_for_render_are_serialized(
 	events: list[str] = []
 
 	async def handle_pulse_message(
-		_render: RenderSession, _session: UserSession, msg: ClientPulseMessage
+		_render: RenderSession,
+		_session: UserSession,
+		msg: ClientPulseMessage,
+		**_kwargs: object,
 	) -> None:
 		events.append(f"start:{msg['type']}")
 		if msg["type"] == "attach":
@@ -179,7 +182,10 @@ async def test_socket_messages_wait_for_connect_to_finish(
 	events: list[str] = []
 
 	async def handle_pulse_message(
-		_render: RenderSession, _session: UserSession, msg: ClientPulseMessage
+		_render: RenderSession,
+		_session: UserSession,
+		msg: ClientPulseMessage,
+		**_kwargs: object,
 	) -> None:
 		events.append(msg["type"])
 

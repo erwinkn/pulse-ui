@@ -3,7 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, ParamSpec, TypeVar, cast, override
 
-from pulse.hooks.core import HookMetadata, HookState, hooks
+from pulse.helpers import Disposable
+from pulse.hooks.core import INIT_SCOPE_ACTIVE, HookMetadata, HookState, hooks
 from pulse.reactive import Effect, Scope, Signal
 
 P = ParamSpec("P")
@@ -31,6 +32,7 @@ class SetupState(HookState):
 		"args",
 		"kwargs",
 		"effects",
+		"states",
 		"key",
 		"_called",
 		"_pending_key",
@@ -45,6 +47,7 @@ class SetupState(HookState):
 		self.args: list[Signal[Any]] = []
 		self.kwargs: dict[str, Signal[Any]] = {}
 		self.effects: list[Effect] = []
+		self.states: list[Disposable] = []
 		self.key: str | None = None
 		self._called = False
 		self._pending_key: str | None = None
@@ -62,10 +65,18 @@ class SetupState(HookState):
 		kwargs: dict[str, Any],
 		key: str | None,
 	) -> Any:
-		self.dispose_effects()
-		with Scope() as scope:
-			self.value = init_func(*args, **kwargs)
-			self.effects = list(scope.effects)
+		self.dispose_owned()
+		# Effects and states created by the init function belong to this hook
+		# alone: INIT_SCOPE_ACTIVE makes @ps.effect skip the inline-effects
+		# cache so nothing ends up with two owners.
+		token = INIT_SCOPE_ACTIVE.set(True)
+		try:
+			with Scope() as scope:
+				self.value = init_func(*args, **kwargs)
+		finally:
+			INIT_SCOPE_ACTIVE.reset(token)
+		self.effects = list(scope.effects)
+		self.states = list(scope.states)
 		self.args = [Signal(arg) for arg in args]
 		self.kwargs = {name: Signal(value) for name, value in kwargs.items()}
 		self.initialized = True
@@ -103,14 +114,20 @@ class SetupState(HookState):
 		for name, value in kwargs.items():
 			self.kwargs[name].write(value)
 
-	def dispose_effects(self) -> None:
+	def dispose_owned(self) -> None:
+		"""Dispose the effects and states created by the last init run."""
 		for effect in self.effects:
-			effect.dispose()
+			if not effect.__disposed__:
+				effect.dispose()
 		self.effects = []
+		for state in self.states:
+			if not state.__disposed__:
+				state.dispose()
+		self.states = []
 
 	@override
 	def dispose(self) -> None:
-		self.dispose_effects()
+		self.dispose_owned()
 		self.args = []
 		self.kwargs = {}
 		self.value = None

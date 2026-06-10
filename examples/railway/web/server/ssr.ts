@@ -46,7 +46,11 @@ async function getRender() {
 		viteServer = await createServer({
 			root: webRoot,
 			// This Vite instance only powers ssrLoadModule; the browser-facing
-			// asset server (with HMR) is the separate `vite dev` process.
+			// asset server (with HMR) is the separate `vite dev` process. Use a
+			// separate dep cache so the two never invalidate each other's
+			// node_modules/.vite (which leaves the browser with mixed chunks
+			// and duplicate React copies).
+			cacheDir: "node_modules/.vite-ssr",
 			server: { middlewareMode: true, hmr: false, ws: false },
 			appType: "custom",
 		});

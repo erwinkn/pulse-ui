@@ -378,3 +378,148 @@ def test_init_exception_does_not_save_partial_locals() -> None:
 		assert calls["count"] == 1
 		assert cast(int, cast(object, example.fn())) == 1
 		assert calls["count"] == 2
+
+
+def test_init_disposes_states_and_effects_on_unmount() -> None:
+	from pulse.reactive import flush_effects
+	from pulse.renderer import RenderTree
+
+	events: list[str] = []
+
+	class S(ps.State):
+		count: int = 0
+
+		@ps.effect
+		def watch(self):
+			events.append(f"state:{self.count}")
+
+	captured: dict[str, Any] = {}
+
+	@ps.component
+	def Comp():
+		with ps.init():
+			st = S()
+
+			@ps.effect
+			def mount_only():  # pyright: ignore[reportUnusedFunction]
+				events.append("mount")
+				return lambda: events.append("unmount")
+
+		captured["st"] = st
+		return ps.div(f"{st.count}")
+
+	tree = RenderTree(Comp())
+	tree.render()
+	flush_effects()
+	assert events == ["state:0", "mount"]
+
+	# Re-render: the init block is skipped, its effects must survive.
+	st = captured["st"]
+	st.count = 1
+	flush_effects()
+	assert "unmount" not in events
+
+	tree.unmount()
+	assert st.__disposed__
+	assert events.count("unmount") == 1
+
+	# The state's effect is dead: further writes don't run it.
+	before = list(events)
+	st.count = 2
+	flush_effects()
+	assert events == before
+
+
+def test_init_effects_are_not_inline_cached() -> None:
+	"""Effects created in a ps.init block bypass the inline-effects hook, so
+	the inline GC for unseen callsites can't dispose them on re-renders."""
+	from pulse.hooks.effects import effect_state
+	from pulse.renderer import RenderTree
+
+	inline_counts: list[int] = []
+
+	@ps.component
+	def Comp():
+		with ps.init():
+
+			@ps.effect
+			def mount_only():  # pyright: ignore[reportUnusedFunction]
+				pass
+
+		inline_counts.append(len(effect_state().effects))
+		return ps.div()
+
+	tree = RenderTree(Comp())
+	tree.render()
+	assert inline_counts == [0]
+	tree.unmount()
+
+
+def test_init_key_change_disposes_previous_states() -> None:
+	from pulse.reactive import Signal, flush_effects
+	from pulse.renderer import RenderTree
+
+	class S(ps.State):
+		label: str = ""
+
+		def __init__(self, label: str):
+			self.label = label
+
+	key_sig = Signal("a")
+	instances: list[Any] = []
+
+	@ps.component
+	def Comp():
+		current = key_sig()
+		with ps.init(key=current):
+			st = S(current)
+		if st not in instances:
+			instances.append(st)
+		return ps.div(st.label)
+
+	tree = RenderTree(Comp())
+	tree.render()
+	flush_effects()
+	assert len(instances) == 1
+
+	key_sig.write("b")
+	flush_effects()
+	assert len(instances) == 2
+	assert instances[0].__disposed__
+	assert not instances[1].__disposed__
+
+	tree.unmount()
+	assert instances[1].__disposed__
+
+
+def test_init_does_not_own_shared_states() -> None:
+	"""States obtained through ps.state or ps.global_state inside a ps.init
+	block belong to their own stores, not to the init entry, so unmounting
+	one component must not dispose them."""
+	from pulse.reactive import flush_effects
+	from pulse.renderer import RenderTree
+
+	class Shared(ps.State):
+		value: int = 0
+
+	shared = ps.global_state(Shared, key="test-init-shared")
+	seen: list[Any] = []
+
+	@ps.component
+	def Comp():
+		with ps.init():
+			inst = shared(id="x")
+		seen.append(inst)
+		return ps.div(f"{inst.value}")
+
+	tree = RenderTree(Comp())
+	tree.render()
+	flush_effects()
+	tree.unmount()
+
+	assert not seen[0].__disposed__
+	# Cleanup the process-wide registry for test isolation.
+	from pulse.hooks.runtime import GLOBAL_STATES
+
+	GLOBAL_STATES.pop("test-init-shared|x", None)
+	seen[0].dispose()

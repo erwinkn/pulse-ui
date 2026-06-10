@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { deserialize, preloadRoutesForPath, type PulsePrerender } from "pulse-ui-client";
-import { renderToString } from "react-dom/server";
+import { deserialize, type PulsePrerender, preloadRoutesForPath } from "pulse-ui-client";
+import { prerender as reactPrerender } from "react-dom/static";
 import { PulseApp } from "../app/pulse/_layout";
 import { pulseRouteTree, routeLoaders } from "../app/pulse/routes";
 
@@ -61,7 +61,10 @@ export async function render(url: string, serialized: unknown) {
 	const pathname = new URL(url, "http://pulse").pathname;
 	await preloadRoutesForPath(pulseRouteTree, routeLoaders, pathname);
 
-	const appHtml = renderToString(<PulseApp prerender={prerender} url={url} />);
+	// prerender (unlike renderToString) waits for lazy components and Suspense
+	// boundaries, so the HTML is complete.
+	const { prelude } = await reactPrerender(<PulseApp prerender={prerender} url={url} />);
+	const appHtml = await new Response(prelude).text();
 	const prerenderJson = jsonForScript(serialized);
 
 	let head = "";

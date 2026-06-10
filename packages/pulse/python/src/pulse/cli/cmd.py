@@ -592,6 +592,9 @@ def build_uvicorn_command(
 
 	if reload_enabled:
 		args.append("--reload")
+		# Bound the graceful-shutdown wait so a lingering connection task can
+		# never wedge the dev reload cycle.
+		args.extend(["--timeout-graceful-shutdown", "3"])
 		args.extend(["--reload-include", "*.css"])
 		app_dir = app_ctx.app_dir or Path.cwd()
 		args.extend(["--reload-dir", str(app_dir)])

@@ -1103,6 +1103,7 @@ class Scope:
 	Attributes:
 		deps: Tracked dependencies mapping Signal/Computed to last_change epoch.
 		effects: Effects created in this scope.
+		states: State instances created in this scope.
 
 	Example:
 
@@ -1119,11 +1120,16 @@ class Scope:
 		# Dict preserves insertion order. Maps dependency -> last_change
 		self.deps: dict[Signal[Any] | Computed[Any], int] = {}
 		self.effects: list[Effect] = []
+		self.states: list[Any] = []
 		self._token: "Token[ReactiveContext] | None" = None
 
 	def register_effect(self, effect: "Effect"):
 		if effect not in self.effects:
 			self.effects.append(effect)
+
+	def register_state(self, state: Any):
+		# Each State registers exactly once (at construction), so no dedupe.
+		self.states.append(state)
 
 	def register_dep(self, value: "Signal[Any] | Computed[Any]"):
 		self.deps[value] = value.last_change

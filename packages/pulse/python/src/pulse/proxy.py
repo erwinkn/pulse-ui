@@ -9,7 +9,7 @@ import websockets
 from fastapi.responses import StreamingResponse
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
-from starlette.websockets import WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 from websockets.typing import Subprotocol
 
 from pulse.context import PulseContext
@@ -106,51 +106,59 @@ class DevServerProxy:
 				# Accept client connection with the negotiated subprotocol
 				await websocket.accept(subprotocol=target_ws.subprotocol)
 
-				# Forward messages bidirectionally
+				# Forward messages bidirectionally. Note: iter_text() swallows
+				# WebSocketDisconnect and simply ends, so each direction must
+				# treat a normal return as "that side is gone" rather than
+				# relying on exceptions.
 				async def forward_client_to_target():
-					try:
-						async for message in websocket.iter_text():
-							await target_ws.send(message)
-					except (WebSocketDisconnect, websockets.ConnectionClosed):
-						# Client disconnected, close target connection
-						logger.debug("Client disconnected, closing target connection")
-						try:
-							await target_ws.close()
-						except Exception:
-							pass
-					except Exception as e:
-						logger.error(f"Error forwarding client message: {e}")
-						raise
+					async for message in websocket.iter_text():
+						await target_ws.send(message)
 
 				async def forward_target_to_client():
-					try:
-						async for message in target_ws:
-							if isinstance(message, str):
-								await websocket.send_text(message)
-							else:
-								await websocket.send_bytes(message)
-					except (WebSocketDisconnect, websockets.ConnectionClosed) as e:
-						# Client or target disconnected, stop forwarding
-						logger.debug(
-							"Connection closed, stopping forward_target_to_client"
-						)
-						# If target disconnected, close client connection
-						if isinstance(e, websockets.ConnectionClosed):
-							try:
-								await websocket.close()
-							except Exception:
-								pass
-					except Exception as e:
-						logger.error(f"Error forwarding target message: {e}")
-						raise
+					async for message in target_ws:
+						if websocket.client_state != WebSocketState.CONNECTED:
+							break
+						if isinstance(message, str):
+							await websocket.send_text(message)
+						else:
+							await websocket.send_bytes(message)
 
-				# Run both forwarding tasks concurrently
-				# If one side closes, the other will detect it and stop gracefully
-				await asyncio.gather(
-					forward_client_to_target(),
-					forward_target_to_client(),
-					return_exceptions=True,
+				# When either side closes, cancel the other and close both ends;
+				# a lingering direction would otherwise keep this handler task
+				# alive forever (blocking uvicorn's graceful shutdown).
+				tasks = {
+					asyncio.create_task(forward_client_to_target()),
+					asyncio.create_task(forward_target_to_client()),
+				}
+				done, pending = await asyncio.wait(
+					tasks, return_when=asyncio.FIRST_COMPLETED
 				)
+				for task in pending:
+					task.cancel()
+				await asyncio.gather(*pending, return_exceptions=True)
+				for task in done:
+					exc = task.exception()
+					if exc is None:
+						continue
+					if isinstance(
+						exc, (WebSocketDisconnect, websockets.ConnectionClosed)
+					):
+						continue
+					if isinstance(exc, RuntimeError):
+						# Starlette raises RuntimeError when sending after the
+						# client already disconnected mid-iteration.
+						logger.debug("Client closed while forwarding target message")
+						continue
+					logger.error(f"Error forwarding proxied WebSocket message: {exc}")
+				try:
+					await target_ws.close()
+				except Exception:
+					pass
+				if websocket.client_state == WebSocketState.CONNECTED:
+					try:
+						await websocket.close()
+					except Exception:
+						pass
 
 		except (websockets.WebSocketException, websockets.ConnectionClosedError) as e:
 			logger.error(f"WebSocket proxy connection failed: {e}")

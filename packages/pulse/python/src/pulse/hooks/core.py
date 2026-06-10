@@ -282,6 +282,15 @@ HOOK_CONTEXT: ContextVar[HookContext | None] = ContextVar(
 	"pulse_hook_context", default=None
 )
 
+# True while a one-time initializer (ps.setup init function or a ps.init()
+# block) is running. Effects created there are captured and owned by that
+# initializer's scope, so @ps.effect must create standalone effects instead
+# of registering them in the inline-effects hook (which would double-own
+# them and dispose mount-only effects on the next render).
+INIT_SCOPE_ACTIVE: ContextVar[bool] = ContextVar(
+	"pulse_init_scope_active", default=False
+)
+
 
 class HookRegistry:
 	_locked: bool
@@ -446,6 +455,7 @@ __all__ = [
 	"HookState",
 	"HookAlreadyRegisteredError",
 	"HOOK_CONTEXT",
+	"INIT_SCOPE_ACTIVE",
 	"HookRegistry",
 	"hooks",
 	"MISSING",

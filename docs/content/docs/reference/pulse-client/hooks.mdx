@@ -107,7 +107,7 @@ Hook to subscribe to a Pulse channel for bidirectional communication. Channels e
 ```ts
 import { usePulseChannel } from "pulse-ui-client";
 
-function usePulseChannel(channelId: string): ChannelBridge
+function usePulseChannel(channelId: string): ChannelBridge | null
 ```
 
 ### Parameters
@@ -118,22 +118,21 @@ function usePulseChannel(channelId: string): ChannelBridge
 
 ### Returns
 
-Returns a `ChannelBridge` instance for sending and receiving messages.
+Returns `null` during the first render, then a `ChannelBridge` instance after the channel is acquired.
 
 ### Throws
 
 - Throws if `channelId` is empty
 - Throws if used outside of a `PulseProvider`
+- Throws if used outside of a `PulseView`
 
 ### Lifecycle
 
 The hook manages channel subscription automatically:
 
-1. On mount: acquires a reference to the channel
-2. On unmount: releases the reference
-3. When all references are released: channel closes
-
-Multiple components can subscribe to the same channel. The channel stays open as long as at least one component is subscribed.
+1. On mount: acquires the channel for the current `PulseView` path
+2. On unmount: releases the channel lease
+3. When the lease is released: the client bridge closes
 
 ### Example: Chat Room
 
@@ -152,6 +151,8 @@ function ChatRoom({ roomId }: { roomId: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
 
   useEffect(() => {
+    if (!channel) return;
+
     // Listen for new messages
     const unsubscribe = channel.on("message", (msg: Message) => {
       setMessages((prev) => [...prev, msg]);
@@ -161,6 +162,7 @@ function ChatRoom({ roomId }: { roomId: string }) {
   }, [channel]);
 
   const sendMessage = (text: string) => {
+    if (!channel) return;
     channel.emit("message", { text });
   };
 
@@ -194,6 +196,8 @@ function UserSearch() {
   const [loading, setLoading] = useState(false);
 
   const search = async (query: string) => {
+    if (!channel) return;
+
     setLoading(true);
     try {
       const users = await channel.request("search", { query });

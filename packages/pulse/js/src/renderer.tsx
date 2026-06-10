@@ -7,6 +7,7 @@ import {
 	type ReactElement,
 	type ReactNode,
 } from "react";
+import type { PulseChannelManager } from "./channel";
 import type { PulseSocketIOClient } from "./client";
 import type { PulsePrerenderView } from "./pulse";
 import { isPulseRefSpec, RefRegistry } from "./ref";
@@ -65,15 +66,31 @@ export class VDOMRenderer {
 	// Track eval keys + callback entries per ReactElement (not real props).
 	#metaMap: WeakMap<ReactElement, ElementMeta>;
 
-	constructor(client: PulseSocketIOClient, path: string, registry: ComponentRegistry = {}) {
+	constructor(
+		client: PulseSocketIOClient,
+		channels: PulseChannelManager,
+		path: string,
+		registry: ComponentRegistry = {},
+	) {
 		this.#client = client;
 		this.#path = path;
 		this.#registry = registry;
 		this.#callbackEntries = new Set();
 		this.#metaMap = new WeakMap();
-		this.#refRegistry = new RefRegistry((channelId) => {
-			return this.#client._ensureChannelEntry(channelId).bridge;
-		});
+		this.#refRegistry = new RefRegistry(channels);
+	}
+
+	static snapshot(registry: ComponentRegistry = {}): VDOMRenderer {
+		const client = {
+			invokeCallback() {},
+		} as unknown as PulseSocketIOClient;
+		const channels: PulseChannelManager = {
+			acquire(channelId: string) {
+				throw new Error(`[Pulse] Snapshot VDOM cannot bind ref channel '${channelId}'`);
+			},
+			dispose() {},
+		};
+		return new VDOMRenderer(client, channels, "", registry);
 	}
 
 	static snapshot(registry: ComponentRegistry = {}): VDOMRenderer {

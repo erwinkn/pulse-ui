@@ -5,7 +5,7 @@ description: "pulse command line"
 
 ## pulse run
 
-Run the Pulse server and web development server together.
+Run the Pulse server together with the web servers: a Bun SSR server (always) and a Vite dev server for assets and HMR (dev mode only).
 
 ```bash
 pulse run <app_file> [options]
@@ -27,8 +27,9 @@ pulse run <app_file> [options]
 | `--prod` | flag | - | Run in production mode |
 | `--plain` | flag | - | Plain output without colors or emojis |
 | `--server-only` | flag | - | Run only the Python server |
-| `--web-only` | flag | - | Run only the web dev server |
-| `--react-server-address` | `str` | - | React server URL (required for single-server + server-only) |
+| `--web-only` | flag | - | Run only the web servers |
+| `--asset-server-address` | `str` | - | Full URL of the Vite asset dev server (required for single-server + server-only in dev) |
+| `--ssr-server-address` | `str` | - | Full URL of the SSR server (required for single-server + server-only) |
 | `--reload/--no-reload` | flag | auto | Enable/disable hot reload (auto-enabled in dev) |
 | `--find-port/--no-find-port` | flag | `True` | Auto-find available port if specified is busy |
 | `--interrupt` | flag | - | Stop an existing Pulse dev instance for this app before starting |
@@ -46,11 +47,52 @@ pulse run app.py --prod --port 3000
 # Development with specific address
 pulse run app.py --address 0.0.0.0 --port 8080
 
-# Run only backend (for separate frontend deployment)
-pulse run app.py --server-only --react-server-address http://localhost:5173
+# Run only the backend (web servers managed separately)
+pulse run app.py --server-only \
+  --asset-server-address http://localhost:5173 \
+  --ssr-server-address http://localhost:3001
 ```
 
 If another Pulse dev instance is already running for the same app, stop it first or rerun with `--interrupt`.
+
+---
+
+## pulse build
+
+Generate routes and build the web assets (client + SSR bundles).
+
+```bash
+pulse build <app_file> [options]
+```
+
+Runs codegen, verifies web dependencies, then runs the web project's build script (`vite build` for the client bundle and `vite build --ssr` for the SSR bundle). Output goes to `dist/client/` and `dist/server/` inside the web directory.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `app_file` | App target: `path/to/app.py[:var]` (default `:app`) or `module.path:var` |
+
+### Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--prod` | flag | - | Build in production mode (default) |
+| `--ci` | flag | - | Build in CI mode |
+| `--fix` | flag | - | Install missing or outdated dependencies before building |
+| `--plain` | flag | - | Plain output without colors or emojis |
+
+### Examples
+
+```bash
+# Production build (requires server_address)
+pulse build app.py
+
+# Install missing web dependencies, then build
+pulse build app.py --fix
+```
+
+`server_address` must be configured in the App constructor or via the `PULSE_SERVER_ADDRESS` environment variable. The command refuses to run while a Pulse dev server is active for the same app.
 
 ---
 
@@ -183,13 +225,21 @@ PULSE_SERVER_ADDRESS=https://api.example.com
 
 Public server address for WebSocket connections. Required in production mode.
 
-### PULSE_REACT_SERVER_ADDRESS
+### PULSE_ASSET_SERVER_ADDRESS
 
 ```bash
-PULSE_REACT_SERVER_ADDRESS=http://localhost:5173
+PULSE_ASSET_SERVER_ADDRESS=http://localhost:5173
 ```
 
-React dev server address. Used in single-server mode with `--server-only`.
+Vite asset dev server address. Set automatically by `pulse run` in dev; required in single-server mode with `--server-only` (dev only).
+
+### PULSE_SSR_SERVER_ADDRESS
+
+```bash
+PULSE_SSR_SERVER_ADDRESS=http://localhost:3001
+```
+
+SSR server address. Set automatically by `pulse run`; required in single-server mode when running the Python server yourself.
 
 ### PULSE_SECRET
 

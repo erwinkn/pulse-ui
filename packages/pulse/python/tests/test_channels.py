@@ -169,6 +169,36 @@ def test_stale_connect_during_detach_grace_is_rejected():
 	assert channel.closed is False
 
 
+def test_resume_omits_closed_channel_from_acceptance():
+	app, render, session = make_route_render()
+	sent: list[dict[str, Any]] = []
+	render.send = sent.append  # pyright: ignore[reportAttributeAccessIssue]
+	channel = create_route_channel(app, render, session, "closed-resume-channel")
+	connect_channel(render, channel)
+	channel.close()
+
+	ok = render.resume(
+		"resume-1",
+		[
+			{
+				"path": "/",
+				"routeInfo": app.routes.find("/").default_route_info(),
+				"attachId": "attach-1",
+			}
+		],
+		[{"channel": channel.id, "path": "/"}],
+	)
+
+	assert ok is True
+	assert sent[-1] == {
+		"type": "server_resume",
+		"resumeId": "resume-1",
+		"status": "ok",
+		"views": [{"path": "/", "attachId": "attach-1"}],
+		"channels": [],
+	}
+
+
 @pytest.mark.asyncio
 async def test_channel_request_resolves_on_response():
 	app = ps.App()

@@ -77,6 +77,24 @@ export interface ServerReloadMessage {
 	type: "reload";
 }
 
+export interface ServerResumeView {
+	path: string;
+	attachId?: string;
+}
+
+export interface ServerResumeChannel {
+	channel: string;
+	path: string;
+}
+
+export interface ServerResumeMessage {
+	type: "server_resume";
+	resumeId: string;
+	status: "ok" | "reload";
+	views?: ServerResumeView[];
+	channels?: ServerResumeChannel[];
+}
+
 export interface ServerAttachAckMessage {
 	type: "attach_ack";
 	path: string;
@@ -97,6 +115,7 @@ export type ServerMessage =
 	| ServerApiCallMessage
 	| ServerNavigateToMessage
 	| ServerReloadMessage
+	| ServerResumeMessage
 	| ServerAttachAckMessage
 	| ServerChannelRequestMessage
 	| ServerChannelResponseMessage
@@ -123,6 +142,24 @@ export interface ClientUpdateMessage {
 export interface ClientDetachMessage {
 	type: "detach";
 	path: string;
+}
+
+export interface ClientResumeView {
+	path: string;
+	routeInfo: RouteInfo;
+	attachId?: string;
+}
+
+export interface ClientResumeChannel {
+	channel: string;
+	path: string;
+}
+
+export interface ClientResumeMessage {
+	type: "client_resume";
+	resumeId: string;
+	views: ClientResumeView[];
+	channels: ClientResumeChannel[];
 }
 
 export interface ClientApiResultMessage {
@@ -179,6 +216,7 @@ export type ClientMessage =
 	| ClientCallbackMessage
 	| ClientUpdateMessage
 	| ClientDetachMessage
+	| ClientResumeMessage
 	| ClientApiResultMessage
 	| ClientChannelRequestMessage
 	| ClientChannelResponseMessage

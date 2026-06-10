@@ -102,6 +102,24 @@ async def test_channel_emit_sends_message():
 	assert message["payload"] == {"values": {"a": 1}}
 
 
+def test_route_bound_channel_emit_includes_path():
+	app, render, session = make_route_render()
+	channel = create_route_channel(app, render, session, "route-channel")
+	connect_channel(render, channel)
+	sent: list[dict[str, Any]] = []
+	render.send = sent.append  # pyright: ignore[reportAttributeAccessIssue]
+
+	channel.emit("setValues", {"values": {"a": 1}})
+
+	assert len(sent) == 1
+	message = sent[0]
+	assert message["type"] == "channel_message"
+	assert message["path"] == "/"
+	assert message["channel"] == channel.id
+	assert message["event"] == "setValues"
+	assert message["payload"] == {"values": {"a": 1}}
+
+
 def test_channel_emit_without_endpoint_raises_channel_closed():
 	app, render, session = make_route_render()
 	channel = create_route_channel(app, render, session, "closed-channel")
@@ -281,6 +299,7 @@ def test_client_request_without_connected_endpoint_gets_error_response():
 			"responseTo": "client-req-1",
 			"payload": None,
 			"error": "Channel has no connected client",
+			"path": "/",
 		}
 	]
 
@@ -389,6 +408,7 @@ async def test_channel_lifecycle_runs_middleware_and_denial_notifies_client():
 			"channel": channel.id,
 			"event": "__close__",
 			"payload": {"reason": "Denied"},
+			"path": "/",
 		}
 	]
 

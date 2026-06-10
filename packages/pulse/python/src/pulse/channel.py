@@ -4,7 +4,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pulse.context import PulseContext
 from pulse.messages import (
@@ -471,6 +471,11 @@ class ChannelsManager:
 			raise ChannelClosed(f"Channel '{channel.id}' is closed")
 		if not allow_unconnected and not channel.connected:
 			raise ChannelClosed("Channel has no connected client")
+		if channel.route_path is not None and "path" not in msg:
+			msg = cast(
+				ServerChannelMessage,
+				cast(object, {**msg, "path": channel.route_path}),
+			)
 		self._render_session.send(msg)
 
 

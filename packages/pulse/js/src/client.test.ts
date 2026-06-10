@@ -3,6 +3,7 @@ import React from "react";
 import { act, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { deserialize, serialize } from "./serialize/serializer";
+import type { Serialized } from "./serialize/serializer";
 
 class FakeSocket {
 	connected = false;
@@ -54,6 +55,9 @@ function makeView(pathRouteInfo = routeInfo) {
 		onUpdate: vi.fn(),
 		onJsExec: vi.fn(),
 		onServerError: vi.fn(),
+		deserializeMessage: vi.fn((data: Serialized) =>
+			deserialize(data, { coerceNullsToUndefined: true }),
+		),
 	};
 }
 
@@ -483,6 +487,137 @@ describe("PulseSocketIOClient attach ack", () => {
 			},
 		]);
 		expect(() => bridge.emit("after-refusal")).toThrow("Channel is closed");
+	});
+
+	it("deserializes js_exec with the owning view deserializer", async () => {
+		const renderNode = vi.fn(() => "route-a-node");
+		const client = await makeClient();
+		const connected = client.connect();
+		const viewA = {
+			...makeView(),
+			onJsExec: vi.fn(),
+			deserializeMessage: vi.fn((data: Serialized) =>
+				deserialize(data, {
+					coerceNullsToUndefined: true,
+					renderer: { renderNode },
+				}),
+			),
+		};
+		const viewB = {
+			...makeView(),
+			deserializeMessage: vi.fn(() => {
+				throw new Error("wrong view");
+			}),
+		};
+		client.attach("/a", viewA);
+		client.attach("/b", viewB);
+		socket.trigger("connect");
+		await connected;
+
+		socket.trigger("message", [
+			[[], [], [], [], [12]],
+			{
+				type: "js_exec",
+				path: "/a",
+				id: "exec-1",
+				expr: {
+					t: "call",
+					callee: { t: "ref", key: "fn" },
+					args: [
+						{
+							t: "lit",
+							value: {
+								tag: "$$RouteOnly",
+								props: { label: "A" },
+								children: [],
+							},
+						},
+					],
+				},
+			},
+		] satisfies Serialized);
+
+		expect(viewA.deserializeMessage).toHaveBeenCalledTimes(1);
+		expect(viewB.deserializeMessage).not.toHaveBeenCalled();
+		expect(viewA.onJsExec.mock.calls[0]![0].expr.args[0].value).toBe("route-a-node");
+		expect(renderNode).toHaveBeenCalledWith(
+			expect.objectContaining({ tag: "$$RouteOnly" }),
+		);
+	});
+
+	it("deserializes route-bound channel messages with the owning view deserializer", async () => {
+		const renderNode = vi.fn(() => "route-a-node");
+		const client = await makeClient();
+		const connected = client.connect();
+		const viewA = {
+			...makeView(),
+			deserializeMessage: vi.fn((data: Serialized) =>
+				deserialize(data, {
+					coerceNullsToUndefined: true,
+					renderer: { renderNode },
+				}),
+			),
+		};
+		const viewB = {
+			...makeView(),
+			deserializeMessage: vi.fn(() => {
+				throw new Error("wrong view");
+			}),
+		};
+		client.attach("/a", viewA);
+		client.attach("/b", viewB);
+		const bridge = client.acquireChannel("chan-1", "/view");
+		const handler = vi.fn();
+		bridge.on("ping", handler);
+		socket.trigger("connect");
+		await connected;
+
+		socket.trigger("message", [
+			[[], [], [], [], [6]],
+			{
+				type: "channel_message",
+				path: "/a",
+				channel: "chan-1",
+				event: "ping",
+				payload: {
+					content: {
+						tag: "$$RouteOnly",
+						props: { label: "A" },
+						children: [],
+					},
+				},
+			},
+		] satisfies Serialized);
+
+		expect(viewA.deserializeMessage).toHaveBeenCalledTimes(1);
+		expect(viewB.deserializeMessage).not.toHaveBeenCalled();
+		expect(handler).toHaveBeenCalledWith({ content: "route-a-node" });
+	});
+
+	it("drops unroutable channel messages with pulse nodes", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		const bridge = client.acquireChannel("chan-1", "/view");
+		const handler = vi.fn();
+		bridge.on("ping", handler);
+		socket.trigger("connect");
+		await connected;
+
+		socket.trigger("message", [
+			[[], [], [], [], [5]],
+			{
+				type: "channel_message",
+				channel: "chan-1",
+				event: "ping",
+				payload: {
+					tag: "$$RouteOnly",
+					props: { label: "A" },
+					children: [],
+				},
+			},
+		] satisfies Serialized);
+
+		expect(handler).not.toHaveBeenCalled();
 	});
 });
 

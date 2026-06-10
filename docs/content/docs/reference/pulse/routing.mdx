@@ -283,10 +283,10 @@ def navigate(
 - `path` - Target path.
 - `replace` - Replace the current history entry instead of pushing a new one.
 - `hard` - Use a full page reload instead of client-side navigation.
-- `force` - Navigate even if the route that requested navigation has unmounted.
+- `force` - Navigate even if the view that requested navigation has since unmounted or changed URL.
 
-By default, navigation from a route callback is bound to the route that requested it.
-If the user has already left that route by the time an async callback resumes, the
+By default, navigation from a callback is bound to the view that requested it.
+If the user has already left that page by the time an async callback resumes, the
 navigation is ignored. Use `force=True` only for intentionally global navigation.
 
 ```python

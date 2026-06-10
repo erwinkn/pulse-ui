@@ -733,7 +733,7 @@ class App:
 				await session.handle_response(resp)
 				return resp
 			if isinstance(result, NotFound):
-				resp = JSONResponse({"notFound": True})
+				resp = JSONResponse({"notFound": True, "redirect": self.not_found})
 				await session.handle_response(resp)
 				return resp
 

@@ -160,7 +160,7 @@ The client class is not exported—`PulseApp` constructs it from `PulseConfig`. 
 
 ## PulseView
 
-Renders a Pulse view at a specific path. This component subscribes to server updates and handles VDOM reconciliation automatically.
+Renders a Pulse view for a route. It looks up the server-rendered view for its route pattern path, attaches to it by view id over the WebSocket, and handles VDOM reconciliation automatically. Each generated route module renders one `PulseView`.
 
 ```tsx
 import { PulseView } from "pulse-ui-client";
@@ -179,7 +179,7 @@ interface PulseViewProps {
 
 | Prop | Type | Description |
 |------|------|-------------|
-| `path` | `string` | View mount path (must match server route) |
+| `path` | `string` | Route pattern path (e.g. `/users/:id`), used to find the view in the prerender payload |
 | `registry` | `Record<string, unknown>` | Component registry for mount points |
 
 ### Component Registry
@@ -203,21 +203,7 @@ function MyPage() {
 
 ### Route Integration
 
-PulseView automatically syncs with React Router. It extracts path parameters, query parameters, and hash from the current location and sends them to the server.
-
-```tsx
-import { Routes, Route } from "react-router";
-import { PulseView } from "pulse-ui-client";
-
-function AppRoutes() {
-  return (
-    <Routes>
-      <Route path="/users/:id" element={<PulseView path="/users" registry={registry} />} />
-      <Route path="/*" element={<PulseView path="/" registry={registry} />} />
-    </Routes>
-  );
-}
-```
+PulseView automatically syncs with the Pulse router. It reads path parameters, query parameters, and hash from the current location (via `useRouteInfo()`) and sends them to the server whenever they change. You normally don't render `PulseView` yourself—the generated route modules do, and `PulseRoutes` renders them at the right place in the layout hierarchy.
 
 ### Server Error Handling
 
@@ -306,8 +292,88 @@ function ContactForm() {
 
 ---
 
+## Router Components
+
+Pulse ships its own client router. These components are used by `PulseApp` and the generated code, but they're also available for custom client components.
+
+### Link
+
+Client-side navigation link with prefetching. This is what `ps.Link` renders to.
+
+```ts
+type LinkProps = AnchorHTMLAttributes<HTMLAnchorElement> & {
+  to: string;
+  /**
+   * Prefetch strategy:
+   * - "intent" (default): prefetch on hover/focus
+   * - "viewport": prefetch when the link scrolls into view
+   * - "render": prefetch as soon as the link renders
+   * - "none": never prefetch
+   */
+  prefetch?: "none" | "intent" | "render" | "viewport";
+  /** Skip client routing and let the browser load the document. */
+  reloadDocument?: boolean;
+  replace?: boolean;
+};
+```
+
+Prefetching warms both the route's JS chunks and the server-rendered views for the target URL, so the subsequent click commits instantly.
+
+```tsx
+import { Link } from "pulse-ui-client";
+
+<Link to="/dashboard" prefetch="viewport">Dashboard</Link>
+```
+
+### Outlet
+
+Renders the matched child route's element inside a layout. This is what `ps.Outlet` renders to.
+
+```tsx
+import { Outlet } from "pulse-ui-client";
+
+function Layout() {
+  return (
+    <div>
+      <nav>...</nav>
+      <Outlet />
+    </div>
+  );
+}
+```
+
+### PulseRouterProvider
+
+The router context: owns the location state machine, popstate handling, navigation sequencing, scroll restoration, and error surfacing. Rendered by `PulseApp`.
+
+```ts
+interface PulseRouterProviderProps {
+  routes: PulseRoute[];
+  routeLoaders: RouteLoaderMap;
+  /** URL of the initial request; required for SSR, optional in the browser. */
+  initialUrl?: string;
+  /** Called before a navigation commits. Throwing aborts the navigation. */
+  onNavigate?: (target: NavigationTarget) => Promise<void | (() => void)>;
+  /** Called when a link wants to prefetch a target URL. */
+  onPrefetch?: (target: NavigationTarget) => void;
+  children: ReactNode;
+}
+```
+
+### PulseRoutes
+
+Renders the matched route hierarchy (layouts wrapping the leaf route) for the current location. Rendered by `PulseApp` inside the providers.
+
+```tsx
+import { PulseRoutes } from "pulse-ui-client";
+
+<PulseRoutes />
+```
+
+---
+
 ## See Also
 
-- [Hooks](/docs/reference/pulse-client/hooks) - usePulseClient, usePulseChannel, usePulsePrerender
+- [Hooks](/docs/reference/pulse-client/hooks) - usePulseClient, usePulseChannel, router hooks
 - [Classes](/docs/reference/pulse-client/classes) - ChannelBridge, VDOMRenderer
 - [Types](/docs/reference/pulse-client/types) - TypeScript type definitions

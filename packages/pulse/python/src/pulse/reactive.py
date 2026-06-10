@@ -464,8 +464,10 @@ class Effect(Disposable):
 			child.dispose()
 		if self.cleanup_fn:
 			self.cleanup_fn()
+			self.cleanup_fn = None
 		for dep in self.deps:
 			dep.obs.remove(self)
+		self.deps = {}
 		if self.parent and self in self.parent.children:
 			self.parent.children.remove(self)
 
@@ -888,8 +890,10 @@ class AsyncEffect(Effect):
 			child.dispose()
 		if self.cleanup_fn:
 			self.cleanup_fn()
+			self.cleanup_fn = None  # pyright: ignore[reportUnannotatedClassAttribute]
 		for dep in self.deps:
 			dep.obs.remove(self)
+		self.deps = {}  # pyright: ignore[reportUnannotatedClassAttribute]
 		if self.parent and self in self.parent.children:
 			self.parent.children.remove(self)
 
@@ -1009,6 +1013,10 @@ class Batch:
 			)
 
 			for effect in current_effects:
+				# An earlier effect in this flush may have disposed or paused
+				# this one (e.g. a parent re-render unmounting a child).
+				if effect.__disposed__ or effect.paused:
+					continue
 				if not effect.should_run():
 					continue
 				try:

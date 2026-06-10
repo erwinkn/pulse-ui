@@ -43,7 +43,7 @@ async def test_socket_messages_for_render_are_serialized(
 			serialize(
 				{
 					"type": "attach",
-					"path": "/",
+					"view": "view-1",
 					"routeInfo": {
 						"pathname": "/",
 						"hash": "",
@@ -64,7 +64,7 @@ async def test_socket_messages_for_render_are_serialized(
 			serialize(
 				{
 					"type": "callback",
-					"path": "/",
+					"view": "view-1",
 					"callback": "1.onClick",
 					"args": [],
 				}
@@ -116,7 +116,7 @@ async def test_attach_sends_ack_after_route_is_attached(
 		cast(UserSession, cast(object, session)),
 		{
 			"type": "attach",
-			"path": "/",
+			"view": "view-1",
 			"routeInfo": {
 				"pathname": "/",
 				"hash": "",
@@ -129,7 +129,7 @@ async def test_attach_sends_ack_after_route_is_attached(
 		},
 	)
 
-	assert sent == [{"type": "attach_ack", "path": "/", "attachId": "attach-1"}]
+	assert sent == [{"type": "attach_ack", "view": "view-1", "attachId": "attach-1"}]
 
 
 @pytest.mark.asyncio
@@ -155,7 +155,7 @@ async def test_attach_does_not_ack_when_route_needs_reload(
 		cast(UserSession, cast(object, session)),
 		{
 			"type": "attach",
-			"path": "/",
+			"view": "view-1",
 			"routeInfo": {
 				"pathname": "/",
 				"hash": "",
@@ -192,7 +192,7 @@ async def test_socket_messages_wait_for_connect_to_finish(
 		serialize(
 			{
 				"type": "attach",
-				"path": "/",
+				"view": "view-1",
 				"routeInfo": {
 					"pathname": "/",
 					"hash": "",
@@ -209,7 +209,7 @@ async def test_socket_messages_wait_for_connect_to_finish(
 		serialize(
 			{
 				"type": "callback",
-				"path": "/",
+				"view": "view-1",
 				"callback": "1.onClick",
 				"args": [],
 			}

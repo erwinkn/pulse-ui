@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "bun:test";
 import { render, screen, waitFor } from "@testing-library/react";
 import React from "react";
-import { MemoryRouter } from "react-router";
-import { PulseProvider, PulseView, usePulseChannel, usePulseViewPath } from "./pulse";
+import { PulseProvider, PulseView, usePulseChannel, usePulseViewId } from "./pulse";
+import { PulseRouterProvider } from "./router";
 
 vi.mock("socket.io-client", () => ({
 	io: () => ({
@@ -14,18 +14,22 @@ vi.mock("socket.io-client", () => ({
 }));
 
 describe("PulseView channel hooks", () => {
-	it("provides view path context and returns null before channel effect runs", async () => {
-		const states: Array<{ path: string; channel: string | null }> = [];
+	it("provides view id context and returns null before channel effect runs", async () => {
+		const states: Array<{ viewId: string; channel: string | null }> = [];
 
 		function Probe() {
-			const path = usePulseViewPath();
+			const viewId = usePulseViewId();
 			const channel = usePulseChannel("chan-1");
-			states.push({ path, channel: channel?.id ?? null });
+			states.push({ viewId, channel: channel?.id ?? null });
 			return <div data-testid="channel">{channel?.id ?? "null"}</div>;
 		}
 
 		render(
-			<MemoryRouter initialEntries={["/test"]}>
+			<PulseRouterProvider
+				routes={[{ id: "/test", path: "test" }]}
+				routeLoaders={{}}
+				initialUrl="http://pulse.test/test"
+			>
 				<PulseProvider
 					config={{
 						serverAddress: "http://pulse.test",
@@ -40,6 +44,8 @@ describe("PulseView channel hooks", () => {
 						directives: {},
 						views: {
 							"/test": {
+								view: "view-1",
+								routePath: "/test",
 								vdom: { tag: "$$Probe" },
 							},
 						},
@@ -47,13 +53,13 @@ describe("PulseView channel hooks", () => {
 				>
 					<PulseView path="/test" registry={{ Probe }} />
 				</PulseProvider>
-			</MemoryRouter>,
+			</PulseRouterProvider>,
 		);
 
 		await waitFor(() => {
 			expect(screen.getByTestId("channel")).toHaveTextContent("chan-1");
 		});
-		expect(states[0]).toEqual({ path: "/test", channel: null });
-		expect(states.at(-1)).toEqual({ path: "/test", channel: "chan-1" });
+		expect(states[0]).toEqual({ viewId: "view-1", channel: null });
+		expect(states.at(-1)).toEqual({ viewId: "view-1", channel: "chan-1" });
 	});
 });

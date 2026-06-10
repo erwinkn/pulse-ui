@@ -36,8 +36,9 @@ def make_context(route_info: RouteInfo):
 	routes = RouteTree([route])
 	session = RenderSession("test", routes)
 	app = ps.App(routes=[route])
-	session.prerender(["/"], route_info)
-	route_ctx = session.route_mounts["/"].route
+	with ps.PulseContext(app=app, render=session):
+		session.prerender(["/"], route_info)
+	route_ctx = session.view_for_path("/").route
 	return app, session, route_ctx
 
 
@@ -60,7 +61,7 @@ class TestQueryParam:
 		session.connect(messages.append)
 
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
-			assert route_ctx.pathname in session.route_mounts
+			assert session.view_for_path(route_ctx.pathname).route is route_ctx
 			state = QState()
 			assert state.q == "hello"
 			flush_effects()
@@ -71,8 +72,8 @@ class TestQueryParam:
 		assert len(messages) == 1
 		msg = messages[0]
 		assert msg["type"] == "navigate_to"
-		assert msg.get("sourceRoutePath") == "/"
-		assert msg.get("sourcePath") == "/"
+		assert msg.get("sourceView") == session.view_for_path("/").id
+		assert msg.get("sourcePathname") == "/"
 		parsed = urlparse(str(msg["path"]))
 		query = parse_qs(parsed.query)
 		assert query["q"] == ["next"]

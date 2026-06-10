@@ -894,6 +894,42 @@ class AsyncEffect(Effect):
 			self.parent.children.remove(self)
 
 
+class RenderEffect(Effect):
+	"""Effect that re-renders a single component subtree.
+
+	The renderer attaches the component's runtime (duck-typed: anything with a
+	`path` attribute) so batches can order render effects parents-first.
+
+	Dependencies are managed exclusively by the renderer via `capture_deps`
+	around each render pass, so executing the effect does not open a tracking
+	scope of its own (the render pass shields itself with Untrack anyway).
+	"""
+
+	runtime: Any = None
+
+	@property
+	def depth(self) -> int:
+		path = getattr(self.runtime, "path", "")
+		if not path:
+			return 0
+		return path.count(".") + 1
+
+	@override
+	def _execute(self) -> None:
+		execution_epoch = epoch()
+		# Clear batch *before* running as the render may update a signal that
+		# causes this effect to be rescheduled.
+		self.batch = None  # pyright: ignore[reportUnannotatedClassAttribute]
+		try:
+			self.cleanup_fn = self.fn()  # pyright: ignore[reportUnannotatedClassAttribute]
+		except Exception as e:
+			self.handle_error(e)
+		self.runs += 1  # pyright: ignore[reportUnannotatedClassAttribute]
+		self.last_run = execution_epoch  # pyright: ignore[reportUnannotatedClassAttribute]
+		if self._interval is not None and self._interval_handle is None:
+			self._schedule_interval()
+
+
 class Batch:
 	"""Groups reactive updates to run effects once after all writes.
 
@@ -961,8 +997,18 @@ class Batch:
 			current_effects = self.effects
 			self.effects = []
 
+			# Clear batch references upfront so that cancelling or rescheduling an
+			# effect from within another effect's run targets the new queue.
 			for effect in current_effects:
 				effect.batch = None
+			# Run render effects after other effects, parents before children: a
+			# parent re-render refreshes its children's dependency snapshots, so
+			# their queued runs become no-ops instead of duplicate renders.
+			current_effects.sort(
+				key=lambda e: (1, e.depth) if isinstance(e, RenderEffect) else (0, 0)
+			)
+
+			for effect in current_effects:
 				if not effect.should_run():
 					continue
 				try:

@@ -61,7 +61,6 @@ export { VDOMRenderer } from "./renderer";
 // } from "./serialize/clean";
 export { deserialize, serialize } from "./serialize/serializer";
 // Transports (types only - implementation is internal)
-export type { MessageListener, Transport } from "./transport";
 // VDOM types and helpers
 export type {
 	ComponentRegistry,

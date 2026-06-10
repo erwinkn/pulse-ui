@@ -127,9 +127,11 @@ export interface PulseRouterProviderProps {
 	initialUrl?: string;
 	/**
 	 * Called before a navigation commits. Typically fetches the new views from
-	 * the Pulse server. Throwing aborts the navigation.
+	 * the Pulse server. Throwing aborts the navigation. May return a callback,
+	 * which runs in the same render batch as the location commit so view data
+	 * and route state swap atomically.
 	 */
-	onNavigate?: (target: NavigationTarget) => Promise<void>;
+	onNavigate?: (target: NavigationTarget) => Promise<void | (() => void)>;
 	/** Called when a link wants to prefetch a target URL. */
 	onPrefetch?: (target: NavigationTarget) => void;
 	children: ReactNode;
@@ -198,13 +200,15 @@ export function PulseRouterProvider({
 			setIsNavigating(true);
 			try {
 				await preloadRoutesForPath(routes, routeLoaders, nextLocation.pathname);
+				let commit: (() => void) | undefined;
 				if (onNavigate) {
-					await onNavigate({ location: nextLocation, match });
+					commit = (await onNavigate({ location: nextLocation, match })) ?? undefined;
 				}
 				if (seq !== navSeqRef.current) {
 					// Superseded by a newer navigation; drop this one.
 					return;
 				}
+				commit?.();
 				let popKey: string | null = null;
 				if (inBrowser) {
 					if (options.pop) {

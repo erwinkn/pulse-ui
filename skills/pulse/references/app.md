@@ -33,7 +33,6 @@ app = ps.App(
 | `internal_server_address` | `str` | `None` | Internal URL for SSR fetches |
 | `not_found` | `str` | `"/not-found"` | 404 page path |
 | `mode` | `"single-server" \| "subdomains"` | `"single-server"` | Deployment mode |
-| `proxy` | `Proxy` | `None` | Single-server proxy tuning |
 | `api_prefix` | `str` | `"/_pulse"` | API route prefix |
 | `cors` | `CORSOptions` | Auto | CORS configuration |
 | `fastapi` | `dict` | `None` | FastAPI constructor options |

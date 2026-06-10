@@ -8,3 +8,4 @@
 app/pulse
 .pulse.lock
 .pulse/
+app/pulse/

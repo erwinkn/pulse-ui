@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { deserialize, preloadRoutesForPath, type PulsePrerender } from "pulse-ui-client";
 import { renderToString } from "react-dom/server";
 import { PulseApp } from "../app/pulse/_layout";
@@ -8,6 +8,7 @@ const inProd = process.env.PULSE_ENV === "prod";
 
 type ManifestEntry = {
 	file: string;
+	isEntry?: boolean;
 	css?: string[];
 	imports?: string[];
 };
@@ -26,17 +27,17 @@ function renderPreloadLinks(manifest: Record<string, ManifestEntry>, entry: stri
 	const entryData = manifest[entry];
 	if (!entryData) return "";
 	entryData.imports?.forEach(addFile);
-	entryData.css?.forEach((file) => tags.push(`<link rel="stylesheet" href="/${file}">`));
+	for (const file of entryData.css ?? []) {
+		tags.push(`<link rel="stylesheet" href="/${file}">`);
+	}
 	return tags.join("");
 }
 
 function renderProdScripts(manifest: Record<string, ManifestEntry>, entry: string) {
 	const entryData = manifest[entry];
 	if (!entryData) return "";
-	const css = (entryData.css ?? [])
-		.map((file) => `<link rel="stylesheet" href="/${file}">`)
-		.join("");
-	return `${css}<script type="module" src="/${entryData.file}"></script>`;
+	// CSS links are emitted in <head> by renderPreloadLinks.
+	return `<script type="module" src="/${entryData.file}"></script>`;
 }
 
 function jsonForScript(value: unknown) {
@@ -66,17 +67,27 @@ export async function render(url: string, serialized: unknown) {
 	let head = "";
 	let scripts = "";
 	if (inProd) {
-		try {
-			const manifestPath = `${import.meta.dirname}/../dist/client/.vite/manifest.json`;
-			const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as Record<
-				string,
-				ManifestEntry
-			>;
-			head = renderPreloadLinks(manifest, "src/entry-client.tsx");
-			scripts = renderProdScripts(manifest, "src/entry-client.tsx");
-		} catch {
-			scripts = '<script type="module" src="/src/entry-client.tsx"></script>';
+		// The built entry runs from dist/server/; the unbuilt one from src/.
+		const manifestCandidates = [
+			`${import.meta.dirname}/../client/.vite/manifest.json`,
+			`${import.meta.dirname}/../dist/client/.vite/manifest.json`,
+		];
+		const manifestPath = manifestCandidates.find((path) => existsSync(path));
+		if (!manifestPath) {
+			throw new Error(
+				`[Pulse] Client build manifest not found (looked in: ${manifestCandidates.join(", ")}). Run the client build first.`,
+			);
 		}
+		const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as Record<
+			string,
+			ManifestEntry
+		>;
+		const entry = Object.keys(manifest).find((key) => manifest[key]!.isEntry);
+		if (!entry) {
+			throw new Error("[Pulse] No entry chunk in the client build manifest");
+		}
+		head = renderPreloadLinks(manifest, entry);
+		scripts = renderProdScripts(manifest, entry);
 	} else {
 		head = devCss;
 		scripts =

@@ -24,7 +24,7 @@ describe("VDOMRenderer", () => {
 				const key = `${path}:${id}`;
 				let bridge = bridges.get(key);
 				if (!bridge) {
-					bridge = new ChannelBridge(client, id);
+					bridge = new ChannelBridge(client, id, path);
 					bridges.set(key, bridge);
 				}
 				return bridge;

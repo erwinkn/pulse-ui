@@ -34,6 +34,12 @@ def build_context():
 	return app, render, session, real_render
 
 
+def connect_channel(real_render: ps.RenderSession, channel_id: str) -> None:
+	real_render.channels.handle_client_connect(
+		{"type": "channel_connect", "channel": channel_id, "path": "/"}
+	)
+
+
 @pytest.mark.asyncio
 async def test_combobox_store_emits_actions():
 	app, render, session, real_render = build_context()
@@ -44,6 +50,7 @@ async def test_combobox_store_emits_actions():
 		render=real_render,
 	):
 		store = ComboboxStore()
+		connect_channel(real_render, store._channel.id)
 		store.open_dropdown("keyboard")
 		store.select_option(3)
 
@@ -67,6 +74,7 @@ async def test_combobox_store_optional_payloads():
 		render=real_render,
 	):
 		store = ComboboxStore()
+		connect_channel(real_render, store._channel.id)
 		store.open_dropdown()
 		store.update_selected_option_index()
 
@@ -90,6 +98,7 @@ async def test_combobox_store_request_roundtrip():
 		render=real_render,
 	):
 		store = ComboboxStore()
+		connect_channel(real_render, store._channel.id)
 		pending = asyncio.create_task(store.get_dropdown_opened())
 
 	await asyncio.sleep(0)
@@ -134,6 +143,7 @@ async def test_combobox_store_callbacks():
 			onDropdownOpen=lambda source: opened_sources.append(source),
 			onDropdownClose=lambda source: closed_sources.append(source),
 		)
+		connect_channel(real_render, store._channel.id)
 
 	with ps.PulseContext(
 		app=app,

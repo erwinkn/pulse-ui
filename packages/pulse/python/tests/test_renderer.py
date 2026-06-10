@@ -1285,11 +1285,12 @@ async def test_ref_on_mount_uses_route_context():
 	render.connect(lambda _: None)
 	with ps.PulseContext(app=app, session=session, render=render):
 		render.prerender(["/"])
-		render.attach("/", app.routes.find("/").default_route_info())
+		view = render.view_for_path("/")
+		render.attach(view.id, app.routes.find("/").default_route_info())
 
 	assert handle is not None
 	render.channels.handle_client_connect(
-		{"type": "channel_connect", "channel": handle.channel_id, "path": "/"}
+		{"type": "channel_connect", "channel": handle.channel_id, "view": view.id}
 	)
 	render.channels.handle_client_event(
 		render=render,

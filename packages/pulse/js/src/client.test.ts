@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, mock, vi } from "bun:test";
 import React from "react";
 import { act, render } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
 import { deserialize, serialize } from "./serialize/serializer";
 import type { Serialized } from "./serialize/serializer";
 
@@ -110,7 +109,7 @@ describe("PulseSocketIOClient attach ack", () => {
 		await connected;
 
 		const attach = sentMessages()[0]!;
-		expect(attach).toMatchObject({ type: "attach", path: "/" });
+		expect(attach).toMatchObject({ type: "attach", view: "/" });
 
 		client.invokeCallback("/", "1.onClick", []);
 		expect(sentMessages()).toHaveLength(1);
@@ -119,14 +118,14 @@ describe("PulseSocketIOClient attach ack", () => {
 			"message",
 			serialize({
 				type: "attach_ack",
-				path: "/",
+				view: "/",
 				attachId: attach.attachId,
 			}),
 		);
 
 		expect(sentMessages()[1]).toMatchObject({
 			type: "callback",
-			path: "/",
+			view: "/",
 			callback: "1.onClick",
 		});
 	});
@@ -145,7 +144,7 @@ describe("PulseSocketIOClient attach ack", () => {
 			"message",
 			serialize({
 				type: "attach_ack",
-				path: "/",
+				view: "/",
 				attachId: attach.attachId,
 			}),
 		);
@@ -168,7 +167,7 @@ describe("PulseSocketIOClient attach ack", () => {
 		await connected;
 
 		expect(sentMessages()).toEqual([
-			{ type: "channel_connect", channel: "chan-1", path: "/view" },
+			{ type: "channel_connect", channel: "chan-1", view: "/view" },
 		]);
 	});
 
@@ -192,7 +191,7 @@ describe("PulseSocketIOClient attach ack", () => {
 				type: "client_resume",
 				resumeId: expect.any(String),
 				views: [],
-				channels: [{ channel: "chan-1", path: "/view" }],
+				channels: [{ channel: "chan-1", view: "/view" }],
 			},
 		]);
 		const resume = sentMessages()[0]!;
@@ -203,7 +202,7 @@ describe("PulseSocketIOClient attach ack", () => {
 				resumeId: resume.resumeId,
 				status: "ok",
 				views: [],
-				channels: [{ channel: "chan-1", path: "/view" }],
+				channels: [{ channel: "chan-1", view: "/view" }],
 			}),
 		);
 		expect(() => bridge.emit("after-reconnect")).not.toThrow();
@@ -234,7 +233,7 @@ describe("PulseSocketIOClient attach ack", () => {
 		const resume = sentMessages(secondSocket)[0]!;
 		expect(resume).toMatchObject({
 			type: "client_resume",
-			views: [{ path: "/", routeInfo }],
+			views: [{ view: "/", routeInfo }],
 		});
 		// Complete the handshake so reconnect timers are cleared for later tests.
 		secondSocket.trigger(
@@ -243,7 +242,7 @@ describe("PulseSocketIOClient attach ack", () => {
 				type: "server_resume",
 				resumeId: resume.resumeId,
 				status: "ok",
-				views: [{ path: "/", attachId: resume.views[0].attachId }],
+				views: [{ view: "/", attachId: resume.views[0].attachId }],
 				channels: [],
 			}),
 		);
@@ -379,7 +378,7 @@ describe("PulseSocketIOClient attach ack", () => {
 				type: "client_resume",
 				resumeId: expect.any(String),
 				views: [],
-				channels: [{ channel: "chan-1", path: "/view" }],
+				channels: [{ channel: "chan-1", view: "/view" }],
 			},
 		]);
 		const resume = sentMessages()[0]!;
@@ -390,7 +389,7 @@ describe("PulseSocketIOClient attach ack", () => {
 				resumeId: resume.resumeId,
 				status: "ok",
 				views: [],
-				channels: [{ channel: "chan-1", path: "/view" }],
+				channels: [{ channel: "chan-1", view: "/view" }],
 			}),
 		);
 
@@ -399,7 +398,7 @@ describe("PulseSocketIOClient attach ack", () => {
 				type: "client_resume",
 				resumeId: resume.resumeId,
 				views: [],
-				channels: [{ channel: "chan-1", path: "/view" }],
+				channels: [{ channel: "chan-1", view: "/view" }],
 			},
 		]);
 	});
@@ -416,7 +415,7 @@ describe("PulseSocketIOClient attach ack", () => {
 			"message",
 			serialize({
 				type: "attach_ack",
-				path: "/",
+				view: "/",
 				attachId: attach.attachId,
 			}),
 		);
@@ -430,7 +429,7 @@ describe("PulseSocketIOClient attach ack", () => {
 			{
 				type: "client_resume",
 				resumeId: expect.any(String),
-				views: [{ path: "/", routeInfo, attachId: attach.attachId }],
+				views: [{ view: "/", routeInfo, attachId: attach.attachId }],
 				channels: [],
 			},
 		]);
@@ -442,14 +441,14 @@ describe("PulseSocketIOClient attach ack", () => {
 				type: "server_resume",
 				resumeId: resume.resumeId,
 				status: "ok",
-				views: [{ path: "/", attachId: attach.attachId }],
+				views: [{ view: "/", attachId: attach.attachId }],
 				channels: [],
 			}),
 		);
 
 		expect(sentMessages()[1]).toMatchObject({
 			type: "callback",
-			path: "/",
+			view: "/",
 			callback: "1.onClick",
 		});
 	});
@@ -483,7 +482,7 @@ describe("PulseSocketIOClient attach ack", () => {
 				type: "client_resume",
 				resumeId: resume.resumeId,
 				views: [],
-				channels: [{ channel: "chan-1", path: "/view" }],
+				channels: [{ channel: "chan-1", view: "/view" }],
 			},
 		]);
 		expect(() => bridge.emit("after-refusal")).toThrow("Channel is closed");
@@ -518,7 +517,7 @@ describe("PulseSocketIOClient attach ack", () => {
 			[[], [], [], [], [12]],
 			{
 				type: "js_exec",
-				path: "/a",
+				view: "/a",
 				id: "exec-1",
 				expr: {
 					t: "call",
@@ -576,7 +575,7 @@ describe("PulseSocketIOClient attach ack", () => {
 			[[], [], [], [], [6]],
 			{
 				type: "channel_message",
-				path: "/a",
+				view: "/a",
 				channel: "chan-1",
 				event: "ping",
 				payload: {
@@ -632,12 +631,17 @@ describe("PulseProvider connection handling", () => {
 
 	it("handles initial connection errors without an unhandled rejection", async () => {
 		const { PulseProvider } = await import("./pulse");
+		const { PulseRouterProvider } = await import("./router");
 		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
 		render(
 			React.createElement(
-				MemoryRouter,
-				null,
+				PulseRouterProvider,
+				{
+					routes: [{ id: "/", index: true }],
+					routeLoaders: {},
+					initialUrl: "http://pulse.test/",
+				},
 				React.createElement(
 					PulseProvider,
 					{

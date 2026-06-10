@@ -5,16 +5,20 @@
 import type { RouteInfo } from "./helpers";
 import type { VDOM, VDOMNode, VDOMUpdate } from "./vdom";
 
-// Based on pulse/messages.py
+// Based on pulse/messages.py. All view-scoped messages carry the unique id of
+// the owning view (`view`).
 export interface ServerInitMessage {
 	type: "vdom_init";
-	path: string;
+	view: string;
+	// Route pattern path (e.g. "/users/:id"), used to associate the view with
+	// its generated route module.
+	routePath: string;
 	vdom: VDOM;
 }
 
 export interface ServerUpdateMessage {
 	type: "vdom_update";
-	path: string;
+	view: string;
 	ops: VDOMUpdate[];
 }
 
@@ -27,7 +31,8 @@ export interface ServerError {
 
 export interface ServerErrorMessage {
 	type: "server_error";
-	path: string;
+	// Omitted for session-level errors that are not tied to a view
+	view?: string;
 	error: ServerError;
 }
 
@@ -43,7 +48,7 @@ export interface ServerApiCallMessage {
 
 export interface ServerChannelRequestMessage {
 	type: "channel_message";
-	path?: string;
+	view?: string;
 	channel: string;
 	event: string;
 	payload?: any;
@@ -54,7 +59,7 @@ export interface ServerChannelRequestMessage {
 
 export interface ServerChannelResponseMessage {
 	type: "channel_message";
-	path?: string;
+	view?: string;
 	channel: string;
 	event?: undefined;
 	responseTo: string;
@@ -70,9 +75,8 @@ export interface ServerNavigateToMessage {
 	path: string;
 	replace: boolean;
 	hard: boolean;
-	sourceRoutePath?: string;
-	sourcePath?: string;
-	sourceMountId?: string;
+	sourceView?: string;
+	sourcePathname?: string;
 }
 
 export interface ServerReloadMessage {
@@ -80,13 +84,13 @@ export interface ServerReloadMessage {
 }
 
 export interface ServerResumeView {
-	path: string;
+	view: string;
 	attachId?: string;
 }
 
 export interface ServerResumeChannel {
 	channel: string;
-	path: string;
+	view: string;
 }
 
 export interface ServerResumeMessage {
@@ -99,13 +103,13 @@ export interface ServerResumeMessage {
 
 export interface ServerAttachAckMessage {
 	type: "attach_ack";
-	path: string;
+	view: string;
 	attachId: string;
 }
 
 export interface ServerJsExecMessage {
 	type: "js_exec";
-	path: string;
+	view: string;
 	id: string;
 	expr: VDOMNode;
 }
@@ -125,36 +129,36 @@ export type ServerMessage =
 
 export interface ClientCallbackMessage {
 	type: "callback";
-	path: string;
+	view: string;
 	callback: string;
 	args: any[];
 }
 
 export interface ClientAttachMessage {
 	type: "attach";
-	path: string;
+	view: string;
 	routeInfo: RouteInfo;
 	attachId: string;
 }
 export interface ClientUpdateMessage {
 	type: "update";
-	path: string;
+	view: string;
 	routeInfo: RouteInfo;
 }
 export interface ClientDetachMessage {
 	type: "detach";
-	path: string;
+	view: string;
 }
 
 export interface ClientResumeView {
-	path: string;
+	view: string;
 	routeInfo: RouteInfo;
 	attachId?: string;
 }
 
 export interface ClientResumeChannel {
 	channel: string;
-	path: string;
+	view: string;
 }
 
 export interface ClientResumeMessage {
@@ -198,7 +202,7 @@ export type ClientChannelMessage = ClientChannelRequestMessage | ClientChannelRe
 export interface ClientChannelConnectMessage {
 	type: "channel_connect";
 	channel: string;
-	path: string;
+	view: string;
 }
 
 export interface ClientChannelDisconnectMessage {

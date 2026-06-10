@@ -69,14 +69,14 @@ class FormRegistration:
 	Attributes:
 		id: Unique form identifier.
 		render_id: Associated render session ID.
-		route_path: Route path this form is bound to.
+		view_id: Id of the view this form is bound to.
 		session_id: Associated user session ID.
 		on_submit: Async callback for form submission.
 	"""
 
 	id: str
 	render_id: str
-	route_path: str
+	view_id: str
 	session_id: str
 	on_submit: Callable[[FormData], Awaitable[None]]
 
@@ -95,7 +95,7 @@ class FormRegistry(Disposable):
 	def register(
 		self,
 		render_id: str,
-		route_id: str,
+		view_id: str,
 		session_id: str,
 		on_submit: Callable[[FormData], Awaitable[None]],
 	) -> FormRegistration:
@@ -103,7 +103,7 @@ class FormRegistry(Disposable):
 
 		Args:
 			render_id: Render session ID.
-			route_id: Route path.
+			view_id: Id of the view the form was rendered in.
 			session_id: User session ID.
 			on_submit: Async callback for form submission.
 
@@ -113,7 +113,7 @@ class FormRegistry(Disposable):
 		registration = FormRegistration(
 			uuid.uuid4().hex,
 			render_id=render_id,
-			route_path=route_id,
+			view_id=view_id,
 			session_id=session_id,
 			on_submit=on_submit,
 		)
@@ -179,20 +179,19 @@ class FormRegistry(Disposable):
 				del data["__data__"]
 
 		try:
-			mount = self._render.get_route_mount(registration.route_path)
+			view = self._render.get_view(registration.view_id)
 		except ValueError as exc:
 			self.unregister(form_id)
 			raise HTTPException(
 				status_code=410,
-				detail="Form route is no longer mounted",
+				detail="Form view is no longer mounted",
 			) from exc
 
 		with PulseContext.update(
 			render=self._render,
-			route=mount.route,
-			source_route_path=registration.route_path,
-			source_path=mount.route.pathname,
-			source_mount_id=mount.mount_id,
+			route=view.route,
+			view=view,
+			source_pathname=view.route.pathname,
 		):
 			await call_flexible(registration.on_submit, data)
 
@@ -377,12 +376,12 @@ class ManualForm(Disposable):
 		"""
 		ctx = PulseContext.get()
 		render = ctx.render
-		route = ctx.route
+		view = ctx.view
 		session = ctx.session
 		if render is None:
 			raise RuntimeError("ManualForm must be created during a render pass")
-		if route is None:
-			raise RuntimeError("ManualForm requires an active route context")
+		if view is None:
+			raise RuntimeError("ManualForm requires an active view context")
 		if session is None:
 			raise RuntimeError("ManualForm requires an active user session")
 
@@ -391,7 +390,7 @@ class ManualForm(Disposable):
 		self._registration = render.forms.register(
 			session_id=session.sid,
 			render_id=render.id,
-			route_id=route.route_path,
+			view_id=view.id,
 			on_submit=self.wrap_on_submit(on_submit),
 		)
 

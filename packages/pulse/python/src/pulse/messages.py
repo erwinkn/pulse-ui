@@ -9,13 +9,17 @@ from pulse.transpiler.vdom import VDOM, VDOMNode, VDOMOperation
 # ====================
 class ServerInitMessage(TypedDict):
 	type: Literal["vdom_init"]
-	path: str
+	# Unique id of the view this VDOM belongs to
+	view: str
+	# Route pattern path (e.g. "/users/:id"), used by the client to associate
+	# the view with its generated route module.
+	routePath: str
 	vdom: VDOM
 
 
 class ServerUpdateMessage(TypedDict):
 	type: Literal["vdom_update"]
-	path: str
+	view: str
 	ops: list[VDOMOperation]
 
 
@@ -37,7 +41,8 @@ class ServerErrorInfo(TypedDict, total=False):
 
 class ServerErrorMessage(TypedDict):
 	type: Literal["server_error"]
-	path: str
+	# Omitted for session-level errors that are not tied to a view
+	view: NotRequired[str]
 	error: ServerErrorInfo
 
 
@@ -46,9 +51,11 @@ class ServerNavigateToMessage(TypedDict):
 	path: str
 	replace: bool
 	hard: bool
-	sourceRoutePath: NotRequired[str]
-	sourcePath: NotRequired[str]
-	sourceMountId: NotRequired[str]
+	# Origin view id + pathname captured when the navigation was requested.
+	# Route-bound navigations are dropped when the origin view is gone or its
+	# URL has changed since.
+	sourceView: NotRequired[str]
+	sourcePathname: NotRequired[str]
 
 
 class ServerReloadMessage(TypedDict):
@@ -56,13 +63,13 @@ class ServerReloadMessage(TypedDict):
 
 
 class ServerResumeView(TypedDict):
-	path: str
+	view: str
 	attachId: NotRequired[str]
 
 
 class ServerResumeChannel(TypedDict):
 	channel: str
-	path: str
+	view: str
 
 
 class ServerResumeMessage(TypedDict):
@@ -75,7 +82,7 @@ class ServerResumeMessage(TypedDict):
 
 class ServerAttachAckMessage(TypedDict):
 	type: Literal["attach_ack"]
-	path: str
+	view: str
 	attachId: str
 
 
@@ -94,7 +101,7 @@ class ServerApiCallMessage(TypedDict):
 
 class ServerChannelRequestMessage(TypedDict):
 	type: Literal["channel_message"]
-	path: NotRequired[str]
+	view: NotRequired[str]
 	channel: str
 	event: str
 	payload: Any
@@ -104,7 +111,7 @@ class ServerChannelRequestMessage(TypedDict):
 
 class ServerChannelResponseMessage(TypedDict):
 	type: Literal["channel_message"]
-	path: NotRequired[str]
+	view: NotRequired[str]
 	channel: str
 	event: None
 	responseTo: str
@@ -116,7 +123,7 @@ class ServerJsExecMessage(TypedDict):
 	"""Execute JavaScript expression on the client."""
 
 	type: Literal["js_exec"]
-	path: str
+	view: str
 	id: str
 	expr: VDOMNode
 
@@ -126,38 +133,38 @@ class ServerJsExecMessage(TypedDict):
 # ====================
 class ClientCallbackMessage(TypedDict):
 	type: Literal["callback"]
-	path: str
+	view: str
 	callback: str
 	args: list[Any]
 
 
 class ClientAttachMessage(TypedDict):
 	type: Literal["attach"]
-	path: str
+	view: str
 	routeInfo: RouteInfo
 	attachId: NotRequired[str]
 
 
 class ClientUpdateMessage(TypedDict):
 	type: Literal["update"]
-	path: str
+	view: str
 	routeInfo: RouteInfo
 
 
 class ClientDetachMessage(TypedDict):
 	type: Literal["detach"]
-	path: str
+	view: str
 
 
 class ClientResumeView(TypedDict):
-	path: str
+	view: str
 	routeInfo: RouteInfo
 	attachId: NotRequired[str]
 
 
 class ClientResumeChannel(TypedDict):
 	channel: str
-	path: str
+	view: str
 
 
 class ClientResumeMessage(TypedDict):
@@ -197,7 +204,7 @@ class ClientChannelResponseMessage(TypedDict):
 class ClientChannelConnectMessage(TypedDict):
 	type: Literal["channel_connect"]
 	channel: str
-	path: str
+	view: str
 
 
 class ClientChannelDisconnectMessage(TypedDict):
@@ -238,13 +245,13 @@ ClientPulseMessage = (
 	| ClientApiResultMessage
 	| ClientJsResultMessage
 )
-ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage
-ClientChannelLifecycleMessage = (
-	ClientChannelConnectMessage | ClientChannelDisconnectMessage
+ClientChannelMessage = (
+	ClientChannelRequestMessage
+	| ClientChannelResponseMessage
+	| ClientChannelConnectMessage
+	| ClientChannelDisconnectMessage
 )
-ClientMessage = (
-	ClientPulseMessage | ClientChannelMessage | ClientChannelLifecycleMessage
-)
+ClientMessage = ClientPulseMessage | ClientChannelMessage
 
 
 class PrerenderPayload(TypedDict):

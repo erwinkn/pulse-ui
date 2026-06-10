@@ -56,13 +56,13 @@ def build_context():
 				),
 			),
 		)
-		real_render.attach("/", route.default_route_info())
-	route_ctx = real_render.route_mounts["/"].route
+		view = real_render.view_for_path("/")
+		real_render.attach(view.id, route.default_route_info())
 
 	app.render_sessions[dummy_render.id] = real_render
 	app._render_to_user[dummy_render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
 	app.user_sessions[session.sid] = session  # pyright: ignore[reportArgumentType]
-	return app, dummy_render, session, real_render, route_ctx
+	return app, dummy_render, session, real_render, view
 
 
 def client_channel_request(message: object) -> ClientChannelRequestMessage:
@@ -70,19 +70,25 @@ def client_channel_request(message: object) -> ClientChannelRequestMessage:
 
 
 def connect_channel(real_render: ps.RenderSession, channel_id: str) -> None:
+	channel = real_render.channels._channels[channel_id]  # pyright: ignore[reportPrivateUsage]
 	real_render.channels.handle_client_connect(
-		{"type": "channel_connect", "channel": channel_id, "path": "/"}
+		{
+			"type": "channel_connect",
+			"channel": channel_id,
+			"view": channel.view_id or "",
+		}
 	)
 
 
 def test_form_recreates_channel_after_client_release():
-	app, render, session, real_render, route_ctx = build_context()
+	app, render, session, real_render, view = build_context()
 
 	with ps.PulseContext(
 		app=app,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
-		route=route_ctx,
+		route=view.route,
+		view=view,
 	):
 		form = MantineForm(
 			mode="uncontrolled",
@@ -98,7 +104,8 @@ def test_form_recreates_channel_after_client_release():
 		app=app,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
-		route=route_ctx,
+		route=view.route,
+		view=view,
 	):
 		form.render()
 		connect_channel(real_render, form._channel.id)
@@ -111,13 +118,14 @@ def test_form_recreates_channel_after_client_release():
 
 @pytest.mark.asyncio
 async def test_form_sync_handler_survives_channel_recreation():
-	app, _render, session, real_render, route_ctx = build_context()
+	app, _render, session, real_render, view = build_context()
 
 	with ps.PulseContext(
 		app=app,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
-		route=route_ctx,
+		route=view.route,
+		view=view,
 	):
 		form = MantineForm(syncMode="change", initialValues={"query": ""})
 		first_channel_id = form._channel.id  # pyright: ignore[reportPrivateUsage]
@@ -128,7 +136,8 @@ async def test_form_sync_handler_survives_channel_recreation():
 		app=app,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
-		route=route_ctx,
+		route=view.route,
+		view=view,
 	):
 		form.render()
 		connect_channel(real_render, form._channel.id)
@@ -150,13 +159,14 @@ async def test_form_sync_handler_survives_channel_recreation():
 
 
 def test_form_exposes_submit_state():
-	app, _render, session, real_render, route_ctx = build_context()
+	app, _render, session, real_render, view = build_context()
 
 	with ps.PulseContext(
 		app=app,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
-		route=route_ctx,
+		route=view.route,
+		view=view,
 	):
 		form = MantineForm()
 
@@ -169,7 +179,7 @@ def test_form_exposes_submit_state():
 
 @pytest.mark.asyncio
 async def test_submit_state_resets_after_successful_submit():
-	app, _render, session, real_render, route_ctx = build_context()
+	app, _render, session, real_render, view = build_context()
 	started = asyncio.Event()
 	release = asyncio.Event()
 	received: list[dict[str, Any]] = []
@@ -183,7 +193,8 @@ async def test_submit_state_resets_after_successful_submit():
 		app=app,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
-		route=route_ctx,
+		route=view.route,
+		view=view,
 	):
 		form = MantineForm()
 		form.render(onSubmit=handle_submit)
@@ -207,7 +218,7 @@ async def test_submit_state_resets_after_successful_submit():
 
 @pytest.mark.asyncio
 async def test_submit_accepts_registry_deserialized_data():
-	app, _render, session, real_render, route_ctx = build_context()
+	app, _render, session, real_render, view = build_context()
 	received: list[dict[str, Any]] = []
 
 	async def handle_submit(values: dict[str, Any]):
@@ -217,7 +228,8 @@ async def test_submit_accepts_registry_deserialized_data():
 		app=app,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
-		route=route_ctx,
+		route=view.route,
+		view=view,
 	):
 		form = MantineForm()
 		form.render(onSubmit=handle_submit)
@@ -231,7 +243,7 @@ async def test_submit_accepts_registry_deserialized_data():
 
 @pytest.mark.asyncio
 async def test_submit_state_resets_after_failed_submit():
-	app, _render, session, real_render, route_ctx = build_context()
+	app, _render, session, real_render, view = build_context()
 	started = asyncio.Event()
 	release = asyncio.Event()
 
@@ -244,7 +256,8 @@ async def test_submit_state_resets_after_failed_submit():
 		app=app,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
-		route=route_ctx,
+		route=view.route,
+		view=view,
 	):
 		form = MantineForm()
 		form.render(onSubmit=handle_submit)

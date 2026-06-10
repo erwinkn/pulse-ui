@@ -818,7 +818,7 @@ class App:
 			# Allow reconnects where the provided renderId no longer exists by creating a new RenderSession
 			render = self.render_sessions.get(rid)
 			if render is None:
-				# The client will try to attach to a non-existing RouteMount, which will cause a reload down the line
+				# The client will try to attach to a non-existing View, which will cause a reload down the line
 				render = self.create_render(
 					rid, session, client_address=get_client_address_socketio(environ)
 				)
@@ -862,7 +862,7 @@ class App:
 					)
 					res = _normalize_connect_response(res)
 				except Exception as exc:
-					render.report_error("/", "connect", exc)
+					render.report_error(None, "connect", exc)
 					res = Ok(None)
 				if isinstance(res, Deny):
 					# Tear down the created session if denied
@@ -986,32 +986,31 @@ class App:
 						render, session, cast(ClientPulseMessage, msg)
 					)
 			except Exception as e:
-				path = msg.get("path", "")
-				render.report_error(path, "server", e)
+				render.report_error(msg.get("view"), "server", e)
 
 	async def _handle_pulse_message(
 		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
 	) -> None:
 		async def _next() -> Ok[None]:
 			if msg["type"] == "attach":
-				attached = render.attach(msg["path"], msg["routeInfo"])
+				attached = render.attach(msg["view"], msg["routeInfo"])
 				attach_id = msg.get("attachId")
 				if attached and isinstance(attach_id, str):
 					render.send(
 						{
 							"type": "attach_ack",
-							"path": msg["path"],
+							"view": msg["view"],
 							"attachId": attach_id,
 						}
 					)
 			elif msg["type"] == "client_resume":
 				render.resume(msg["resumeId"], msg["views"], msg["channels"])
 			elif msg["type"] == "update":
-				render.update_route(msg["path"], msg["routeInfo"])
+				render.update_route(msg["view"], msg["routeInfo"])
 			elif msg["type"] == "callback":
-				render.execute_callback(msg["path"], msg["callback"], msg["args"])
+				render.execute_callback(msg["view"], msg["callback"], msg["args"])
 			elif msg["type"] == "detach":
-				render.detach(msg["path"])
+				render.detach(msg["view"])
 			elif msg["type"] == "api_result":
 				render.handle_api_result(dict(msg))
 			elif msg["type"] == "js_result":
@@ -1039,9 +1038,8 @@ class App:
 				return
 
 			if isinstance(res, Deny):
-				path = cast(str, msg.get("path", "api_response"))
 				render.report_error(
-					path,
+					msg.get("view"),
 					"server",
 					Exception("Request denied by server"),
 					{"kind": "deny"},

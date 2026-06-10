@@ -8,7 +8,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useLocation, useNavigate, useParams } from "react-router";
+import { useNavigate, useRouteInfo } from "./router";
 import {
 	createPulseChannelManager,
 	type ChannelBridge,
@@ -38,6 +38,10 @@ export interface PulseConfig {
 }
 
 export type PulsePrerenderView = {
+	// Unique id of the server-side view
+	view: string;
+	// Route pattern path (e.g. "/users/:id")
+	routePath: string;
 	vdom: VDOM;
 };
 
@@ -52,7 +56,7 @@ export type PulsePrerender = {
 // Context for the client, provided by PulseProvider
 const PulseClientContext = createContext<PulseSocketIOClient | null>(null);
 const PulsePrerenderContext = createContext<PulsePrerender | null>(null);
-export const PulseViewPathContext = createContext<string | null>(null);
+export const PulseViewIdContext = createContext<string | null>(null);
 
 export const usePulseClient = () => {
 	const client = useContext(PulseClientContext);
@@ -74,22 +78,25 @@ export const usePulsePrerender = (path: string) => {
 	return view;
 };
 
-export const usePulseViewPath = () => {
-	const path = useContext(PulseViewPathContext);
-	if (!path) {
-		throw new Error("usePulseViewPath must be used within a PulseView");
+export const usePulseViewId = () => {
+	const viewId = useContext(PulseViewIdContext);
+	if (!viewId) {
+		throw new Error("usePulseViewId must be used within a PulseView");
 	}
-	return path;
+	return viewId;
 };
 
 export function usePulseChannelManager(): PulseChannelManager {
-	const path = usePulseViewPath();
-	return usePulseChannelManagerForPath(path);
+	const viewId = usePulseViewId();
+	return usePulseChannelManagerForView(viewId);
 }
 
-export function usePulseChannelManagerForPath(path: string): PulseChannelManager {
+export function usePulseChannelManagerForView(viewId: string): PulseChannelManager {
 	const client = usePulseClient();
-	const manager = useMemo(() => createPulseChannelManager(client, path), [client, path]);
+	const manager = useMemo(
+		() => createPulseChannelManager(client, viewId),
+		[client, viewId],
+	);
 	const pendingDispose = useRef<{
 		manager: PulseChannelManager;
 		timer: ReturnType<typeof setTimeout>;
@@ -150,7 +157,7 @@ function reportConnectionError(err: unknown) {
 
 export function PulseProvider({ children, config, prerender }: PulseProviderProps) {
 	const [status, setStatus] = useState<ConnectionStatus>("ok");
-	const rrNavigate = useNavigate();
+	const navigate = useNavigate();
 	const { directives } = prerender;
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: another useEffect syncs the directives without recreating the client
@@ -158,10 +165,10 @@ export function PulseProvider({ children, config, prerender }: PulseProviderProp
 		return new PulseSocketIOClient(
 			config.serverAddress,
 			directives,
-			rrNavigate,
+			navigate,
 			config.connectionStatus,
 		);
-	}, [config.serverAddress, rrNavigate, config.connectionStatus]);
+	}, [config.serverAddress, navigate, config.connectionStatus]);
 	useEffect(() => client.setDirectives(directives), [client, directives]);
 
 	useEffect(() => {
@@ -252,42 +259,22 @@ export interface PulseViewProps {
 
 export function PulseView({ path, registry }: PulseViewProps) {
 	const client = usePulseClient();
-	const channels = usePulseChannelManagerForPath(path);
 	const initialView = usePulsePrerender(path);
+	const viewId = initialView.view;
+	const channels = usePulseChannelManagerForView(viewId);
 	const renderer = useMemo(
-		() => new VDOMRenderer(client, channels, path, registry),
-		[client, channels, path, registry],
+		() => new VDOMRenderer(client, channels, viewId, registry),
+		[client, channels, viewId, registry],
 	);
 	const [tree, setTree] = useState<ReactNode>(() => renderer.init(initialView));
 	const [serverError, setServerError] = useState<ServerError | null>(null);
 
-	const location = useLocation();
-	const params = useParams();
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies: using hacky deep equality for params
-	const routeInfo = useMemo(() => {
-		const { "*": catchall = "", ...pathParams } = params;
-		const queryParams = new URLSearchParams(location.search);
-		const query = location.search.startsWith("?")
-			? location.search.slice(1)
-			: location.search;
-		const hash = location.hash.startsWith("#")
-			? location.hash.slice(1)
-			: location.hash;
-		return {
-			hash,
-			pathname: location.pathname,
-			query,
-			queryParams: Object.fromEntries(queryParams.entries()),
-			pathParams,
-			catchall: catchall.length > 0 ? catchall.split("/") : [],
-		} satisfies RouteInfo;
-	}, [location.hash, location.pathname, location.search, JSON.stringify(params)]);
+	const routeInfo = useRouteInfo();
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: We don't want to detach on navigation, so another useEffect syncs the routeInfo on navigation.
 	useEffect(() => {
 		if (inBrowser) {
-			client.attach(path, {
+			client.attach(viewId, {
 				routeInfo,
 				onInit: (view) => {
 					setTree(renderer.init(view));
@@ -314,17 +301,17 @@ export function PulseView({ path, registry }: PulseViewProps) {
 			return () => {
 				renderer.clearPendingCallbacks();
 				renderer.dispose();
-				client.detach(path);
+				client.detach(viewId);
 			};
 		}
 		//  routeInfo is NOT included here on purpose
-	}, [client, renderer, path]);
+	}, [client, renderer, viewId]);
 
 	useEffect(() => {
 		if (inBrowser) {
-			client.updateRoute(path, routeInfo);
+			client.updateRoute(viewId, routeInfo);
 		}
-	}, [client, path, routeInfo]);
+	}, [client, viewId, routeInfo]);
 	// Hack for our current prerendering setup on client-side navigation. Will be improved soon
 	const hasRendered = useRef(false);
 	useIsomorphicLayoutEffect(() => {
@@ -345,7 +332,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 		return <ServerErrorPopup error={serverError} />;
 	}
 
-	return <PulseViewPathContext.Provider value={path}>{tree}</PulseViewPathContext.Provider>;
+	return <PulseViewIdContext.Provider value={viewId}>{tree}</PulseViewIdContext.Provider>;
 }
 
 function ServerErrorPopup({ error }: { error: ServerError }) {

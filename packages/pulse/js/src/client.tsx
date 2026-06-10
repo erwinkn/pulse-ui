@@ -17,7 +17,7 @@ import type {
 } from "./messages";
 import type { PulsePrerenderView } from "./pulse";
 import { extractEvent } from "./serialize/events";
-import { deserialize, serialize } from "./serialize/serializer";
+import { deserialize, serialize, type Serialized } from "./serialize/serializer";
 import type { VDOMUpdate } from "./vdom";
 
 function documentIsHidden(): boolean {
@@ -44,6 +44,7 @@ export interface MountedView {
 	onUpdate: (ops: VDOMUpdate[]) => void;
 	onJsExec: (msg: ServerJsExecMessage) => void;
 	onServerError: (error: ServerError) => void;
+	deserializeMessage: (data: Serialized) => ServerMessage;
 }
 export type ConnectionStatus = "ok" | "connecting" | "reconnecting" | "error";
 export type ConnectionStatusListener = (status: ConnectionStatus) => void;
@@ -267,7 +268,7 @@ export class PulseSocketIOClient {
 			// Wrap in an arrow function to avoid losing the `this` reference
 			socket.on("message", (data) => {
 				if (this.#socket !== socket) return;
-				this.#handleServerMessage(deserialize(data, { coerceNullsToUndefined: true }));
+				this.#handleSerializedServerMessage(data);
 			});
 		});
 	}
@@ -714,6 +715,97 @@ export class PulseSocketIOClient {
 		return true;
 	}
 
+	#handleSerializedServerMessage(data: Serialized): void {
+		const raw = this.#serializedPayloadObject(data);
+		if (raw) {
+			const type = raw.type;
+			if (type === "js_exec") {
+				this.#handleSerializedJsExec(data, raw);
+				return;
+			}
+			if (type === "channel_message") {
+				if (this.#handleSerializedChannelMessage(data, raw)) {
+					return;
+				}
+			}
+		}
+		this.#handleServerMessage(deserialize(data, { coerceNullsToUndefined: true }));
+	}
+
+	#handleSerializedJsExec(data: Serialized, raw: Record<string, unknown>): void {
+		const path = raw.path;
+		if (typeof path !== "string") {
+			return;
+		}
+		const view = this.#activeViews.get(path);
+		if (!view) {
+			if (typeof raw.id === "string") this.#sendJsResult(raw.id, undefined, null);
+			return;
+		}
+		this.#handleServerMessage(this.#deserializeForView(data, view, "js_exec", path));
+	}
+
+	#handleSerializedChannelMessage(
+		data: Serialized,
+		raw: Record<string, unknown>,
+	): boolean {
+		const path = raw.path;
+		if (typeof path === "string") {
+			const view = this.#activeViews.get(path);
+			if (!view) {
+				if (typeof raw.channel === "string") {
+					this.#dropChannel(
+						raw.channel,
+						new PulseChannelResetError("Channel view is no longer active"),
+					);
+				}
+				return true;
+			}
+			this.#handleServerMessage(
+				this.#deserializeForView(data, view, "channel_message", path),
+			);
+			return true;
+		}
+		if (this.#hasPulseNodes(data)) {
+			if (typeof raw.channel === "string") {
+				this.#dropChannel(
+					raw.channel,
+					new PulseChannelResetError(
+						"Route-bound channel message is missing an active view path",
+					),
+				);
+			}
+			return true;
+		}
+		return false;
+	}
+
+	#deserializeForView(
+		data: Serialized,
+		view: MountedView,
+		type: string,
+		path: string,
+	): ServerMessage {
+		try {
+			return view.deserializeMessage(data);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			throw new Error(`[Pulse] Failed to deserialize ${type} for path '${path}': ${message}`);
+		}
+	}
+
+	#serializedPayloadObject(data: Serialized): Record<string, unknown> | null {
+		const raw = data[1];
+		if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+			return null;
+		}
+		return raw as Record<string, unknown>;
+	}
+
+	#hasPulseNodes(data: Serialized): boolean {
+		return data[0][4].length > 0;
+	}
+
 	#sendAttach(path: string, routeInfo: RouteInfo, socket?: Socket): void {
 		const attachId = `${path}:${++this.#nextAttachId}`;
 		this.#activeAttachIds.set(path, attachId);
@@ -768,5 +860,12 @@ export class PulseSocketIOClient {
 			type: "channel_disconnect",
 			channel: id,
 		});
+	}
+
+	#dropChannel(id: string, reason: PulseChannelResetError): void {
+		const entry = this.#channels.get(id);
+		if (!entry) return;
+		this.#channels.delete(id);
+		entry.bridge.dispose(reason);
 	}
 }

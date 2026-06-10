@@ -29,6 +29,7 @@ class App:
         disconnect_queue_timeout: float = 300.0,
         connection_status: ConnectionStatusConfig | None = None,
         render_loop_limit: int = 50,
+        unowned_reactives: Literal["error", "warn", "ignore"] = "error",
     ): ...
 ```
 
@@ -54,6 +55,7 @@ class App:
 | `disconnect_queue_timeout` | `float` | `300.0` | Disconnected socket message queue timeout (seconds) |
 | `connection_status` | `ConnectionStatusConfig` | `None` | Connection status UI timing |
 | `render_loop_limit` | `int` | `50` | Maximum render loops before failing |
+| `unowned_reactives` | `"error" \| "warn" \| "ignore"` | `"error"` | Policy when a component render constructs Effects/States with no owner (nothing would dispose them). Use `ps.init()`, `ps.state(...)`, or `@ps.effect` instead |
 
 Framework routes live under the reserved `/_pulse/*` namespace and are not configurable.
 

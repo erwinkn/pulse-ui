@@ -701,10 +701,12 @@ class Effect(Disposable):
 
 	@contextmanager
 	def capture_deps(self, update_deps: bool | None = None):
+		"""Capture dependencies for this effect; yields the tracking Scope so
+		callers can inspect what else (effects, states) was created within."""
 		scope = Scope()
 		try:
 			with scope:
-				yield
+				yield scope
 		finally:
 			self.set_deps(scope.deps, update_deps=update_deps)
 

@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from types import NoneType
 from typing import Any, NamedTuple, TypeAlias, cast
 from typing import Literal as TypingLiteral
 
+from pulse.context import PulseContext
 from pulse.debounce import Debounced
 from pulse.helpers import values_equal
 from pulse.hooks.core import HookContext
-from pulse.reactive import RenderEffect, Untrack
+from pulse.reactive import RenderEffect, Scope, Untrack
 from pulse.refs import RefHandle
 from pulse.transpiler import Import
 from pulse.transpiler.function import Constant, JsFunction, JsxFunction
@@ -42,6 +44,44 @@ PropValue: TypeAlias = Node | Callable[..., Any] | Debounced[Any, Any] | RefHand
 FRAGMENT_TAG = ""
 MOUNT_PREFIX = "$$"
 CALLBACK_PLACEHOLDER = "$cb"
+
+logger = logging.getLogger(__name__)
+
+
+def enforce_scope_ownership(scope: Scope, component: PulseNode) -> None:
+	"""Flag Effects/States constructed during a render pass without an owner.
+
+	Everything with a designated owner is shielded from (or removed from) the
+	component's tracking scope: inline @ps.effect (inline-effects hook),
+	ps.init/ps.setup creations (their own capture scopes), ps.state factories,
+	hook-state factories, and shared/global states (Untrack). Whatever is left
+	would never be disposed, so it leaks past unmount. Policy comes from
+	App(unowned_reactives=...): "error" (default), "warn", or "ignore".
+	"""
+	if not scope.effects and not scope.states:
+		return
+	policy = PulseContext.get().app.unowned_reactives
+	if policy == "ignore":
+		return
+	component_name = component.name or getattr(component.fn, "__name__", "component")
+	created = [f"Effect '{effect.name or 'unnamed'}'" for effect in scope.effects]
+	created += [type(state).__name__ for state in scope.states]
+	message = (
+		f"Component '{component_name}' created reactive objects during render "
+		f"with no owner to dispose them: {', '.join(created)}. Create states in "
+		"`with ps.init():` or via `ps.state(...)`, and effects with `@ps.effect` "
+		"or inside a State. Configure this check with App(unowned_reactives=...)."
+	)
+	if policy == "warn":
+		logger.warning(message)
+		return
+	for effect in scope.effects:
+		if not effect.__disposed__:
+			effect.dispose()
+	for state in scope.states:
+		if not state.__disposed__:
+			state.dispose()
+	raise RuntimeError(message)
 
 
 class Callback(NamedTuple):
@@ -271,21 +311,25 @@ class Renderer:
 				unmount_element(component.contents)
 				component.contents = None
 		if runtime.effect is None:
-			runtime.effect = RenderEffect(
-				_make_component_effect(tree, runtime),
-				lazy=True,
-				name=f"render:{component.name or getattr(component.fn, '__name__', 'component')}",
-			)
+			# Untrack: the runtime owns its render effect; it must not register
+			# into the enclosing (parent) component's tracking scope.
+			with Untrack():
+				runtime.effect = RenderEffect(
+					_make_component_effect(tree, runtime),
+					lazy=True,
+					name=f"render:{component.name or getattr(component.fn, '__name__', 'component')}",
+				)
 			runtime.effect.runtime = runtime
 		if component.hooks is None:
 			component.hooks = HookContext()
 		# Untrack shields the enclosing component's scope: this component's
 		# reads (and its effect) must not become dependencies of its parent.
 		with Untrack():
-			with runtime.effect.capture_deps(update_deps=True):
+			with runtime.effect.capture_deps(update_deps=True) as scope:
 				with component.hooks:
 					rendered = component.fn(*component.args, **component.kwargs)
 				vdom, normalized_child = self.render_tree(rendered, path)
+			enforce_scope_ownership(scope, component)
 		runtime.effect.runs += 1
 		component.contents = normalized_child
 		return vdom, component
@@ -393,11 +437,14 @@ class Renderer:
 		runtime.node = current
 		runtime.path = path
 		if runtime.effect is None:
-			runtime.effect = RenderEffect(
-				_make_component_effect(tree, runtime),
-				lazy=True,
-				name=f"render:{current.name or getattr(current.fn, '__name__', 'component')}",
-			)
+			# Untrack: the runtime owns its render effect; it must not register
+			# into the enclosing (parent) component's tracking scope.
+			with Untrack():
+				runtime.effect = RenderEffect(
+					_make_component_effect(tree, runtime),
+					lazy=True,
+					name=f"render:{current.name or getattr(current.fn, '__name__', 'component')}",
+				)
 			runtime.effect.runtime = runtime
 		else:
 			# This pass re-renders the component now; a queued standalone run
@@ -405,7 +452,7 @@ class Renderer:
 			runtime.effect.cancel(cancel_interval=False)
 
 		with Untrack():
-			with runtime.effect.capture_deps(update_deps=True):
+			with runtime.effect.capture_deps(update_deps=True) as scope:
 				with current.hooks:
 					rendered = current.fn(*current.args, **current.kwargs)
 
@@ -419,6 +466,7 @@ class Renderer:
 					current.contents = self.reconcile_tree(
 						current.contents, rendered, path
 					)
+			enforce_scope_ownership(scope, current)
 		runtime.effect.runs += 1
 
 		return current
@@ -431,7 +479,7 @@ class Renderer:
 		if component.hooks is None:
 			component.hooks = HookContext()
 		with Untrack():
-			with runtime.effect.capture_deps(update_deps=True):
+			with runtime.effect.capture_deps(update_deps=True) as scope:
 				with component.hooks:
 					rendered = component.fn(*component.args, **component.kwargs)
 				if component.contents is None:
@@ -444,6 +492,7 @@ class Renderer:
 					component.contents = self.reconcile_tree(
 						component.contents, rendered, path
 					)
+			enforce_scope_ownership(scope, component)
 		runtime.effect.runs += 1
 
 	def reconcile_element(

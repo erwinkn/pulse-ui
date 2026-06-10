@@ -12,6 +12,8 @@ export default defineConfig(({ isSsrBuild }) => ({
 			pulse: resolve(__dirname, "app", "pulse"),
 		},
 		conditions: ["@pulse/source", "module", "browser", "development|production"],
+		// Workspace-linked pulse packages must share this app's React copy
+		dedupe: ["react", "react-dom"],
 	},
 	ssr: {
 		noExternal: [/^pulse-/],

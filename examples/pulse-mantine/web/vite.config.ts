@@ -11,6 +11,18 @@ export default defineConfig(({ isSsrBuild }) => ({
 			pulse: resolve(__dirname, "app", "pulse"),
 		},
 		conditions: ["@pulse/source", "module", "browser", "development|production"],
+		// Workspace-linked pulse packages must share this app's React and
+		// Mantine copies (context providers break across duplicates)
+		dedupe: [
+			"react",
+			"react-dom",
+			"@mantine/core",
+			"@mantine/hooks",
+			"@mantine/form",
+			"@mantine/dates",
+			"@mantine/charts",
+			"@mantine/notifications",
+		],
 	},
 	ssr: {
 		noExternal: [/^pulse-/],

@@ -55,6 +55,24 @@ class ServerReloadMessage(TypedDict):
 	type: Literal["reload"]
 
 
+class ServerResumeView(TypedDict):
+	path: str
+	attachId: NotRequired[str]
+
+
+class ServerResumeChannel(TypedDict):
+	channel: str
+	path: str
+
+
+class ServerResumeMessage(TypedDict):
+	type: Literal["server_resume"]
+	resumeId: str
+	status: Literal["ok", "reload"]
+	views: NotRequired[list[ServerResumeView]]
+	channels: NotRequired[list[ServerResumeChannel]]
+
+
 class ServerAttachAckMessage(TypedDict):
 	type: Literal["attach_ack"]
 	path: str
@@ -129,6 +147,24 @@ class ClientDetachMessage(TypedDict):
 	path: str
 
 
+class ClientResumeView(TypedDict):
+	path: str
+	routeInfo: RouteInfo
+	attachId: NotRequired[str]
+
+
+class ClientResumeChannel(TypedDict):
+	channel: str
+	path: str
+
+
+class ClientResumeMessage(TypedDict):
+	type: Literal["client_resume"]
+	resumeId: str
+	views: list[ClientResumeView]
+	channels: list[ClientResumeChannel]
+
+
 class ClientApiResultMessage(TypedDict):
 	type: Literal["api_result"]
 	id: str
@@ -184,6 +220,7 @@ ServerMessage = (
 	| ServerApiCallMessage
 	| ServerNavigateToMessage
 	| ServerReloadMessage
+	| ServerResumeMessage
 	| ServerAttachAckMessage
 	| ServerChannelMessage
 	| ServerJsExecMessage
@@ -195,6 +232,7 @@ ClientPulseMessage = (
 	| ClientAttachMessage
 	| ClientUpdateMessage
 	| ClientDetachMessage
+	| ClientResumeMessage
 	| ClientApiResultMessage
 	| ClientJsResultMessage
 )

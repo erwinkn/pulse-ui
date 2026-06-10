@@ -93,16 +93,6 @@ export class VDOMRenderer {
 		return new VDOMRenderer(client, channels, "", registry);
 	}
 
-	static snapshot(registry: ComponentRegistry = {}): VDOMRenderer {
-		const client = {
-			invokeCallback() {},
-			_ensureChannelEntry(channelId: string) {
-				throw new Error(`[Pulse] Snapshot VDOM cannot bind ref channel '${channelId}'`);
-			},
-		} as unknown as PulseSocketIOClient;
-		return new VDOMRenderer(client, "", registry);
-	}
-
 	getObject(key: string): unknown {
 		const obj = (this.#registry as any)[key];
 		if (obj === undefined) {

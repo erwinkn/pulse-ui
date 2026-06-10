@@ -2,7 +2,7 @@
 title: "Routing"
 ---
 
-Pulse uses client-side routing to create fast, seamless navigation between pages. Routes are defined on your `App` and rendered using React Router under the hood.
+Pulse uses client-side routing to create fast, seamless navigation between pages. Routes are defined on your `App` in Python—that route tree is the single source of truth. Pulse ships its own router in the React client and generates a matching route manifest for it, so you never define routes in two places.
 
 ## Defining routes
 
@@ -111,6 +111,34 @@ Use `ps.Link` for declarative navigation. It renders an `<a>` tag that handles c
 ps.Link("Go to About", to="/about")
 ps.Link("User Profile", to="/users/123", className="nav-link")
 ```
+
+`ps.Link` accepts a few options:
+
+| Prop | Default | Description |
+|------|---------|-------------|
+| `to` | required | Target URL path |
+| `prefetch` | `"intent"` | When to prefetch the target page (see below) |
+| `replace` | `None` | Replace the current history entry instead of pushing |
+| `reloadDocument` | `None` | Skip client routing and do a full page load |
+
+### Prefetching
+
+Links prefetch their target page before the user clicks, making navigation feel instant. Prefetching warms up two things: the JavaScript chunks for the target route, and the server-rendered content for the page (the server renders it ahead of time and keeps it briefly cached). The `prefetch` prop controls when this happens:
+
+| Mode | Behavior |
+|------|----------|
+| `"intent"` (default) | Prefetch when the user hovers or focuses the link |
+| `"viewport"` | Prefetch when the link scrolls into view |
+| `"render"` | Prefetch as soon as the link renders |
+| `"none"` | Never prefetch |
+
+The default works well for most apps. Use `"viewport"` or `"render"` for links you're confident the user will click (like primary navigation), and `"none"` for links to expensive pages you don't want rendered speculatively.
+
+### How navigation works
+
+When a user clicks a link, the client sends a navigation request to the server over the existing WebSocket connection. The server matches the URL against your Python route tree, renders the pages for the new location, and sends them back—no extra HTTP round trips.
+
+A useful consequence: routes that remain matched after navigation are *reused*, not re-rendered. If a user navigates from `/dashboard/analytics` to `/dashboard/settings`, the dashboard layout (and any state it holds) survives the navigation untouched—only the new child route renders fresh. Navigations that change only the query string or hash skip the render round trip entirely; the existing page just receives the updated route info.
 
 ### Programmatic navigation
 

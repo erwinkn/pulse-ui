@@ -47,9 +47,9 @@ class NotificationProps(  # pyright: ignore[reportIncompatibleVariableOverride]
 	"""Controls notification line or icon color"""
 	radius: MantineRadius
 	"""Controls notification border radius"""
-	icon: ps.Element
+	icon: ps.Node
 	"""Notification icon, replaces color line"""
-	title: ps.Element  # pyright: ignore[reportIncompatibleVariableOverride]
+	title: ps.Node  # pyright: ignore[reportIncompatibleVariableOverride]
 	"""Notification title, displayed above the message body"""
 	loading: bool
 	"""If set, the Loader component is displayed instead of the icon"""
@@ -149,8 +149,8 @@ NotificationPosition = Literal[
 class NotificationDataWithoutId(NotificationProps, total=False):
 	id: str
 	"""Notification id, can be used to close or update notification"""
-	message: Required[str]
-	"""Main notification message. Real API also supports nodes, but we can't handle that yet."""
+	message: Required[ps.Node]
+	"""Main notification message"""
 	position: NotificationPosition
 	"""Notification position"""
 	autoClose: int | bool

@@ -658,7 +658,7 @@ type MessageListener = (message: ServerMessage) => void;
 Wire format for serialized data.
 
 ```ts
-type Serialized = [[number[], number[], number[], number[]], PlainJSON];
+type Serialized = [[number[], number[], number[], number[], number[]], PlainJSON];
 ```
 
 ### PlainJSON
@@ -678,6 +678,8 @@ Options for deserialization.
 ```ts
 interface DeserializationOptions {
   coerceNullsToUndefined?: boolean;
+  registry?: ComponentRegistry;
+  renderer?: Pick<VDOMRenderer, "renderNode">;
 }
 ```
 

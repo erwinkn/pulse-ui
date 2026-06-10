@@ -1,9 +1,13 @@
+import type { ReactNode } from "react";
+import { VDOMRenderer } from "../renderer";
+import type { ComponentRegistry, VDOMNode } from "../vdom";
+
 export type Primitive = number | string | boolean | null | undefined;
 export type JSON<T> = T | Array<JSON<T>> | { [K: string]: JSON<T> };
 export type PlainJSON = JSON<Primitive>;
 export type Serializable = any;
 
-export type Serialized = [[number[], number[], number[], number[]], PlainJSON];
+export type Serialized = [[number[], number[], number[], number[], number[]], PlainJSON];
 
 export function serialize(data: Serializable): Serialized {
 	const seen = new Map<any, number>();
@@ -11,11 +15,13 @@ export function serialize(data: Serializable): Serialized {
 	const dates: number[] = [];
 	const sets: number[] = [];
 	const maps: number[] = [];
+	const pulseNodes: number[] = [];
 
-	// Single global counter - increments once per node visit
+	// Single global counter - increments once per payload slot visit
 	let globalIndex = 0;
 
 	function process(value: Serializable, context?: string): PlainJSON {
+		const idx = globalIndex++;
 		if (value == null || typeof value === "string" || typeof value === "boolean") {
 			return value;
 		}
@@ -34,7 +40,6 @@ export function serialize(data: Serializable): Serialized {
 			return value;
 		}
 
-		const idx = globalIndex++;
 		const prevRef = seen.get(value);
 		if (prevRef !== undefined) {
 			// Make sure to push the current index, but use the ref's index as the value!
@@ -93,33 +98,60 @@ export function serialize(data: Serializable): Serialized {
 	}
 
 	const payload = process(data);
-	return [[refs, dates, sets, maps], payload];
+	return [[refs, dates, sets, maps, pulseNodes], payload];
 }
 
 export interface DeserializationOptions {
 	coerceNullsToUndefined?: boolean;
+	registry?: ComponentRegistry;
+	renderer?: Pick<VDOMRenderer, "renderNode">;
 }
 
 export function deserialize<Data extends Serializable = Serializable>(
 	payload: Serialized,
 	options?: DeserializationOptions,
 ): Data {
-	const [[refsA, datesA, setsA, mapsA], data] = payload;
+	const [metadata, data] = payload;
+	const [refsA, datesA, setsA, mapsA, pulseNodesA] = metadata;
 
 	const refs = new Set(refsA);
 	const dates = new Set(datesA);
 	const sets = new Set(setsA);
 	const maps = new Set(mapsA);
+	const pulseNodes = new Set(pulseNodesA);
+	const pulseRenderer = options?.renderer
+		? options.renderer
+		: options?.registry
+			? VDOMRenderer.snapshot(options.registry)
+			: undefined;
+	if (pulseNodes.size > 0 && !pulseRenderer) {
+		throw new Error("[Pulse] Payload contains VDOM nodes but no renderer or registry was provided");
+	}
 
 	const objects: Array<any> = [];
+	let globalIndex = 0;
 
 	function reconstruct(value: PlainJSON): any {
-		const idx = objects.length;
+		const idx = globalIndex++;
+		const shouldRenderPulseNode = pulseNodes.has(idx);
 		if (refs.has(idx)) {
-			// We increment the counter on refs during serialization. We're never
-			// going to use this entry, so we can just push null.
-			objects.push(null);
-			return objects[value as number];
+			if (typeof value !== "number") {
+				throw new Error("Reference payload must be a numeric index");
+			}
+			objects[idx] = null;
+			if (!(value in objects)) {
+				throw new Error(`Dangling reference to index ${value}`);
+			}
+			return objects[value];
+		}
+
+		function finish(result: any) {
+			if (!shouldRenderPulseNode) {
+				return result;
+			}
+			const node = pulseRenderer!.renderNode(result as VDOMNode) as ReactNode;
+			objects[idx] = node;
+			return node;
 		}
 
 		if (dates.has(idx)) {
@@ -130,23 +162,21 @@ export function deserialize<Data extends Serializable = Serializable>(
 			if (literal) {
 				const [y, m, d] = literal;
 				const dt = new Date(Date.UTC(y, m - 1, d));
-				objects.push(dt);
+				objects[idx] = dt;
 				return dt;
 			}
 			if (isDateLiteral(value)) {
 				throw new Error(`Invalid date literal: ${value}`);
 			}
 			const dt = new Date(value);
-			objects.push(dt);
+			objects[idx] = dt;
 			return dt;
 		}
 
-		if (
-			value == null ||
-			typeof value === "number" ||
-			typeof value === "string" ||
-			typeof value === "boolean"
-		) {
+		if (isPrimitive(value)) {
+			if (shouldRenderPulseNode) {
+				throw new Error("Pulse node payload must be a VDOM node");
+			}
 			if (options?.coerceNullsToUndefined) {
 				return value ?? undefined;
 			}
@@ -156,48 +186,57 @@ export function deserialize<Data extends Serializable = Serializable>(
 		if (Array.isArray(value)) {
 			if (sets.has(idx)) {
 				const result = new Set();
-				objects.push(result);
+				objects[idx] = result;
 				for (let i = 0; i < value.length; i++) {
 					result.add(reconstruct(value[i]));
 				}
-				return result;
+				return finish(result);
 			}
 
 			const length = value.length;
 			const arr = new Array(length);
-			objects.push(arr);
+			objects[idx] = arr;
 			for (let i = 0; i < length; i++) {
 				arr[i] = reconstruct(value[i]);
 			}
-			return arr;
+			return finish(arr);
 		}
 
 		if (typeof value === "object") {
 			if (maps.has(idx)) {
 				const result = new Map<string, any>();
-				objects.push(result);
+				objects[idx] = result;
 				const keys = Object.keys(value);
 				for (let i = 0; i < keys.length; i++) {
 					const key = keys[i];
 					result.set(key, reconstruct(value[key]));
 				}
-				return result;
+				return finish(result);
 			}
 
 			const result: Record<string, any> = {};
-			objects.push(result);
+			objects[idx] = result;
 			const keys = Object.keys(value);
 			for (let i = 0; i < keys.length; i++) {
 				const key = keys[i];
 				result[key] = reconstruct(value[key]);
 			}
-			return result;
+			return finish(result);
 		}
 
 		throw new Error(`Unsupported value in deserialization: ${value}`);
 	}
 
 	return reconstruct(data);
+}
+
+function isPrimitive(value: PlainJSON): value is Primitive {
+	return (
+		value == null ||
+		typeof value === "number" ||
+		typeof value === "string" ||
+		typeof value === "boolean"
+	);
 }
 
 const DATE_LITERAL_RE = /^\d{4}-\d{2}-\d{2}$/;

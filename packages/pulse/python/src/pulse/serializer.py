@@ -38,7 +38,7 @@ import types
 from dataclasses import fields, is_dataclass
 from typing import Any, TypeAlias
 
-from pulse.renderer import Renderer
+from pulse.renderer import Renderer, unmount_element
 from pulse.transpiler.nodes import Element, Expr, PulseNode, Value, clone_renderable
 
 Primitive = int | float | str | bool | None
@@ -132,10 +132,14 @@ def serialize(data: Any) -> Serialized:
 			raise TypeError(f"Unsupported value in serialization: {type(value)!r}")
 
 		pulse_payload = None
-		if isinstance(value, Element):
-			pulse_payload = clone_renderable(value).render(Renderer(mode="snapshot"))
-		elif isinstance(value, PulseNode):
-			pulse_payload = clone_renderable(value).render(Renderer(mode="snapshot"))
+		if isinstance(value, (Element, PulseNode)):
+			# Snapshot-render a clone, then unmount it: hooks (and any effects
+			# created during the render) must not outlive the one-shot VDOM.
+			clone = clone_renderable(value)
+			try:
+				pulse_payload = clone.render(Renderer(mode="snapshot"))
+			finally:
+				unmount_element(clone)
 		elif isinstance(value, Expr):
 			pulse_payload = value.render()
 

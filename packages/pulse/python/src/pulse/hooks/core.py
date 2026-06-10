@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Generic, Literal, TypeVar, override
 
 from pulse.helpers import Disposable, call_flexible
+from pulse.reactive import Untrack
 
 logger = logging.getLogger(__name__)
 
@@ -194,10 +195,15 @@ class HookNamespace(Generic[T]):
 		normalized = self._normalize_key(key)
 		state = self.states.get(normalized)
 		if state is None:
-			created = call_flexible(
-				self.hook.factory,
-				HookInit(definition=self.hook, render_cycle=ctx.render_cycle, key=key),
-			)
+			# Shield the factory from the ambient scope: the hook state owns
+			# whatever reactives it creates and disposes them itself.
+			with Untrack():
+				created = call_flexible(
+					self.hook.factory,
+					HookInit(
+						definition=self.hook, render_cycle=ctx.render_cycle, key=key
+					),
+				)
 			if inspect.isawaitable(created):
 				raise HookError(
 					f"Hook factory '{self.hook.name}' returned an awaitable; "

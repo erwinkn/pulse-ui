@@ -5,7 +5,7 @@ from typing import Any, TypeVar, override
 
 from pulse.component import is_component_code
 from pulse.hooks.core import HookMetadata, HookState, hooks
-from pulse.reactive import Untrack
+from pulse.reactive import REACTIVE_CONTEXT, Untrack
 from pulse.state.state import State
 
 S = TypeVar("S", bound=State)
@@ -43,6 +43,15 @@ class StateHookState(HookState):
 		key: str | None,
 		arg: State | Callable[[], State],
 	) -> State:
+		if isinstance(arg, State):
+			# The hook claims instances passed directly (adopting or disposing
+			# them), so the ambient scope must not own them too.
+			scope = REACTIVE_CONTEXT.get().scope
+			if scope is not None:
+				for index, candidate in enumerate(scope.states):
+					if candidate is arg:
+						del scope.states[index]
+						break
 		full_identity = self._make_key(identity, key)
 		if full_identity in self.called_keys:
 			if key is None:

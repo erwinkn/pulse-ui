@@ -361,10 +361,9 @@ def build(
 		raise typer.Exit(1)
 
 	addr = app.server_address or "http://localhost:8000"
-	internal_address = app.internal_server_address or addr
 
 	try:
-		app.run_codegen(addr, internal_address)
+		app.run_codegen(addr)
 	except Exception:
 		logger.error("Failed to generate routes")
 		logger.print_exception()

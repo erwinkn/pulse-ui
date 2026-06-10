@@ -147,7 +147,6 @@ class Codegen:
 	def generate_all(
 		self,
 		server_address: str,
-		internal_server_address: str | None = None,
 		connection_status: "ConnectionStatusConfig | None" = None,
 	):
 		# Ensure generated files are gitignored
@@ -161,11 +160,7 @@ class Codegen:
 		# Keep track of all generated files
 		generated_files = set(
 			[
-				self.generate_layout_tsx(
-					server_address,
-					internal_server_address,
-					connection_status,
-				),
+				self.generate_layout_tsx(server_address, connection_status),
 				self.generate_routes_ts(),
 				*(
 					self.generate_route(route, server_address=server_address)
@@ -217,7 +212,6 @@ class Codegen:
 	def generate_layout_tsx(
 		self,
 		server_address: str,
-		internal_server_address: str | None = None,
 		connection_status: "ConnectionStatusConfig | None" = None,
 	):
 		"""Generates the content of _layout.tsx"""
@@ -227,7 +221,6 @@ class Codegen:
 		content = str(
 			LAYOUT_TEMPLATE.render_unicode(
 				server_address=server_address,
-				internal_server_address=internal_server_address or server_address,
 				api_prefix=FRAMEWORK_API_PREFIX,
 				connection_status=connection_status,
 			)

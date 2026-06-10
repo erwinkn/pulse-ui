@@ -215,8 +215,6 @@ class App:
 		server_address: Public server URL. Used only in ci/prod.
 		dev_server_address: Development server URL. Defaults to
 			"http://localhost:8000".
-		internal_server_address: Internal URL for server-side loader fetches.
-			Falls back to server_address if not provided.
 		not_found: Path for 404 page. Defaults to "/not-found".
 		mode: Deployment mode - "single-server" (default) or "subdomains".
 			Framework endpoints are always mounted under the reserved `/_pulse/*`
@@ -256,7 +254,6 @@ class App:
 	status: AppStatus
 	server_address: str | None
 	dev_server_address: str
-	internal_server_address: str | None
 	api_prefix: str
 	plugins: list[Plugin]
 	routes: RouteTree
@@ -302,7 +299,6 @@ class App:
 		session_store: SessionStore | CookieSessionStore | None = None,
 		server_address: str | None = None,
 		dev_server_address: str = "http://localhost:8000",
-		internal_server_address: str | None = None,
 		not_found: str = "/not-found",
 		# Deployment and integration options
 		mode: PulseMode = "single-server",
@@ -322,8 +318,6 @@ class App:
 		self.server_address = server_address if self.env in ("ci", "prod") else None
 		# Development server address (used in dev mode)
 		self.dev_server_address = dev_server_address
-		# Optional internal address used by server-side loader fetches
-		self.internal_server_address = internal_server_address
 		self.asset_server_address = None
 		self.ssr_server_address = None
 
@@ -462,9 +456,7 @@ class App:
 			except Exception:
 				logger.exception("Error during SessionStore.close()")
 
-	def run_codegen(
-		self, address: str | None = None, internal_address: str | None = None
-	) -> None:
+	def run_codegen(self, address: str | None = None) -> None:
 		"""Generate web code for all routes.
 
 		Generates TypeScript/JSX files for the Pulse web runtime based on
@@ -472,27 +464,22 @@ class App:
 
 		Args:
 			address: Public server address. Updates server_address if provided.
-			internal_address: Internal server address for SSR fetches. Updates
-				internal_server_address if provided.
 
 		Raises:
 			RuntimeError: If no server address is available (neither passed
-				as argument nor set on the App instance).
+			as argument nor set on the App instance).
 		"""
 		# Allow the CLI to disable codegen in specific scenarios (e.g., prod server-only)
 		if envvars.codegen_disabled:
 			return
 		if address:
 			self.server_address = address
-		if internal_address:
-			self.internal_server_address = internal_address
 		if not self.server_address:
 			raise RuntimeError(
 				"Please provide a server address to the App constructor or the Pulse CLI."
 			)
 		self.codegen.generate_all(
 			self.server_address,
-			self.internal_server_address or self.server_address,
 			connection_status=self.connection_status,
 		)
 
@@ -527,9 +514,7 @@ class App:
 			else:
 				server_address = self.dev_server_address
 
-		# Use internal server address for server-side loader if provided; fallback to public
-		internal_address = self.internal_server_address or server_address
-		self.run_codegen(server_address, internal_address)
+		self.run_codegen(server_address)
 		self.setup(server_address)
 		self.status = AppStatus.running
 

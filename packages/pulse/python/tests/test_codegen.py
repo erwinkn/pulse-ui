@@ -45,7 +45,6 @@ class TestCodegen:
 		assert "const __registry = {" in result
 		assert 'export const path = "/simple"' in result
 		assert "export const registry = __registry" in result
-		assert "export function headers" in result
 		assert "export default function RouteComponent()" in result
 		assert "registry={__registry}" in result
 		assert "path={path}" in result
@@ -324,7 +323,6 @@ class TestGenerateRoute:
 		assert 'export const path = "/test"' in result
 		assert "export const registry = __registry" in result
 		assert "export default function RouteComponent()" in result
-		assert "export function headers" in result
 		assert "const __registry = {" in result
 
 	def test_generate_route_with_component(self):

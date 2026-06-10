@@ -333,14 +333,4 @@ export default function RouteComponent() {{
 }}''')
 		output_parts.append("")
 
-		# Headers function
-		output_parts.append("""// Action and loader headers are not returned automatically
-function hasAnyHeaders(headers) {
-  return [...headers].length > 0;
-}
-
-export function headers({ actionHeaders, loaderHeaders }) {
-  return hasAnyHeaders(actionHeaders) ? actionHeaders : loaderHeaders;
-}""")
-
 		return "\n".join(output_parts)

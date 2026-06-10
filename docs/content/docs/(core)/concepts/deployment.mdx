@@ -8,14 +8,14 @@ Pulse apps are Python backends that communicate with React frontends over WebSoc
 
 ## Code generation
 
-Pulse generates React Router files that connect your Python routes to the React frontend. This happens automatically during development and can be triggered manually for production builds.
+Pulse generates the React files that connect your Python routes to the frontend. This happens automatically during development and can be triggered manually for production builds.
 
 ### How it works
 
 When you run `pulse run app.py`, Pulse:
 
 1. Reads your route definitions from the `App` object
-2. Generates React Router configuration files in your web directory
+2. Generates a route manifest (`routes.ts`) mirroring your Python route tree, with one code-split module per route
 3. Creates route components that connect to the Pulse server
 4. Copies any local assets referenced by `Import` or `DynamicImport`
 

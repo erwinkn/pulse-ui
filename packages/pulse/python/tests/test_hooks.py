@@ -526,3 +526,37 @@ def test_externally_disposed_hook_state_is_surfaced_on_unmount(
 		"Error disposing hook 'pulse:core.state'" in record.getMessage()
 		for record in caplog.records
 	)
+
+
+def test_setup_owned_state_disposed_elsewhere_is_surfaced(
+	caplog: pytest.LogCaptureFixture,
+):
+	import logging
+
+	from pulse.renderer import RenderTree
+
+	captured: list[DummyState] = []
+
+	@ps.component
+	def Comp():
+		def _init():
+			st = DummyState()
+			captured.append(st)
+			return st
+
+		ps.setup(_init)
+		return ps.div()
+
+	tree = RenderTree(Comp())
+	tree.render()
+
+	# Forbidden: the setup initializer owns this state.
+	captured[0].dispose()
+
+	with caplog.at_level(logging.ERROR, logger="pulse.hooks.core"):
+		tree.unmount()
+
+	assert any(
+		"Error disposing hook 'pulse:core.setup'" in record.getMessage()
+		for record in caplog.records
+	)

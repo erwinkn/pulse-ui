@@ -523,3 +523,67 @@ def test_init_does_not_own_shared_states() -> None:
 
 	GLOBAL_STATES.pop("test-init-shared|x", None)
 	seen[0].dispose()
+
+
+def test_init_parent_child_state_composition_disposes_cleanly() -> None:
+	"""A parent state disposing a child it holds as an attribute must not be
+	flagged: both are captured by the init scope, and whichever the entry
+	disposes first cascades into the other."""
+	from pulse.renderer import RenderTree
+
+	class Child(ps.State):
+		value: int = 0
+
+	class Parent(ps.State):
+		def __init__(self, child: Child):
+			self._child: Child = child
+
+	created: list[Any] = []
+
+	@ps.component
+	def Comp():
+		with ps.init():
+			child = Child()
+			parent = Parent(child)
+		created.append((child, parent))
+		return ps.div()
+
+	tree = RenderTree(Comp())
+	tree.render()
+	tree.unmount()
+	child, parent = created[0]
+	assert child.__disposed__ and parent.__disposed__
+
+
+def test_init_owned_state_disposed_elsewhere_is_surfaced(
+	caplog: pytest.LogCaptureFixture,
+) -> None:
+	import logging
+
+	from pulse.renderer import RenderTree
+
+	class S(ps.State):
+		value: int = 0
+
+	created: list[Any] = []
+
+	@ps.component
+	def Comp():
+		with ps.init():
+			st = S()
+		created.append(st)
+		return ps.div()
+
+	tree = RenderTree(Comp())
+	tree.render()
+
+	# Forbidden: the init block owns this state.
+	created[0].dispose()
+
+	with caplog.at_level(logging.ERROR, logger="pulse.hooks.core"):
+		tree.unmount()
+
+	assert any(
+		"Error disposing hook 'init_storage'" in record.getMessage()
+		for record in caplog.records
+	)

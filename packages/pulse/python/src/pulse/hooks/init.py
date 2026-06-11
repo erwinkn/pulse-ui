@@ -11,7 +11,7 @@ from contextvars import Token
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast, override
 
-from pulse.helpers import Disposable, getsourcecode
+from pulse.helpers import Disposable, dispose_owned_collection, getsourcecode
 from pulse.hooks.core import INIT_SCOPE_ACTIVE, HookState, hooks
 from pulse.reactive import Effect, Scope
 from pulse.transpiler.errors import TranspileError
@@ -717,14 +717,10 @@ class InitEntry:
 	states: list[Disposable] = field(default_factory=list)
 
 	def dispose_owned(self) -> None:
-		for effect in self.effects:
-			if not effect.__disposed__:
-				effect.dispose()
+		owned: list[Disposable] = [*self.effects, *self.states]
 		self.effects = []
-		for state in self.states:
-			if not state.__disposed__:
-				state.dispose()
 		self.states = []
+		dispose_owned_collection("a ps.init() block", owned)
 
 
 class InitState(HookState):

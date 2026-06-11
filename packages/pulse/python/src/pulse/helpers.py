@@ -163,6 +163,27 @@ class Disposable(ABC):
 			cls.dispose = wrapped_dispose
 
 
+def dispose_owned_collection(owner: str, items: "list[Disposable]") -> None:
+	"""Dispose a collection owned by a single owner, surfacing foreign disposals.
+
+	Items already disposed when this is called were disposed by something
+	that does not own them - a bug worth surfacing in dev. Items disposed
+	mid-loop by an earlier sibling's cascade (a parent state disposing a
+	child it holds as an attribute) are legitimate and skipped silently.
+	"""
+	stale = [item for item in items if item.__disposed__]
+	for item in items:
+		if not item.__disposed__:
+			item.dispose()
+	if stale and env.pulse_env == "dev":
+		names = ", ".join(repr(item) for item in stale)
+		raise RuntimeError(
+			f"Reactive objects owned by {owner} were already disposed when it "
+			+ f"released them: {names}. Something else disposed objects it "
+			+ "does not own. This is likely a bug."
+		)
+
+
 def get_client_address(request: Request) -> str | None:
 	"""Best-effort client origin/address from an HTTP request.
 

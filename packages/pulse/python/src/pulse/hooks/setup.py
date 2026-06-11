@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, ParamSpec, TypeVar, cast, override
 
-from pulse.helpers import Disposable
+from pulse.helpers import Disposable, dispose_owned_collection
 from pulse.hooks.core import INIT_SCOPE_ACTIVE, HookMetadata, HookState, hooks
 from pulse.reactive import Effect, Scope, Signal
 
@@ -116,14 +116,10 @@ class SetupState(HookState):
 
 	def dispose_owned(self) -> None:
 		"""Dispose the effects and states created by the last init run."""
-		for effect in self.effects:
-			if not effect.__disposed__:
-				effect.dispose()
+		owned: list[Disposable] = [*self.effects, *self.states]
 		self.effects = []
-		for state in self.states:
-			if not state.__disposed__:
-				state.dispose()
 		self.states = []
+		dispose_owned_collection("a ps.setup initializer", owned)
 
 	@override
 	def dispose(self) -> None:

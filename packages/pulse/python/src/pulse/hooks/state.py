@@ -91,8 +91,11 @@ class StateHookState(HookState):
 	@override
 	def dispose(self) -> None:
 		for instance in self.instances.values():
-			if not instance.__disposed__:
-				instance.dispose()
+			# No already-disposed guard: this hook owns its instances
+			# exclusively, so anything else disposing them first is an
+			# ownership bug. In dev the Disposable wrapper raises (surfaced
+			# by HookNamespace.dispose's error log); prod skips silently.
+			instance.dispose()
 		self.instances.clear()
 
 

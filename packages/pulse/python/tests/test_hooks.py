@@ -494,3 +494,35 @@ class TestSetupOwnership:
 		assert not instances[1].__disposed__
 		assert "cleanup:a" in events
 		assert "run:b" in events
+
+
+def test_externally_disposed_hook_state_is_surfaced_on_unmount(
+	caplog: pytest.LogCaptureFixture,
+):
+	"""ps.state owns its instances exclusively; if something else disposed one,
+	unmount must surface the double dispose instead of skipping silently."""
+	import logging
+
+	from pulse.renderer import RenderTree
+
+	captured: list[DummyState] = []
+
+	@ps.component
+	def Comp():
+		st = state(lambda: DummyState())
+		captured.append(st)
+		return ps.div()
+
+	tree = RenderTree(Comp())
+	tree.render()
+
+	# Forbidden: disposing a state returned by ps.state.
+	captured[0].dispose()
+
+	with caplog.at_level(logging.ERROR, logger="pulse.hooks.core"):
+		tree.unmount()
+
+	assert any(
+		"Error disposing hook 'pulse:core.state'" in record.getMessage()
+		for record in caplog.records
+	)

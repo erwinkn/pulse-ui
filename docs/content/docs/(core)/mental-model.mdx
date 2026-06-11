@@ -39,7 +39,7 @@ In detail:
 3. **User interacts** — When someone clicks a button or types in an input, that event travels back to your Python code over WebSocket
 4. **State updates trigger re-render** — Your event handler updates state, Pulse re-runs your component, computes new changes, and the cycle continues
 
-This "diff and patch" approach is borrowed from React. It keeps updates fast even for complex UIs.
+This "diff and patch" approach is borrowed from React. It keeps updates fast even for complex UIs. Rendering is fine-grained: each component tracks the state it reads, so a state change re-runs only the components that depend on it—not the whole page—and only their changes are sent to the browser.
 
 ## Sessions and isolation
 

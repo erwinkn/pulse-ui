@@ -52,8 +52,8 @@ from pulse.components.for_ import For as For
 from pulse.components.if_ import If as If
 
 # Router components
-from pulse.components.react_router import Link as Link
-from pulse.components.react_router import Outlet as Outlet
+from pulse.components.router import Link as Link
+from pulse.components.router import Outlet as Outlet
 from pulse.context import PulseContext as PulseContext
 
 # Cookies
@@ -1333,9 +1333,6 @@ from pulse.middleware import (
 
 # Plugin
 from pulse.plugin import Plugin as Plugin
-
-# Proxy
-from pulse.proxy import Proxy as Proxy
 from pulse.queries.client import QueryClient as QueryClient
 from pulse.queries.client import QueryFilter as QueryFilter
 from pulse.queries.client import queries as queries
@@ -1428,7 +1425,7 @@ from pulse.render_session import (
 	RenderSession as RenderSession,
 )
 from pulse.render_session import (
-	RouteMount as RouteMount,
+	View as View,
 )
 from pulse.render_session import run_js as run_js
 

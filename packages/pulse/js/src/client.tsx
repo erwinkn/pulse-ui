@@ -1,4 +1,4 @@
-import type { NavigateFunction } from "react-router";
+import type { NavigateFunction } from "./router";
 import { io, type Socket } from "socket.io-client";
 import { ChannelBridge, PulseChannelResetError } from "./channel";
 import type { RouteInfo } from "./helpers";
@@ -7,15 +7,18 @@ import type {
 	ClientCallbackMessage,
 	ClientJsResultMessage,
 	ClientMessage,
+	ClientResumeMessage,
 	ServerApiCallMessage,
 	ServerChannelMessage,
 	ServerError,
 	ServerJsExecMessage,
 	ServerMessage,
+	ServerNavigateResultMessage,
+	ServerResumeMessage,
 } from "./messages";
 import type { PulsePrerenderView } from "./pulse";
 import { extractEvent } from "./serialize/events";
-import { deserialize, serialize } from "./serialize/serializer";
+import { deserialize, serialize, type Serialized } from "./serialize/serializer";
 import type { VDOMUpdate } from "./vdom";
 
 function documentIsHidden(): boolean {
@@ -42,6 +45,7 @@ export interface MountedView {
 	onUpdate: (ops: VDOMUpdate[]) => void;
 	onJsExec: (msg: ServerJsExecMessage) => void;
 	onServerError: (error: ServerError) => void;
+	deserializeMessage: (data: Serialized) => ServerMessage;
 }
 export type ConnectionStatus = "ok" | "connecting" | "reconnecting" | "error";
 export type ConnectionStatusListener = (status: ConnectionStatus) => void;
@@ -55,11 +59,11 @@ export interface PulseClient {
 	isConnected(): boolean;
 	onConnectionChange(listener: ConnectionStatusListener): () => void;
 	// Messages
-	updateRoute(path: string, routeInfo: RouteInfo): void;
-	invokeCallback(path: string, callback: string, args: any[]): void;
+	updateRoute(viewId: string, routeInfo: RouteInfo): void;
+	invokeCallback(viewId: string, callback: string, args: any[]): void;
 	// VDOM subscription
-	attach(path: string, view: MountedView): void;
-	detach(path: string): void;
+	attach(viewId: string, view: MountedView): void;
+	detach(viewId: string): void;
 }
 
 export class PulseSocketIOClient {
@@ -70,9 +74,9 @@ export class PulseSocketIOClient {
 	#socket: Socket | null = null;
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
-	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
+	#channels: Map<string, { view: string; bridge: ChannelBridge }> = new Map();
 	#url: string;
-	#frameworkNavigate: NavigateFunction;
+	#frameworkNavigate: NavigateFunction | null = null;
 	#directives: Directives;
 	#connectionStatusConfig: {
 		initialConnectingDelay: number;
@@ -86,11 +90,23 @@ export class PulseSocketIOClient {
 	#nextAttachId = 0;
 	#suspended = false;
 	#reloadOnReconnectTimeout = false;
+	#resumePending = false;
+	#pendingResumeId: string | null = null;
+	#resumeSnapshotViews: Set<string> = new Set();
+	#resumeSnapshotChannels: Set<string> = new Set();
+	#nextNavId = 0;
+	#pendingNavigations: Map<
+		string,
+		{
+			resolve: (result: ServerNavigateResultMessage) => void;
+			reject: (error: Error) => void;
+			timer: ReturnType<typeof setTimeout>;
+		}
+	> = new Map();
 
 	constructor(
 		url: string,
 		directives: Directives,
-		frameworkNavigate: NavigateFunction,
 		connectionStatusConfig: {
 			initialConnectingDelay: number;
 			initialErrorDelay: number;
@@ -99,7 +115,6 @@ export class PulseSocketIOClient {
 	) {
 		this.#url = url;
 		this.#directives = directives;
-		this.#frameworkNavigate = frameworkNavigate;
 		this.#socket = null;
 		this.#activeViews = new Map();
 		this.#activeAttachIds = new Map();
@@ -110,6 +125,10 @@ export class PulseSocketIOClient {
 	}
 	public setDirectives(directives: Directives) {
 		this.#directives = directives;
+	}
+	/** Bind the router's navigate function once the router has mounted. */
+	public setFrameworkNavigate(navigate: NavigateFunction) {
+		this.#frameworkNavigate = navigate;
 	}
 	public isConnected(): boolean {
 		return this.#socket?.connected ?? false;
@@ -201,14 +220,38 @@ export class PulseSocketIOClient {
 			socket.on("connect", () => {
 				if (this.#socket !== socket) return;
 				console.log("[SocketIOTransport] Connected:", this.#socket?.id);
+				if (this.#hasConnectedOnce) {
+					// The transport is up; the resume handshake completes at the
+					// protocol level and flips the status back to "ok".
+					this.#startResume(socket);
+					resolve();
+					return;
+				}
 				// Send attach for all active views on connect/reconnect
-				for (const [path, route] of this.#activeViews) {
-					this.#sendAttach(path, route.routeInfo, socket);
+				for (const [viewId, view] of this.#activeViews) {
+					this.#sendAttach(viewId, view.routeInfo, socket);
+				}
+				for (const [channel, endpoint] of this.#channels) {
+					socket.emit(
+						"message",
+						serialize({
+							type: "channel_connect",
+							channel,
+							view: endpoint.view,
+						}),
+					);
 				}
 
 				for (const payload of this.#messageQueue) {
 					// Already sent above
-					if (payload.type === "attach" && this.#activeViews.has(payload.path)) {
+					if (payload.type === "attach" && this.#activeViews.has(payload.view)) {
+						continue;
+					}
+					if (
+						payload.type === "channel_connect" ||
+						payload.type === "channel_disconnect" ||
+						payload.type === "navigate"
+					) {
 						continue;
 					}
 					// We're reattaching all the routes, so no need to send update
@@ -240,7 +283,7 @@ export class PulseSocketIOClient {
 			// Wrap in an arrow function to avoid losing the `this` reference
 			socket.on("message", (data) => {
 				if (this.#socket !== socket) return;
-				this.#handleServerMessage(deserialize(data, { coerceNullsToUndefined: true }));
+				this.#handleSerializedServerMessage(data);
 			});
 		});
 	}
@@ -261,7 +304,7 @@ export class PulseSocketIOClient {
 	}
 
 	public sendMessage(payload: ClientMessage) {
-		if (this.isConnected()) {
+		if (this.isConnected() && !this.#resumePending) {
 			// console.log("[SocketIOTransport] Sending:", payload);
 			this.#socket!.emit("message", serialize(payload as any));
 		} else {
@@ -270,32 +313,37 @@ export class PulseSocketIOClient {
 		}
 	}
 
-	public attach(path: string, view: MountedView) {
-		if (this.#activeViews.has(path)) {
-			throw new Error(`Path ${path} is already attached`);
+	public attach(viewId: string, view: MountedView) {
+		if (this.#activeViews.has(viewId)) {
+			throw new Error(`View ${viewId} is already attached`);
 		}
-		this.#activeViews.set(path, view);
-		this.#sendAttach(path, view.routeInfo);
+		this.#activeViews.set(viewId, view);
+		this.#sendAttach(viewId, view.routeInfo);
 	}
 
-	public updateRoute(path: string, routeInfo: RouteInfo) {
-		const view = this.#activeViews.get(path);
+	public updateRoute(viewId: string, routeInfo: RouteInfo) {
+		const view = this.#activeViews.get(viewId);
 		if (view) {
 			view.routeInfo = routeInfo;
 			this.sendMessage({
 				type: "update",
-				path,
+				view: viewId,
 				routeInfo,
 			});
 		}
 	}
 
-	public detach(path: string) {
-		this.#activeViews.delete(path);
-		this.#activeAttachIds.delete(path);
-		this.#ackedAttachIds.delete(path);
-		this.#pendingCallbacks.delete(path);
-		void this.sendMessage({ type: "detach", path });
+	public detach(viewId: string) {
+		this.#activeViews.delete(viewId);
+		this.#activeAttachIds.delete(viewId);
+		this.#ackedAttachIds.delete(viewId);
+		this.#pendingCallbacks.delete(viewId);
+		for (const [channel, endpoint] of [...this.#channels]) {
+			if (endpoint.view === viewId) {
+				this.#releaseChannel(channel, endpoint);
+			}
+		}
+		void this.sendMessage({ type: "detach", view: viewId });
 	}
 
 	public suspend() {
@@ -334,6 +382,8 @@ export class PulseSocketIOClient {
 		this.#channels.clear();
 		this.#currentStatus = "ok";
 		this.#hasConnectedOnce = false;
+		this.#resumePending = false;
+		this.#pendingResumeId = null;
 	}
 
 	#closeSocket(): void {
@@ -348,22 +398,29 @@ export class PulseSocketIOClient {
 		// console.log("[PulseClient] Received message:", message);
 		switch (message.type) {
 			case "vdom_init": {
-				const route = this.#activeViews.get(message.path);
-				// Ignore messages for paths that are not mounted
-				if (!route) return;
-				route.onInit(message);
+				const view = this.#activeViews.get(message.view);
+				// Ignore messages for views that are not mounted
+				if (!view) return;
+				view.onInit(message);
 				break;
 			}
 			case "vdom_update": {
-				const route = this.#activeViews.get(message.path);
-				if (!route) return; // Not an active path; discard
-				route.onUpdate(message.ops);
+				const view = this.#activeViews.get(message.view);
+				if (!view) return; // Not an active view; discard
+				view.onUpdate(message.ops);
 				break;
 			}
 			case "server_error": {
-				const route = this.#activeViews.get(message.path);
-				if (!route) return; // discard for inactive paths
-				route.onServerError(message.error);
+				if (message.view === undefined) {
+					// Session-level error: surface on every active view.
+					for (const view of this.#activeViews.values()) {
+						view.onServerError(message.error);
+					}
+					break;
+				}
+				const view = this.#activeViews.get(message.view);
+				if (!view) return; // discard for inactive views
+				view.onServerError(message.error);
 				break;
 			}
 			case "api_call": {
@@ -371,18 +428,15 @@ export class PulseSocketIOClient {
 				break;
 			}
 			case "navigate_to": {
-				if (message.sourceRoutePath && message.sourcePath) {
-					const view = this.#activeViews.get(message.sourceRoutePath);
-					if (!view || view.routeInfo.pathname !== message.sourcePath) break;
-				} else if (message.sourcePath) {
-					let sourceActive = false;
-					for (const view of this.#activeViews.values()) {
-						if (view.routeInfo.pathname === message.sourcePath) {
-							sourceActive = true;
-							break;
-						}
+				if (message.sourceView) {
+					const view = this.#activeViews.get(message.sourceView);
+					if (!view) break;
+					if (
+						message.sourcePathname &&
+						view.routeInfo.pathname !== message.sourcePathname
+					) {
+						break;
 					}
-					if (!sourceActive) break;
 				}
 				const replace = !!message.replace;
 				let dest = message.path || "";
@@ -398,7 +452,11 @@ export class PulseSocketIOClient {
 
 				// No scheme = relative path → SPA
 				if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(dest)) {
-					this.#frameworkNavigate(dest, { replace });
+					if (this.#frameworkNavigate) {
+						this.#frameworkNavigate(dest, { replace });
+					} else {
+						hardNav();
+					}
 					break;
 				}
 
@@ -406,7 +464,7 @@ export class PulseSocketIOClient {
 				if (/^https?:\/\//.test(dest)) {
 					try {
 						const url = new URL(dest);
-						if (url.origin === window.location.origin) {
+						if (url.origin === window.location.origin && this.#frameworkNavigate) {
 							this.#frameworkNavigate(`${url.pathname}${url.search}${url.hash}`, { replace });
 							break;
 						}
@@ -421,8 +479,16 @@ export class PulseSocketIOClient {
 				window.location.reload();
 				break;
 			}
+			case "server_resume": {
+				this.#handleServerResume(message);
+				break;
+			}
+			case "navigate_result": {
+				this.#handleNavigateResult(message);
+				break;
+			}
 			case "attach_ack": {
-				this.#handleAttachAck(message.path, message.attachId);
+				this.#handleAttachAck(message.view, message.attachId);
 				break;
 			}
 			case "channel_message": {
@@ -490,23 +556,67 @@ export class PulseSocketIOClient {
 		}
 	}
 
-	public invokeCallback(path: string, callback: string, args: any[]) {
-		if (!this.#activeViews.has(path)) return;
+	public invokeCallback(viewId: string, callback: string, args: any[]) {
+		if (!this.#activeViews.has(viewId)) return;
 		const message: ClientCallbackMessage = {
 			type: "callback",
-			path,
+			view: viewId,
 			callback,
 			args: args.map(extractEvent),
 		};
-		if (this.#isAttachAcked(path)) {
+		if (this.#isAttachAcked(viewId)) {
 			this.sendMessage(message);
 			return;
 		}
 		this.#queueCallback(message);
 	}
 
+	/**
+	 * Ask the server to render the views for a navigation (or prefetch them).
+	 * Rejects when the socket is down — callers fall back to HTTP prerender.
+	 */
+	public navigateViews(
+		routeInfo: RouteInfo,
+		options: { prefetch?: boolean; timeoutMs?: number } = {},
+	): Promise<ServerNavigateResultMessage> {
+		if (!this.isConnected() || this.#resumePending) {
+			return Promise.reject(new Error("Pulse socket is not connected"));
+		}
+		const nav = `nav-${++this.#nextNavId}`;
+		const promise = new Promise<ServerNavigateResultMessage>((resolve, reject) => {
+			const timer = setTimeout(() => {
+				this.#pendingNavigations.delete(nav);
+				reject(new Error("Navigation request timed out"));
+			}, options.timeoutMs ?? 15_000);
+			this.#pendingNavigations.set(nav, { resolve, reject, timer });
+		});
+		this.sendMessage({
+			type: "navigate",
+			nav,
+			routeInfo,
+			...(options.prefetch ? { prefetch: true } : {}),
+		});
+		return promise;
+	}
+
+	#handleNavigateResult(message: ServerNavigateResultMessage): void {
+		const pending = this.#pendingNavigations.get(message.nav);
+		if (!pending) return;
+		this.#pendingNavigations.delete(message.nav);
+		clearTimeout(pending.timer);
+		pending.resolve(message);
+	}
+
+	#rejectPendingNavigations(reason: string): void {
+		for (const pending of this.#pendingNavigations.values()) {
+			clearTimeout(pending.timer);
+			pending.reject(new Error(reason));
+		}
+		this.#pendingNavigations.clear();
+	}
+
 	#handleJsExec(message: ServerJsExecMessage) {
-		const view = this.#activeViews.get(message.path);
+		const view = this.#activeViews.get(message.view);
 		if (!view) {
 			// View unmounted before the message arrived - send result back to unblock
 			// the server-side future (which is likely already cancelled anyway).
@@ -530,67 +640,287 @@ export class PulseSocketIOClient {
 		this.sendMessage(msg);
 	}
 
-	public acquireChannel(id: string): ChannelBridge {
-		const entry = this.#ensureChannelEntry(id);
-		entry.refCount += 1;
-		return entry.bridge;
+	public acquireChannel(id: string, viewId = ""): ChannelBridge {
+		if (this.#channels.has(id)) {
+			throw new Error(`Pulse channel '${id}' is already acquired`);
+		}
+		const bridge = new ChannelBridge(this, id, viewId);
+		this.#channels.set(id, { view: viewId, bridge });
+		this.sendMessage({
+			type: "channel_connect",
+			channel: id,
+			view: viewId,
+		});
+		return bridge;
 	}
 
-	public releaseChannel(id: string): void {
-		const entry = this.#channels.get(id);
-		if (!entry) {
+	public releaseChannel(id: string, viewId = ""): void {
+		const endpoint = this.#channels.get(id);
+		if (!endpoint || endpoint.view !== viewId) {
 			return;
 		}
-		entry.refCount = Math.max(0, entry.refCount - 1);
-		if (entry.refCount === 0) {
-			entry.bridge.dispose(new PulseChannelResetError("Channel released"));
-			this.sendMessage({
-				type: "channel_message",
-				channel: id,
-				event: "__close__",
-				payload: { reason: "refcount_zero" },
-			});
-			this.#channels.delete(id);
-		}
-	}
-
-	#ensureChannelEntry(id: string): {
-		bridge: ChannelBridge;
-		refCount: number;
-	} {
-		let entry = this.#channels.get(id);
-		if (!entry) {
-			entry = {
-				bridge: new ChannelBridge(this, id),
-				refCount: 0,
-			};
-			this.#channels.set(id, entry);
-		}
-		return entry;
+		this.#releaseChannel(id, endpoint);
 	}
 
 	#routeChannelMessage(message: ServerChannelMessage): void {
-		const entry = this.#ensureChannelEntry(message.channel);
-		const closed = entry.bridge.handleServerMessage(message);
-		if (closed && entry.refCount === 0) {
+		const endpoint = this.#channels.get(message.channel);
+		if (!endpoint) return;
+		const closed = endpoint.bridge.handleServerMessage(message);
+		if (closed) {
 			this.#channels.delete(message.channel);
 		}
 	}
 
 	#handleTransportDisconnect(): void {
 		this.#ackedAttachIds.clear();
+		this.#resumePending = false;
+		this.#pendingResumeId = null;
+		this.#rejectPendingNavigations("Connection lost");
 		for (const entry of this.#channels.values()) {
 			entry.bridge.handleDisconnect(new PulseChannelResetError("Connection lost"));
 		}
 	}
 
-	#sendAttach(path: string, routeInfo: RouteInfo, socket?: Socket): void {
-		const attachId = `${path}:${++this.#nextAttachId}`;
-		this.#activeAttachIds.set(path, attachId);
-		this.#ackedAttachIds.delete(path);
+	#startResume(socket: Socket): void {
+		const resumeId = `${Date.now()}:${Math.random().toString(16).slice(2)}`;
+		this.#resumePending = true;
+		this.#pendingResumeId = resumeId;
+		const views: ClientResumeMessage["views"] = [];
+		for (const [viewId, view] of this.#activeViews) {
+			const attachId = this.#activeAttachIds.get(viewId);
+			views.push({
+				view: viewId,
+				routeInfo: view.routeInfo,
+				...(attachId ? { attachId } : {}),
+			});
+		}
+		const channels: ClientResumeMessage["channels"] = [];
+		for (const [channel, endpoint] of this.#channels) {
+			channels.push({ channel, view: endpoint.view });
+		}
+		this.#resumeSnapshotViews = new Set(views.map((view) => view.view));
+		this.#resumeSnapshotChannels = new Set(channels.map((c) => c.channel));
+		socket.emit(
+			"message",
+			serialize({
+				type: "client_resume",
+				resumeId,
+				views,
+				channels,
+			} satisfies ClientResumeMessage),
+		);
+	}
+
+	#handleServerResume(message: ServerResumeMessage): void {
+		if (message.resumeId !== this.#pendingResumeId) return;
+		this.#pendingResumeId = null;
+		if (message.status === "reload") {
+			this.#resumePending = false;
+			this.#messageQueue = [];
+			this.#pendingCallbacks.clear();
+			for (const [channel, endpoint] of this.#channels) {
+				endpoint.bridge.dispose(new PulseChannelResetError("Resume rejected"));
+				this.#channels.delete(channel);
+			}
+			window.location.reload();
+			return;
+		}
+
+		const acceptedViews = new Set((message.views ?? []).map((view) => view.view));
+		const acceptedChannels = new Map(
+			(message.channels ?? []).map((channel) => [channel.channel, channel.view]),
+		);
+
+		// Drop queued callbacks only for views we no longer hold; views mounted
+		// during the resume window re-attach below and flush on their ack.
+		for (const viewId of [...this.#pendingCallbacks.keys()]) {
+			if (!acceptedViews.has(viewId) && !this.#activeViews.has(viewId)) {
+				this.#pendingCallbacks.delete(viewId);
+			}
+		}
+		for (const view of message.views ?? []) {
+			const attachId = view.attachId ?? this.#activeAttachIds.get(view.view);
+			if (attachId && this.#activeAttachIds.get(view.view) === attachId) {
+				this.#ackedAttachIds.set(view.view, attachId);
+			}
+		}
+		// Channels acquired after the resume snapshot were never declared:
+		// connect them now. Snapshot channels the server refused are dead.
+		for (const [channel, endpoint] of [...this.#channels]) {
+			if (!this.#resumeSnapshotChannels.has(channel)) {
+				continue;
+			}
+			if (acceptedChannels.get(channel) !== endpoint.view) {
+				endpoint.bridge.dispose(
+					new PulseChannelResetError("Channel was not resumed"),
+				);
+				this.#channels.delete(channel);
+			}
+		}
+
+		const queued = this.#messageQueue;
+		this.#messageQueue = [];
+		this.#resumePending = false;
+		// Views mounted while the resume was in flight (e.g. a navigation
+		// committing as the tab became visible) were not in the snapshot;
+		// attach them now. The server replies reload for ids it lost.
+		for (const [viewId, view] of this.#activeViews) {
+			if (!acceptedViews.has(viewId) && !this.#resumeSnapshotViews.has(viewId)) {
+				this.#sendAttach(viewId, view.routeInfo);
+			}
+		}
+		for (const [channel, endpoint] of this.#channels) {
+			if (!this.#resumeSnapshotChannels.has(channel)) {
+				this.sendMessage({
+					type: "channel_connect",
+					channel,
+					view: endpoint.view,
+				});
+			}
+		}
+		for (const viewId of acceptedViews) {
+			this.#flushPendingCallbacks(viewId);
+		}
+		for (const payload of queued) {
+			if (this.#shouldReplayAfterResume(payload, acceptedViews, acceptedChannels)) {
+				this.sendMessage(payload);
+			}
+		}
+		this.#handleConnected();
+	}
+
+	#shouldReplayAfterResume(
+		payload: ClientMessage,
+		acceptedViews: Set<string>,
+		acceptedChannels: Map<string, string>,
+	): boolean {
+		if (
+			payload.type === "attach" ||
+			payload.type === "update" ||
+			payload.type === "navigate" ||
+			payload.type === "channel_connect" ||
+			payload.type === "client_resume"
+		) {
+			// attach/channel_connect for surviving endpoints are re-sent by the
+			// resume logic itself; update is superseded by the attach payloads.
+			return false;
+		}
+		if (payload.type === "detach") {
+			// Tear-downs issued while offline must reach the server (which
+			// tolerates unknown ids) unless the endpoint was re-established
+			// in the meantime (dev StrictMode replay).
+			return !this.#activeViews.has(payload.view);
+		}
+		if (payload.type === "channel_disconnect") {
+			return !this.#channels.has(payload.channel);
+		}
+		if (payload.type === "callback") {
+			return acceptedViews.has(payload.view);
+		}
+		if (payload.type === "channel_message") {
+			return acceptedChannels.has(payload.channel);
+		}
+		return true;
+	}
+
+	#handleSerializedServerMessage(data: Serialized): void {
+		const raw = this.#serializedPayloadObject(data);
+		if (raw) {
+			const type = raw.type;
+			if (type === "js_exec") {
+				this.#handleSerializedJsExec(data, raw);
+				return;
+			}
+			if (type === "channel_message") {
+				if (this.#handleSerializedChannelMessage(data, raw)) {
+					return;
+				}
+			}
+		}
+		this.#handleServerMessage(deserialize(data, { coerceNullsToUndefined: true }));
+	}
+
+	#handleSerializedJsExec(data: Serialized, raw: Record<string, unknown>): void {
+		const viewId = raw.view;
+		if (typeof viewId !== "string") {
+			return;
+		}
+		const view = this.#activeViews.get(viewId);
+		if (!view) {
+			if (typeof raw.id === "string") this.#sendJsResult(raw.id, undefined, null);
+			return;
+		}
+		this.#handleServerMessage(this.#deserializeForView(data, view, "js_exec", viewId));
+	}
+
+	#handleSerializedChannelMessage(
+		data: Serialized,
+		raw: Record<string, unknown>,
+	): boolean {
+		const viewId = raw.view;
+		if (typeof viewId === "string") {
+			const view = this.#activeViews.get(viewId);
+			if (!view) {
+				if (typeof raw.channel === "string") {
+					this.#dropChannel(
+						raw.channel,
+						new PulseChannelResetError("Channel view is no longer active"),
+					);
+				}
+				return true;
+			}
+			this.#handleServerMessage(
+				this.#deserializeForView(data, view, "channel_message", viewId),
+			);
+			return true;
+		}
+		if (this.#hasPulseNodes(data)) {
+			if (typeof raw.channel === "string") {
+				this.#dropChannel(
+					raw.channel,
+					new PulseChannelResetError(
+						"Route-bound channel message is missing an active view path",
+					),
+				);
+			}
+			return true;
+		}
+		return false;
+	}
+
+	#deserializeForView(
+		data: Serialized,
+		view: MountedView,
+		type: string,
+		viewId: string,
+	): ServerMessage {
+		try {
+			return view.deserializeMessage(data);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			throw new Error(`[Pulse] Failed to deserialize ${type} for view '${viewId}': ${message}`);
+		}
+	}
+
+	#serializedPayloadObject(data: Serialized): Record<string, unknown> | null {
+		const raw = data[1];
+		if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+			return null;
+		}
+		return raw as Record<string, unknown>;
+	}
+
+	#hasPulseNodes(data: Serialized): boolean {
+		return data[0][4].length > 0;
+	}
+
+	#sendAttach(viewId: string, routeInfo: RouteInfo, socket?: Socket): void {
+		const attachId = `${viewId}:${++this.#nextAttachId}`;
+		this.#activeAttachIds.set(viewId, attachId);
+		this.#ackedAttachIds.delete(viewId);
 		const message = {
 			type: "attach" as const,
-			path,
+			view: viewId,
 			routeInfo,
 			attachId,
 		};
@@ -601,37 +931,49 @@ export class PulseSocketIOClient {
 		this.sendMessage(message);
 	}
 
-	#isAttachAcked(path: string): boolean {
-		const attachId = this.#activeAttachIds.get(path);
-		return attachId !== undefined && this.#ackedAttachIds.get(path) === attachId;
+	#isAttachAcked(viewId: string): boolean {
+		const attachId = this.#activeAttachIds.get(viewId);
+		return attachId !== undefined && this.#ackedAttachIds.get(viewId) === attachId;
 	}
 
-	#handleAttachAck(path: string, attachId: string): void {
-		if (this.#activeAttachIds.get(path) !== attachId) return;
-		this.#ackedAttachIds.set(path, attachId);
-		this.#flushPendingCallbacks(path);
+	#handleAttachAck(viewId: string, attachId: string): void {
+		if (this.#activeAttachIds.get(viewId) !== attachId) return;
+		this.#ackedAttachIds.set(viewId, attachId);
+		this.#flushPendingCallbacks(viewId);
 	}
 
 	#queueCallback(message: ClientCallbackMessage): void {
-		const queue = this.#pendingCallbacks.get(message.path) ?? [];
+		const queue = this.#pendingCallbacks.get(message.view) ?? [];
 		queue.push(message);
-		this.#pendingCallbacks.set(message.path, queue);
+		this.#pendingCallbacks.set(message.view, queue);
 	}
 
-	#flushPendingCallbacks(path: string): void {
-		if (!this.#activeViews.has(path) || !this.#isAttachAcked(path)) return;
-		const queue = this.#pendingCallbacks.get(path);
+	#flushPendingCallbacks(viewId: string): void {
+		if (!this.#activeViews.has(viewId) || !this.#isAttachAcked(viewId)) return;
+		const queue = this.#pendingCallbacks.get(viewId);
 		if (!queue) return;
-		this.#pendingCallbacks.delete(path);
+		this.#pendingCallbacks.delete(viewId);
 		for (const message of queue) {
 			this.sendMessage(message);
 		}
 	}
 
-	_ensureChannelEntry(id: string): {
-		bridge: ChannelBridge;
-		refCount: number;
-	} {
-		return this.#ensureChannelEntry(id);
+	#releaseChannel(
+		id: string,
+		endpoint: { view: string; bridge: ChannelBridge },
+	): void {
+		this.#channels.delete(id);
+		endpoint.bridge.dispose(new PulseChannelResetError("Channel released"));
+		this.sendMessage({
+			type: "channel_disconnect",
+			channel: id,
+		});
+	}
+
+	#dropChannel(id: string, reason: PulseChannelResetError): void {
+		const entry = this.#channels.get(id);
+		if (!entry) return;
+		this.#channels.delete(id);
+		entry.bridge.dispose(reason);
 	}
 }

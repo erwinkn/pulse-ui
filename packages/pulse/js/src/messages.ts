@@ -5,16 +5,20 @@
 import type { RouteInfo } from "./helpers";
 import type { VDOM, VDOMNode, VDOMUpdate } from "./vdom";
 
-// Based on pulse/messages.py
+// Based on pulse/messages.py. All view-scoped messages carry the unique id of
+// the owning view (`view`).
 export interface ServerInitMessage {
 	type: "vdom_init";
-	path: string;
+	view: string;
+	// Route pattern path (e.g. "/users/:id"), used to associate the view with
+	// its generated route module.
+	routePath: string;
 	vdom: VDOM;
 }
 
 export interface ServerUpdateMessage {
 	type: "vdom_update";
-	path: string;
+	view: string;
 	ops: VDOMUpdate[];
 }
 
@@ -27,7 +31,8 @@ export interface ServerError {
 
 export interface ServerErrorMessage {
 	type: "server_error";
-	path: string;
+	// Omitted for session-level errors that are not tied to a view
+	view?: string;
 	error: ServerError;
 }
 
@@ -43,6 +48,7 @@ export interface ServerApiCallMessage {
 
 export interface ServerChannelRequestMessage {
 	type: "channel_message";
+	view?: string;
 	channel: string;
 	event: string;
 	payload?: any;
@@ -53,6 +59,7 @@ export interface ServerChannelRequestMessage {
 
 export interface ServerChannelResponseMessage {
 	type: "channel_message";
+	view?: string;
 	channel: string;
 	event?: undefined;
 	responseTo: string;
@@ -68,24 +75,50 @@ export interface ServerNavigateToMessage {
 	path: string;
 	replace: boolean;
 	hard: boolean;
-	sourceRoutePath?: string;
-	sourcePath?: string;
-	sourceMountId?: string;
+	sourceView?: string;
+	sourcePathname?: string;
 }
 
 export interface ServerReloadMessage {
 	type: "reload";
 }
 
+export interface ServerResumeView {
+	view: string;
+	attachId?: string;
+}
+
+export interface ServerResumeChannel {
+	channel: string;
+	view: string;
+}
+
+export interface ServerResumeMessage {
+	type: "server_resume";
+	resumeId: string;
+	status: "ok" | "reload";
+	views?: ServerResumeView[];
+	channels?: ServerResumeChannel[];
+}
+
+export interface ServerNavigateResultMessage {
+	type: "navigate_result";
+	nav: string;
+	status: "ok" | "redirect" | "notFound" | "error";
+	redirect?: string;
+	// Route pattern path -> fresh init message, or null to keep the live view
+	views?: Record<string, ServerInitMessage | null>;
+}
+
 export interface ServerAttachAckMessage {
 	type: "attach_ack";
-	path: string;
+	view: string;
 	attachId: string;
 }
 
 export interface ServerJsExecMessage {
 	type: "js_exec";
-	path: string;
+	view: string;
 	id: string;
 	expr: VDOMNode;
 }
@@ -97,6 +130,8 @@ export type ServerMessage =
 	| ServerApiCallMessage
 	| ServerNavigateToMessage
 	| ServerReloadMessage
+	| ServerResumeMessage
+	| ServerNavigateResultMessage
 	| ServerAttachAckMessage
 	| ServerChannelRequestMessage
 	| ServerChannelResponseMessage
@@ -104,25 +139,50 @@ export type ServerMessage =
 
 export interface ClientCallbackMessage {
 	type: "callback";
-	path: string;
+	view: string;
 	callback: string;
 	args: any[];
 }
 
 export interface ClientAttachMessage {
 	type: "attach";
-	path: string;
+	view: string;
 	routeInfo: RouteInfo;
 	attachId: string;
 }
 export interface ClientUpdateMessage {
 	type: "update";
-	path: string;
+	view: string;
 	routeInfo: RouteInfo;
 }
 export interface ClientDetachMessage {
 	type: "detach";
-	path: string;
+	view: string;
+}
+
+export interface ClientNavigateMessage {
+	type: "navigate";
+	nav: string;
+	routeInfo: RouteInfo;
+	prefetch?: boolean;
+}
+
+export interface ClientResumeView {
+	view: string;
+	routeInfo: RouteInfo;
+	attachId?: string;
+}
+
+export interface ClientResumeChannel {
+	channel: string;
+	view: string;
+}
+
+export interface ClientResumeMessage {
+	type: "client_resume";
+	resumeId: string;
+	views: ClientResumeView[];
+	channels: ClientResumeChannel[];
 }
 
 export interface ClientApiResultMessage {
@@ -156,6 +216,17 @@ export interface ClientChannelResponseMessage {
 
 export type ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage;
 
+export interface ClientChannelConnectMessage {
+	type: "channel_connect";
+	channel: string;
+	view: string;
+}
+
+export interface ClientChannelDisconnectMessage {
+	type: "channel_disconnect";
+	channel: string;
+}
+
 export interface ClientJsResultMessage {
 	type: "js_result";
 	id: string;
@@ -168,7 +239,11 @@ export type ClientMessage =
 	| ClientCallbackMessage
 	| ClientUpdateMessage
 	| ClientDetachMessage
+	| ClientNavigateMessage
+	| ClientResumeMessage
 	| ClientApiResultMessage
 	| ClientChannelRequestMessage
 	| ClientChannelResponseMessage
+	| ClientChannelConnectMessage
+	| ClientChannelDisconnectMessage
 	| ClientJsResultMessage;

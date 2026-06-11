@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from typing import Any, get_type_hints, override
 
 from pulse.helpers import Disposable
-from pulse.reactive import Computed, Effect, Scope, Signal
+from pulse.reactive import REACTIVE_CONTEXT, Computed, Effect, Scope, Signal
 from pulse.reactive_extensions import ReactiveProperty
 from pulse.state.property import (
 	ComputedProperty,
@@ -145,6 +145,11 @@ class StateMeta(ABCMeta):
 		except AttributeError:
 			return instance
 		initializer()
+		# Let the ambient scope track this instance so owners that capture a
+		# scope (ps.setup / ps.init) can dispose states created within it.
+		rc = REACTIVE_CONTEXT.get()
+		if rc.scope is not None:
+			rc.scope.register_state(instance)
 		return instance
 
 
@@ -353,8 +358,10 @@ class State(Disposable, metaclass=StateMeta):
 		"""
 		# Call user-defined cleanup hook first
 		self.on_dispose()
+		# Skip values another owner (or a previous loop iteration through an
+		# alias) already disposed.
 		for value in self.__dict__.values():
-			if isinstance(value, Disposable):
+			if isinstance(value, Disposable) and not value.__disposed__:
 				value.dispose()
 
 		undisposed_effects = [e for e in self._scope.effects if not e.__disposed__]

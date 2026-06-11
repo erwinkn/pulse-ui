@@ -35,6 +35,21 @@ interface ConnectionStatusConfig {
 }
 ```
 
+### PulseAppProps
+
+Props for the `PulseApp` component.
+
+```ts
+interface PulseAppProps {
+  routes: PulseRoute[];
+  routeLoaders: RouteLoaderMap;
+  config: PulseConfig;
+  prerender: PulsePrerender;
+  /** URL of the initial request; required for SSR. */
+  url?: string;
+}
+```
+
 ### PulseProviderProps
 
 Props for the `PulseProvider` component.
@@ -42,14 +57,14 @@ Props for the `PulseProvider` component.
 ```ts
 interface PulseProviderProps {
   children: ReactNode;
-  config: PulseConfig;
+  client: PulseSocketIOClient;
   prerender: PulsePrerender;
 }
 ```
 
 ### PulsePrerender
 
-Server-side prerender data.
+Server-side prerender data. Views are keyed by their route pattern path.
 
 ```ts
 interface PulsePrerender {
@@ -58,6 +73,8 @@ interface PulsePrerender {
 }
 
 interface PulsePrerenderView {
+  view: string;       // Unique id of the server-side view
+  routePath: string;  // Route pattern path (e.g. "/users/:id")
   vdom: VDOM;
 }
 ```
@@ -69,12 +86,14 @@ Connection directives for authentication and headers.
 ```ts
 interface Directives {
   headers?: Record<string, string>;
+  query?: Record<string, string>;
   socketio?: SocketIODirectives;
 }
 
 interface SocketIODirectives {
   headers?: Record<string, string>;
   auth?: Record<string, string>;
+  query?: Record<string, string>;
 }
 ```
 
@@ -119,6 +138,46 @@ interface RouteInfo {
 | `queryParams` | Parsed query parameters |
 | `pathParams` | Route parameters from path |
 | `catchall` | Segments from catch-all route (`/*`) |
+
+### PulseRoute
+
+A node in the generated route manifest (`pulseRouteTree`). Mirrors the Python route tree; layouts are pathless nodes.
+
+```ts
+type PulseRoute = {
+  id: string;          // Unique route path (matches the Python side)
+  path?: string;       // URL segment(s); absent for layouts
+  index?: boolean;     // True for index routes
+  children?: PulseRoute[];
+};
+```
+
+### MatchResult
+
+Result of matching a pathname against a `PulseRoute[]` tree with `matchRoutes`.
+
+```ts
+type MatchResult = {
+  matches: PulseRoute[];  // Root-to-leaf chain of matched routes
+  params: Record<string, string | undefined>;
+  catchall: string[];
+};
+```
+
+### RouteModule / RouteLoader / RouteLoaderMap
+
+Code-split route modules and their loaders (the generated `routeLoaders`).
+
+```ts
+type RouteModule = {
+  default: ComponentType<any>;
+  registry?: Record<string, unknown>;
+  path?: string;
+};
+
+type RouteLoader = () => Promise<RouteModule>;
+type RouteLoaderMap = Record<string, RouteLoader>;
+```
 
 ---
 
@@ -349,7 +408,7 @@ interface ReconciliationUpdate {
 
 ## Message Types
 
-Messages sent between client and server over WebSocket.
+Messages sent between client and server over WebSocket. All view-scoped messages carry the unique id of the owning view (`view`).
 
 ### Client Messages
 
@@ -359,6 +418,7 @@ type ClientMessage =
   | ClientCallbackMessage
   | ClientUpdateMessage
   | ClientDetachMessage
+  | ClientNavigateMessage
   | ClientApiResultMessage
   | ClientChannelRequestMessage
   | ClientChannelResponseMessage;
@@ -366,13 +426,14 @@ type ClientMessage =
 
 #### ClientAttachMessage
 
-Attaches to a view path.
+Attaches to a view by id.
 
 ```ts
 interface ClientAttachMessage {
   type: "attach";
-  path: string;
+  view: string;
   routeInfo: RouteInfo;
+  attachId: string;
 }
 ```
 
@@ -383,7 +444,7 @@ Invokes a server callback.
 ```ts
 interface ClientCallbackMessage {
   type: "callback";
-  path: string;
+  view: string;
   callback: string;
   args: any[];
 }
@@ -391,24 +452,37 @@ interface ClientCallbackMessage {
 
 #### ClientUpdateMessage
 
-Updates route info for an attached path.
+Updates route info for an attached view.
 
 ```ts
 interface ClientUpdateMessage {
   type: "update";
-  path: string;
+  view: string;
   routeInfo: RouteInfo;
 }
 ```
 
 #### ClientDetachMessage
 
-Detaches from a view path.
+Detaches from a view.
 
 ```ts
 interface ClientDetachMessage {
   type: "detach";
-  path: string;
+  view: string;
+}
+```
+
+#### ClientNavigateMessage
+
+Requests the views for a new location (sent on link clicks and prefetches). `nav` is a client sequence number used to drop stale responses.
+
+```ts
+interface ClientNavigateMessage {
+  type: "navigate";
+  nav: string;
+  routeInfo: RouteInfo;
+  prefetch?: boolean;
 }
 ```
 
@@ -464,6 +538,7 @@ type ServerMessage =
   | ServerErrorMessage
   | ServerApiCallMessage
   | ServerNavigateToMessage
+  | ServerNavigateResultMessage
   | ServerChannelRequestMessage
   | ServerChannelResponseMessage;
 ```
@@ -475,7 +550,8 @@ Initial VDOM for a view.
 ```ts
 interface ServerInitMessage {
   type: "vdom_init";
-  path: string;
+  view: string;
+  routePath: string;  // Route pattern path (e.g. "/users/:id")
   vdom: VDOM;
 }
 ```
@@ -487,7 +563,7 @@ VDOM updates.
 ```ts
 interface ServerUpdateMessage {
   type: "vdom_update";
-  path: string;
+  view: string;
   ops: VDOMUpdate[];
 }
 ```
@@ -499,7 +575,8 @@ Server error information.
 ```ts
 interface ServerErrorMessage {
   type: "server_error";
-  path: string;
+  // Omitted for session-level errors that are not tied to a view
+  view?: string;
   error: ServerError;
 }
 
@@ -508,6 +585,21 @@ interface ServerError {
   stack?: string;
   phase: "render" | "callback" | "mount" | "unmount" | "navigate" | "server";
   details?: Record<string, any>;
+}
+```
+
+#### ServerNavigateResultMessage
+
+Response to a `navigate` message: the view set for the new location.
+
+```ts
+interface ServerNavigateResultMessage {
+  type: "navigate_result";
+  nav: string;
+  status: "ok" | "redirect" | "notFound" | "error";
+  redirect?: string;
+  // Route pattern path -> fresh init message, or null to keep the live view
+  views?: Record<string, ServerInitMessage | null>;
 }
 ```
 
@@ -529,7 +621,7 @@ interface ServerApiCallMessage {
 
 #### ServerNavigateToMessage
 
-Navigation instruction.
+Server-initiated navigation (e.g. `ps.navigate()`). Handled by the client router like a link click. `sourceView` lets the client drop navigations from views that have since been disposed.
 
 ```ts
 interface ServerNavigateToMessage {
@@ -537,8 +629,8 @@ interface ServerNavigateToMessage {
   path: string;
   replace: boolean;
   hard: boolean;
-  sourceRoutePath?: string;
-  sourcePath?: string;
+  sourceView?: string;
+  sourcePathname?: string;
 }
 ```
 
@@ -586,10 +678,10 @@ interface PulseClient {
   disconnect(): void;
   isConnected(): boolean;
   onConnectionChange(listener: ConnectionStatusListener): () => void;
-  updateRoute(path: string, routeInfo: RouteInfo): void;
-  invokeCallback(path: string, callback: string, args: any[]): void;
-  attach(path: string, view: MountedView): void;
-  detach(path: string): void;
+  updateRoute(viewId: string, routeInfo: RouteInfo): void;
+  invokeCallback(viewId: string, callback: string, args: any[]): void;
+  attach(viewId: string, view: MountedView): void;
+  detach(viewId: string): void;
 }
 ```
 
@@ -611,7 +703,7 @@ type ConnectionStatusListener = (status: ConnectionStatus) => void;
 
 ### MountedView
 
-Callbacks for a mounted view.
+Callbacks registered when attaching to a view.
 
 ```ts
 interface MountedView {
@@ -620,6 +712,7 @@ interface MountedView {
   onUpdate: (ops: VDOMUpdate[]) => void;
   onJsExec: (msg: ServerJsExecMessage) => void;
   onServerError: (error: ServerError) => void;
+  deserializeMessage: (data: Serialized) => ServerMessage;
 }
 ```
 
@@ -658,7 +751,7 @@ type MessageListener = (message: ServerMessage) => void;
 Wire format for serialized data.
 
 ```ts
-type Serialized = [[number[], number[], number[], number[]], PlainJSON];
+type Serialized = [[number[], number[], number[], number[], number[]], PlainJSON];
 ```
 
 ### PlainJSON
@@ -678,6 +771,8 @@ Options for deserialization.
 ```ts
 interface DeserializationOptions {
   coerceNullsToUndefined?: boolean;
+  registry?: ComponentRegistry;
+  renderer?: Pick<VDOMRenderer, "renderNode">;
 }
 ```
 

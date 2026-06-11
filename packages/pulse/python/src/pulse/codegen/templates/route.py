@@ -323,7 +323,8 @@ def generate_route(
 
 		# Route component
 		pulse_view_js = pulse_view_import.js_name
-		output_parts.append(f'''const path = "{path}";
+		output_parts.append(f'''export const path = "{path}";
+export const registry = __registry;
 
 export default function RouteComponent() {{
   return (
@@ -331,15 +332,5 @@ export default function RouteComponent() {{
   );
 }}''')
 		output_parts.append("")
-
-		# Headers function
-		output_parts.append("""// Action and loader headers are not returned automatically
-function hasAnyHeaders(headers) {
-  return [...headers].length > 0;
-}
-
-export function headers({ actionHeaders, loaderHeaders }) {
-  return hasAnyHeaders(actionHeaders) ? actionHeaders : loaderHeaders;
-}""")
 
 		return "\n".join(output_parts)

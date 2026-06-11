@@ -1,7 +1,7 @@
 // Public API surface for pulse-client
 
-export type { ChannelBridge } from "./channel";
-export { PulseChannelResetError, usePulseChannel } from "./channel";
+export type { ChannelBridge, PulseChannelLease, PulseChannelManager } from "./channel";
+export { PulseChannelResetError } from "./channel";
 // Client implementation (types only - implementation is internal)
 export type {
 	ConnectionStatusListener,
@@ -13,7 +13,10 @@ export type { PulseFormProps } from "./form";
 export { FormSubmissionError, PulseForm, submitForm } from "./form";
 export type { RouteInfo } from "./helpers";
 // Server helpers
-export { extractServerRouteInfo } from "./helpers";
+export { buildRouteInfo, type LocationLike } from "./helpers";
+// Pre-hydration input capture (SSR documents embed the script; PulseApp replays)
+export { preHydrationInputCaptureScript, replayPreHydrationInputs } from "./hydration";
+export * from "./router";
 // Messages (types only)
 export type {
 	ClientApiResultMessage,
@@ -36,9 +39,24 @@ export type {
 	ServerNavigateToMessage,
 	ServerUpdateMessage,
 } from "./messages";
-export type { PulseConfig, PulsePrerender, PulseProviderProps } from "./pulse";
+export type {
+	PulseAppProps,
+	PulseConfig,
+	PulsePrerender,
+	PulseProviderProps,
+} from "./pulse";
 // Core React bindings
-export { PulseProvider, PulseView, usePulseClient } from "./pulse";
+export {
+	PulseApp,
+	PulseViewIdContext,
+	PulseProvider,
+	PulseView,
+	usePulseChannel,
+	usePulseChannelManager,
+	usePulseChannelManagerForView,
+	usePulseClient,
+	usePulseViewId,
+} from "./pulse";
 // Renderer helpers
 // Renderer (structural expressions + eval-keyed props)
 export { VDOMRenderer } from "./renderer";
@@ -51,7 +69,6 @@ export { VDOMRenderer } from "./renderer";
 // } from "./serialize/clean";
 export { deserialize, serialize } from "./serialize/serializer";
 // Transports (types only - implementation is internal)
-export type { MessageListener, Transport } from "./transport";
 // VDOM types and helpers
 export type {
 	ComponentRegistry,

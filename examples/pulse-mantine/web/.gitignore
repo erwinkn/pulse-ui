@@ -1,11 +1,10 @@
 .DS_Store
 /node_modules/
 
-# React Router
-/.react-router/
-/build/
+# Build output
+/dist/
 
+# Pulse
 .pulse.lock
-pulse/
 .pulse/
 app/pulse/

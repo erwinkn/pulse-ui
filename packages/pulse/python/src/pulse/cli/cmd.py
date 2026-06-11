@@ -31,11 +31,12 @@ from pulse.cli.processes import execute_commands
 from pulse.cli.secrets import resolve_dev_secret
 from pulse.cli.uvicorn_log_config import get_log_config
 from pulse.env import (
+	ENV_PULSE_ASSET_SERVER_ADDRESS,
 	ENV_PULSE_DISABLE_CODEGEN,
 	ENV_PULSE_HOST,
 	ENV_PULSE_PORT,
-	ENV_PULSE_REACT_SERVER_ADDRESS,
 	ENV_PULSE_SECRET,
+	ENV_PULSE_SSR_SERVER_ADDRESS,
 	PulseEnv,
 	env,
 )
@@ -72,10 +73,15 @@ def run(
 	),
 	server_only: bool = typer.Option(False, "--server-only", "--backend-only"),
 	web_only: bool = typer.Option(False, "--web-only"),
-	react_server_address: str | None = typer.Option(
+	asset_server_address: str | None = typer.Option(
 		None,
-		"--react-server-address",
-		help="Full URL of React server (required for single-server + --server-only)",
+		"--asset-server-address",
+		help="Full URL of asset dev server (required for single-server + --server-only in dev)",
+	),
+	ssr_server_address: str | None = typer.Option(
+		None,
+		"--ssr-server-address",
+		help="Full URL of SSR server (required for single-server + --server-only)",
 	),
 	reload: bool | None = typer.Option(None, "--reload/--no-reload"),
 	find_port: bool = typer.Option(True, "--find-port/--no-find-port"),
@@ -88,7 +94,7 @@ def run(
 		False, "--verbose", help="Show all logs without filtering"
 	),
 ):
-	"""Run the Pulse server and web development server together."""
+	"""Run the Pulse server with the SSR server (and Vite dev server in dev)."""
 	extra_flags = list(ctx.args)
 
 	# Validate mode flags (dev is default if neither specified)
@@ -101,6 +107,9 @@ def run(
 	mode: PulseEnv = "prod" if prod else "dev"
 	env.pulse_env = mode
 	logger = CLILogger(mode, plain=plain)
+
+	# The Vite dev server only runs in dev; prod serves built assets directly.
+	allow_assets = mode == "dev"
 
 	# Turn on reload in dev only
 	if reload is None:
@@ -119,14 +128,21 @@ def run(
 	if is_single_server:
 		logger.print("Single-server mode")
 
-	# In single-server + server-only mode, require explicit React server address
+	# In single-server + server-only mode, require explicit SSR/asset server addresses
 	if is_single_server and server_only:
-		if not react_server_address:
+		if not ssr_server_address:
 			logger.error(
-				"--react-server-address is required when using single-server mode with --server-only."
+				"--ssr-server-address is required when using single-server mode with --server-only."
 			)
 			raise typer.Exit(1)
-		os.environ[ENV_PULSE_REACT_SERVER_ADDRESS] = react_server_address
+		os.environ[ENV_PULSE_SSR_SERVER_ADDRESS] = ssr_server_address
+		if allow_assets:
+			if not asset_server_address:
+				logger.error(
+					"--asset-server-address is required in dev when using single-server mode with --server-only."
+				)
+				raise typer.Exit(1)
+			os.environ[ENV_PULSE_ASSET_SERVER_ADDRESS] = asset_server_address
 
 	web_root = app_instance.codegen.cfg.web_root
 	if not web_root.exists() and not server_only:
@@ -184,11 +200,15 @@ def run(
 	commands: list[CommandSpec] = []
 
 	# Track readiness for announcement
-	server_ready = {"server": False, "web": False}
+	server_ready = {"server": False, "assets": False, "ssr": False}
 	announced = False
 
-	def mark_web_ready() -> None:
-		server_ready["web"] = True
+	def mark_assets_ready() -> None:
+		server_ready["assets"] = True
+		check_and_announce()
+
+	def mark_ssr_ready() -> None:
+		server_ready["ssr"] = True
 		check_and_announce()
 
 	def mark_server_ready() -> None:
@@ -202,11 +222,14 @@ def run(
 			return
 
 		needs_server = not web_only
-		needs_web = not server_only
+		needs_assets = allow_assets and not server_only
+		needs_ssr = not server_only
 
 		if needs_server and not server_ready["server"]:
 			return
-		if needs_web and not server_ready["web"]:
+		if needs_assets and not server_ready["assets"]:
+			return
+		if needs_ssr and not server_ready["ssr"]:
 			return
 
 		# All required servers are ready, show announcement
@@ -215,22 +238,33 @@ def run(
 		server_url = f"{protocol}://{address}:{port}"
 		logger.write_ready_announcement(address, port, server_url)
 
-	# Build web command first (when needed) so we can set PULSE_REACT_SERVER_ADDRESS
-	# before building the uvicorn command, which needs that env var
+	# Build web commands first (when needed) so we can set the asset/SSR server
+	# address env vars before building the uvicorn command, which forwards them
 	if not server_only:
-		web_port = find_available_port(5173)
-		web_cmd = build_web_command(
+		if allow_assets:
+			asset_port = find_available_port(5173)
+			asset_cmd = build_asset_command(
+				web_root=web_root,
+				extra_args=web_args,
+				port=asset_port,
+				ready_pattern=r"localhost:\d+",
+				on_ready=mark_assets_ready,
+				plain=plain,
+			)
+			commands.append(asset_cmd)
+			env.asset_server_address = f"http://localhost:{asset_port}"
+		ssr_port = find_available_port(3001)
+		ssr_cmd = build_ssr_command(
 			web_root=web_root,
 			extra_args=web_args,
-			port=web_port,
-			mode=app_instance.env,
-			ready_pattern=r"localhost:\d+",
-			on_ready=mark_web_ready,
+			port=ssr_port,
+			script="ssr" if mode == "dev" else "start",
+			ready_pattern=r"SSR server running",
+			on_ready=mark_ssr_ready,
 			plain=plain,
 		)
-		commands.append(web_cmd)
-		# Set env var so app can read the React server address (only used in single-server mode)
-		env.react_server_address = f"http://localhost:{web_port}"
+		commands.append(ssr_cmd)
+		env.ssr_server_address = f"http://localhost:{ssr_port}"
 
 	if not web_only:
 		server_cmd = build_uvicorn_command(
@@ -269,6 +303,117 @@ def run(
 			logger.print("Run again with --interrupt to stop it and start this app.")
 		raise typer.Exit(1) from None
 	raise typer.Exit(exit_code)
+
+
+@cli.command(
+	"build", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
+def build(
+	ctx: typer.Context,
+	app_file: str = typer.Argument(
+		...,
+		help=("App target: 'path/to/app.py[:var]' (default :app) or 'module.path:var'"),
+	),
+	plain: bool = typer.Option(
+		False, "--plain", help="Use plain output without colors or emojis"
+	),
+	fix: bool = typer.Option(
+		False, "--fix", help="Install missing or outdated dependencies before building"
+	),
+	ci: bool = typer.Option(False, "--ci", help="Run build in CI mode"),
+	prod: bool = typer.Option(False, "--prod", help="Run build in production mode"),
+):
+	"""Generate routes and build web assets (client + SSR bundles)."""
+	extra_args = list(ctx.args)
+
+	mode_flags = [name for flag, name in [(ci, "ci"), (prod, "prod")] if flag]
+	if len(mode_flags) > 1:
+		logger = CLILogger("dev", plain=plain)
+		logger.error("Please specify only one of --ci or --prod.")
+		raise typer.Exit(1)
+
+	mode: PulseEnv = cast(PulseEnv, mode_flags[0]) if mode_flags else "prod"
+	env.pulse_env = mode
+	logger = CLILogger(mode, plain=plain)
+
+	logger.print(f"Loading app from {app_file}")
+	env.codegen_disabled = False
+	app_ctx = load_app_from_target(app_file, logger)
+	_apply_app_context_to_env(app_ctx)
+	app = app_ctx.app
+
+	web_root = app.codegen.cfg.web_root
+	if not web_root.exists():
+		logger.error(f"Directory not found: {web_root.absolute()}")
+		raise typer.Exit(1)
+	if info := active_lock_info(web_root):
+		logger.error(
+			"Cannot run 'pulse build' while a Pulse dev server is running at "
+			+ f"{info.url} (pid={info.pid}). Stop the dev server first."
+		)
+		raise typer.Exit(1)
+
+	if mode in ("ci", "prod") and not app.server_address:
+		logger.error(
+			"server_address must be provided when building in CI or production mode. "
+			+ "Set it in your App constructor or via the PULSE_SERVER_ADDRESS environment variable."
+		)
+		raise typer.Exit(1)
+
+	addr = app.server_address or "http://localhost:8000"
+
+	try:
+		app.run_codegen(addr)
+	except Exception:
+		logger.error("Failed to generate routes")
+		logger.print_exception()
+		raise typer.Exit(1) from None
+
+	try:
+		to_add = check_web_dependencies(
+			web_root,
+			pulse_version=PULSE_PY_VERSION,
+		)
+	except DependencyResolutionError as exc:
+		logger.error(str(exc))
+		raise typer.Exit(1) from None
+	except DependencyError as exc:
+		logger.error(str(exc))
+		raise typer.Exit(1) from None
+
+	if to_add:
+		if not fix:
+			logger.error("Missing dependencies detected in web project.")
+			for pkg in to_add:
+				logger.print(f"  {pkg}")
+			logger.print("Run 'pulse build --fix' or 'pulse check --fix' to install.")
+			raise typer.Exit(1)
+		try:
+			dep_plan = prepare_web_dependencies(
+				web_root,
+				pulse_version=PULSE_PY_VERSION,
+			)
+			if dep_plan:
+				_run_dependency_plan(logger, web_root, dep_plan)
+		except subprocess.CalledProcessError:
+			logger.error("Failed to install web dependencies with Bun.")
+			raise typer.Exit(1) from None
+
+	command = build_web_command(
+		web_root=web_root,
+		extra_args=extra_args,
+		plain=plain,
+	)
+	try:
+		exit_code = execute_commands(
+			[command],
+			tag_mode=logger.get_tag_mode(),
+		)
+	except RuntimeError as exc:
+		logger.error(str(exc))
+		raise typer.Exit(1) from None
+	if exit_code:
+		raise typer.Exit(exit_code)
 
 
 @cli.command("generate")
@@ -447,6 +592,9 @@ def build_uvicorn_command(
 
 	if reload_enabled:
 		args.append("--reload")
+		# Bound the graceful-shutdown wait so a lingering connection task can
+		# never wedge the dev reload cycle.
+		args.extend(["--timeout-graceful-shutdown", "3"])
 		args.extend(["--reload-include", "*.css"])
 		app_dir = app_ctx.app_dir or Path.cwd()
 		args.extend(["--reload-dir", str(app_dir)])
@@ -480,10 +628,14 @@ def build_uvicorn_command(
 		command_env["FORCE_COLOR"] = "0"
 	else:
 		command_env["FORCE_COLOR"] = "1"
-	# Pass React server address to uvicorn process if set
-	if ENV_PULSE_REACT_SERVER_ADDRESS in os.environ:
-		command_env[ENV_PULSE_REACT_SERVER_ADDRESS] = os.environ[
-			ENV_PULSE_REACT_SERVER_ADDRESS
+	# Pass asset + SSR server addresses to uvicorn process if set
+	if ENV_PULSE_ASSET_SERVER_ADDRESS in os.environ:
+		command_env[ENV_PULSE_ASSET_SERVER_ADDRESS] = os.environ[
+			ENV_PULSE_ASSET_SERVER_ADDRESS
+		]
+	if ENV_PULSE_SSR_SERVER_ADDRESS in os.environ:
+		command_env[ENV_PULSE_SSR_SERVER_ADDRESS] = os.environ[
+			ENV_PULSE_SSR_SERVER_ADDRESS
 		]
 	if app_ctx.app.env == "prod" and server_only:
 		command_env[ENV_PULSE_DISABLE_CODEGEN] = "1"
@@ -510,36 +662,20 @@ def build_uvicorn_command(
 	)
 
 
-def build_web_command(
+def build_asset_command(
 	*,
 	web_root: Path,
 	extra_args: Sequence[str],
 	port: int | None = None,
-	mode: PulseEnv = "dev",
 	ready_pattern: str | None = None,
 	on_ready: Callable[[], None] | None = None,
 	plain: bool = False,
 ) -> CommandSpec:
 	command_env = os.environ.copy()
-	if mode == "prod":
-		args = [
-			"node",
-			"node_modules/@react-router/serve/dist/cli.js",
-			"./build/server/index.js",
-		]
-		command_env["NODE_ENV"] = "production"
-	else:
-		# Development: use dev server
-		args = ["bun", "run", "dev"]
-
+	# Development: use Vite dev server
+	args = ["bun", "run", "dev"]
 	if port is not None:
-		if mode == "prod":
-			# react-router-serve uses PORT environment variable
-			# Don't add --port flag for production
-			command_env["PORT"] = str(port)
-		else:
-			# react-router dev accepts --port flag
-			args.extend(["--port", str(port)])
+		args.extend(["--port", str(port)])
 	if extra_args:
 		args.extend(extra_args)
 
@@ -555,12 +691,72 @@ def build_web_command(
 		command_env["FORCE_COLOR"] = "1"
 
 	return CommandSpec(
-		name="web",
+		name="assets",
 		args=args,
 		cwd=web_root,
 		env=command_env,
 		ready_pattern=ready_pattern,
 		on_ready=on_ready,
+	)
+
+
+def build_ssr_command(
+	*,
+	web_root: Path,
+	extra_args: Sequence[str],
+	script: str = "ssr",
+	port: int | None = None,
+	ready_pattern: str | None = None,
+	on_ready: Callable[[], None] | None = None,
+	plain: bool = False,
+) -> CommandSpec:
+	command_env = os.environ.copy()
+	args = ["bun", "run", script]
+	if port is not None:
+		command_env["PULSE_SSR_PORT"] = str(port)
+	if extra_args:
+		args.extend(extra_args)
+
+	command_env.update({"PYTHONUNBUFFERED": "1"})
+	if plain:
+		command_env["NO_COLOR"] = "1"
+		command_env["FORCE_COLOR"] = "0"
+	else:
+		command_env["FORCE_COLOR"] = "1"
+
+	return CommandSpec(
+		name="ssr",
+		args=args,
+		cwd=web_root,
+		env=command_env,
+		ready_pattern=ready_pattern,
+		on_ready=on_ready,
+	)
+
+
+def build_web_command(
+	*,
+	web_root: Path,
+	extra_args: Sequence[str],
+	plain: bool = False,
+) -> CommandSpec:
+	command_env = os.environ.copy()
+	args = ["bun", "run", "build"]
+	if extra_args:
+		args.extend(extra_args)
+
+	command_env.update({"PYTHONUNBUFFERED": "1"})
+	if plain:
+		command_env["NO_COLOR"] = "1"
+		command_env["FORCE_COLOR"] = "0"
+	else:
+		command_env["FORCE_COLOR"] = "1"
+
+	return CommandSpec(
+		name="build",
+		args=args,
+		cwd=web_root,
+		env=command_env,
 	)
 
 

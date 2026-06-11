@@ -5,14 +5,14 @@ The format mirrors the TypeScript implementation in ``packages/pulse/js``.
 Serialized payload structure::
 
     (
-        ("refs|dates|sets|maps", payload),
+        ("refs|dates|sets|maps|pulse_nodes", payload),
     )
 
-- The first element is a compact metadata string with four pipe-separated
+- The first element is a compact metadata string with five pipe-separated
   comma-separated integer lists representing global node indices for:
-  ``refs``, ``dates``, ``sets``, ``maps``.
-- ``refs``  – indices where the payload entry is an integer pointing to a
-  previously visited node's index (shared refs/cycles).
+  ``refs``, ``dates``, ``sets``, ``maps``, ``pulse_nodes``.
+- ``refs``  – traversal indices where the payload entry is an integer pointing
+  to a previously visited node's index (shared refs/cycles).
 - ``dates`` – indices that should be materialised as temporal objects; the
   payload entry is an ISO 8601 string:
   - ``YYYY-MM-DD`` → ``datetime.date``
@@ -21,9 +21,11 @@ Serialized payload structure::
   items.
 - ``maps``  – indices that are ``Map`` instances; payload is an object mapping
   string keys to child payloads. Python reconstructs these as ``dict``.
+- ``pulse_nodes`` – indices that should be rendered as VDOM nodes by the JS
+  client.
 
-Nodes are assigned a single global index as they are visited (non-primitives
-only). This preserves shared references and cycles across nested structures
+Nodes are assigned a single global index as each payload slot is visited.
+This preserves shared references and cycles across nested structures
 containing primitives, lists/tuples, ``dict``/plain objects, ``set``, ``date``
 and ``datetime`` objects.
 """
@@ -34,11 +36,15 @@ import datetime as dt
 import math
 import types
 from dataclasses import fields, is_dataclass
-from typing import Any
+from typing import Any, TypeAlias
+
+from pulse.renderer import Renderer, unmount_element
+from pulse.transpiler.nodes import Element, Expr, PulseNode, Value, clone_renderable
 
 Primitive = int | float | str | bool | None
 PlainJSON = Primitive | list["PlainJSON"] | dict[str, "PlainJSON"]
-Serialized = tuple[tuple[list[int], list[int], list[int], list[int]], PlainJSON]
+SerializedMeta: TypeAlias = tuple[list[int], list[int], list[int], list[int], list[int]]
+Serialized = tuple[SerializedMeta, PlainJSON]
 
 __all__ = [
 	"serialize",
@@ -97,11 +103,19 @@ def serialize(data: Any) -> Serialized:
 	dates: list[int] = []
 	sets: list[int] = []
 	maps: list[int] = []
+	pulse_nodes: list[int] = []
 
 	global_index = 0
 
-	def process(value: Any) -> PlainJSON:
+	def process(value: Any) -> Any:
 		nonlocal global_index
+		unwrapped = unwrap_value(value)
+		if unwrapped is not value:
+			return process(unwrapped)
+
+		idx = global_index
+		global_index += 1
+
 		if value is None or isinstance(value, (bool, int, str)):
 			return value
 		if isinstance(value, float):
@@ -114,8 +128,31 @@ def serialize(data: Any) -> Serialized:
 				)
 			return value
 
-		idx = global_index
-		global_index += 1
+		if isinstance(value, (type, types.ModuleType)):
+			raise TypeError(f"Unsupported value in serialization: {type(value)!r}")
+
+		pulse_payload = None
+		if isinstance(value, (Element, PulseNode)):
+			# Snapshot-render a clone, then unmount it: hooks (and any effects
+			# created during the render) must not outlive the one-shot VDOM.
+			clone = clone_renderable(value)
+			try:
+				pulse_payload = clone.render(Renderer(mode="snapshot"))
+			finally:
+				unmount_element(clone)
+		elif isinstance(value, Expr):
+			pulse_payload = value.render()
+
+		if pulse_payload is not None and is_primitive(pulse_payload):
+			if isinstance(pulse_payload, float):
+				if math.isnan(pulse_payload):
+					return None
+				if math.isinf(pulse_payload):
+					raise ValueError(
+						f"Cannot serialize {pulse_payload}: Infinity is not valid JSON. "
+						+ "Replace with None or a sentinel value."
+					)
+			return pulse_payload
 
 		obj_id = id(value)
 		prev_ref = seen.get(obj_id)
@@ -123,6 +160,10 @@ def serialize(data: Any) -> Serialized:
 			refs.append(idx)
 			return prev_ref
 		seen[obj_id] = idx
+
+		if pulse_payload is not None:
+			pulse_nodes.append(idx)
+			value = pulse_payload
 
 		if isinstance(value, dt.datetime):
 			dates.append(idx)
@@ -161,7 +202,7 @@ def serialize(data: Any) -> Serialized:
 				dc_obj[f.name] = process(getattr(value, f.name))
 			return dc_obj
 
-		if callable(value) or isinstance(value, (type, types.ModuleType)):
+		if callable(value):
 			raise TypeError(f"Unsupported value in serialization: {type(value)!r}")
 
 		if hasattr(value, "__dict__"):
@@ -176,7 +217,7 @@ def serialize(data: Any) -> Serialized:
 
 	payload = process(data)
 
-	return ((refs, dates, sets, maps), payload)
+	return ((refs, dates, sets, maps, pulse_nodes), payload)
 
 
 def deserialize(
@@ -212,25 +253,26 @@ def deserialize(
 		restored = ps.deserialize(serialized)
 		```
 	"""
-	(refs, dates, sets, _maps), data = payload
+	(refs, dates, sets, _maps, _pulse_nodes), data = payload
 	refs = set(refs)
 	dates = set(dates)
 	sets = set(sets)
 	# we don't care about maps
 
-	objects: list[Any] = []
+	objects: dict[int, Any] = {}
+	global_index = 0
 
 	def reconstruct(value: PlainJSON) -> Any:
-		idx = len(objects)
+		nonlocal global_index
+		idx = global_index
+		global_index += 1
 
 		if idx in refs:
 			assert isinstance(value, (int, float)), (
 				"Reference payload must be numeric index"
 			)
-			# Placeholder to keep indices aligned
-			objects.append(None)
 			target_index = int(value)
-			assert 0 <= target_index < len(objects), (
+			assert target_index in objects, (
 				f"Dangling reference to index {target_index}"
 			)
 			return objects[target_index]
@@ -239,10 +281,10 @@ def deserialize(
 			assert isinstance(value, str), "Date payload must be an ISO string"
 			if _is_date_literal(value):
 				date_value = dt.date.fromisoformat(value)
-				objects.append(date_value)
+				objects[idx] = date_value
 				return date_value
 			dt_value = _datetime_from_iso(value)
-			objects.append(dt_value)
+			objects[idx] = dt_value
 			return dt_value
 
 		if value is None:
@@ -254,12 +296,12 @@ def deserialize(
 		if isinstance(value, list):
 			if idx in sets:
 				result_set: set[Any] = set()
-				objects.append(result_set)
+				objects[idx] = result_set
 				for entry in value:
 					result_set.add(reconstruct(entry))
 				return result_set
 			result_list: list[Any] = []
-			objects.append(result_list)
+			objects[idx] = result_list
 			for entry in value:
 				result_list.append(reconstruct(entry))
 			return result_list
@@ -267,7 +309,7 @@ def deserialize(
 		if isinstance(value, dict):
 			# Both maps and records are reconstructed as dictionaries in Python
 			result_dict: dict[str, Any] = {}
-			objects.append(result_dict)
+			objects[idx] = result_dict
 			for key, entry in value.items():
 				result_dict[str(key)] = reconstruct(entry)
 			return result_dict
@@ -275,6 +317,16 @@ def deserialize(
 		raise TypeError(f"Unsupported value in deserialization: {type(value)!r}")
 
 	return reconstruct(data)
+
+
+def unwrap_value(value: Any) -> Any:
+	if isinstance(value, Value):
+		return value.value
+	return value
+
+
+def is_primitive(value: Any) -> bool:
+	return value is None or isinstance(value, (bool, int, float, str))
 
 
 def _datetime_to_iso(value: dt.datetime) -> str:

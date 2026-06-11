@@ -4,7 +4,7 @@ import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any, ParamSpec, Protocol, TypeVar, cast, overload
 
-from pulse.hooks.core import HOOK_CONTEXT
+from pulse.hooks.core import HOOK_CONTEXT, INIT_SCOPE_ACTIVE
 from pulse.hooks.effects import effect_state
 from pulse.hooks.state import collect_component_identity
 from pulse.reactive import (
@@ -309,8 +309,10 @@ def effect(
 				interval=interval,
 			)
 
-		if ctx is None:
-			# Not in component - create standalone effect (current behavior)
+		if ctx is None or INIT_SCOPE_ACTIVE.get():
+			# Outside a component render, or inside a one-time initializer
+			# (ps.setup / ps.init) whose scope captures and owns the effect:
+			# create a standalone effect.
 			return create_effect()
 
 		# In component render - use inline caching

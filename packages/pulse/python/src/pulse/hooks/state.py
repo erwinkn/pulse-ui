@@ -91,12 +91,8 @@ class StateHookState(HookState):
 	@override
 	def dispose(self) -> None:
 		for instance in self.instances.values():
-			try:
-				if not instance.__disposed__:
-					instance.dispose()
-			except RuntimeError:
-				# Already disposed, ignore
-				pass
+			if not instance.__disposed__:
+				instance.dispose()
 		self.instances.clear()
 
 

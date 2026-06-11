@@ -16,6 +16,7 @@ import {
 } from "./channel";
 import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
 import { buildRouteInfo, type RouteInfo } from "./helpers";
+import { replayPreHydrationInputs } from "./hydration";
 import type { ServerError, ServerInitMessage, ServerNavigateResultMessage } from "./messages";
 import { VDOMRenderer } from "./renderer";
 import {
@@ -485,6 +486,12 @@ export function PulseApp({ routes, routeLoaders, config, prerender, url }: Pulse
 	useEffect(() => {
 		persistDirectives(current.directives);
 	}, [current]);
+
+	// Replay inputs the user typed before hydration (recorded by the inline
+	// capture script in the SSR document) once the hydration commit is done.
+	useEffect(() => {
+		replayPreHydrationInputs();
+	}, []);
 
 	const client = useMemo(
 		() =>

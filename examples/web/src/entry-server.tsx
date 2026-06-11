@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { deserialize, preloadRoutesForPath, type PulsePrerender } from "pulse-ui-client";
+import { deserialize, preHydrationInputCaptureScript, preloadRoutesForPath, type PulsePrerender } from "pulse-ui-client";
 import { prerender as reactPrerender } from "react-dom/static";
 import { PulseApp } from "../app/pulse/_layout";
 import { pulseRouteTree, routeLoaders } from "../app/pulse/routes";
@@ -104,6 +104,7 @@ export async function render(url: string, serialized: unknown) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>${preHydrationInputCaptureScript}</script>
     ${head}
   </head>
   <body>

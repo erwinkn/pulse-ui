@@ -14,6 +14,8 @@ export { FormSubmissionError, PulseForm, submitForm } from "./form";
 export type { RouteInfo } from "./helpers";
 // Server helpers
 export { buildRouteInfo, type LocationLike } from "./helpers";
+// Pre-hydration input capture (SSR documents embed the script; PulseApp replays)
+export { preHydrationInputCaptureScript, replayPreHydrationInputs } from "./hydration";
 export * from "./router";
 // Messages (types only)
 export type {

@@ -246,7 +246,7 @@ class TestCodegen:
 
 		layout_content = (pulse_app_dir / "_layout.tsx").read_text()
 		assert (
-			'import { deserialize, extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";'
+			'import { buildRouteInfo, deserialize, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";'
 			in layout_content
 		)
 		assert 'serverAddress: "http://localhost:8000"' in layout_content

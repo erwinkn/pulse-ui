@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "bun:test";
 import { render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { PulseProvider, PulseView, usePulseChannel, usePulseViewId } from "./pulse";
-import { PulseRouterProvider } from "./router";
+import { MemoryRouter } from "react-router";
 
 vi.mock("socket.io-client", () => ({
 	io: () => ({
@@ -25,11 +25,7 @@ describe("PulseView channel hooks", () => {
 		}
 
 		render(
-			<PulseRouterProvider
-				routes={[{ id: "/test", path: "test" }]}
-				routeLoaders={{}}
-				initialUrl="http://pulse.test/test"
-			>
+			<MemoryRouter initialEntries={["/test"]}>
 				<PulseProvider
 					config={{
 						serverAddress: "http://pulse.test",
@@ -53,7 +49,7 @@ describe("PulseView channel hooks", () => {
 				>
 					<PulseView path="/test" registry={{ Probe }} />
 				</PulseProvider>
-			</PulseRouterProvider>,
+			</MemoryRouter>,
 		);
 
 		await waitFor(() => {

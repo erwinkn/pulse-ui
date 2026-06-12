@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, mock, vi } from "bun:test";
 import React from "react";
 import { act, render } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { deserialize, serialize } from "./serialize/serializer";
 import type { Serialized } from "./serialize/serializer";
 
@@ -631,17 +632,12 @@ describe("PulseProvider connection handling", () => {
 
 	it("handles initial connection errors without an unhandled rejection", async () => {
 		const { PulseProvider } = await import("./pulse");
-		const { PulseRouterProvider } = await import("./router");
 		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
 		render(
 			React.createElement(
-				PulseRouterProvider,
-				{
-					routes: [{ id: "/", index: true }],
-					routeLoaders: {},
-					initialUrl: "http://pulse.test/",
-				} as React.ComponentProps<typeof PulseRouterProvider>,
+				MemoryRouter,
+				null,
 				React.createElement(
 					PulseProvider,
 					{

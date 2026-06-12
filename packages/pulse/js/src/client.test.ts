@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, mock, vi } from "bun:test";
 import React from "react";
 import { act, render } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
 import { deserialize, serialize } from "./serialize/serializer";
 import type { Serialized } from "./serialize/serializer";
 
@@ -69,12 +68,7 @@ async function makeClient(
 	},
 ) {
 	const { PulseSocketIOClient } = await import("./client");
-	return new PulseSocketIOClient(
-		"http://pulse.test",
-		{},
-		vi.fn() as any,
-		connectionStatus,
-	);
+	return new PulseSocketIOClient("http://pulse.test", {}, connectionStatus);
 }
 
 function sentMessages(target: FakeSocket = socket) {
@@ -632,24 +626,22 @@ describe("PulseProvider connection handling", () => {
 
 	it("handles initial connection errors without an unhandled rejection", async () => {
 		const { PulseProvider } = await import("./pulse");
+		const { PulseRouterProvider } = await import("./router");
 		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+		const client = await makeClient();
 
 		render(
 			React.createElement(
-				MemoryRouter,
-				null,
+				PulseRouterProvider,
+				{
+					routes: [{ id: "/", index: true }],
+					routeLoaders: {},
+					initialUrl: "http://pulse.test/",
+				} as React.ComponentProps<typeof PulseRouterProvider>,
 				React.createElement(
 					PulseProvider,
 					{
-						config: {
-							serverAddress: "http://pulse.test",
-							apiPrefix: "/_pulse",
-							connectionStatus: {
-								initialConnectingDelay: 0,
-								initialErrorDelay: 0,
-								reconnectErrorDelay: 0,
-							},
-						},
+						client,
 						prerender: { views: {}, directives: {} },
 						children: React.createElement("div", null, "child"),
 					},
@@ -665,5 +657,73 @@ describe("PulseProvider connection handling", () => {
 
 		expect(io).toHaveBeenCalledTimes(1);
 		consoleError.mockRestore();
+	});
+});
+
+describe("resume window message handling", () => {
+	beforeEach(() => {
+		io.mockClear();
+	});
+
+	it("attaches views mounted during the resume handshake after it completes", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		client.attach("view-a", makeView());
+		socket.trigger("connect");
+		await connected;
+
+		socket.trigger("disconnect");
+		socket.emitted = [];
+		socket.trigger("connect");
+
+		// A navigation commits while the resume is pending.
+		client.attach("view-b", makeView());
+
+		const resume = sentMessages()[0]!;
+		expect(resume.type).toBe("client_resume");
+		socket.trigger(
+			"message",
+			serialize({
+				type: "server_resume",
+				resumeId: resume.resumeId,
+				status: "ok",
+				views: [{ view: "view-a" }],
+				channels: [],
+			}),
+		);
+
+		const attaches = sentMessages().filter((m) => m.type === "attach");
+		expect(attaches.map((m) => m.view)).toEqual(["view-b"]);
+	});
+
+	it("replays offline detach unless the view was re-attached", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		client.attach("view-a", makeView());
+		client.attach("view-b", makeView());
+		socket.trigger("connect");
+		await connected;
+
+		socket.trigger("disconnect");
+		client.detach("view-a");
+		client.detach("view-b");
+		client.attach("view-b", makeView()); // StrictMode-style replay
+		socket.emitted = [];
+		socket.trigger("connect");
+
+		const resume = sentMessages()[0]!;
+		socket.trigger(
+			"message",
+			serialize({
+				type: "server_resume",
+				resumeId: resume.resumeId,
+				status: "ok",
+				views: [{ view: "view-b" }],
+				channels: [],
+			}),
+		);
+
+		const replayed = sentMessages().filter((m) => m.type === "detach");
+		expect(replayed.map((m) => m.view)).toEqual(["view-a"]);
 	});
 });

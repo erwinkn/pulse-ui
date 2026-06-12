@@ -1006,8 +1006,7 @@ class KeyedQueryResult(Generic[T], Disposable):
 	@override
 	def dispose(self):
 		"""Clean up the result and its observe effect."""
-		if not self._observe_effect.__disposed__:
-			self._observe_effect.dispose()
+		self._observe_effect.dispose()
 
 
 class QueryProperty(Generic[T, TState], InitializableProperty):

@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable, Iterable
+import logging
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from types import NoneType
 from typing import Any, NamedTuple, TypeAlias, cast
 from typing import Literal as TypingLiteral
 
+from pulse.context import PulseContext
 from pulse.debounce import Debounced
 from pulse.helpers import values_equal
 from pulse.hooks.core import HookContext
+from pulse.reactive import RenderEffect, Scope, Untrack
 from pulse.refs import RefHandle
 from pulse.transpiler import Import
 from pulse.transpiler.function import Constant, JsFunction, JsxFunction
@@ -42,6 +45,44 @@ FRAGMENT_TAG = ""
 MOUNT_PREFIX = "$$"
 CALLBACK_PLACEHOLDER = "$cb"
 
+logger = logging.getLogger(__name__)
+
+
+def enforce_scope_ownership(scope: Scope, component: PulseNode) -> None:
+	"""Flag Effects/States constructed during a render pass without an owner.
+
+	Everything with a designated owner is shielded from (or removed from) the
+	component's tracking scope: inline @ps.effect (inline-effects hook),
+	ps.init/ps.setup creations (their own capture scopes), ps.state factories,
+	hook-state factories, and shared/global states (Untrack). Whatever is left
+	would never be disposed, so it leaks past unmount. Policy comes from
+	App(unowned_reactives=...): "error" (default), "warn", or "ignore".
+	"""
+	if not scope.effects and not scope.states:
+		return
+	policy = PulseContext.get().app.unowned_reactives
+	if policy == "ignore":
+		return
+	component_name = component.name or getattr(component.fn, "__name__", "component")
+	created = [f"Effect '{effect.name or 'unnamed'}'" for effect in scope.effects]
+	created += [type(state).__name__ for state in scope.states]
+	message = (
+		f"Component '{component_name}' created reactive objects during render "
+		f"with no owner to dispose them: {', '.join(created)}. Create states in "
+		"`with ps.init():` or via `ps.state(...)`, and effects with `@ps.effect` "
+		"or inside a State. Configure this check with App(unowned_reactives=...)."
+	)
+	if policy == "warn":
+		logger.warning(message)
+		return
+	for effect in scope.effects:
+		if not effect.__disposed__:
+			effect.dispose()
+	for state in scope.states:
+		if not state.__disposed__:
+			state.dispose()
+	raise RuntimeError(message)
+
 
 class Callback(NamedTuple):
 	fn: Callable[..., Any]
@@ -69,52 +110,160 @@ class RenderPropTask(NamedTuple):
 	path: str
 
 
+class ComponentRuntime:
+	"""Persistent render state for one component instance.
+
+	Lives on the first PulseNode instance rendered for the component and moves
+	to each new instance during reconciliation. The render effect re-renders
+	only this component's subtree when its dependencies change.
+	"""
+
+	__slots__ = ("node", "path", "tree", "effect")  # pyright: ignore[reportUnannotatedClassAttribute]
+
+	node: PulseNode
+	path: str
+	tree: "RenderTree"
+	effect: RenderEffect | None
+
+	def __init__(self, node: PulseNode, path: str, tree: "RenderTree") -> None:
+		self.node = node
+		self.path = path
+		self.tree = tree
+		self.effect = None
+
+
 class RenderTree:
+	"""Persistent render state for a view.
+
+	Holds the normalized node tree and the callback registry, and dispatches
+	fine-grained component re-renders. The owning View installs `dispatch` to
+	wrap passes with Pulse context and ship the resulting operations to the
+	client; without a dispatcher (tests, standalone trees), operations
+	accumulate in `pending_ops`.
+	"""
+
 	element: Node
 	callbacks: Callbacks
 	rendered: bool
+	dispatch: Callable[[ComponentRuntime], None] | None
+	pending_ops: list[VDOMOperation]
 
 	def __init__(self, element: Node) -> None:
 		self.element = element
 		self.callbacks = {}
 		self.rendered = False
+		self.dispatch = None
+		self.pending_ops = []
 
 	def render(self) -> VDOM:
-		"""First render. Returns VDOM."""
-		renderer = Renderer()
+		"""First render (or full re-render for a fresh prerender). Returns VDOM."""
+		renderer = Renderer(tree=self)
 		vdom, self.element = renderer.render_tree(self.element)
-		self.callbacks = renderer.callbacks
+		renderer.finish_pass()
 		self.rendered = True
 		return vdom
 
 	def rerender(self, new_element: Node | None = None) -> list[VDOMOperation]:
-		"""Re-render and return update operations.
+		"""Reconcile the whole tree from the root and return update operations.
 
 		If new_element is provided, reconciles against it (for testing).
-		Otherwise, reconciles against the current element (production use).
+		Otherwise, reconciles against the current element.
 		"""
 		if not self.rendered:
 			raise RuntimeError("render() must be called before rerender()")
 		target = new_element if new_element is not None else self.element
-		renderer = Renderer()
+		renderer = Renderer(tree=self)
 		self.element = renderer.reconcile_tree(self.element, target, path="")
-		self.callbacks = renderer.callbacks
+		renderer.finish_pass()
 		return renderer.operations
+
+	def run_component_pass(self, runtime: ComponentRuntime) -> list[VDOMOperation]:
+		"""Re-render a single component subtree, returning its operations."""
+		renderer = Renderer(tree=self, pass_root=runtime.path)
+		renderer.rerender_component(runtime)
+		renderer.finish_pass()
+		return renderer.operations
+
+	def _dispatch(self, runtime: ComponentRuntime) -> None:
+		if self.dispatch is not None:
+			self.dispatch(runtime)
+			return
+		self.pending_ops.extend(self.run_component_pass(runtime))
+
+	def take_ops(self) -> list[VDOMOperation]:
+		"""Drain operations accumulated without a dispatcher."""
+		ops = self.pending_ops
+		self.pending_ops = []
+		return ops
+
+	def iter_runtimes(self) -> "Iterator[ComponentRuntime]":
+		yield from iter_component_runtimes(self.element)
+
+	def pause_effects(self) -> None:
+		for runtime in self.iter_runtimes():
+			if runtime.effect is not None:
+				runtime.effect.pause()
+
+	def resume_effects(self) -> None:
+		for runtime in self.iter_runtimes():
+			if runtime.effect is not None:
+				runtime.effect.resume()
+
+	def flush_effects(self) -> None:
+		for runtime in self.iter_runtimes():
+			if runtime.effect is not None:
+				runtime.effect.flush()
 
 	def unmount(self) -> None:
 		if self.rendered:
 			unmount_element(self.element)
 			self.rendered = False
 		self.callbacks.clear()
+		self.pending_ops = []
 
 
 class Renderer:
+	"""Single render/reconcile pass over (part of) a tree.
+
+	Persistent mode requires a RenderTree: callbacks are registered into the
+	tree's persistent registry, and callbacks under `pass_root` that are not
+	re-registered during the pass are swept when it finishes. Snapshot mode
+	renders one-shot VDOM with callbacks/refs stripped.
+	"""
+
 	def __init__(
-		self, *, mode: TypingLiteral["persistent", "snapshot"] = "persistent"
+		self,
+		*,
+		tree: RenderTree | None = None,
+		pass_root: str = "",
+		mode: TypingLiteral["persistent", "snapshot"] = "persistent",
 	) -> None:
 		self.mode: TypingLiteral["persistent", "snapshot"] = mode
-		self.callbacks: Callbacks = {}
+		self.tree: RenderTree | None = tree
+		self.pass_root: str = pass_root
+		self.callbacks: Callbacks = tree.callbacks if tree is not None else {}
 		self.operations: list[VDOMOperation] = []
+		self._stale_callbacks: set[str] = set()
+		if tree is not None:
+			if pass_root:
+				prefix = pass_root + "."
+				self._stale_callbacks = {
+					key
+					for key in self.callbacks
+					if key == pass_root or key.startswith(prefix)
+				}
+			else:
+				self._stale_callbacks = set(self.callbacks)
+
+	def register_callback(self, path: str, fn: Callable[..., Any]) -> None:
+		register_callback(self.callbacks, path, fn)
+		self._stale_callbacks.discard(path)
+
+	def finish_pass(self) -> None:
+		"""Drop callbacks under the pass root that were not re-registered."""
+		for key in self._stale_callbacks:
+			self.callbacks.pop(key, None)
+		self._stale_callbacks = set()
 
 	# ------------------------------------------------------------------
 	# Rendering helpers
@@ -135,11 +284,53 @@ class Renderer:
 	def render_component(
 		self, component: PulseNode, path: str
 	) -> tuple[VDOM, PulseNode]:
+		if self.mode == "snapshot":
+			if component.hooks is None:
+				component.hooks = HookContext()
+			with component.hooks:
+				rendered = component.fn(*component.args, **component.kwargs)
+			vdom, normalized_child = self.render_tree(rendered, path)
+			component.contents = normalized_child
+			return vdom, component
+
+		tree = self.tree
+		if tree is None:
+			raise RuntimeError(
+				"Rendering components persistently requires a RenderTree"
+			)
+		runtime = component.runtime
+		if runtime is None:
+			runtime = ComponentRuntime(component, path, tree)
+			component.runtime = runtime
+		else:
+			# Full re-render of an already-rendered component (fresh prerender):
+			# tear down the old subtree so stale effects don't stay subscribed.
+			runtime.node = component
+			runtime.path = path
+			if component.contents is not None:
+				unmount_element(component.contents)
+				component.contents = None
+		if runtime.effect is None:
+			# Untrack: the runtime owns its render effect; it must not register
+			# into the enclosing (parent) component's tracking scope.
+			with Untrack():
+				runtime.effect = RenderEffect(
+					_make_component_effect(tree, runtime),
+					lazy=True,
+					name=f"render:{component.name or getattr(component.fn, '__name__', 'component')}",
+				)
+			runtime.effect.runtime = runtime
 		if component.hooks is None:
 			component.hooks = HookContext()
-		with component.hooks:
-			rendered = component.fn(*component.args, **component.kwargs)
-		vdom, normalized_child = self.render_tree(rendered, path)
+		# Untrack shields the enclosing component's scope: this component's
+		# reads (and its effect) must not become dependencies of its parent.
+		with Untrack():
+			with runtime.effect.capture_deps(update_deps=True) as scope:
+				with component.hooks:
+					rendered = component.fn(*component.args, **component.kwargs)
+				vdom, normalized_child = self.render_tree(rendered, path)
+			enforce_scope_ownership(scope, component)
+		runtime.effect.runs += 1
 		component.contents = normalized_child
 		return vdom, component
 
@@ -216,23 +407,93 @@ class Renderer:
 	) -> PulseNode:
 		current.hooks = previous.hooks
 		current.contents = previous.contents
-
 		if current.hooks is None:
 			current.hooks = HookContext()
 
-		with current.hooks:
-			rendered = current.fn(*current.args, **current.kwargs)
+		if self.mode == "snapshot":
+			with current.hooks:
+				rendered = current.fn(*current.args, **current.kwargs)
+			if current.contents is None:
+				new_vdom, normalized = self.render_tree(rendered, path)
+				current.contents = normalized
+				self.operations.append(
+					ReplaceOperation(type="replace", path=path, data=new_vdom)
+				)
+			else:
+				current.contents = self.reconcile_tree(current.contents, rendered, path)
+			return current
 
-		if current.contents is None:
-			new_vdom, normalized = self.render_tree(rendered, path)
-			current.contents = normalized
-			self.operations.append(
-				ReplaceOperation(type="replace", path=path, data=new_vdom)
+		tree = self.tree
+		if tree is None:
+			raise RuntimeError(
+				"Rendering components persistently requires a RenderTree"
 			)
+		runtime = previous.runtime
+		if runtime is None:
+			runtime = ComponentRuntime(current, path, tree)
+		current.runtime = runtime
+		if previous is not current:
+			previous.runtime = None
+		runtime.node = current
+		runtime.path = path
+		if runtime.effect is None:
+			# Untrack: the runtime owns its render effect; it must not register
+			# into the enclosing (parent) component's tracking scope.
+			with Untrack():
+				runtime.effect = RenderEffect(
+					_make_component_effect(tree, runtime),
+					lazy=True,
+					name=f"render:{current.name or getattr(current.fn, '__name__', 'component')}",
+				)
+			runtime.effect.runtime = runtime
 		else:
-			current.contents = self.reconcile_tree(current.contents, rendered, path)
+			# This pass re-renders the component now; a queued standalone run
+			# would be redundant.
+			runtime.effect.cancel(cancel_interval=False)
+
+		with Untrack():
+			with runtime.effect.capture_deps(update_deps=True) as scope:
+				with current.hooks:
+					rendered = current.fn(*current.args, **current.kwargs)
+
+				if current.contents is None:
+					new_vdom, normalized = self.render_tree(rendered, path)
+					current.contents = normalized
+					self.operations.append(
+						ReplaceOperation(type="replace", path=path, data=new_vdom)
+					)
+				else:
+					current.contents = self.reconcile_tree(
+						current.contents, rendered, path
+					)
+			enforce_scope_ownership(scope, current)
+		runtime.effect.runs += 1
 
 		return current
+
+	def rerender_component(self, runtime: ComponentRuntime) -> None:
+		"""Standalone re-render of one component, triggered by its effect."""
+		component = runtime.node
+		path = runtime.path
+		assert runtime.effect is not None
+		if component.hooks is None:
+			component.hooks = HookContext()
+		with Untrack():
+			with runtime.effect.capture_deps(update_deps=True) as scope:
+				with component.hooks:
+					rendered = component.fn(*component.args, **component.kwargs)
+				if component.contents is None:
+					new_vdom, normalized = self.render_tree(rendered, path)
+					component.contents = normalized
+					self.operations.append(
+						ReplaceOperation(type="replace", path=path, data=new_vdom)
+					)
+				else:
+					component.contents = self.reconcile_tree(
+						component.contents, rendered, path
+					)
+			enforce_scope_ownership(scope, component)
+		runtime.effect.runs += 1
 
 	def reconcile_element(
 		self,
@@ -457,7 +718,7 @@ class Renderer:
 				if normalized is None:
 					normalized = current.copy()
 				normalized[key] = value
-				register_callback(self.callbacks, prop_path, value.fn)
+				self.register_callback(prop_path, value.fn)
 				prev_delay = (
 					old_value.delay_ms if isinstance(old_value, Debounced) else None
 				)
@@ -477,7 +738,7 @@ class Renderer:
 				if normalized is None:
 					normalized = current.copy()
 				normalized[key] = value
-				register_callback(self.callbacks, prop_path, value)
+				self.register_callback(prop_path, value)
 				if not callable(old_value) or isinstance(old_value, Debounced):
 					updated[key] = CALLBACK_PLACEHOLDER
 				continue
@@ -529,6 +790,13 @@ class Renderer:
 
 	def unmount_subtree(self, node: Node) -> None:
 		unmount_element(node)
+
+
+def _make_component_effect(tree: RenderTree, runtime: ComponentRuntime):
+	def run() -> None:
+		tree._dispatch(runtime)  # pyright: ignore[reportPrivateUsage]
+
+	return run
 
 
 # ----------------------------------------------------------------------
@@ -651,8 +919,31 @@ def key_value(node: Node | Node) -> str | None:
 	return cast(str | None, key)
 
 
+def iter_component_runtimes(node: Node) -> "Iterator[ComponentRuntime]":
+	"""Yield every ComponentRuntime in a normalized subtree."""
+	if isinstance(node, PulseNode):
+		if node.runtime is not None:
+			yield node.runtime
+		if node.contents is not None:
+			yield from iter_component_runtimes(node.contents)
+		return
+	if isinstance(node, Element):
+		if isinstance(node.props, dict):
+			for value in node.props.values():
+				if isinstance(value, (Element, PulseNode)):
+					yield from iter_component_runtimes(value)
+		for child in normalize_children(node.children):
+			yield from iter_component_runtimes(child)
+
+
 def unmount_element(element: Node) -> None:
 	if isinstance(element, PulseNode):
+		runtime = element.runtime
+		if runtime is not None:
+			if runtime.effect is not None:
+				runtime.effect.dispose()
+				runtime.effect = None
+			element.runtime = None
 		if element.contents is not None:
 			unmount_element(element.contents)
 			element.contents = None

@@ -780,6 +780,7 @@ class PulseNode:
 	# Renderer state (mutable, set during render)
 	hooks: Any = None  # HookContext
 	contents: Node | None = None
+	runtime: Any = None  # ComponentRuntime (persistent render state)
 
 	def emit(self, out: list[str]) -> None:
 		fn_name = getattr(self.fn, "__name__", "unknown")

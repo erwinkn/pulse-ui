@@ -178,7 +178,19 @@ Dynamic URL segments like `/users/:id`. The `:id` part matches any value and is 
 Key-value pairs in the URL after `?`, like `?page=2&sort=name`. Used for filters, pagination, and other optional state.
 
 **Navigation**
-Programmatically changing the URL and rendering a different route. Can be client-side (no page reload) or a full redirect.
+Programmatically changing the URL and rendering a different route. Can be client-side (no page reload) or a full redirect. In Pulse, client-side navigation flows over the WebSocket: the server matches the new URL, renders the new views, and reuses views whose route still matches—so their state survives the navigation.
+
+**View**
+A single rendered route or layout instance for one browser tab. Each view has a unique server-generated ID, and everything scoped to that page—callbacks, channels, refs—is tied to it. Views whose route still matches after a navigation are reused with their state intact; the rest are disposed.
+
+**Prefetching**
+Loading a page's resources before the user clicks. Pulse links prefetch both the route's JavaScript chunks and the server-rendered views (on hover by default), so clicking commits instantly.
+
+**Route Manifest**
+The generated `routes.ts` file mirroring your Python route tree on the client. It exports `pulseRouteTree` (the route structure, used for client-side matching) and `routeLoaders` (dynamic imports that code-split the bundle per route). The Python route tree remains the source of truth.
+
+**SSR Server**
+A small Bun process that renders the initial HTML for page requests. `pulse run` starts it alongside the Python server; in single-server mode the Python server forwards page requests to it and serves everything from one origin.
 
 ## Sessions & State Persistence
 

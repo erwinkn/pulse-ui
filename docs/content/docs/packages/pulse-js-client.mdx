@@ -35,33 +35,33 @@ When you build a Pulse application, the Python server generates a virtual DOM (V
 The client is automatically included when you create a Pulse app. You don't need to install it manually unless you're building custom integrations.
 
 ```bash
-bun add pulse-client
+bun add pulse-ui-client
 ```
 
 ## Key Components
 
-### PulseProvider
+### PulseApp
 
-The root provider that establishes the WebSocket connection to your server.
+The all-in-one app shell: the built-in router, the WebSocket client, and the route renderer in one component. The generated `web/app/pulse/_layout.tsx` wraps it with your app's configuration.
 
 ```tsx
-import { PulseProvider } from "pulse-client";
+import { PulseApp } from "pulse-ui-client";
 
-function App() {
-  return (
-    <PulseProvider config={{ serverUrl: "http://localhost:8000" }}>
-      <Routes />
-    </PulseProvider>
-  );
-}
+<PulseApp
+  routes={pulseRouteTree}
+  routeLoaders={routeLoaders}
+  config={config}
+  prerender={prerender}
+  url={url}
+/>
 ```
 
 ### PulseView
 
-Renders a server-driven view for a specific route.
+Renders a server-driven view for a route. The generated route modules render this for you.
 
 ```tsx
-import { PulseView } from "pulse-client";
+import { PulseView } from "pulse-ui-client";
 
 function Dashboard() {
   return <PulseView path="/dashboard" registry={registry} />;
@@ -73,7 +73,7 @@ function Dashboard() {
 Hook to access the client instance for advanced use cases.
 
 ```tsx
-import { usePulseClient } from "pulse-client";
+import { usePulseClient } from "pulse-ui-client";
 
 function MyComponent() {
   const client = usePulseClient();
@@ -83,20 +83,23 @@ function MyComponent() {
 
 ### usePulseChannel
 
-Hook for real-time bidirectional messaging between client and server.
+Hook for real-time bidirectional messaging between client and server. Returns `null` until the channel is acquired.
 
 ```tsx
-import { usePulseChannel } from "pulse-client";
+import { usePulseChannel } from "pulse-ui-client";
 
 function Chat() {
   const channel = usePulseChannel("chat");
 
-  channel.on("new_message", (msg) => {
-    // Handle incoming message
-  });
+  useEffect(() => {
+    if (!channel) return;
+    return channel.on("new_message", (msg) => {
+      // Handle incoming message
+    });
+  }, [channel]);
 
   const sendMessage = () => {
-    channel.emit("message", { text: "Hello" });
+    channel?.emit("message", { text: "Hello" });
   };
 }
 ```
@@ -105,14 +108,14 @@ function Chat() {
 
 ### PulseForm
 
-A form component that handles submission and serialization.
+A form component that submits via `fetch` so the view stays mounted during submission.
 
 ```tsx
-import { PulseForm, submitForm } from "pulse-client";
+import { PulseForm } from "pulse-ui-client";
 
 function MyForm() {
   return (
-    <PulseForm onSubmit={(data) => console.log(data)}>
+    <PulseForm action="/api/submit">
       <input name="email" />
       <button type="submit">Submit</button>
     </PulseForm>
@@ -125,7 +128,7 @@ function MyForm() {
 The client provides utilities for serializing and deserializing data between Python and JavaScript.
 
 ```tsx
-import { serialize, deserialize } from "pulse-client";
+import { serialize, deserialize } from "pulse-ui-client";
 
 // Serialize data for sending to server
 const wire = serialize({ date: new Date() });
@@ -137,19 +140,23 @@ const data = deserialize(wire);
 ## Exports
 
 **Components:**
-- `PulseProvider` - Root provider for connection management
+- `PulseApp` - All-in-one app shell (router + provider + routes)
+- `PulseProvider` - Context provider for the WebSocket client
 - `PulseView` - Renders server-driven views
 - `PulseForm` - Form handling component
+- `Link`, `Outlet`, `PulseRouterProvider`, `PulseRoutes` - Built-in router
 
 **Hooks:**
 - `usePulseClient()` - Access the client instance
 - `usePulseChannel(name)` - Real-time messaging
+- `useNavigate()`, `useLocation()`, `useParams()`, `useRouteInfo()` - Router hooks
 
 **Functions:**
 - `serialize` - Convert data for wire transfer
 - `deserialize` - Parse data from wire format
 - `submitForm` - Programmatic form submission
-- `extractServerRouteInfo` - Extract route information
+- `matchRoutes` - Match a pathname against the route manifest
+- `buildRouteInfo` - Build a `RouteInfo` from a location
 
 **Types:**
 - `VDOM`, `VDOMNode`, `VDOMElement` - Virtual DOM types

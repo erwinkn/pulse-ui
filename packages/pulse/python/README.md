@@ -35,7 +35,7 @@ src/pulse/
 ├── routing.py          # Route/Layout definitions, URL matching
 ├── vdom.py             # VDOM node types (Element, Component, Node)
 ├── renderer.py         # VDOM rendering and diffing
-├── render_session.py   # Per-browser session, manages mounted routes
+├── render_session.py   # Per-browser session, manages views (rendered route/layout instances)
 ├── reactive.py         # Signal/Computed/Effect primitives
 ├── reactive_extensions.py  # ReactiveList, ReactiveDict, ReactiveSet
 ├── state.py            # State management
@@ -71,7 +71,7 @@ src/pulse/
 ├── components/         # Built-in components
 │   ├── for_.py         # <For> loop component
 │   ├── if_.py          # <If> conditional component
-│   └── react_router.py # Link, Outlet for routing
+│   └── router.py       # Link, Outlet for routing (binds to the pulse-ui-client router)
 │
 ├── html/               # HTML element bindings
 │   ├── tags.py         # div, span, button, etc.
@@ -83,8 +83,8 @@ src/pulse/
 │   ├── function.py     # JsFunction, @javascript decorator
 │   └── imports.py      # Import/CssImport for client-side JS
 │
-├── codegen/            # Code generation for React Router
-│   ├── codegen.py      # Generates routes.ts, loaders
+├── codegen/            # Code generation for the web app
+│   ├── codegen.py      # Generates routes.ts (route manifest), _layout.tsx, route modules
 │   └── templates/      # Mako templates for generated code
 │
 ├── cli/                # Command-line interface

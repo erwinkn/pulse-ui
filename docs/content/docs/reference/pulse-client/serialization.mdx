@@ -227,21 +227,27 @@ a.ref = b;  // circular
 
 ---
 
-## extractServerRouteInfo
+## buildRouteInfo
 
-Extracts route information from a React Router loader function. Use this in SSR loaders to pass route context to the Pulse server.
+Builds a `RouteInfo` object from a location plus matched parameters. The router uses this internally to produce the route info it sends to the server; it's exported for custom integrations.
 
 ```ts
-import { extractServerRouteInfo } from "pulse-ui-client";
+import { buildRouteInfo } from "pulse-ui-client";
 
-function extractServerRouteInfo(args: LoaderFunctionArgs): RouteInfo
+function buildRouteInfo(
+  location: LocationLike,
+  pathParams: Record<string, string | undefined>,
+  catchall: string[],
+): RouteInfo
 ```
 
 ### Parameters
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `args` | `LoaderFunctionArgs` | React Router loader arguments |
+| `location` | `LocationLike` | `{ pathname, search, hash }` |
+| `pathParams` | `Record<string, string \| undefined>` | Matched path parameters |
+| `catchall` | `string[]` | Matched catch-all segments |
 
 ### Returns
 
@@ -259,20 +265,16 @@ interface RouteInfo {
 ### Example
 
 ```ts
-import { extractServerRouteInfo } from "pulse-ui-client";
-import type { LoaderFunctionArgs } from "react-router";
+import { buildRouteInfo, matchRoutes } from "pulse-ui-client";
+import { pulseRouteTree } from "../app/pulse/routes";
 
-export async function loader(args: LoaderFunctionArgs) {
-  const routeInfo = extractServerRouteInfo(args);
+const location = { pathname: "/users/123", search: "?tab=settings", hash: "" };
+const match = matchRoutes(pulseRouteTree, location.pathname);
 
-  // routeInfo.pathname = "/users/123"
-  // routeInfo.pathParams = { id: "123" }
-  // routeInfo.queryParams = { tab: "settings" }
-
-  // Pass to Pulse server for SSR
-  const prerender = await fetchPulsePrerender(routeInfo);
-  return { prerender };
-}
+const routeInfo = buildRouteInfo(location, match?.params ?? {}, match?.catchall ?? []);
+// routeInfo.pathname = "/users/123"
+// routeInfo.pathParams = { id: "123" }
+// routeInfo.queryParams = { tab: "settings" }
 ```
 
 ---

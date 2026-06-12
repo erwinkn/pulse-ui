@@ -1,6 +1,8 @@
 # Routing
 
-Client-side routing with React Router. Supports nested layouts, dynamic segments, and query parameters.
+Client-side routing with Pulse's built-in router. The Python route tree is the source of truth; the client gets a generated mirror of it. Supports nested layouts, dynamic segments, and query parameters.
+
+Navigation is WebSocket-native: link clicks request the new pages over the existing socket, and routes that stay matched (e.g. a layout during sibling navigation) are reused with their state intact—only newly matched routes render fresh.
 
 ## Route Definition
 
@@ -227,10 +229,11 @@ ps.Link(to="/about", className="btn")[
 
 **Props**:
 - `to` - Target URL path
-- `prefetch` - `"intent"` (default), `"render"`, `"viewport"`, `"none"`
+- `prefetch` - `"intent"` (hover/focus, default), `"viewport"` (when visible), `"render"` (immediately), `"none"`
 - `replace` - Replace history instead of push
 - `reloadDocument` - Force full page navigation
-- `viewTransition` - Enable View Transitions API
+
+Prefetching warms both the route's JS chunks and the server-rendered page, so the click commits instantly.
 
 ## Query Parameters
 

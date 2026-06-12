@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "bun:test";
 import { render, screen, waitFor } from "@testing-library/react";
 import React from "react";
+import { PulseSocketIOClient } from "./client";
 import { PulseProvider, PulseView, usePulseChannel, usePulseViewId } from "./pulse";
-import { MemoryRouter } from "react-router";
+import { PulseRouterProvider } from "./router";
 
 vi.mock("socket.io-client", () => ({
 	io: () => ({
@@ -24,18 +25,20 @@ describe("PulseView channel hooks", () => {
 			return <div data-testid="channel">{channel?.id ?? "null"}</div>;
 		}
 
+		const client = new PulseSocketIOClient("http://pulse.test", {}, {
+			initialConnectingDelay: 100000,
+			initialErrorDelay: 100000,
+			reconnectErrorDelay: 100000,
+		});
+
 		render(
-			<MemoryRouter initialEntries={["/test"]}>
+			<PulseRouterProvider
+				routes={[{ id: "/test", path: "test" }]}
+				routeLoaders={{}}
+				initialUrl="http://pulse.test/test"
+			>
 				<PulseProvider
-					config={{
-						serverAddress: "http://pulse.test",
-						apiPrefix: "/api",
-						connectionStatus: {
-							initialConnectingDelay: 100000,
-							initialErrorDelay: 100000,
-							reconnectErrorDelay: 100000,
-						},
-					}}
+					client={client}
 					prerender={{
 						directives: {},
 						views: {
@@ -49,7 +52,7 @@ describe("PulseView channel hooks", () => {
 				>
 					<PulseView path="/test" registry={{ Probe }} />
 				</PulseProvider>
-			</MemoryRouter>,
+			</PulseRouterProvider>,
 		);
 
 		await waitFor(() => {

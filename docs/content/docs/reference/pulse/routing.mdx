@@ -126,6 +126,48 @@ app = ps.App(
 )
 ```
 
+### RouteTree
+
+Parsed route tree built from your `App`'s routes. Available as `app.routes`.
+
+```python
+class RouteTree:
+    tree: list[Route | Layout]
+    flat_tree: dict[str, Route | Layout]
+```
+
+#### Methods
+
+##### find
+
+```python
+def find(self, path: str) -> Route | Layout
+```
+
+Look up a route or layout by its unique path.
+
+**Raises:** `ValueError` if no route exists for the path.
+
+##### match
+
+```python
+def match(
+    self, pathname: str
+) -> tuple[list[Route | Layout], PathParameters] | None
+```
+
+Match a URL pathname against the route tree, server-side. This is the same matcher Pulse uses for navigation and prerendering: static segments beat dynamic (`:x`), which beat optional (`:x?`), which beat splat (`*`).
+
+**Returns:** Tuple of (matched routes/layouts from root to leaf, path parameters), or `None` if nothing matches.
+
+```python
+match = app.routes.match("/users/123")
+if match:
+    routes, params = match
+    params.params  # {"id": "123"}
+    params.splat   # [] (catch-all segments)
+```
+
 ### RouteInfo
 
 TypedDict containing route information from the client.
@@ -177,30 +219,25 @@ def catchall(self) -> list[str]: ...
 
 ### Link
 
-Client-side navigation link (wraps react-router `Link`).
+Client-side navigation link (wraps the Pulse router's `Link` from `pulse-ui-client`).
 
 ```python
 def Link(
     *children: Node,
     key: str | None = None,
     to: str,
-    discover: Literal["render", "none"] | None = None,
     prefetch: Literal["none", "intent", "render", "viewport"] = "intent",
-    preventScrollReset: bool | None = None,
-    relative: Literal["route", "path"] | None = None,
     reloadDocument: bool | None = None,
     replace: bool | None = None,
-    state: dict[str, object] | None = None,
-    viewTransition: bool | None = None,
     **props: HTMLAnchorProps,
 )
 ```
 
 **Parameters:**
 - `to` - Target path.
-- `prefetch` - Prefetch strategy. Default: `"intent"`.
+- `prefetch` - Prefetch strategy: `"intent"` (hover/focus, default), `"viewport"` (when visible), `"render"` (immediately), `"none"` (never).
+- `reloadDocument` - Skip client routing and let the browser load the document.
 - `replace` - Replace history entry instead of push.
-- `state` - State to pass to the target route.
 - `**props` - Additional anchor element props.
 
 ```python
@@ -210,7 +247,7 @@ ps.Link("User", to="/users/123", prefetch="render")
 
 ### Outlet
 
-Renders child routes within a layout (wraps react-router `Outlet`).
+Renders child routes within a layout (wraps the Pulse router's `Outlet` from `pulse-ui-client`).
 
 ```python
 def Outlet(key: str | None = None)
@@ -246,10 +283,10 @@ def navigate(
 - `path` - Target path.
 - `replace` - Replace the current history entry instead of pushing a new one.
 - `hard` - Use a full page reload instead of client-side navigation.
-- `force` - Navigate even if the route that requested navigation has unmounted.
+- `force` - Navigate even if the view that requested navigation has since unmounted or changed URL.
 
-By default, navigation from a route callback is bound to the route that requested it.
-If the user has already left that route by the time an async callback resumes, the
+By default, navigation from a callback is bound to the view that requested it.
+If the user has already left that page by the time an async callback resumes, the
 navigation is ignored. Use `force=True` only for intentionally global navigation.
 
 ```python

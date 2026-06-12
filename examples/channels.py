@@ -44,8 +44,12 @@ def ChannelTester(*, channelId: str, label: str):
 
 	useEffect(onMount, [channelId, label])
 
-	# Subscribe to server events
+	# Subscribe to server events. The channel bridge is None until the
+	# connection effect runs, so guard before wiring handlers.
 	def subscribeToEvents():
+		if bridge is None:
+			return
+
 		def onNotify(payload: Any):
 			appendLog(f"[server -> client] notify {stringify(payload)}")
 
@@ -69,6 +73,8 @@ def ChannelTester(*, channelId: str, label: str):
 
 	# Send ping to server
 	def sendPing():
+		if bridge is None:
+			return
 		next_count = eventCount + 1
 		setEventCount(next_count)
 		try:
@@ -86,6 +92,8 @@ def ChannelTester(*, channelId: str, label: str):
 
 	# Send request to server
 	async def sendRequest():
+		if bridge is None:
+			return
 		next_count = requestCount + 1
 		setRequestCount(next_count)
 		setPendingRequest(True)

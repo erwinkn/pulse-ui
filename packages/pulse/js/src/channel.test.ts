@@ -103,16 +103,11 @@ describe("ChannelBridge", () => {
 	});
 
 	it("reacquires a fresh bridge after release closes a channel", () => {
-		const client = new PulseSocketIOClient(
-			"http://pulse.test",
-			{},
-			vi.fn() as any,
-			{
-				initialConnectingDelay: 0,
-				initialErrorDelay: 0,
-				reconnectErrorDelay: 0,
-			},
-		);
+		const client = new PulseSocketIOClient("http://pulse.test", {}, {
+			initialConnectingDelay: 0,
+			initialErrorDelay: 0,
+			reconnectErrorDelay: 0,
+		});
 
 		const first = client.acquireChannel("chan-1", "/view");
 		client.releaseChannel("chan-1", "/view");
@@ -125,16 +120,11 @@ describe("ChannelBridge", () => {
 	});
 
 	it("connects once per channel id and rejects duplicate endpoints", () => {
-		const client = new PulseSocketIOClient(
-			"http://pulse.test",
-			{},
-			vi.fn() as any,
-			{
-				initialConnectingDelay: 0,
-				initialErrorDelay: 0,
-				reconnectErrorDelay: 0,
-			},
-		);
+		const client = new PulseSocketIOClient("http://pulse.test", {}, {
+			initialConnectingDelay: 0,
+			initialErrorDelay: 0,
+			reconnectErrorDelay: 0,
+		});
 		const sent: ClientMessage[] = [];
 		vi.spyOn(client, "sendMessage").mockImplementation((message: any) => {
 			sent.push(message);
@@ -158,16 +148,11 @@ describe("ChannelBridge", () => {
 	});
 
 	it("channel manager acquires with its view path and releases idempotently", () => {
-		const client = new PulseSocketIOClient(
-			"http://pulse.test",
-			{},
-			vi.fn() as any,
-			{
-				initialConnectingDelay: 0,
-				initialErrorDelay: 0,
-				reconnectErrorDelay: 0,
-			},
-		);
+		const client = new PulseSocketIOClient("http://pulse.test", {}, {
+			initialConnectingDelay: 0,
+			initialErrorDelay: 0,
+			reconnectErrorDelay: 0,
+		});
 		const sent: ClientMessage[] = [];
 		vi.spyOn(client, "sendMessage").mockImplementation((message: any) => {
 			sent.push(message);
@@ -185,16 +170,11 @@ describe("ChannelBridge", () => {
 	});
 
 	it("channel manager rejects duplicate acquires", () => {
-		const client = new PulseSocketIOClient(
-			"http://pulse.test",
-			{},
-			vi.fn() as any,
-			{
-				initialConnectingDelay: 0,
-				initialErrorDelay: 0,
-				reconnectErrorDelay: 0,
-			},
-		);
+		const client = new PulseSocketIOClient("http://pulse.test", {}, {
+			initialConnectingDelay: 0,
+			initialErrorDelay: 0,
+			reconnectErrorDelay: 0,
+		});
 		vi.spyOn(client, "sendMessage").mockImplementation(() => {});
 
 		const manager = createPulseChannelManager(client, "/view");
@@ -206,16 +186,11 @@ describe("ChannelBridge", () => {
 	});
 
 	it("channel manager disposes outstanding leases", () => {
-		const client = new PulseSocketIOClient(
-			"http://pulse.test",
-			{},
-			vi.fn() as any,
-			{
-				initialConnectingDelay: 0,
-				initialErrorDelay: 0,
-				reconnectErrorDelay: 0,
-			},
-		);
+		const client = new PulseSocketIOClient("http://pulse.test", {}, {
+			initialConnectingDelay: 0,
+			initialErrorDelay: 0,
+			reconnectErrorDelay: 0,
+		});
 		const sent: ClientMessage[] = [];
 		vi.spyOn(client, "sendMessage").mockImplementation((message: any) => {
 			sent.push(message);

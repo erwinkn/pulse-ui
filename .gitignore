@@ -193,3 +193,4 @@ cdk.context.json
 
 # Mac
 .DS_Store
+.claude/launch.json

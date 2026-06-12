@@ -90,7 +90,7 @@ def test_react_component_applies_signature_defaults():
 	"""Non-None signature defaults are filled in on the runtime call path."""
 	from typing import Literal
 
-	link_import = Import("Link", "react-router")
+	link_import = Import("Link", "pulse-ui-client")
 
 	@react_component(link_import)
 	def Link(

@@ -1,11 +1,12 @@
 from mako.template import Template
 
 LAYOUT_TEMPLATE = Template(
-	"""import { buildRouteInfo, deserialize, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";
-import { Outlet, data, type LoaderFunctionArgs, type ClientLoaderFunctionArgs } from "react-router";
-import { matchRoutes } from "react-router";
-import { rrPulseRouteTree } from "./routes.runtime";
-import { useLoaderData } from "react-router";
+	"""import {
+  PulseApp as PulseAppShell,
+  type PulseConfig,
+  type PulsePrerender,
+} from "pulse-ui-client";
+import { pulseRouteTree, routeLoaders } from "./routes";
 
 // This config is used to initialize the client
 export const config: PulseConfig = {
@@ -18,110 +19,16 @@ export const config: PulseConfig = {
   },
 };
 
-// Build the RouteInfo payload from React Router loader args
-function extractServerRouteInfo({ params, request }: LoaderFunctionArgs | ClientLoaderFunctionArgs) {
-  const { "*": catchall = "", ...pathParams } = params;
-  const parsedUrl = new URL(request.url);
-  return buildRouteInfo(
-    { pathname: parsedUrl.pathname, search: parsedUrl.search, hash: parsedUrl.hash },
-    pathParams,
-    catchall.length > 1 ? catchall.split("/") : [],
-  );
-}
-
-
-// Server loader: perform initial prerender, abort on first redirect/not-found
-export async function loader(args: LoaderFunctionArgs) {
-  const url = new URL(args.request.url);
-  const matches = matchRoutes(rrPulseRouteTree, url.pathname) ?? [];
-  const paths = matches.map(m => m.route.uniquePath);
-  // Build minimal, safe headers for cross-origin API call
-  const incoming = args.request.headers;
-  const fwd = new Headers();
-  const cookie = incoming.get("cookie");
-  const authorization = incoming.get("authorization");
-  if (cookie) fwd.set("cookie", cookie);
-  if (authorization) fwd.set("authorization", authorization);
-  fwd.set("content-type", "application/json");
-  // Internal server address for server-side loader requests.
-  const internalServerAddress = "${internal_server_address}";
-  const res = await fetch(`$${"{"}internalServerAddress}$${"{"}config.apiPrefix}/prerender`, {
-    method: "POST",
-    headers: fwd,
-    body: JSON.stringify({ paths, routeInfo: extractServerRouteInfo(args) }),
-  });
-  if (!res.ok) throw new Error("Failed to prerender batch:" + res.status);
-  const body = await res.json();
-  if (body.redirect) return new Response(null, { status: 302, headers: { Location: body.redirect } });
-  if (body.notFound) {
-    console.error("Not found:", url.pathname);
-    throw new Response("Not Found", { status: 404 });
-  }
-  const prerenderData = deserialize(body) as PulsePrerender;
-  const setCookies =
-    (res.headers.getSetCookie?.() as string[] | undefined) ??
-    (res.headers.get("set-cookie") ? [res.headers.get("set-cookie") as string] : []);
-  const headers = new Headers();
-  for (const c of setCookies) headers.append("Set-Cookie", c);
-  return data(prerenderData, { headers });
-}
-
-// Client loader: re-prerender on navigation while reusing directives
-export async function clientLoader(args: ClientLoaderFunctionArgs) {
-  const url = new URL(args.request.url);
-  const matches = matchRoutes(rrPulseRouteTree, url.pathname) ?? [];
-  const paths = matches.map(m => m.route.uniquePath);
-  const directives = 
-    typeof window !== "undefined" && typeof sessionStorage !== "undefined"
-      ? (JSON.parse(sessionStorage.getItem("__PULSE_DIRECTIVES") ?? "{}"))
-      : {};
-  const headers = new Headers({ "content-type": "application/json" });
-  if (directives?.headers) {
-    for (const [key, value] of Object.entries(directives.headers)) {
-      headers.set(key, value as string);
-    }
-  }
-  headers.set("x-pulse-client-loader", "1");
-  headers.set("x-pulse-client-loader-location", args.request.url);
-  const prerenderUrl = new URL(`$${"{"}config.serverAddress}$${"{"}config.apiPrefix}/prerender`);
-  if (directives?.query) {
-    for (const [key, value] of Object.entries(directives.query)) {
-      prerenderUrl.searchParams.set(key, value as string);
-    }
-  }
-  const res = await fetch(prerenderUrl, {
-    method: "POST",
-    headers,
-    credentials: "include",
-    redirect: "manual",
-    body: JSON.stringify({ paths, routeInfo: extractServerRouteInfo(args) }),
-  });
-  if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400)) {
-    window.location.assign(args.request.url);
-    throw new Error("Reloading due to stale Pulse deployment affinity.");
-  }
-  if (!res.ok) throw new Error("Failed to prerender batch:" + res.status);
-  const body = await res.json();
-  if (body.redirect) return new Response(null, { status: 302, headers: { Location: body.redirect } });
-  if (body.notFound) throw new Response("Not Found", { status: 404 });
-  const prerenderData = deserialize(body) as PulsePrerender;
-  if (typeof window !== "undefined" && typeof sessionStorage !== "undefined" && prerenderData.directives) {
-    sessionStorage.setItem("__PULSE_DIRECTIVES", JSON.stringify(prerenderData.directives));
-  }
-  return prerenderData as PulsePrerender;
-}
-
-export default function PulseLayout() {
-  const data = useLoaderData<typeof loader>();
-  if (typeof window !== "undefined" && typeof sessionStorage !== "undefined") {
-    sessionStorage.setItem("__PULSE_DIRECTIVES", JSON.stringify(data.directives));
-  }
+export function PulseApp({ prerender, url }: { prerender: PulsePrerender; url?: string }) {
   return (
-    <PulseProvider config={config} prerender={data}>
-      <Outlet />
-    </PulseProvider>
+    <PulseAppShell
+      routes={pulseRouteTree}
+      routeLoaders={routeLoaders}
+      config={config}
+      prerender={prerender}
+      url={url}
+    />
   );
 }
-// Persist directives in sessionStorage for reuse in clientLoader is handled within the component
 """
 )

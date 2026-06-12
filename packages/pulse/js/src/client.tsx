@@ -1,4 +1,4 @@
-import type { NavigateFunction } from "react-router";
+import type { NavigateFunction } from "./router";
 import { io, type Socket } from "socket.io-client";
 import { ChannelBridge, PulseChannelResetError } from "./channel";
 import type { RouteInfo } from "./helpers";
@@ -75,7 +75,7 @@ export class PulseSocketIOClient {
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
 	#channels: Map<string, { view: string; bridge: ChannelBridge }> = new Map();
 	#url: string;
-	#frameworkNavigate: NavigateFunction;
+	#frameworkNavigate: NavigateFunction | null = null;
 	#directives: Directives;
 	#connectionStatusConfig: {
 		initialConnectingDelay: number;
@@ -91,11 +91,12 @@ export class PulseSocketIOClient {
 	#reloadOnReconnectTimeout = false;
 	#resumePending = false;
 	#pendingResumeId: string | null = null;
+	#resumeSnapshotViews: Set<string> = new Set();
+	#resumeSnapshotChannels: Set<string> = new Set();
 
 	constructor(
 		url: string,
 		directives: Directives,
-		frameworkNavigate: NavigateFunction,
 		connectionStatusConfig: {
 			initialConnectingDelay: number;
 			initialErrorDelay: number;
@@ -104,7 +105,6 @@ export class PulseSocketIOClient {
 	) {
 		this.#url = url;
 		this.#directives = directives;
-		this.#frameworkNavigate = frameworkNavigate;
 		this.#socket = null;
 		this.#activeViews = new Map();
 		this.#activeAttachIds = new Map();
@@ -115,6 +115,10 @@ export class PulseSocketIOClient {
 	}
 	public setDirectives(directives: Directives) {
 		this.#directives = directives;
+	}
+	/** Bind the router's navigate function once the router has mounted. */
+	public setFrameworkNavigate(navigate: NavigateFunction) {
+		this.#frameworkNavigate = navigate;
 	}
 	public isConnected(): boolean {
 		return this.#socket?.connected ?? false;
@@ -437,7 +441,11 @@ export class PulseSocketIOClient {
 
 				// No scheme = relative path → SPA
 				if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(dest)) {
-					this.#frameworkNavigate(dest, { replace });
+					if (this.#frameworkNavigate) {
+						this.#frameworkNavigate(dest, { replace });
+					} else {
+						hardNav();
+					}
 					break;
 				}
 
@@ -445,7 +453,7 @@ export class PulseSocketIOClient {
 				if (/^https?:\/\//.test(dest)) {
 					try {
 						const url = new URL(dest);
-						if (url.origin === window.location.origin) {
+						if (url.origin === window.location.origin && this.#frameworkNavigate) {
 							this.#frameworkNavigate(`${url.pathname}${url.search}${url.hash}`, { replace });
 							break;
 						}
@@ -548,6 +556,7 @@ export class PulseSocketIOClient {
 		this.#queueCallback(message);
 	}
 
+
 	#handleJsExec(message: ServerJsExecMessage) {
 		const view = this.#activeViews.get(message.view);
 		if (!view) {
@@ -630,6 +639,8 @@ export class PulseSocketIOClient {
 		for (const [channel, endpoint] of this.#channels) {
 			channels.push({ channel, view: endpoint.view });
 		}
+		this.#resumeSnapshotViews = new Set(views.map((view) => view.view));
+		this.#resumeSnapshotChannels = new Set(channels.map((c) => c.channel));
 		socket.emit(
 			"message",
 			serialize({
@@ -661,8 +672,10 @@ export class PulseSocketIOClient {
 			(message.channels ?? []).map((channel) => [channel.channel, channel.view]),
 		);
 
+		// Drop queued callbacks only for views we no longer hold; views mounted
+		// during the resume window re-attach below and flush on their ack.
 		for (const viewId of [...this.#pendingCallbacks.keys()]) {
-			if (!acceptedViews.has(viewId)) {
+			if (!acceptedViews.has(viewId) && !this.#activeViews.has(viewId)) {
 				this.#pendingCallbacks.delete(viewId);
 			}
 		}
@@ -672,7 +685,12 @@ export class PulseSocketIOClient {
 				this.#ackedAttachIds.set(view.view, attachId);
 			}
 		}
+		// Channels acquired after the resume snapshot were never declared:
+		// connect them now. Snapshot channels the server refused are dead.
 		for (const [channel, endpoint] of [...this.#channels]) {
+			if (!this.#resumeSnapshotChannels.has(channel)) {
+				continue;
+			}
 			if (acceptedChannels.get(channel) !== endpoint.view) {
 				endpoint.bridge.dispose(
 					new PulseChannelResetError("Channel was not resumed"),
@@ -684,6 +702,23 @@ export class PulseSocketIOClient {
 		const queued = this.#messageQueue;
 		this.#messageQueue = [];
 		this.#resumePending = false;
+		// Views mounted while the resume was in flight (e.g. a navigation
+		// committing as the tab became visible) were not in the snapshot;
+		// attach them now. The server replies reload for ids it lost.
+		for (const [viewId, view] of this.#activeViews) {
+			if (!acceptedViews.has(viewId) && !this.#resumeSnapshotViews.has(viewId)) {
+				this.#sendAttach(viewId, view.routeInfo);
+			}
+		}
+		for (const [channel, endpoint] of this.#channels) {
+			if (!this.#resumeSnapshotChannels.has(channel)) {
+				this.sendMessage({
+					type: "channel_connect",
+					channel,
+					view: endpoint.view,
+				});
+			}
+		}
 		for (const viewId of acceptedViews) {
 			this.#flushPendingCallbacks(viewId);
 		}
@@ -702,13 +737,22 @@ export class PulseSocketIOClient {
 	): boolean {
 		if (
 			payload.type === "attach" ||
-			payload.type === "detach" ||
 			payload.type === "update" ||
 			payload.type === "channel_connect" ||
-			payload.type === "channel_disconnect" ||
 			payload.type === "client_resume"
 		) {
+			// attach/channel_connect for surviving endpoints are re-sent by the
+			// resume logic itself; update is superseded by the attach payloads.
 			return false;
+		}
+		if (payload.type === "detach") {
+			// Tear-downs issued while offline must reach the server (which
+			// tolerates unknown ids) unless the endpoint was re-established
+			// in the meantime (dev StrictMode replay).
+			return !this.#activeViews.has(payload.view);
+		}
+		if (payload.type === "channel_disconnect") {
+			return !this.#channels.has(payload.channel);
 		}
 		if (payload.type === "callback") {
 			return acceptedViews.has(payload.view);

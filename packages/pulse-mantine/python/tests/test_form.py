@@ -1,5 +1,4 @@
 import asyncio
-import json
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -7,7 +6,6 @@ import pulse as ps
 import pytest
 from pulse.messages import ClientChannelRequestMessage
 from pulse.routing import Route, RouteInfo, RouteTree
-from pulse.serializer import serialize
 from pulse.user_session import UserSession
 from pulse_mantine import MantineForm
 
@@ -200,9 +198,11 @@ async def test_submit_state_resets_after_successful_submit():
 		form.render(onSubmit=handle_submit)
 
 	form._form._start_submit()  # pyright: ignore[reportPrivateUsage]
+	# The registry deserializes __data__ and merges it before invoking the
+	# handler, so the handler receives plain values.
 	task = asyncio.create_task(
 		form._form.registration.on_submit(  # pyright: ignore[reportPrivateUsage]
-			{"__data__": json.dumps(serialize({"name": "Ada"}))}
+			{"name": "Ada"}
 		)
 	)
 	await asyncio.wait_for(started.wait(), timeout=1)
@@ -263,9 +263,11 @@ async def test_submit_state_resets_after_failed_submit():
 		form.render(onSubmit=handle_submit)
 
 	form._form._start_submit()  # pyright: ignore[reportPrivateUsage]
+	# The registry deserializes __data__ and merges it before invoking the
+	# handler, so the handler receives plain values.
 	task = asyncio.create_task(
 		form._form.registration.on_submit(  # pyright: ignore[reportPrivateUsage]
-			{"__data__": json.dumps(serialize({"name": "Ada"}))}
+			{"name": "Ada"}
 		)
 	)
 	await asyncio.wait_for(started.wait(), timeout=1)
@@ -277,3 +279,56 @@ async def test_submit_state_resets_after_failed_submit():
 		await task
 
 	assert not form.is_submitting
+
+
+@pytest.mark.asyncio
+async def test_submit_merges_files_without_placeholder_leftovers():
+	"""The form endpoint pre-merges __data__ values (with None placeholders
+	where files were stripped) into the data dict; file entries arrive under
+	dotted paths. The merge must replace the placeholders, not append."""
+	from starlette.datastructures import Headers, UploadFile
+
+	app, _render, session, real_render, view = build_context()
+	received: list[dict[str, Any]] = []
+
+	async def handle_submit(values: dict[str, Any]):
+		received.append(values)
+
+	with ps.PulseContext(
+		app=app,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		render=real_render,
+		route=view.route,
+		view=view,
+	):
+		form = MantineForm()
+		form.render(onSubmit=handle_submit)
+
+	def make_file(name: str) -> UploadFile:
+		import io
+
+		return UploadFile(
+			io.BytesIO(b"data"),
+			filename=name,
+			headers=Headers({"content-type": "application/octet-stream"}),
+		)
+
+	resume = make_file("resume.pdf")
+	shot1 = make_file("shot1.png")
+	shot2 = make_file("shot2.png")
+
+	# Mirrors FormRegistry.handle_submit output: __data__ values merged in
+	# (files stripped to None client-side), files keyed by dotted paths.
+	await form._form.registration.on_submit(  # pyright: ignore[reportPrivateUsage]
+		{
+			"portfolio": [None, None],
+			"resume": resume,
+			"portfolio.0": shot1,
+			"portfolio.1": shot2,
+		}
+	)
+
+	assert len(received) == 1
+	values = received[0]
+	assert values["resume"] is resume
+	assert values["portfolio"] == [shot1, shot2]

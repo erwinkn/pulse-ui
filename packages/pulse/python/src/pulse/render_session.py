@@ -108,7 +108,7 @@ class View:
 	route_path: str
 	route: RouteContext
 	tree: RenderTree
-	effect: Effect | None
+	session: Any
 	initialized: bool
 	state: ViewState
 	pending_action: PendingAction | None
@@ -128,8 +128,9 @@ class View:
 		self.render = render
 		self.route_path = ensure_absolute_path(route_path)
 		self.route = RouteContext(route_info, route, render, self.route_path)
-		self.effect = None
+		self.session = PulseContext.get().session
 		self.tree = RenderTree(route.render())
+		self.tree.dispatch = self._dispatch_render
 		self.initialized = False
 		self.state = "pending"
 		self.pending_action = None
@@ -137,6 +138,19 @@ class View:
 		self.queue_timeout = None
 		self.render_batch_id = -1
 		self.render_batch_renders = 0
+
+	def _dispatch_render(self, runtime: Any) -> None:
+		"""Run one component re-render pass and ship its operations."""
+		try:
+			message = self.render.render_component_pass(self, runtime)
+		except Exception as exc:
+			details: dict[str, Any] | None = None
+			if isinstance(exc, RenderLoopError):
+				details = {"renders": exc.renders, "batch_id": exc.batch_id}
+			self.render.report_error(self.id, "render", exc, details)
+			return
+		if message is not None:
+			self.render.send(message)
 
 	def update_route(self, route_info: RouteInfo) -> None:
 		self.route.update(route_info)
@@ -171,8 +185,8 @@ class View:
 			)
 			return
 		self._cancel_pending_timeout()
-		if self.state == "idle" and self.effect:
-			self.effect.resume()
+		if self.state == "idle":
+			self.tree.resume_effects()
 		self.state = "pending"
 		self.queue = []
 		self.pending_action = action
@@ -212,49 +226,13 @@ class View:
 		self.state = "idle"
 		self.queue = None
 		self._cancel_pending_timeout()
-		if self.effect:
-			self.effect.pause()
-
-	def ensure_effect(self, *, lazy: bool = False, flush: bool = True) -> None:
-		if self.effect is not None:
-			if flush:
-				self.effect.flush()
-			return
-
-		ctx = PulseContext.get()
-		session = ctx.session
-
-		def _render_effect():
-			message = self.render.rerender(self, session=session)
-			if message is not None:
-				self.render.send(message)
-
-		def _report_render_error(exc: Exception) -> None:
-			details: dict[str, Any] | None = None
-			if isinstance(exc, RenderLoopError):
-				details = {
-					"renders": exc.renders,
-					"batch_id": exc.batch_id,
-				}
-			self.render.report_error(self.id, "render", exc, details)
-
-		self.effect = Effect(
-			_render_effect,
-			immediate=False,
-			name=f"{self.route_path}:render",
-			on_error=_report_render_error,
-			lazy=lazy,
-		)
-		if flush:
-			self.effect.flush()
+		self.tree.pause_effects()
 
 	def dispose(self) -> None:
 		self._cancel_pending_timeout()
 		self.state = "closed"
 		self.queue = None
 		self.tree.unmount()
-		if self.effect:
-			self.effect.dispose()
 
 
 class RenderSession:
@@ -454,19 +432,19 @@ class RenderSession:
 				view = View(self, path, route, info)
 				self.views[view.id] = view
 				self._views_by_path[path] = view
-				view.ensure_effect(lazy=True, flush=False)
 			else:
 				view.update_route(info)
-				if view.effect is None:
-					view.ensure_effect(lazy=True, flush=False)
 				if route_info is not None and view.state == "active":
 					view.start_pending(self.prerender_queue_timeout)
 
 			if view.state != "active" and view.queue_timeout is None:
 				view.start_pending(self.prerender_queue_timeout)
-			assert view.effect is not None
-			with view.effect.capture_deps(update_deps=True):
-				message = self.render(view)
+			if view.state == "pending":
+				# The full re-render below supersedes anything queued; ops
+				# computed against the previous tree must not flush onto the
+				# client's freshly initialized one.
+				view.queue = []
+			message = self.render(view)
 
 			results[path] = message
 			if message["type"] == "navigate_to":
@@ -612,8 +590,7 @@ class RenderSession:
 			view.render_batch_id = batch_id
 			view.render_batch_renders = 1
 		if view.render_batch_renders > self.render_loop_limit:
-			if view.effect:
-				view.effect.pause()
+			view.tree.pause_effects()
 			raise RenderLoopError(view.route_path, view.render_batch_renders, batch_id)
 
 	def _render_with_interrupts(
@@ -668,20 +645,22 @@ class RenderSession:
 
 		return self._render_with_interrupts(view, session=session, render_fn=_render)
 
-	def rerender(
-		self, view: View, *, session: Any | None = None
+	def render_component_pass(
+		self, view: View, runtime: Any
 	) -> ServerUpdateMessage | ServerNavigateToMessage | None:
-		def _rerender() -> ServerUpdateMessage | None:
+		"""Re-render one component subtree within the view's Pulse context."""
+
+		def _pass() -> ServerUpdateMessage | None:
 			if not view.initialized:
 				raise RuntimeError(
-					f"rerender called before init for {view.route_path!r}"
+					f"component render before init for {view.route_path!r}"
 				)
-			ops = view.tree.rerender()
+			ops = view.tree.run_component_pass(runtime)
 			if ops:
 				return ServerUpdateMessage(type="vdom_update", view=view.id, ops=ops)
 			return None
 
-		return self._render_with_interrupts(view, session=session, render_fn=_rerender)
+		return self._render_with_interrupts(view, session=view.session, render_fn=_pass)
 
 	# ---- Helpers ----
 
@@ -737,7 +716,11 @@ class RenderSession:
 		"""Return a per-session singleton for the provided key."""
 		inst = self._global_states.get(key)
 		if inst is None:
-			inst = factory()
+			# Shield creation from the ambient scope: this session owns the
+			# instance, not whatever component (or ps.init block) first
+			# happened to access it.
+			with Untrack():
+				inst = factory()
 			self._global_states[key] = inst
 		return inst
 

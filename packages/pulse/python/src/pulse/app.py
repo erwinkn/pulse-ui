@@ -62,11 +62,13 @@ from pulse.messages import (
 	ClientChannelRequestMessage,
 	ClientChannelResponseMessage,
 	ClientMessage,
+	ClientNavigateMessage,
 	ClientPulseMessage,
 	Prerender,
 	PrerenderPayload,
 	ServerInitMessage,
 	ServerMessage,
+	ServerNavigateResultMessage,
 	ServerNavigateToMessage,
 )
 from pulse.middleware import (
@@ -271,6 +273,7 @@ class App:
 	_render_to_user: dict[str, str]
 	_sessions_in_request: dict[str, int]
 	_socket_to_render: dict[str, str]
+	_socket_requests: dict[str, PulseRequest]
 	_connecting_sockets: set[str]
 	_pending_socket_messages: dict[str, list[Serialized]]
 	_render_cleanups: dict[str, TimerHandleLike]
@@ -353,6 +356,7 @@ class App:
 		self._sessions_in_request = {}
 		# Map websocket sid -> renderId for message routing
 		self._socket_to_render = {}
+		self._socket_requests = {}
 		self._connecting_sockets = set()
 		self._pending_socket_messages = {}
 		# Map render_id -> cleanup timer handle for timeout-based expiry
@@ -934,6 +938,7 @@ class App:
 			except Exception:
 				self._connecting_sockets.discard(sid)
 				self._pending_socket_messages.pop(sid, None)
+				self._socket_requests.pop(sid, None)
 				self._socket_to_render.pop(sid, None)
 				raise
 			await self._drain_pending_socket_messages(sid)
@@ -981,6 +986,8 @@ class App:
 			# Map socket sid to renderId for message routing
 			self._socket_to_render[sid] = rid
 			pulse_request = PulseRequest.from_socketio_environ(environ, auth)
+			self._socket_requests[sid] = pulse_request
+
 			# Cancel any pending cleanup since session is now connected
 			self._cancel_render_cleanup(rid)
 
@@ -1015,6 +1022,7 @@ class App:
 		def disconnect(sid: str):  # pyright: ignore[reportUnusedFunction]
 			self._connecting_sockets.discard(sid)
 			self._pending_socket_messages.pop(sid, None)
+			self._socket_requests.pop(sid, None)
 			rid = self._socket_to_render.pop(sid, None)
 			if rid is not None:
 				render = self.render_sessions.get(rid)
@@ -1124,7 +1132,10 @@ class App:
 					)
 				else:
 					await self._handle_pulse_message(
-						render, session, cast(ClientPulseMessage, msg)
+						render,
+						session,
+						cast(ClientPulseMessage, msg),
+						request=self._socket_requests.get(sid),
 					)
 			except Exception as e:
 				render.report_error(msg.get("view"), "server", e)
@@ -1134,6 +1145,8 @@ class App:
 		render: RenderSession,
 		session: UserSession,
 		msg: ClientPulseMessage,
+		*,
+		request: PulseRequest | None = None,
 	) -> None:
 		async def _next() -> Ok[None]:
 			if msg["type"] == "attach":
@@ -1147,6 +1160,8 @@ class App:
 							"attachId": attach_id,
 						}
 					)
+			elif msg["type"] == "navigate":
+				await self._handle_navigate(render, session, msg, request)
 			elif msg["type"] == "client_resume":
 				render.resume(msg["resumeId"], msg["views"], msg["channels"])
 			elif msg["type"] == "update":
@@ -1188,6 +1203,118 @@ class App:
 					Exception("Request denied by server"),
 					{"kind": "deny"},
 				)
+
+	async def _handle_navigate(
+		self,
+		render: RenderSession,
+		session: UserSession,
+		msg: ClientNavigateMessage,
+		request: PulseRequest | None,
+	) -> None:
+		"""Render the views for a client navigation or hover prefetch.
+
+		The URL is matched against the Python route tree (the source of truth);
+		prerender middleware runs exactly as it does for HTTP prerenders.
+		"""
+		nav = msg["nav"]
+		route_info = msg["routeInfo"]
+
+		def reply(message: ServerNavigateResultMessage) -> None:
+			render.send(message)
+
+		match = self.routes.match(route_info["pathname"])
+		if match is None:
+			reply(
+				{
+					"type": "navigate_result",
+					"nav": nav,
+					"status": "notFound",
+					"redirect": self.not_found,
+				}
+			)
+			return
+		if request is None:
+			raise RuntimeError("Socket navigation is missing its connection request")
+
+		matched_routes, params = match
+		paths = [route.unique_path() for route in matched_routes]
+		info: RouteInfo = {
+			"pathname": route_info["pathname"],
+			"hash": route_info.get("hash", ""),
+			"query": route_info.get("query", ""),
+			"queryParams": route_info.get("queryParams", {}),
+			"pathParams": params.params,
+			"catchall": params.splat,
+		}
+		payload: PrerenderPayload = {"paths": paths, "routeInfo": info}
+
+		async def _process() -> PrerenderResponse:
+			results = render.navigate_views(paths, info)
+			views: dict[str, ServerInitMessage | ServerNavigateToMessage | None] = {}
+			for path in paths:
+				result = results[path]
+				if result is None or result["type"] == "vdom_init":
+					views[path] = result
+					continue
+				# A redirect/not-found interrupt was raised while rendering
+				nav_path = result["path"]
+				if result["replace"] and nav_path == self.not_found:
+					return NotFound()
+				return Redirect(path=str(nav_path) if nav_path else "/")
+			result_data: Prerender = {
+				"views": views,
+				"directives": {
+					"headers": {},
+					"query": {},
+					"socketio": {"auth": {}, "headers": {}, "query": {}},
+				},
+			}
+			return Ok(result_data)
+
+		try:
+			result = await self.middleware.prerender(
+				payload=payload,
+				request=request,
+				session=session.data,
+				next=_process,
+			)
+		except Exception as exc:
+			render.report_error(None, "navigate", exc)
+			reply({"type": "navigate_result", "nav": nav, "status": "error"})
+			return
+
+		if isinstance(result, Redirect):
+			reply(
+				{
+					"type": "navigate_result",
+					"nav": nav,
+					"status": "redirect",
+					"redirect": result.path or "/",
+				}
+			)
+		elif isinstance(result, NotFound):
+			reply(
+				{
+					"type": "navigate_result",
+					"nav": nav,
+					"status": "notFound",
+					"redirect": self.not_found,
+				}
+			)
+		elif isinstance(result, Ok):
+			reply(
+				{
+					"type": "navigate_result",
+					"nav": nav,
+					"status": "ok",
+					"views": cast(
+						dict[str, "ServerInitMessage | None"], result.payload["views"]
+					),
+				}
+			)
+		else:
+			# Denied by middleware
+			reply({"type": "navigate_result", "nav": nav, "status": "error"})
 
 	async def _handle_channel_message(
 		self,

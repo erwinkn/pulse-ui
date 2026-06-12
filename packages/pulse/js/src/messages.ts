@@ -101,6 +101,15 @@ export interface ServerResumeMessage {
 	channels?: ServerResumeChannel[];
 }
 
+export interface ServerNavigateResultMessage {
+	type: "navigate_result";
+	nav: string;
+	status: "ok" | "redirect" | "notFound" | "error";
+	redirect?: string;
+	// Route pattern path -> fresh init message, or null to keep the live view
+	views?: Record<string, ServerInitMessage | null>;
+}
+
 export interface ServerAttachAckMessage {
 	type: "attach_ack";
 	view: string;
@@ -122,6 +131,7 @@ export type ServerMessage =
 	| ServerNavigateToMessage
 	| ServerReloadMessage
 	| ServerResumeMessage
+	| ServerNavigateResultMessage
 	| ServerAttachAckMessage
 	| ServerChannelRequestMessage
 	| ServerChannelResponseMessage
@@ -148,6 +158,13 @@ export interface ClientUpdateMessage {
 export interface ClientDetachMessage {
 	type: "detach";
 	view: string;
+}
+
+export interface ClientNavigateMessage {
+	type: "navigate";
+	nav: string;
+	routeInfo: RouteInfo;
+	prefetch?: boolean;
 }
 
 export interface ClientResumeView {
@@ -222,6 +239,7 @@ export type ClientMessage =
 	| ClientCallbackMessage
 	| ClientUpdateMessage
 	| ClientDetachMessage
+	| ClientNavigateMessage
 	| ClientResumeMessage
 	| ClientApiResultMessage
 	| ClientChannelRequestMessage

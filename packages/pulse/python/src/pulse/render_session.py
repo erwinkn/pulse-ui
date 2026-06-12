@@ -10,12 +10,17 @@ from pulse.channel import Channel
 from pulse.context import PulseContext
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import (
+	ClientResumeChannel,
+	ClientResumeView,
 	ServerApiCallMessage,
 	ServerErrorPhase,
 	ServerInitMessage,
 	ServerJsExecMessage,
 	ServerMessage,
 	ServerNavigateToMessage,
+	ServerResumeChannel,
+	ServerResumeMessage,
+	ServerResumeView,
 	ServerUpdateMessage,
 )
 from pulse.queries.store import QueryStore
@@ -341,6 +346,7 @@ class RenderSession:
 		"""WebSocket disconnected. Start queuing briefly before pausing."""
 		self._send_message = None
 		self.connected = False
+		self.channels.disconnect_all()
 
 		for mount in self.route_mounts.values():
 			if mount.state == "active":
@@ -504,6 +510,65 @@ class RenderSession:
 			mount.activate(self._send_message)
 		return mount.state == "active"
 
+	def resume(
+		self,
+		resume_id: str,
+		views: list[ClientResumeView],
+		channels: list[ClientResumeChannel],
+	) -> bool:
+		accepted_views: list[ServerResumeView] = []
+		accepted_paths: set[str] = set()
+
+		for view in views:
+			path = ensure_absolute_path(view["path"])
+			mount = self.route_mounts.get(path)
+			if mount is None or mount.state in ("idle", "closed"):
+				self.send(
+					ServerResumeMessage(
+						type="server_resume",
+						resumeId=resume_id,
+						status="reload",
+					)
+				)
+				return False
+			mount.update_route(view["routeInfo"])
+			if mount.state == "pending" and self._send_message:
+				mount.activate(self._send_message)
+			if mount.state != "active":
+				self.send(
+					ServerResumeMessage(
+						type="server_resume",
+						resumeId=resume_id,
+						status="reload",
+					)
+				)
+				return False
+			accepted_paths.add(path)
+			resumed_view: ServerResumeView = {"path": path}
+			if attach_id := view.get("attachId"):
+				resumed_view["attachId"] = attach_id
+			accepted_views.append(resumed_view)
+
+		accepted_channels: list[ServerResumeChannel] = []
+		for channel in channels:
+			channel_id = str(channel.get("channel", ""))
+			path = ensure_absolute_path(str(channel.get("path", "")))
+			if path not in accepted_paths:
+				continue
+			if self.channels.resume_client_channel(channel_id, path):
+				accepted_channels.append({"channel": channel_id, "path": path})
+
+		self.send(
+			ServerResumeMessage(
+				type="server_resume",
+				resumeId=resume_id,
+				status="ok",
+				views=accepted_views,
+				channels=accepted_channels,
+			)
+		)
+		return True
+
 	def update_route(self, path: str, route_info: RouteInfo):
 		"""Update routing state (query params, etc.) for attached path."""
 		path = ensure_absolute_path(path)
@@ -525,6 +590,7 @@ class RenderSession:
 		if current is not mount:
 			return
 		try:
+			self.channels.remove_route(path)
 			self.route_mounts.pop(path, None)
 			self._ref_channels_by_route.pop(path, None)
 			mount.dispose()
@@ -534,11 +600,12 @@ class RenderSession:
 	def detach(self, path: str):
 		"""Client route unmounted. Dispose immediately outside dev StrictMode replay."""
 		path = ensure_absolute_path(path)
-		self._ref_channels_by_route.pop(path, None)
 		mount = self.route_mounts.get(path)
 		if not mount:
 			return
+		old_mount_id = mount.mount_id
 		mount.renew_mount_id()
+		self.channels.rebind_route_mount(path, old_mount_id, mount.mount_id)
 		if self.dev_strict_mode_detach_timeout > 0:
 			# React StrictMode in development intentionally replays mount effects as
 			# attach -> detach -> attach without another prerender. Keep the mount for

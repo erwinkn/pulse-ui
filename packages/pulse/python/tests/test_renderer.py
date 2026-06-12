@@ -1282,10 +1282,15 @@ async def test_ref_on_mount_uses_route_context():
 	app = ps.App([ps.Route("/", WithRef)])
 	render = ps.RenderSession("render-ref-route-context", app.routes)
 	session: Any = SimpleNamespace(sid="session-ref-route-context")
+	render.connect(lambda _: None)
 	with ps.PulseContext(app=app, session=session, render=render):
 		render.prerender(["/"])
+		render.attach("/", app.routes.find("/").default_route_info())
 
 	assert handle is not None
+	render.channels.handle_client_connect(
+		{"type": "channel_connect", "channel": handle.channel_id, "path": "/"}
+	)
 	render.channels.handle_client_event(
 		render=render,
 		session=session,

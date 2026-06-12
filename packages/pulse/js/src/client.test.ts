@@ -3,6 +3,7 @@ import React from "react";
 import { act, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { deserialize, serialize } from "./serialize/serializer";
+import type { Serialized } from "./serialize/serializer";
 
 class FakeSocket {
 	connected = false;
@@ -47,13 +48,18 @@ const routeInfo = {
 	catchall: [],
 };
 
-const view = {
-	routeInfo,
-	onInit: vi.fn(),
-	onUpdate: vi.fn(),
-	onJsExec: vi.fn(),
-	onServerError: vi.fn(),
-};
+function makeView(pathRouteInfo = routeInfo) {
+	return {
+		routeInfo: pathRouteInfo,
+		onInit: vi.fn(),
+		onUpdate: vi.fn(),
+		onJsExec: vi.fn(),
+		onServerError: vi.fn(),
+		deserializeMessage: vi.fn((data: Serialized) =>
+			deserialize(data, { coerceNullsToUndefined: true }),
+		),
+	};
+}
 
 async function makeClient(
 	connectionStatus = {
@@ -99,7 +105,7 @@ describe("PulseSocketIOClient attach ack", () => {
 	it("queues callbacks until the active attach is acknowledged", async () => {
 		const client = await makeClient();
 		const connected = client.connect();
-		client.attach("/", view);
+		client.attach("/", makeView());
 		socket.trigger("connect");
 		await connected;
 
@@ -128,7 +134,7 @@ describe("PulseSocketIOClient attach ack", () => {
 	it("drops queued callbacks when the path detaches before ack", async () => {
 		const client = await makeClient();
 		const connected = client.connect();
-		client.attach("/", view);
+		client.attach("/", makeView());
 		socket.trigger("connect");
 		await connected;
 
@@ -150,10 +156,63 @@ describe("PulseSocketIOClient attach ack", () => {
 		]);
 	});
 
+	it("coalesces queued channel lifecycle messages on initial connect", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+
+		client.acquireChannel("chan-1", "/view");
+		client.releaseChannel("chan-1", "/view");
+		client.acquireChannel("chan-1", "/view");
+
+		socket.trigger("connect");
+		await connected;
+
+		expect(sentMessages()).toEqual([
+			{ type: "channel_connect", channel: "chan-1", path: "/view" },
+		]);
+	});
+
+	it("rejects channel requests on transport disconnect and reconnects endpoint", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+
+		const bridge = client.acquireChannel("chan-1", "/view");
+		const pending = bridge.request("needs-response");
+
+		socket.trigger("disconnect");
+		await expect(pending).rejects.toThrow("Connection lost");
+
+		socket.emitted = [];
+		socket.trigger("connect");
+
+		expect(sentMessages()).toEqual([
+			{
+				type: "client_resume",
+				resumeId: expect.any(String),
+				views: [],
+				channels: [{ channel: "chan-1", path: "/view" }],
+			},
+		]);
+		const resume = sentMessages()[0]!;
+		socket.trigger(
+			"message",
+			serialize({
+				type: "server_resume",
+				resumeId: resume.resumeId,
+				status: "ok",
+				views: [],
+				channels: [{ channel: "chan-1", path: "/view" }],
+			}),
+		);
+		expect(() => bridge.emit("after-reconnect")).not.toThrow();
+	});
+
 	it("suspends hidden tabs without clearing active views and reattaches on resume", async () => {
 		const client = await makeClient();
 		const connected = client.connect();
-		client.attach("/", view);
+		client.attach("/", makeView());
 		const firstSocket = socket;
 		firstSocket.trigger("connect");
 		await connected;
@@ -172,10 +231,22 @@ describe("PulseSocketIOClient attach ack", () => {
 		secondSocket.trigger("connect");
 		await resumed;
 
-		expect(sentMessages(secondSocket)[0]).toMatchObject({
-			type: "attach",
-			path: "/",
+		const resume = sentMessages(secondSocket)[0]!;
+		expect(resume).toMatchObject({
+			type: "client_resume",
+			views: [{ path: "/", routeInfo }],
 		});
+		// Complete the handshake so reconnect timers are cleared for later tests.
+		secondSocket.trigger(
+			"message",
+			serialize({
+				type: "server_resume",
+				resumeId: resume.resumeId,
+				status: "ok",
+				views: [{ path: "/", attachId: resume.views[0].attachId }],
+				channels: [],
+			}),
+		);
 	});
 
 	it("does not reload visible active tabs when reconnect times out", async () => {
@@ -287,6 +358,266 @@ describe("PulseSocketIOClient attach ack", () => {
 		await waitForEffects();
 
 		expect(reload).not.toHaveBeenCalled();
+	});
+
+	it("does not replay stale channel disconnect after offline release and reacquire", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+
+		client.acquireChannel("chan-1", "/view");
+		socket.trigger("disconnect");
+		client.releaseChannel("chan-1", "/view");
+		client.acquireChannel("chan-1", "/view");
+
+		socket.emitted = [];
+		socket.trigger("connect");
+
+		expect(sentMessages()).toEqual([
+			{
+				type: "client_resume",
+				resumeId: expect.any(String),
+				views: [],
+				channels: [{ channel: "chan-1", path: "/view" }],
+			},
+		]);
+		const resume = sentMessages()[0]!;
+		socket.trigger(
+			"message",
+			serialize({
+				type: "server_resume",
+				resumeId: resume.resumeId,
+				status: "ok",
+				views: [],
+				channels: [{ channel: "chan-1", path: "/view" }],
+			}),
+		);
+
+		expect(sentMessages()).toEqual([
+			{
+				type: "client_resume",
+				resumeId: resume.resumeId,
+				views: [],
+				channels: [{ channel: "chan-1", path: "/view" }],
+			},
+		]);
+	});
+
+	it("keeps queued callbacks behind resume acceptance", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		client.attach("/", makeView());
+		socket.trigger("connect");
+		await connected;
+
+		const attach = sentMessages()[0]!;
+		socket.trigger(
+			"message",
+			serialize({
+				type: "attach_ack",
+				path: "/",
+				attachId: attach.attachId,
+			}),
+		);
+
+		socket.trigger("disconnect");
+		client.invokeCallback("/", "1.onClick", []);
+		socket.emitted = [];
+		socket.trigger("connect");
+
+		expect(sentMessages()).toEqual([
+			{
+				type: "client_resume",
+				resumeId: expect.any(String),
+				views: [{ path: "/", routeInfo, attachId: attach.attachId }],
+				channels: [],
+			},
+		]);
+
+		const resume = sentMessages()[0]!;
+		socket.trigger(
+			"message",
+			serialize({
+				type: "server_resume",
+				resumeId: resume.resumeId,
+				status: "ok",
+				views: [{ path: "/", attachId: attach.attachId }],
+				channels: [],
+			}),
+		);
+
+		expect(sentMessages()[1]).toMatchObject({
+			type: "callback",
+			path: "/",
+			callback: "1.onClick",
+		});
+	});
+
+	it("drops queued channel messages and closes bridge when channel is not resumed", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+
+		const bridge = client.acquireChannel("chan-1", "/view");
+		socket.trigger("disconnect");
+		bridge.emit("offline-event");
+		socket.emitted = [];
+		socket.trigger("connect");
+
+		const resume = sentMessages()[0]!;
+		socket.trigger(
+			"message",
+			serialize({
+				type: "server_resume",
+				resumeId: resume.resumeId,
+				status: "ok",
+				views: [],
+				channels: [],
+			}),
+		);
+
+		expect(sentMessages()).toEqual([
+			{
+				type: "client_resume",
+				resumeId: resume.resumeId,
+				views: [],
+				channels: [{ channel: "chan-1", path: "/view" }],
+			},
+		]);
+		expect(() => bridge.emit("after-refusal")).toThrow("Channel is closed");
+	});
+
+	it("deserializes js_exec with the owning view deserializer", async () => {
+		const renderNode = vi.fn(() => "route-a-node");
+		const client = await makeClient();
+		const connected = client.connect();
+		const viewA = {
+			...makeView(),
+			onJsExec: vi.fn(),
+			deserializeMessage: vi.fn((data: Serialized) =>
+				deserialize(data, {
+					coerceNullsToUndefined: true,
+					renderer: { renderNode },
+				}),
+			),
+		};
+		const viewB = {
+			...makeView(),
+			deserializeMessage: vi.fn(() => {
+				throw new Error("wrong view");
+			}),
+		};
+		client.attach("/a", viewA);
+		client.attach("/b", viewB);
+		socket.trigger("connect");
+		await connected;
+
+		socket.trigger("message", [
+			[[], [], [], [], [12]],
+			{
+				type: "js_exec",
+				path: "/a",
+				id: "exec-1",
+				expr: {
+					t: "call",
+					callee: { t: "ref", key: "fn" },
+					args: [
+						{
+							t: "lit",
+							value: {
+								tag: "$$RouteOnly",
+								props: { label: "A" },
+								children: [],
+							},
+						},
+					],
+				},
+			},
+		] satisfies Serialized);
+
+		expect(viewA.deserializeMessage).toHaveBeenCalledTimes(1);
+		expect(viewB.deserializeMessage).not.toHaveBeenCalled();
+		expect(viewA.onJsExec.mock.calls[0]![0].expr.args[0].value).toBe("route-a-node");
+		expect(renderNode).toHaveBeenCalledWith(
+			expect.objectContaining({ tag: "$$RouteOnly" }),
+		);
+	});
+
+	it("deserializes route-bound channel messages with the owning view deserializer", async () => {
+		const renderNode = vi.fn(() => "route-a-node");
+		const client = await makeClient();
+		const connected = client.connect();
+		const viewA = {
+			...makeView(),
+			deserializeMessage: vi.fn((data: Serialized) =>
+				deserialize(data, {
+					coerceNullsToUndefined: true,
+					renderer: { renderNode },
+				}),
+			),
+		};
+		const viewB = {
+			...makeView(),
+			deserializeMessage: vi.fn(() => {
+				throw new Error("wrong view");
+			}),
+		};
+		client.attach("/a", viewA);
+		client.attach("/b", viewB);
+		const bridge = client.acquireChannel("chan-1", "/view");
+		const handler = vi.fn();
+		bridge.on("ping", handler);
+		socket.trigger("connect");
+		await connected;
+
+		socket.trigger("message", [
+			[[], [], [], [], [6]],
+			{
+				type: "channel_message",
+				path: "/a",
+				channel: "chan-1",
+				event: "ping",
+				payload: {
+					content: {
+						tag: "$$RouteOnly",
+						props: { label: "A" },
+						children: [],
+					},
+				},
+			},
+		] satisfies Serialized);
+
+		expect(viewA.deserializeMessage).toHaveBeenCalledTimes(1);
+		expect(viewB.deserializeMessage).not.toHaveBeenCalled();
+		expect(handler).toHaveBeenCalledWith({ content: "route-a-node" });
+	});
+
+	it("drops unroutable channel messages with pulse nodes", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		const bridge = client.acquireChannel("chan-1", "/view");
+		const handler = vi.fn();
+		bridge.on("ping", handler);
+		socket.trigger("connect");
+		await connected;
+
+		socket.trigger("message", [
+			[[], [], [], [], [5]],
+			{
+				type: "channel_message",
+				channel: "chan-1",
+				event: "ping",
+				payload: {
+					tag: "$$RouteOnly",
+					props: { label: "A" },
+					children: [],
+				},
+			},
+		] satisfies Serialized);
+
+		expect(handler).not.toHaveBeenCalled();
 	});
 });
 

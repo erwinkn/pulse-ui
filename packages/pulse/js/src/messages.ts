@@ -43,6 +43,7 @@ export interface ServerApiCallMessage {
 
 export interface ServerChannelRequestMessage {
 	type: "channel_message";
+	path?: string;
 	channel: string;
 	event: string;
 	payload?: any;
@@ -53,6 +54,7 @@ export interface ServerChannelRequestMessage {
 
 export interface ServerChannelResponseMessage {
 	type: "channel_message";
+	path?: string;
 	channel: string;
 	event?: undefined;
 	responseTo: string;
@@ -77,6 +79,24 @@ export interface ServerReloadMessage {
 	type: "reload";
 }
 
+export interface ServerResumeView {
+	path: string;
+	attachId?: string;
+}
+
+export interface ServerResumeChannel {
+	channel: string;
+	path: string;
+}
+
+export interface ServerResumeMessage {
+	type: "server_resume";
+	resumeId: string;
+	status: "ok" | "reload";
+	views?: ServerResumeView[];
+	channels?: ServerResumeChannel[];
+}
+
 export interface ServerAttachAckMessage {
 	type: "attach_ack";
 	path: string;
@@ -97,6 +117,7 @@ export type ServerMessage =
 	| ServerApiCallMessage
 	| ServerNavigateToMessage
 	| ServerReloadMessage
+	| ServerResumeMessage
 	| ServerAttachAckMessage
 	| ServerChannelRequestMessage
 	| ServerChannelResponseMessage
@@ -123,6 +144,24 @@ export interface ClientUpdateMessage {
 export interface ClientDetachMessage {
 	type: "detach";
 	path: string;
+}
+
+export interface ClientResumeView {
+	path: string;
+	routeInfo: RouteInfo;
+	attachId?: string;
+}
+
+export interface ClientResumeChannel {
+	channel: string;
+	path: string;
+}
+
+export interface ClientResumeMessage {
+	type: "client_resume";
+	resumeId: string;
+	views: ClientResumeView[];
+	channels: ClientResumeChannel[];
 }
 
 export interface ClientApiResultMessage {
@@ -156,6 +195,17 @@ export interface ClientChannelResponseMessage {
 
 export type ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage;
 
+export interface ClientChannelConnectMessage {
+	type: "channel_connect";
+	channel: string;
+	path: string;
+}
+
+export interface ClientChannelDisconnectMessage {
+	type: "channel_disconnect";
+	channel: string;
+}
+
 export interface ClientJsResultMessage {
 	type: "js_result";
 	id: string;
@@ -168,7 +218,10 @@ export type ClientMessage =
 	| ClientCallbackMessage
 	| ClientUpdateMessage
 	| ClientDetachMessage
+	| ClientResumeMessage
 	| ClientApiResultMessage
 	| ClientChannelRequestMessage
 	| ClientChannelResponseMessage
+	| ClientChannelConnectMessage
+	| ClientChannelDisconnectMessage
 	| ClientJsResultMessage;

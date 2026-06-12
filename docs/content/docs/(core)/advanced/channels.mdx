@@ -169,7 +169,12 @@ def ChatClient(*, channelId: str):
         # This runs in the browser when the server emits "new_message"
         console.log("Got message:", payload)
 
-    useEffect(lambda: bridge.on("new_message", on_new_message), [bridge])
+    def subscribe():
+        if not bridge:
+            return  # bridge is null until the channel is acquired
+        return bridge.on("new_message", on_new_message)
+
+    useEffect(subscribe, [bridge])
 
     # Send events to the server
     def send_message(text: str):
@@ -183,14 +188,14 @@ def ChatClient(*, channelId: str):
 
 A note on `@ps.javascript`: This decorator lets you write JavaScript logic that runs in the browser. The code inside looks like Python but transpiles to JavaScript. This is useful when you need browser APIs (like `localStorage`, `window`, or DOM manipulation) or want to optimize performance by keeping some logic client-side.
 
-The `usePulseChannel` hook returns a bridge object with three methods:
+The `usePulseChannel` hook returns `null` until the channel is acquired (after the first render), then a bridge object with three methods:
 - `on(event, handler)` - Listen for events from the server
 - `emit(event, payload)` - Send events to the server (fire-and-forget)
 - `request(event, payload)` - Send a request and await the server's response
 
 ## Channel lifecycle
 
-Channels are tied to the route where they're created. When the user navigates to a different route, the channel closes automatically and resources are cleaned up. This prevents memory leaks and stale connections.
+Channels are tied to the view (the rendered page) where they're created. When that view is disposed—because the user navigated somewhere its route no longer matches—the channel closes automatically and resources are cleaned up. This prevents memory leaks and stale connections. Views that survive a navigation (like a layout during sibling navigation) keep their channels alive.
 
 If you need a channel that persists across route changes (like a global notification system), create it at a higher level in your component tree, such as in a layout component.
 

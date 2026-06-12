@@ -17,60 +17,53 @@ bun add pulse-ui-client
 
 ## Peer Dependencies
 
-The package requires React 18 or 19 and React Router 7:
+The package requires React 18 or 19—nothing else. Routing is built in:
 
 ```json
 {
   "peerDependencies": {
     "react": "^18 || ^19",
-    "react-dom": "^18 || ^19",
-    "react-router": "^7"
+    "react-dom": "^18 || ^19"
   }
 }
 ```
 
 ## Quick Start
 
-Here's a minimal setup connecting a React app to a Pulse backend:
+In a Pulse project, the generated `web/app/pulse/_layout.tsx` exports a configured `PulseApp` that your entry files render. Here's what that looks like:
 
 ```tsx
-import { PulseProvider, PulseView } from "pulse-ui-client";
-import { BrowserRouter, Routes, Route } from "react-router";
+import { PulseApp, type PulsePrerender } from "pulse-ui-client";
+import { pulseRouteTree, routeLoaders } from "./routes";
 
-// Component registry for custom mount points
-const registry = {
-  MyButton: (props) => <button {...props} />,
-};
-
-function App() {
+function App({ prerender, url }: { prerender: PulsePrerender; url?: string }) {
   return (
-    <BrowserRouter>
-      <PulseProvider
-        config={{
-          serverAddress: "http://localhost:8000",
-          apiPrefix: "/_pulse",
-          connectionStatus: {
-            initialConnectingDelay: 500,
-            initialErrorDelay: 5000,
-            reconnectErrorDelay: 3000,
-          },
-        }}
-        prerender={{ views: {}, directives: {} }}
-      >
-        <Routes>
-          <Route path="/*" element={<PulseView path="/" registry={registry} />} />
-        </Routes>
-      </PulseProvider>
-    </BrowserRouter>
+    <PulseApp
+      routes={pulseRouteTree}
+      routeLoaders={routeLoaders}
+      config={{
+        serverAddress: "http://localhost:8000",
+        apiPrefix: "/_pulse",
+        connectionStatus: {
+          initialConnectingDelay: 2000,
+          initialErrorDelay: 8000,
+          reconnectErrorDelay: 8000,
+        },
+      }}
+      prerender={prerender}
+      url={url}
+    />
   );
 }
 ```
 
 Let's break this down:
 
-1. **PulseProvider** wraps your app and manages the WebSocket connection
-2. **PulseView** renders the UI for a specific route path
-3. **registry** maps component names to React components for custom mount points
+1. **PulseApp** composes the router (`PulseRouterProvider` → `PulseProvider` → `PulseRoutes`) into one shell
+2. **routes / routeLoaders** come from the generated route manifest—`routes` mirrors your Python route tree, `routeLoaders` code-splits one module per route
+3. **prerender** is the server-rendered payload (views + directives) from the initial HTML request
+
+To wrap the whole app with global providers (themes, etc.), do it around `PulseApp` in your `src/entry-client.tsx` and `src/entry-server.tsx`.
 
 ## What's Included
 
@@ -78,15 +71,19 @@ The package exports several categories of APIs:
 
 ### Components
 
-- **PulseProvider** - Root context provider for WebSocket connection
-- **PulseView** - Renders Pulse views and handles updates
+- **PulseApp** - All-in-one app shell: router + provider + routes
+- **PulseProvider** - Context provider for the WebSocket client
+- **PulseView** - Renders a Pulse view and handles updates
 - **PulseForm** - Form component that submits without unmounting
+- **PulseRouterProvider / PulseRoutes / Outlet / Link** - The built-in router
 
 ### Hooks
 
 - **usePulseClient** - Access the Pulse client instance
 - **usePulseChannel** - Subscribe to bidirectional channels
 - **usePulsePrerender** - Access prerendered view data
+- **usePulseViewId** - The id of the enclosing view
+- **useNavigate / useLocation / useParams / useRouteInfo / useNavigationError** - Router hooks
 
 ### Classes
 
@@ -97,24 +94,29 @@ The package exports several categories of APIs:
 ### Utilities
 
 - **serialize** / **deserialize** - Wire format encoding
-- **extractServerRouteInfo** - Extract route info in loaders
+- **buildRouteInfo** - Build a `RouteInfo` from a location
+- **matchRoutes** - Match a pathname against a `PulseRoute[]` tree
 - **submitForm** - Programmatic form submission
 
 ## Architecture
 
-The client maintains a persistent WebSocket connection to the Pulse server:
+The client maintains a persistent WebSocket connection to the Pulse server. Every rendered route or layout instance is a **view** with a unique server-generated id, and all messages are scoped to that id:
 
 ```
 React App                          Pulse Server
     |                                   |
-    |-- attach (path, routeInfo) ------>|
-    |<-------- vdom_init (VDOM) --------|
+    |-- attach (view, routeInfo) ------>|
+    |<---- vdom_init (view, VDOM) ------|
     |                                   |
-    |<------ vdom_update (ops[]) -------|  (on state change)
+    |<--- vdom_update (view, ops[]) ----|  (on state change)
     |                                   |
-    |-- callback (path, id, args) ----->|  (on user interaction)
+    |-- callback (view, id, args) ----->|  (on user interaction)
     |                                   |
+    |-- navigate (nav, routeInfo) ----->|  (on link click)
+    |<--- navigate_result (views) ------|
 ```
+
+Navigation also flows over the socket: the server matches the URL against the Python route tree, renders the new views, and reuses surviving ones (their state persists).
 
 When a user interacts with the UI, callbacks are sent to the server. The server updates state and sends VDOM patches back. The client applies these patches incrementally, preserving React's reconciliation benefits.
 

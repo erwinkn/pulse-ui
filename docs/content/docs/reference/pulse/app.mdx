@@ -16,13 +16,12 @@ class App:
         middleware: PulseMiddleware | Sequence[PulseMiddleware] | None = None,
         plugins: Sequence[Plugin] | None = None,
         cookie: Cookie | None = None,
-        session_store: SessionStore | None = None,
+        session_store: SessionStore | CookieSessionStore | None = None,
         server_address: str | None = None,
         dev_server_address: str = "http://localhost:8000",
         internal_server_address: str | None = None,
         not_found: str = "/not-found",
         mode: PulseMode = "single-server",
-        proxy: Proxy | None = None,
         cors: CORSOptions | None = None,
         fastapi: dict[str, Any] | None = None,
         session_timeout: float = 60.0,
@@ -30,6 +29,7 @@ class App:
         disconnect_queue_timeout: float = 300.0,
         connection_status: ConnectionStatusConfig | None = None,
         render_loop_limit: int = 50,
+        unowned_reactives: Literal["error", "warn", "ignore"] = "error",
     ): ...
 ```
 
@@ -48,7 +48,6 @@ class App:
 | `internal_server_address` | `str` | `None` | Internal URL for server-side fetches |
 | `not_found` | `str` | `"/not-found"` | Path for 404 page |
 | `mode` | `PulseMode` | `"single-server"` | Deployment mode |
-| `proxy` | `Proxy` | `None` | Single-server proxy tuning |
 | `cors` | `CORSOptions` | `None` | CORS configuration |
 | `fastapi` | `dict` | `None` | Additional FastAPI options |
 | `session_timeout` | `float` | `60.0` | Session cleanup timeout (seconds) |
@@ -56,6 +55,7 @@ class App:
 | `disconnect_queue_timeout` | `float` | `300.0` | Disconnected socket message queue timeout (seconds) |
 | `connection_status` | `ConnectionStatusConfig` | `None` | Connection status UI timing |
 | `render_loop_limit` | `int` | `50` | Maximum render loops before failing |
+| `unowned_reactives` | `"error" \| "warn" \| "ignore"` | `"error"` | Policy when a component render constructs Effects/States with no owner (nothing would dispose them). Use `ps.init()`, `ps.state(...)`, or `@ps.effect` instead |
 
 Framework routes live under the reserved `/_pulse/*` namespace and are not configurable.
 
@@ -97,14 +97,12 @@ ASGI factory for production deployment. Called on each reload.
 #### run_codegen
 
 ```python
-def run_codegen(
-    self,
-    address: str | None = None,
-    internal_address: str | None = None,
-) -> None
+def run_codegen(self, address: str | None = None) -> None
 ```
 
-Generate React Router code for all routes.
+Generate the web app code (route manifest + route modules) for all routes. Updates `server_address` if `address` is provided.
+
+**Raises:** `RuntimeError` if no server address is available.
 
 #### setup
 
@@ -145,27 +143,6 @@ Deployment mode for the application.
 |-------|-------------|
 | `"single-server"` | Python and React on same origin (default) |
 | `"subdomains"` | Python API on subdomain (e.g., `api.example.com`) |
-
----
-
-## Proxy
-
-Configuration for the single-server React proxy.
-
-```python
-@dataclass
-class Proxy:
-    max_concurrency: int = 100
-    incoming_streaming_threshold: int = 512 * 1024
-    outgoing_streaming_threshold: int = 5 * 1024 * 1024
-    stream_chunk_size: int = 512 * 1024
-    connect_timeout: float | None = 30.0
-    disconnect_watch_timeout: float = 30.0
-    disconnect_watch_max_sleep: float = 1.0
-    disconnect_watch_base_sleep: float = 0.001
-```
-
-Pass it to `App(proxy=ps.Proxy(...))`. Used only in `"single-server"` mode.
 
 ---
 

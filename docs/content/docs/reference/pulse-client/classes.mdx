@@ -226,7 +226,8 @@ Converts VDOM trees to React elements and applies incremental updates. This is u
 class VDOMRenderer {
   constructor(
     client: PulseSocketIOClient,
-    path: string,
+    channels: PulseChannelManager,
+    viewId: string,
     registry?: ComponentRegistry
   );
 
@@ -242,7 +243,8 @@ class VDOMRenderer {
 ```ts
 constructor(
   client: PulseSocketIOClient,
-  path: string,
+  channels: PulseChannelManager,
+  viewId: string,
   registry?: ComponentRegistry
 )
 ```
@@ -250,7 +252,8 @@ constructor(
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `client` | `PulseSocketIOClient` | The Pulse client for callbacks |
-| `path` | `string` | View path for callback routing |
+| `channels` | `PulseChannelManager` | Channel manager for the view (used by refs) |
+| `viewId` | `string` | Unique id of the view, used to scope callbacks |
 | `registry` | `ComponentRegistry` | Optional component registry |
 
 ### Methods
@@ -316,16 +319,22 @@ evaluateExpr(expr: VDOMNode): unknown
 ### Example: Custom Renderer
 
 ```tsx
-import { VDOMRenderer, usePulseClient, usePulsePrerender } from "pulse-ui-client";
-import { useMemo, useState, useEffect } from "react";
+import {
+  VDOMRenderer,
+  usePulseClient,
+  usePulseChannelManagerForView,
+  usePulsePrerender,
+} from "pulse-ui-client";
+import { useMemo, useState } from "react";
 
 function CustomView({ path }: { path: string }) {
   const client = usePulseClient();
-  const prerender = usePulsePrerender(path);
+  const prerender = usePulsePrerender(path); // { view, routePath, vdom }
+  const channels = usePulseChannelManagerForView(prerender.view);
 
   const renderer = useMemo(
-    () => new VDOMRenderer(client, path, {}),
-    [client, path]
+    () => new VDOMRenderer(client, channels, prerender.view, {}),
+    [client, channels, prerender.view]
   );
 
   const [tree, setTree] = useState(() => renderer.init(prerender));

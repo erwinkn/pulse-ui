@@ -14,6 +14,7 @@ import pytest
 from pulse import javascript
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import ServerMessage
+from pulse.reactive import RenderEffect
 from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteInfo, RouteTree
 from pulse.test_helpers import wait_for
@@ -85,6 +86,13 @@ def attach_view(
 
 
 # TODO: clean this up - this was refactored using GPT-5 and is thus quite hacky
+def root_effect(view: Any) -> RenderEffect:
+	"""The render effect of the view's root component."""
+	runtime = next(iter(view.tree.iter_runtimes()))
+	assert runtime.effect is not None
+	return runtime.effect
+
+
 def mount_with_listener(session: RenderSession, path: str):
 	# Maintain a session-level set of listened paths and a shared message log
 	listened: set[str] | None = getattr(session, "_test_listened_paths", None)
@@ -776,8 +784,8 @@ async def test_disconnect_pauses_render_effects():
 		attach_view(session, "/a")
 
 	view = session.view_for_path("/a")
-	assert view.effect is not None
-	assert view.effect.paused is False
+	assert root_effect(view) is not None
+	assert root_effect(view).paused is False
 
 	# Disconnect should pause the effect (after queue timeout)
 	session.disconnect()
@@ -1096,22 +1104,22 @@ async def test_effect_paused_in_idle_state():
 		attach_view(session, "/a")
 
 	view = session.view_for_path("/a")
-	assert view.effect is not None
-	assert view.effect.paused is False
+	assert root_effect(view) is not None
+	assert root_effect(view).paused is False
 	assert view.state == "active"
 
 	# Disconnect puts view in PENDING state (not paused)
 	session.disconnect()
 	assert view.state == "pending"
-	assert view.effect.paused is False  # Still running in PENDING
+	assert root_effect(view).paused is False  # Still running in PENDING
 
 	# Manually trigger transition to IDLE (simulating timeout)
 	transition_view_to_idle(session, "/a")
 
 	# Now the effect should be paused
 	assert view.state == "idle"
-	assert view.effect.paused is True
-	assert view.effect.batch is None
+	assert root_effect(view).paused is True
+	assert root_effect(view).batch is None
 
 	session.close()
 
@@ -1145,8 +1153,8 @@ async def test_multiple_routes_idle_attach_requests_reload():
 	transition_view_to_idle(session, "/b")
 
 	# Both effects should now be paused
-	effect_a = view_a.effect
-	effect_b = view_b.effect
+	effect_a = root_effect(view_a)
+	effect_b = root_effect(view_b)
 	assert effect_a is not None
 	assert effect_b is not None
 	assert effect_a.paused is True
@@ -1621,7 +1629,7 @@ async def test_prerender_then_attach_works():
 	assert result["view"] == view.id
 	assert result["routePath"] == "/a"
 	assert view.state == "pending"
-	assert view.effect is not None  # Effect created during prerender
+	assert root_effect(view) is not None  # Effect created during prerender
 
 	# Now attach
 	messages: list[ServerMessage] = []
@@ -1666,8 +1674,9 @@ async def test_prerender_seeds_effect_deps_for_updates():
 		session.prerender(["/a"], None)
 
 	view = session.view_for_path("/a")
-	assert view.effect is not None
-	assert view.effect.runs == 0
+	assert root_effect(view) is not None
+	# The initial render ran inside the effect's dependency capture
+	assert root_effect(view).runs == 1
 
 	with ps.PulseContext.update(render=session):
 		session.attach(view.id, make_route_info("/a"))
@@ -1696,8 +1705,8 @@ async def test_prerender_keeps_views_for_unrendered_paths():
 
 	view_a = session.view_for_path("/a")
 	view_b = session.view_for_path("/b")
-	effect_a = view_a.effect
-	effect_b = view_b.effect
+	effect_a = root_effect(view_a)
+	effect_b = root_effect(view_b)
 	assert effect_a is not None
 	assert effect_b is not None
 	assert view_a.state == "active"
@@ -1712,11 +1721,11 @@ async def test_prerender_keeps_views_for_unrendered_paths():
 
 	assert result["type"] == "vdom_init"
 	assert session.view_for_path("/a") is view_a
-	assert view_a.effect is effect_a
+	assert root_effect(view_a) is effect_a
 	assert view_a.state == "pending"
 	assert view_a.route.query == "page=2"
 	assert session.view_for_path("/b") is view_b
-	assert view_b.effect is effect_b
+	assert root_effect(view_b) is effect_b
 
 	messages.clear()
 	session.update_route(view_a.id, nav_info)
@@ -1800,7 +1809,7 @@ async def test_detach_immediate_removes_view_and_disposes_effect():
 		attach_view(session, "/a")
 
 	view = session.view_for_path("/a")
-	effect = view.effect
+	effect = root_effect(view)
 	assert effect is not None
 
 	session.detach(view.id)
@@ -1988,14 +1997,14 @@ async def test_prerender_queue_timeout_transitions_to_idle():
 
 	view = session.view_for_path("/a")
 	assert view.state == "pending"
-	assert view.effect is not None
-	assert view.effect.paused is False
+	assert root_effect(view) is not None
+	assert root_effect(view).paused is False
 
 	# Manually trigger the timeout (simulating time passing)
 	transition_view_to_idle(session, "/a")
 
 	assert view.state == "idle"
-	assert view.effect.paused is True
+	assert root_effect(view).paused is True
 
 	session.close()
 
@@ -2013,8 +2022,8 @@ async def test_attach_from_idle_requests_reload():
 	view = session.view_for_path("/a")
 	transition_view_to_idle(session, "/a")
 	assert view.state == "idle"
-	assert view.effect is not None
-	assert view.effect.paused is True
+	assert root_effect(view) is not None
+	assert root_effect(view).paused is True
 
 	# Now attach
 	messages: list[ServerMessage] = []
@@ -2025,7 +2034,7 @@ async def test_attach_from_idle_requests_reload():
 
 	# Should request reload and leave the view idle
 	assert view.state == "idle"
-	assert view.effect.paused is True
+	assert root_effect(view).paused is True
 	assert len(messages) == 1
 	assert messages[0]["type"] == "reload"
 

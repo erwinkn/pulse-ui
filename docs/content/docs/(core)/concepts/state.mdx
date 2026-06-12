@@ -40,6 +40,8 @@ def CounterDemo():
 
 Without `ps.init()`, a new `Counter` instance would be created on every render, resetting the count to 0 each time.
 
+States created inside `ps.init()` live as long as the component: when it unmounts (or the init block re-runs because its `key` changed), Pulse disposes them automatically, stopping their effects and running `on_dispose()`.
+
 ## How tracking works
 
 When you render a component that displays `state.count`, Pulse remembers that the component depends on `count`. Later, when `count` changes, Pulse rerenders only the components that need it.

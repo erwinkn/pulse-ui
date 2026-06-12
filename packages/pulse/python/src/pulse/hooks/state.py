@@ -5,6 +5,7 @@ from typing import Any, TypeVar, override
 
 from pulse.component import is_component_code
 from pulse.hooks.core import HookMetadata, HookState, hooks
+from pulse.reactive import REACTIVE_CONTEXT, Untrack
 from pulse.state.state import State
 
 S = TypeVar("S", bound=State)
@@ -42,6 +43,15 @@ class StateHookState(HookState):
 		key: str | None,
 		arg: State | Callable[[], State],
 	) -> State:
+		if isinstance(arg, State):
+			# The hook claims instances passed directly (adopting or disposing
+			# them), so the ambient scope must not own them too.
+			scope = REACTIVE_CONTEXT.get().scope
+			if scope is not None:
+				for index, candidate in enumerate(scope.states):
+					if candidate is arg:
+						del scope.states[index]
+						break
 		full_identity = self._make_key(identity, key)
 		if full_identity in self.called_keys:
 			if key is None:
@@ -81,17 +91,23 @@ class StateHookState(HookState):
 	@override
 	def dispose(self) -> None:
 		for instance in self.instances.values():
-			try:
-				if not instance.__disposed__:
-					instance.dispose()
-			except RuntimeError:
-				# Already disposed, ignore
-				pass
+			# No already-disposed guard: this hook owns its instances
+			# exclusively, so anything else disposing them first is an
+			# ownership bug. In dev the Disposable wrapper raises (surfaced
+			# by HookNamespace.dispose's error log); prod skips silently.
+			instance.dispose()
 		self.instances.clear()
 
 
 def _instantiate_state(arg: State | Callable[[], State]) -> State:
-	instance = arg() if callable(arg) else arg
+	if callable(arg):
+		# Shield the factory from the ambient scope: this hook owns the
+		# instance, so a surrounding ps.init/ps.setup scope must not capture
+		# (and later dispose) it too.
+		with Untrack():
+			instance = arg()
+	else:
+		instance = arg
 	if not isinstance(instance, State):
 		raise TypeError(
 			"`pulse.state` expects a State instance or a callable returning a State instance"

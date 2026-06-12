@@ -8,14 +8,14 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useNavigate, useRouteInfo } from "./router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import {
 	createPulseChannelManager,
 	type ChannelBridge,
 	type PulseChannelManager,
 } from "./channel";
 import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
-import type { RouteInfo } from "./helpers";
+import { buildRouteInfo, type RouteInfo } from "./helpers";
 import type { ServerError } from "./messages";
 import { VDOMRenderer } from "./renderer";
 import { deserialize } from "./serialize/serializer";
@@ -146,6 +146,20 @@ export interface PulseProviderProps {
 	children: ReactNode;
 	config: PulseConfig;
 	prerender: PulsePrerender;
+}
+
+function useRouteInfo(): RouteInfo {
+	const location = useLocation();
+	const params = useParams();
+	// biome-ignore lint/correctness/useExhaustiveDependencies: using hacky deep equality for params
+	return useMemo(() => {
+		const { "*": catchall = "", ...pathParams } = params;
+		return buildRouteInfo(
+			location,
+			pathParams,
+			catchall.length > 0 ? catchall.split("/") : [],
+		);
+	}, [location.hash, location.pathname, location.search, JSON.stringify(params)]);
 }
 
 const inBrowser = typeof window !== "undefined";

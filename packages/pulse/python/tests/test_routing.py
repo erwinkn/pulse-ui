@@ -136,6 +136,100 @@ def test_route_tree_find_non_existent_in_layout(route_tree: RouteTree):
 		route_tree.find("/<layout>|nonexistent")
 
 
+def test_route_tree_match_static():
+	routes = RouteTree([Route("/about", DummyComponent)])
+	match = routes.match("/about")
+	assert match is not None
+	matched, params = match
+	assert [route.unique_path() for route in matched] == ["/about"]
+	assert params.params == {}
+
+
+def test_route_tree_match_dynamic():
+	routes = RouteTree([Route("/users/:id", DummyComponent)])
+	match = routes.match("/users/42")
+	assert match is not None
+	_, params = match
+	assert params.params == {"id": "42"}
+
+
+def test_route_tree_match_optional():
+	routes = RouteTree([Route("/docs/:lang?", DummyComponent)])
+	match_root = routes.match("/docs")
+	match_lang = routes.match("/docs/en")
+	assert match_root is not None
+	assert match_lang is not None
+	assert match_root[1].params == {}
+	assert match_lang[1].params == {"lang": "en"}
+
+
+def test_route_tree_match_splat():
+	routes = RouteTree([Route("/files/*", DummyComponent)])
+	match = routes.match("/files/a/b/c")
+	assert match is not None
+	_, params = match
+	assert params.splat == ["a", "b", "c"]
+
+
+def test_route_tree_match_no_match():
+	routes = RouteTree([Route("/about", DummyComponent)])
+	assert routes.match("/missing") is None
+
+
+def test_route_tree_match_includes_layouts():
+	layout_routes = RouteTree(
+		[
+			Layout(
+				render=DummyComponent,
+				children=[Route("dashboard", DummyComponent)],
+			),
+		]
+	)
+	match = layout_routes.match("/dashboard")
+	assert match is not None
+	matched, _ = match
+	assert [route.unique_path() for route in matched] == ["/<layout>", "/dashboard"]
+
+
+def test_route_tree_match_prefers_static_over_dynamic():
+	routes = RouteTree(
+		[
+			Route("/users/:id", DummyComponent),
+			Route("/users/new", DummyComponent),
+		]
+	)
+	match = routes.match("/users/new")
+	assert match is not None
+	matched, params = match
+	assert matched[-1].unique_path() == "/users/new"
+	assert params.params == {}
+
+
+def test_route_tree_match_nested_routes():
+	routes = RouteTree(
+		[
+			Route(
+				"/users",
+				DummyComponent,
+				children=[
+					Route("", DummyComponent),
+					Route(":id", DummyComponent),
+				],
+			),
+		]
+	)
+	match = routes.match("/users/42")
+	assert match is not None
+	matched, params = match
+	assert [route.unique_path() for route in matched] == ["/users", "/users/:id"]
+	assert params.params == {"id": "42"}
+
+	index_match = routes.match("/users")
+	assert index_match is not None
+	index_matched, _ = index_match
+	assert [route.unique_path() for route in index_matched] == ["/users", "/users/"]
+
+
 def test_route_tree_consecutive_layouts():
 	def render():
 		return ps.div()

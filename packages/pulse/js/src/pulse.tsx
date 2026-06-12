@@ -1,6 +1,7 @@
 import {
 	createContext,
 	type ReactNode,
+	useCallback,
 	useContext,
 	useEffect,
 	useLayoutEffect,
@@ -8,7 +9,6 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useLocation, useNavigate, useParams } from "react-router";
 import {
 	createPulseChannelManager,
 	type ChannelBridge,
@@ -16,8 +16,18 @@ import {
 } from "./channel";
 import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
 import { buildRouteInfo, type RouteInfo } from "./helpers";
-import type { ServerError } from "./messages";
+import { replayPreHydrationInputs } from "./hydration";
+import type { ServerError, ServerInitMessage } from "./messages";
 import { VDOMRenderer } from "./renderer";
+import {
+	type NavigationTarget,
+	type PulseRoute,
+	PulseRouterProvider,
+	PulseRoutes,
+	type RouteLoaderMap,
+	useNavigate,
+	useRouteInfo,
+} from "./router";
 import { deserialize } from "./serialize/serializer";
 import type { VDOM } from "./vdom";
 
@@ -144,22 +154,8 @@ export function usePulseChannel(channelId: string): ChannelBridge | null {
 
 export interface PulseProviderProps {
 	children: ReactNode;
-	config: PulseConfig;
+	client: PulseSocketIOClient;
 	prerender: PulsePrerender;
-}
-
-function useRouteInfo(): RouteInfo {
-	const location = useLocation();
-	const params = useParams();
-	// biome-ignore lint/correctness/useExhaustiveDependencies: using hacky deep equality for params
-	return useMemo(() => {
-		const { "*": catchall = "", ...pathParams } = params;
-		return buildRouteInfo(
-			location,
-			pathParams,
-			catchall.length > 0 ? catchall.split("/") : [],
-		);
-	}, [location.hash, location.pathname, location.search, JSON.stringify(params)]);
 }
 
 const inBrowser = typeof window !== "undefined";
@@ -169,21 +165,11 @@ function reportConnectionError(err: unknown) {
 	console.error("[PulseProvider] Connection failed:", err);
 }
 
-export function PulseProvider({ children, config, prerender }: PulseProviderProps) {
+export function PulseProvider({ children, client, prerender }: PulseProviderProps) {
 	const [status, setStatus] = useState<ConnectionStatus>("ok");
-	const navigate = useNavigate();
 	const { directives } = prerender;
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: another useEffect syncs the directives without recreating the client
-	const client = useMemo(() => {
-		return new PulseSocketIOClient(
-			config.serverAddress,
-			directives,
-			navigate,
-			config.connectionStatus,
-		);
-	}, [config.serverAddress, navigate, config.connectionStatus]);
-	useEffect(() => client.setDirectives(directives), [client, directives]);
+	useEffect(() => client.setDirectives(directives ?? {}), [client, directives]);
 
 	useEffect(() => {
 		if (!inBrowser) return;
@@ -371,5 +357,214 @@ function ServerErrorPopup({ error }: { error: ServerError }) {
 				</details>
 			)}
 		</div>
+	);
+}
+
+// =================================================================
+// App shell
+// =================================================================
+
+export interface PulseAppProps {
+	routes: PulseRoute[];
+	routeLoaders: RouteLoaderMap;
+	config: PulseConfig;
+	prerender: PulsePrerender;
+	/** URL of the initial request; required for SSR. */
+	url?: string;
+}
+
+const DIRECTIVES_KEY = "__PULSE_DIRECTIVES";
+
+function readStoredDirectives(): Directives {
+	if (!inBrowser || typeof sessionStorage === "undefined") {
+		return {};
+	}
+	try {
+		return JSON.parse(sessionStorage.getItem(DIRECTIVES_KEY) ?? "{}") as Directives;
+	} catch {
+		return {};
+	}
+}
+
+function persistDirectives(directives: Directives | undefined) {
+	if (!inBrowser || typeof sessionStorage === "undefined" || !directives) {
+		return;
+	}
+	sessionStorage.setItem(DIRECTIVES_KEY, JSON.stringify(directives));
+}
+
+type NavigationViews = {
+	status: "ok" | "redirect" | "notFound" | "error";
+	redirect?: string;
+	views?: Record<string, ServerInitMessage | null>;
+	directives?: Directives;
+};
+
+async function fetchPrerenderViews(
+	config: PulseConfig,
+	paths: string[],
+	routeInfo: RouteInfo,
+): Promise<NavigationViews> {
+	const directives = readStoredDirectives();
+	const headers: Record<string, string> = { "content-type": "application/json" };
+	for (const [key, value] of Object.entries(directives.headers ?? {})) {
+		headers[key] = value;
+	}
+	const res = await fetch(config.serverAddress + config.apiPrefix + "/prerender", {
+		method: "POST",
+		headers,
+		credentials: "include",
+		body: JSON.stringify({ paths, routeInfo }),
+	});
+	if (!res.ok) {
+		throw new Error(`Prerender request failed with status ${res.status}`);
+	}
+	const body = await res.json();
+	if (body.redirect) {
+		return { status: "redirect", redirect: body.redirect };
+	}
+	if (body.notFound) {
+		return { status: "notFound", redirect: body.redirect };
+	}
+	const prerender = deserialize(body) as PulsePrerender;
+	return {
+		status: "ok",
+		views: prerender.views as Record<string, ServerInitMessage | null>,
+		directives: prerender.directives,
+	};
+}
+
+/**
+ * Merge a navigation result into the current view set. Entries the server
+ * marked as reused (null) keep their identity so live views stay mounted and
+ * their state persists across the navigation.
+ */
+function mergeNavigationViews(
+	current: Record<string, PulsePrerenderView>,
+	incoming: Record<string, ServerInitMessage | null>,
+): Record<string, PulsePrerenderView> {
+	const next: Record<string, PulsePrerenderView> = {};
+	for (const [path, entry] of Object.entries(incoming)) {
+		// Wire deserialization may coerce null reuse markers to undefined.
+		if (entry == null) {
+			const existing = current[path];
+			if (!existing) {
+				throw new Error(
+					`[Pulse] Server reused the view for '${path}' but the client has no entry for it`,
+				);
+			}
+			next[path] = existing;
+		} else {
+			next[path] = entry;
+		}
+	}
+	return next;
+}
+
+function PulseFrameworkNavigationBinder({ client }: { client: PulseSocketIOClient }) {
+	const navigate = useNavigate();
+	useEffect(() => {
+		client.setFrameworkNavigate(navigate);
+	}, [client, navigate]);
+	return null;
+}
+
+/**
+ * The Pulse application shell: router + socket client + route views.
+ *
+ * Navigation is server-driven: link clicks fetch the target's views from the
+ * Python server via HTTP prerender, and the result commits atomically with
+ * the location change.
+ */
+export function PulseApp({ routes, routeLoaders, config, prerender, url }: PulseAppProps) {
+	const [current, setCurrent] = useState(prerender);
+	useEffect(() => {
+		persistDirectives(current.directives);
+	}, [current]);
+
+	// Replay inputs the user typed before hydration (recorded by the inline
+	// capture script in the SSR document) once the hydration commit is done.
+	useEffect(() => {
+		replayPreHydrationInputs();
+	}, []);
+
+	const client = useMemo(
+		() =>
+			new PulseSocketIOClient(
+				config.serverAddress,
+				prerender.directives ?? {},
+				config.connectionStatus,
+			),
+		// biome-ignore lint/correctness/useExhaustiveDependencies: directives are synced by PulseProvider without recreating the client
+		[config.serverAddress, config.connectionStatus],
+	);
+
+	const requestViews = useCallback(
+		async (target: NavigationTarget): Promise<NavigationViews> => {
+			const routeInfo = buildRouteInfo(
+				target.location,
+				target.match.params,
+				target.match.catchall,
+			);
+			const paths = target.match.matches.map((route) => route.id);
+			return fetchPrerenderViews(config, paths, routeInfo);
+		},
+		[config],
+	);
+
+	const handleNavigate = useCallback(
+		async (target: NavigationTarget) => {
+			let result = await requestViews(target);
+			if (result.status === "redirect") {
+				if (inBrowser) {
+					window.location.assign(result.redirect || "/");
+				}
+				return false;
+			}
+			if (result.status === "notFound") {
+				if (inBrowser) {
+					window.location.assign(result.redirect || "/not-found");
+				}
+				return false;
+			}
+			if (result.status === "error" || !result.views) {
+				throw new Error("Navigation failed on the server");
+			}
+			const { views, directives } = result;
+			return () => {
+				setCurrent((previous) => {
+					try {
+						return {
+							views: mergeNavigationViews(previous.views, views),
+							directives: directives ?? previous.directives,
+						};
+					} catch (error) {
+						// The server marked a view as reused that this client
+						// never committed; a hard reload resyncs everything.
+						console.error("[Pulse] Navigation state mismatch:", error);
+						if (inBrowser) {
+							setTimeout(() => window.location.reload(), 0);
+						}
+						return previous;
+					}
+				});
+			};
+		},
+		[requestViews],
+	);
+
+
+	return (
+		<PulseRouterProvider
+			routes={routes}
+			routeLoaders={routeLoaders}
+			initialUrl={url}
+			onNavigate={handleNavigate}
+		>
+			<PulseFrameworkNavigationBinder client={client} />
+			<PulseProvider client={client} prerender={current}>
+				<PulseRoutes />
+			</PulseProvider>
+		</PulseRouterProvider>
 	);
 }

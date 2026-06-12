@@ -263,8 +263,9 @@ def test_run_interrupt_stops_existing_server_before_finding_port(
 	assert result.exit_code == 0, result.output
 	assert calls[:2] == [("interrupt", web_root), ("find", 8000)]
 	assert ("find", 5173) in calls
+	assert ("find", 3001) in calls
 	assert "Stopped existing Pulse dev server at http://localhost:8000" in result.output
-	assert [command.name for command in commands] == ["web", "server"]
+	assert [command.name for command in commands] == ["assets", "ssr", "server"]
 
 
 def test_run_existing_lock_suggests_interrupt(
@@ -342,10 +343,6 @@ def test_prepare_web_dependencies_returns_install_when_up_to_date(tmp_path: Path
 	package_json = {
 		"dependencies": {
 			"pulse-ui-client": "9.9.9",
-			"react-router": "^7",
-			"@react-router/node": "^7",
-			"@react-router/serve": "^7",
-			"@react-router/dev": "^7",
 		}
 	}
 	(web_root / "package.json").write_text(json.dumps(package_json))
@@ -372,26 +369,37 @@ def test_prepare_web_dependencies_raises_on_conflict(tmp_path: Path):
 		)
 
 
-def test_build_web_command_uses_node_serve_in_prod(tmp_path: Path) -> None:
+def test_build_web_command_runs_bun_build(tmp_path: Path) -> None:
 	web_root = tmp_path / "web"
 	web_root.mkdir()
 
-	spec = cmd_mod.build_web_command(web_root=web_root, extra_args=[], mode="prod")
+	spec = cmd_mod.build_web_command(web_root=web_root, extra_args=[])
 
-	assert spec.args == [
-		"node",
-		"node_modules/@react-router/serve/dist/cli.js",
-		"./build/server/index.js",
-	]
+	assert spec.args == ["bun", "run", "build"]
+	assert spec.name == "build"
 
 
-def test_build_web_command_sets_node_env_in_prod(tmp_path: Path) -> None:
+def test_build_asset_command_uses_vite_dev_server(tmp_path: Path) -> None:
 	web_root = tmp_path / "web"
 	web_root.mkdir()
 
-	spec = cmd_mod.build_web_command(web_root=web_root, extra_args=[], mode="prod")
+	spec = cmd_mod.build_asset_command(web_root=web_root, extra_args=[], port=5173)
 
-	assert spec.env["NODE_ENV"] == "production"
+	assert spec.args == ["bun", "run", "dev", "--port", "5173"]
+	assert spec.name == "assets"
+
+
+def test_build_ssr_command_sets_port_env(tmp_path: Path) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+
+	spec = cmd_mod.build_ssr_command(
+		web_root=web_root, extra_args=[], script="start", port=3001
+	)
+
+	assert spec.args == ["bun", "run", "start"]
+	assert spec.env["PULSE_SSR_PORT"] == "3001"
+	assert spec.name == "ssr"
 
 
 def test_web_workspaces_using_pulse_ui_client_declare_ws() -> None:

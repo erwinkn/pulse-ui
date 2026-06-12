@@ -127,9 +127,12 @@ export interface PulseRouterProviderProps {
 	initialUrl?: string;
 	/**
 	 * Called before a navigation commits. Typically fetches the new views from
-	 * the Pulse server. Throwing aborts the navigation.
+	 * the Pulse server. Throwing aborts the navigation with an error; returning
+	 * false abandons it silently (e.g. a redirect took over). May return a
+	 * callback, which runs in the same render batch as the location commit so
+	 * view data and route state swap atomically.
 	 */
-	onNavigate?: (target: NavigationTarget) => Promise<void>;
+	onNavigate?: (target: NavigationTarget) => Promise<void | false | (() => void)>;
 	/** Called when a link wants to prefetch a target URL. */
 	onPrefetch?: (target: NavigationTarget) => void;
 	children: ReactNode;
@@ -169,6 +172,9 @@ export function PulseRouterProvider({
 	const [navigationError, setNavigationError] = useState<NavigationError | null>(null);
 	const latestLocationRef = useRef<LocationLike>(initialLocation);
 	const navSeqRef = useRef(0);
+	// Key of the history entry currently displayed; scroll positions are saved
+	// under it whenever we navigate away (including pops).
+	const historyKeyRef = useRef<string>(inBrowser ? readHistoryKey() : "initial");
 
 	useEffect(() => {
 		if (!inBrowser) return;
@@ -195,32 +201,52 @@ export function PulseRouterProvider({
 				return;
 			}
 
+			// Same-pathname navigations (query/hash changes) cannot change the
+			// matched views; commit directly and let mounted views sync their
+			// route info over the socket.
+			const samePath = nextLocation.pathname === latestLocationRef.current.pathname;
+
 			setIsNavigating(true);
 			try {
-				await preloadRoutesForPath(routes, routeLoaders, nextLocation.pathname);
-				if (onNavigate) {
-					await onNavigate({ location: nextLocation, match });
+				let commit: void | false | (() => void) = undefined;
+				if (!samePath) {
+					await preloadRoutesForPath(routes, routeLoaders, nextLocation.pathname);
+					if (onNavigate) {
+						commit = await onNavigate({ location: nextLocation, match });
+					}
 				}
 				if (seq !== navSeqRef.current) {
 					// Superseded by a newer navigation; drop this one.
 					return;
 				}
+				if (commit === false) {
+					// Abandoned (e.g. the server redirected and a document
+					// navigation is in flight); leave router state untouched.
+					return;
+				}
+				if (commit) {
+					commit();
+				}
 				let popKey: string | null = null;
 				if (inBrowser) {
+					// Remember the scroll position of the entry we are leaving.
+					scrollPositions.set(historyKeyRef.current, {
+						x: window.scrollX,
+						y: window.scrollY,
+					});
 					if (options.pop) {
 						popKey = readHistoryKey();
+						historyKeyRef.current = popKey;
 					} else {
-						scrollPositions.set(readHistoryKey(), {
-							x: window.scrollX,
-							y: window.scrollY,
-						});
 						const url = locationToUrl(nextLocation);
-						const state = { __pulseKey: newHistoryKey() };
+						const key = newHistoryKey();
+						const state = { __pulseKey: key };
 						if (options.replace) {
 							window.history.replaceState(state, "", url);
 						} else {
 							window.history.pushState(state, "", url);
 						}
+						historyKeyRef.current = key;
 					}
 				}
 				latestLocationRef.current = nextLocation;

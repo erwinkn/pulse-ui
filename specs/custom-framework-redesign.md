@@ -49,8 +49,9 @@ rendering, and client-side prefetching.
 - View lifecycle states stay: `pending → active → idle/closed`, with pending
   queues + TTL (reused for prefetch).
 - Channels bind to `view.id` (replaces `(route_path, mount_id)` pair from
-  split/04). Detach/remount produces a new view ID, so stale actors are
-  rejected naturally.
+  split/04). A view keeps its id through the dev StrictMode detach grace (the
+  replayed attach is the same logical view); real disposal removes the id, so
+  stale actors are rejected naturally.
 - Resume handshake declares views by ID.
 
 ### Protocol
@@ -68,14 +69,20 @@ All view-scoped messages carry `view` (the ID):
 ### Navigation (WS-native)
 
 - Client router matches locally (mirror matcher) to know which JS chunks to
-  load, then sends `navigate {nav, url, routeInfo, keep: [viewIds]}` over the
-  socket. `nav` is a client sequence number; stale responses are dropped.
-- Server: matches the URL against the Python route tree, runs redirect
-  middleware, computes the view set (reusing `keep` views whose route pattern
-  still matches — layouts persist across sibling navigation), renders new
-  views, and replies `server_navigate {nav, location, views: [{id, routePath,
-  vdom?}]}`. Removed views are disposed server-side; the client detaches them
-  implicitly.
+  load, then sends `navigate {nav, routeInfo, prefetch?}` over the socket.
+  `nav` correlates the `navigate_result` reply; the router's sequence tokens
+  drop superseded navigations client-side.
+- Server: matches the URL against the Python route tree (authoritative path
+  params), runs prerender middleware, and replies `navigate_result {nav,
+  status, views}` where `views` maps each matched route pattern to a fresh
+  init message or `null` for patterns the session already has live views for.
+- **Reuse semantics:** views whose route pattern survives the navigation keep
+  their identity — their state persists, and their route info syncs via the
+  per-view `update` messages mounted views already send. Only missing
+  patterns render fresh (pending + dispose TTL). Same-pathname navigations
+  (query/hash changes) skip the server entirely.
+- Old views are detached by the client after the commit and disposed
+  server-side.
 - Because everything flows on one socket, updates to surviving views and the
   navigation response are naturally ordered (the old HTTP prerender + WS
   update combination had no ordering guarantee).
@@ -128,16 +135,20 @@ review fixes:
 
 ### Fine-grained rendering (server)
 
-Per the fine-grained plan doc:
+As implemented:
 
-- `RenderEffect(Effect)` per `PulseNode`, created on first render, immediate
-  on creation, batched on schedule.
-- Batch flush dedupe: a scheduled render effect is skipped when an ancestor
-  render effect is also scheduled (the parent re-render covers it).
-- Component runtime: stable `path`, `hooks`, `effect`; reconciliation moves
-  rebase paths and callback registry keys (prefix pruning).
-- Ops from component effects accumulate on the owning `View` and flush as one
-  `vdom_update` per reactive batch.
+- `RenderEffect(Effect)` per `PulseNode` (`ComponentRuntime` holds node, path,
+  tree, effect). The first render runs inside the effect's `capture_deps`, so
+  dependencies are per-component; child components shield themselves with
+  `Untrack`, keeping parent scopes clean.
+- Batches order render effects after other effects and parents before
+  children; a parent pass refreshes its children's dependency snapshots via
+  `capture_deps`, so their queued runs become no-ops (no explicit dedupe).
+- The callback registry is persistent per tree; each pass sweeps callbacks
+  under its root that were not re-registered. Unmounts dispose component
+  effects; idle views pause every effect in the tree.
+- Each component pass ships its ops as one `vdom_update` through the owning
+  View (interrupt handling, loop guard, and error reporting included).
 - The wire format (VDOM + exprs + callbacks + render props interwoven) is
   unchanged; ops just get more precise paths.
 

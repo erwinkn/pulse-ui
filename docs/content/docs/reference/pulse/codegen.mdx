@@ -96,32 +96,41 @@ The code generator creates the following structure inside `<web_root>/app/<pulse
 
 ```
 pulse/
-  _layout.tsx        # Root layout with Pulse provider
-  routes.ts          # React Router route configuration
-  routes.runtime.ts  # Server-side route matching
+  _layout.tsx        # PulseApp wrapper with the client configuration
+  routes.ts          # Route manifest: pulseRouteTree + routeLoaders
   routes/
-    index.tsx        # Index route
-    users.tsx        # /users route
-    users.$id.tsx    # /users/:id route
+    index.jsx        # Index route
+    users.jsx        # /users route
+    ...              # One module per route (nested paths become folders)
   layouts/
-    dashboard.tsx    # Layout components
+    layout/
+      _layout.jsx    # Layout components
   assets/
     *.css            # Copied local assets
 ```
 
+### Route Manifest
+
+`routes.ts` exports two values:
+
+- `pulseRouteTree` — a serializable mirror of your Python route tree (`PulseRoute[]`), used by the client router for matching
+- `routeLoaders` — a map of route id to dynamic `import()` of the route's module, which is what code-splits the bundle per route
+
 ### Route Files
 
-Each route file exports a React component that:
-- Connects to the Pulse WebSocket server
+Each route module default-exports a React component that renders `PulseView` with the route's component registry (the imports, constants, and transpiled functions that route needs). `PulseView`:
+- Attaches to the server-rendered view over WebSocket
 - Renders the server-side VDOM
 - Handles real-time updates
 
 ### Layout File
 
-The `_layout.tsx` contains:
-- Server address configuration
-- WebSocket connection setup
-- Connection status indicator (configurable)
+The `_layout.tsx` exports a `PulseApp` component wired up with:
+- The route manifest and loaders
+- Server address and API prefix configuration
+- Connection status indicator timing (configurable)
+
+Your `src/entry-client.tsx` and `src/entry-server.tsx` import `PulseApp` from this file.
 
 ---
 
@@ -179,7 +188,7 @@ def generate_layout_tsx(
 ) -> Path
 ```
 
-Generate the root layout file with Pulse provider configuration.
+Generate the `_layout.tsx` file with the `PulseApp` wrapper and client configuration.
 
 Generated framework requests always use the reserved `/_pulse/*` namespace.
 
@@ -189,7 +198,7 @@ Generated framework requests always use the reserved `/_pulse/*` namespace.
 def generate_routes_ts(self) -> Path
 ```
 
-Generate React Router route configuration file.
+Generate the route manifest (`routes.ts`) with `pulseRouteTree` and `routeLoaders`.
 
 ### Properties
 

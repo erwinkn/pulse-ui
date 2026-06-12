@@ -195,7 +195,9 @@ class View:
 	):
 		if self.state == "pending":
 			if self.queue is None:
-				raise RuntimeError(f"Pending view missing queue for {self.route_path!r}")
+				raise RuntimeError(
+					f"Pending view missing queue for {self.route_path!r}"
+				)
 			self.queue.append(message)
 			return
 		if self.state == "active":
@@ -612,9 +614,7 @@ class RenderSession:
 		if view.render_batch_renders > self.render_loop_limit:
 			if view.effect:
 				view.effect.pause()
-			raise RenderLoopError(
-				view.route_path, view.render_batch_renders, batch_id
-			)
+			raise RenderLoopError(view.route_path, view.render_batch_renders, batch_id)
 
 	def _render_with_interrupts(
 		self,

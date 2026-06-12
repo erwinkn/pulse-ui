@@ -490,7 +490,9 @@ class QueryParamSync(Disposable):
 			current_params = dict(cast(Mapping[str, str], raw_params))
 			pathname = info["pathname"]
 			view = self.render._views_by_path.get(self.route.route_path)  # pyright: ignore[reportPrivateUsage]
-			source_view = view.id if view is not None and view.route is self.route else None
+			source_view = (
+				view.id if view is not None and view.route is self.route else None
+			)
 			hash_frag = info["hash"]
 		query_params = dict(current_params)
 		for binding in self._bindings.values():

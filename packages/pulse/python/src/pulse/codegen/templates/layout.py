@@ -1,7 +1,7 @@
 from mako.template import Template
 
 LAYOUT_TEMPLATE = Template(
-	"""import { deserialize, extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";
+	"""import { buildRouteInfo, deserialize, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";
 import { Outlet, data, type LoaderFunctionArgs, type ClientLoaderFunctionArgs } from "react-router";
 import { matchRoutes } from "react-router";
 import { rrPulseRouteTree } from "./routes.runtime";
@@ -17,6 +17,17 @@ export const config: PulseConfig = {
     reconnectErrorDelay: ${int(connection_status.reconnect_error_delay * 1000)},
   },
 };
+
+// Build the RouteInfo payload from React Router loader args
+function extractServerRouteInfo({ params, request }: LoaderFunctionArgs | ClientLoaderFunctionArgs) {
+  const { "*": catchall = "", ...pathParams } = params;
+  const parsedUrl = new URL(request.url);
+  return buildRouteInfo(
+    { pathname: parsedUrl.pathname, search: parsedUrl.search, hash: parsedUrl.hash },
+    pathParams,
+    catchall.length > 1 ? catchall.split("/") : [],
+  );
+}
 
 
 // Server loader: perform initial prerender, abort on first redirect/not-found

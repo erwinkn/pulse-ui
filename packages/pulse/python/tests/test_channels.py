@@ -22,9 +22,15 @@ class DummyRender:
 		self.sent.append(message)
 
 
-def connect_channel(render: RenderSession, channel: Channel, path: str = "/") -> None:
+def connect_channel(
+	render: RenderSession, channel: Channel, view_id: str | None = None
+) -> None:
 	render.channels.handle_client_connect(
-		{"type": "channel_connect", "channel": channel.id, "path": path}
+		{
+			"type": "channel_connect",
+			"channel": channel.id,
+			"view": view_id if view_id is not None else (channel.view_id or ""),
+		}
 	)
 
 
@@ -48,7 +54,9 @@ def make_route_render(
 	render.connect(lambda _: None)
 	with ps.PulseContext(app=app, session=session, render=render):
 		render.prerender([path])
-		render.attach(path, app.routes.find(path).default_route_info())
+		render.attach(
+			render.view_for_path(path).id, app.routes.find(path).default_route_info()
+		)
 	return app, render, session
 
 
@@ -59,15 +67,14 @@ def create_route_channel(
 	identifier: str,
 	path: str = "/",
 ) -> Channel:
-	mount = render.get_route_mount(path)
+	view = render.view_for_path(path)
 	with ps.PulseContext(
 		app=app,
 		session=session,
 		render=render,
-		route=mount.route,
-		source_route_path=mount.route.route_path,
-		source_path=mount.route.pathname,
-		source_mount_id=mount.mount_id,
+		route=view.route,
+		view=view,
+		source_pathname=view.route.pathname,
 	):
 		return render.channels.create(identifier)
 
@@ -102,7 +109,7 @@ async def test_channel_emit_sends_message():
 	assert message["payload"] == {"values": {"a": 1}}
 
 
-def test_route_bound_channel_emit_includes_path():
+def test_route_bound_channel_emit_includes_view():
 	app, render, session = make_route_render()
 	channel = create_route_channel(app, render, session, "route-channel")
 	connect_channel(render, channel)
@@ -114,7 +121,7 @@ def test_route_bound_channel_emit_includes_path():
 	assert len(sent) == 1
 	message = sent[0]
 	assert message["type"] == "channel_message"
-	assert message["path"] == "/"
+	assert message["view"] == render.view_for_path("/").id
 	assert message["channel"] == channel.id
 	assert message["event"] == "setValues"
 	assert message["payload"] == {"values": {"a": 1}}
@@ -128,12 +135,12 @@ def test_channel_emit_without_endpoint_raises_channel_closed():
 		channel.emit("notify", None)
 
 
-def test_connect_requires_matching_active_route_mount():
+def test_connect_requires_matching_active_view():
 	app, render, session = make_route_render()
 	channel = create_route_channel(app, render, session, "owned-channel")
 
 	render.channels.handle_client_connect(
-		{"type": "channel_connect", "channel": channel.id, "path": "/other"}
+		{"type": "channel_connect", "channel": channel.id, "view": "other-view"}
 	)
 	assert channel.connected is False
 
@@ -147,7 +154,7 @@ async def test_dev_strict_mode_detach_preserves_route_channel_until_dispose():
 	channel = create_route_channel(app, render, session, "strict-channel")
 	connect_channel(render, channel)
 
-	render.detach("/")
+	render.detach(render.view_for_path("/").id)
 
 	assert channel.closed is False
 	assert channel.connected is True
@@ -157,22 +164,26 @@ async def test_dev_strict_mode_detach_preserves_route_channel_until_dispose():
 	assert channel.closed is True
 
 
-def test_dev_strict_mode_replay_rebinds_route_channel_mount():
+def test_dev_strict_mode_replay_reconnects_route_channel():
 	app, render, session = make_route_render(dev_strict_mode_detach_timeout=10.0)
 	channel = create_route_channel(app, render, session, "replay-channel")
 	connect_channel(render, channel)
 
-	render.detach("/")
+	view = render.view_for_path("/")
+	render.detach(view.id)
 	render.channels.handle_client_disconnect(
 		{"type": "channel_disconnect", "channel": channel.id}
 	)
 	assert channel.closed is False
 	assert channel.connected is False
 
+	# The view keeps its id through the StrictMode replay, so the channel
+	# binding stays valid without any rebinding.
 	with ps.PulseContext(app=app, session=session, render=render):
-		render.attach("/", app.routes.find("/").default_route_info())
+		render.attach(view.id, app.routes.find("/").default_route_info())
 	connect_channel(render, channel)
 
+	assert channel.view_id == view.id
 	assert channel.connected is True
 
 
@@ -180,7 +191,7 @@ def test_stale_connect_during_detach_grace_is_rejected():
 	app, render, session = make_route_render(dev_strict_mode_detach_timeout=10.0)
 	channel = create_route_channel(app, render, session, "stale-channel")
 
-	render.detach("/")
+	render.detach(render.view_for_path("/").id)
 	connect_channel(render, channel)
 
 	assert channel.connected is False
@@ -195,16 +206,17 @@ def test_resume_omits_closed_channel_from_acceptance():
 	connect_channel(render, channel)
 	channel.close()
 
+	view = render.view_for_path("/")
 	ok = render.resume(
 		"resume-1",
 		[
 			{
-				"path": "/",
+				"view": view.id,
 				"routeInfo": app.routes.find("/").default_route_info(),
 				"attachId": "attach-1",
 			}
 		],
-		[{"channel": channel.id, "path": "/"}],
+		[{"channel": channel.id, "view": view.id}],
 	)
 
 	assert ok is True
@@ -212,7 +224,7 @@ def test_resume_omits_closed_channel_from_acceptance():
 		"type": "server_resume",
 		"resumeId": "resume-1",
 		"status": "ok",
-		"views": [{"path": "/", "attachId": "attach-1"}],
+		"views": [{"view": view.id, "attachId": "attach-1"}],
 		"channels": [],
 	}
 
@@ -299,7 +311,7 @@ def test_client_request_without_connected_endpoint_gets_error_response():
 			"responseTo": "client-req-1",
 			"payload": None,
 			"error": "Channel has no connected client",
-			"path": "/",
+			"view": render.view_for_path("/").id,
 		}
 	]
 
@@ -394,10 +406,11 @@ async def test_channel_lifecycle_runs_middleware_and_denial_notifies_client():
 	render.send = sent.append  # pyright: ignore[reportAttributeAccessIssue]
 	channel = create_route_channel(app, render, session, "denied-channel")
 
+	view = render.view_for_path("/")
 	await app._handle_channel_message(  # pyright: ignore[reportPrivateUsage]
 		render,
 		session,
-		{"type": "channel_connect", "channel": channel.id, "path": "/"},
+		{"type": "channel_connect", "channel": channel.id, "view": view.id},
 	)
 
 	assert events == ["__connect__"]
@@ -408,7 +421,7 @@ async def test_channel_lifecycle_runs_middleware_and_denial_notifies_client():
 			"channel": channel.id,
 			"event": "__close__",
 			"payload": {"reason": "Denied"},
-			"path": "/",
+			"view": view.id,
 		}
 	]
 
@@ -435,10 +448,11 @@ async def test_channel_connect_disconnect_lifecycle_middleware_events():
 	app, render, session = make_route_render(middleware=LogMiddleware())
 	channel = create_route_channel(app, render, session, "lifecycle-channel")
 
+	view = render.view_for_path("/")
 	await app._handle_channel_message(  # pyright: ignore[reportPrivateUsage]
 		render,
 		session,
-		{"type": "channel_connect", "channel": channel.id, "path": "/"},
+		{"type": "channel_connect", "channel": channel.id, "view": view.id},
 	)
 	await app._handle_channel_message(  # pyright: ignore[reportPrivateUsage]
 		render,

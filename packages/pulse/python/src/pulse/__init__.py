@@ -1428,7 +1428,7 @@ from pulse.render_session import (
 	RenderSession as RenderSession,
 )
 from pulse.render_session import (
-	RouteMount as RouteMount,
+	View as View,
 )
 from pulse.render_session import run_js as run_js
 

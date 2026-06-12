@@ -16,7 +16,6 @@ from pulse.messages import (
 	ServerChannelRequestMessage,
 	ServerChannelResponseMessage,
 )
-from pulse.routing import ensure_absolute_path
 from pulse.scheduling import create_future
 
 if TYPE_CHECKING:
@@ -74,18 +73,18 @@ class ChannelsManager:
 
 	_render_session: "RenderSession"
 	_channels: dict[str, "Channel"]
-	_channels_by_route: dict[str, set[str]]
+	_channels_by_view: dict[str, set[str]]
 	pending_requests: dict[str, PendingRequest]
 
 	def __init__(self, render_session: "RenderSession") -> None:
 		self._render_session = render_session
 		self._channels = {}
-		self._channels_by_route = defaultdict(set)
+		self._channels_by_view = defaultdict(set)
 		self.pending_requests = {}
 
 	# ------------------------------------------------------------------
 	def create(
-		self, identifier: str | None = None, *, bind_route: bool = True
+		self, identifier: str | None = None, *, bind_view: bool = True
 	) -> "Channel":
 		ctx = PulseContext.get()
 		render = ctx.render
@@ -97,52 +96,52 @@ class ChannelsManager:
 		if channel_id in self._channels:
 			raise ValueError(f"Channel id '{channel_id}' is already in use")
 
-		route_path: str | None = None
-		mount_id: str | None = None
-		if bind_route and ctx.route is not None:
-			route_path = ctx.route.route_path
-			mount_id = ctx.source_mount_id
-			if mount_id is None:
-				try:
-					mount_id = render.get_route_mount(route_path).mount_id
-				except ValueError:
-					mount_id = None
+		view_id = ctx.view.id if bind_view and ctx.view is not None else None
 
 		channel = Channel(
 			self,
 			channel_id,
 			render_id=render.id,
 			session_id=session.sid,
-			route_path=route_path,
-			mount_id=mount_id,
+			view_id=view_id,
 		)
 		self._channels[channel_id] = channel
-		if route_path is not None:
-			self._channels_by_route[route_path].add(channel_id)
+		if view_id is not None:
+			self._channels_by_view[view_id].add(channel_id)
 		return channel
 
 	# ------------------------------------------------------------------
-	def remove_route(self, path: str) -> None:
-		# route_path is already an absolute path
-		route_channels = list(self._channels_by_route.get(path, set()))
-		# if route_channels:
-		# 	print(f"Disposing {len(route_channels)} channel(s) for route {route_path}")
-		for channel_id in route_channels:
+	def remove_view(self, view_id: str) -> None:
+		view_channels = list(self._channels_by_view.get(view_id, set()))
+		for channel_id in view_channels:
 			channel = self._channels.get(channel_id)
 			if channel is None:
 				continue
 			channel.closed = True
-			self.dispose_channel(channel, reason="route.unmount")
-		self._channels_by_route.pop(path, None)
+			self.dispose_channel(channel, reason="view.unmount")
+		self._channels_by_view.pop(view_id, None)
 
-	def rebind_route_mount(
-		self, path: str, old_mount_id: str, new_mount_id: str
-	) -> None:
-		path = ensure_absolute_path(path)
-		for channel_id in self._channels_by_route.get(path, set()):
-			channel = self._channels.get(channel_id)
-			if channel is not None and channel.mount_id == old_mount_id:
-				channel.mount_id = new_mount_id
+	def _validate_client_endpoint(
+		self, channel: "Channel", view_id: str, action: str
+	) -> bool:
+		if channel.view_id is None:
+			return True
+		if view_id != channel.view_id:
+			logger.warning(
+				"Rejecting channel %s for wrong view: %s view=%s owner=%s",
+				action,
+				channel.id,
+				view_id,
+				channel.view_id,
+			)
+			return False
+		view = self._render_session.views.get(channel.view_id)
+		if view is None or view.state != "active":
+			logger.warning(
+				"Rejecting stale channel %s: %s view=%s", action, channel.id, view_id
+			)
+			return False
+		return True
 
 	def handle_client_connect(self, message: ClientChannelConnectMessage) -> None:
 		channel_id = str(message.get("channel"))
@@ -150,56 +149,19 @@ class ChannelsManager:
 		if channel is None or channel.closed:
 			return
 
-		path = ensure_absolute_path(str(message.get("path", "")))
-		if channel.route_path is not None and path != channel.route_path:
-			logger.warning(
-				"Rejecting channel connect for wrong path: %s path=%s owner=%s",
-				channel_id,
-				path,
-				channel.route_path,
-			)
+		view_id = str(message.get("view", ""))
+		if not self._validate_client_endpoint(channel, view_id, "connect"):
 			return
-
-		if channel.route_path is not None:
-			mount = self._render_session.route_mounts.get(channel.route_path)
-			if (
-				mount is None
-				or mount.state != "active"
-				or mount.mount_id != channel.mount_id
-			):
-				logger.warning(
-					"Rejecting stale channel connect: %s path=%s", channel_id, path
-				)
-				return
 
 		channel.connected = True
 
-	def resume_client_channel(self, channel_id: str, path: str) -> bool:
+	def resume_client_channel(self, channel_id: str, view_id: str) -> bool:
 		channel = self._channels.get(channel_id)
 		if channel is None or channel.closed:
 			return False
 
-		path = ensure_absolute_path(path)
-		if channel.route_path is not None and path != channel.route_path:
-			logger.warning(
-				"Rejecting channel resume for wrong path: %s path=%s owner=%s",
-				channel_id,
-				path,
-				channel.route_path,
-			)
+		if not self._validate_client_endpoint(channel, view_id, "resume"):
 			return False
-
-		if channel.route_path is not None:
-			mount = self._render_session.route_mounts.get(channel.route_path)
-			if (
-				mount is None
-				or mount.state != "active"
-				or mount.mount_id != channel.mount_id
-			):
-				logger.warning(
-					"Rejecting stale channel resume: %s path=%s", channel_id, path
-				)
-				return False
 
 		channel.connected = True
 		return True
@@ -283,15 +245,11 @@ class ChannelsManager:
 		payload = message.get("payload")
 		request_id = message.get("requestId")
 
-		route_ctx = None
-		source_mount_id = None
-		if channel.route_path is not None:
-			try:
-				mount = render.get_route_mount(channel.route_path)
-				route_ctx = mount.route
-				source_mount_id = mount.mount_id
-			except Exception:
-				route_ctx = None
+		view = (
+			render.views.get(channel.view_id) if channel.view_id is not None else None
+		)
+		route_ctx = view.route if view is not None else None
+		source_pathname = route_ctx.pathname if route_ctx is not None else None
 
 		async def _invoke() -> None:
 			try:
@@ -299,11 +257,8 @@ class ChannelsManager:
 					session=session,
 					render=render,
 					route=route_ctx,
-					source_route_path=(
-						route_ctx.route_path if route_ctx is not None else None
-					),
-					source_path=route_ctx.pathname if route_ctx is not None else None,
-					source_mount_id=source_mount_id,
+					view=view,
+					source_pathname=source_pathname,
 				):
 					result = await channel.dispatch(event, payload, request_id)
 			except Exception as exc:
@@ -419,12 +374,12 @@ class ChannelsManager:
 
 	# ------------------------------------------------------------------
 	def _cleanup_channel_refs(self, channel: "Channel") -> None:
-		if channel.route_path is not None:
-			route_bucket = self._channels_by_route.get(channel.route_path)
-			if route_bucket is not None:
-				route_bucket.discard(channel.id)
-				if not route_bucket:
-					self._channels_by_route.pop(channel.route_path, None)
+		if channel.view_id is not None:
+			view_bucket = self._channels_by_view.get(channel.view_id)
+			if view_bucket is not None:
+				view_bucket.discard(channel.id)
+				if not view_bucket:
+					self._channels_by_view.pop(channel.view_id, None)
 
 	def dispose_channel(
 		self,
@@ -432,12 +387,6 @@ class ChannelsManager:
 		*,
 		reason: str | None = None,
 	) -> None:
-		# pending = sum(
-		# 	1
-		# 	for pending in self.pending_requests.values()
-		# 	if pending.channel_id == channel.id
-		# )
-		# print(f"Disposing channel id={channel.id} render={channel.render_id} session={channel.session_id} route={channel.route_path} reason={reason or 'unspecified'} pending={pending}")
 		self._cleanup_channel_refs(channel)
 		self._cancel_pending_for_channel(channel.id)
 		# Notify client that the channel has been closed
@@ -471,10 +420,10 @@ class ChannelsManager:
 			raise ChannelClosed(f"Channel '{channel.id}' is closed")
 		if not allow_unconnected and not channel.connected:
 			raise ChannelClosed("Channel has no connected client")
-		if channel.route_path is not None and "path" not in msg:
+		if channel.view_id is not None and "view" not in msg:
 			msg = cast(
 				ServerChannelMessage,
-				cast(object, {**msg, "path": channel.route_path}),
+				cast(object, {**msg, "view": channel.view_id}),
 			)
 		self._render_session.send(msg)
 
@@ -489,7 +438,7 @@ class Channel:
 		id: Channel identifier (auto-generated UUID or user-provided).
 		render_id: Associated render session ID.
 		session_id: Associated user session ID.
-		route_path: Route path this channel is bound to, or None.
+		view_id: Id of the view this channel is bound to, or None.
 		closed: Whether the channel has been closed.
 
 	Example:
@@ -511,8 +460,7 @@ class Channel:
 	id: str
 	render_id: str
 	session_id: str
-	route_path: str | None
-	mount_id: str | None
+	view_id: str | None
 	connected: bool
 	_handlers: dict[str, list[ChannelHandler]]
 	closed: bool
@@ -524,15 +472,13 @@ class Channel:
 		*,
 		render_id: str,
 		session_id: str,
-		route_path: str | None,
-		mount_id: str | None,
+		view_id: str | None,
 	) -> None:
 		self._manager = manager
 		self.id = identifier
 		self.render_id = render_id
 		self.session_id = session_id
-		self.route_path = route_path
-		self.mount_id = mount_id
+		self.view_id = view_id
 		self.connected = False
 		self._handlers = defaultdict(list)
 		self.closed = False

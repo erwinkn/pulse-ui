@@ -34,10 +34,10 @@ def build_context():
 
 def build_route_context():
 	@ps.component
-	def view():
+	def page():
 		return ps.div()
 
-	app = ps.App([ps.Route("/", view)])
+	app = ps.App([ps.Route("/", page)])
 	render = DummyRender()
 	session = SimpleNamespace(sid="session-1")
 
@@ -55,14 +55,19 @@ def build_route_context():
 		render=real_render,
 	):
 		real_render.prerender(["/"])
-		real_render.attach("/", app.routes.find("/").default_route_info())
-	mount = real_render.get_route_mount("/")
-	return app, render, session, real_render, mount
+		view = real_render.view_for_path("/")
+		real_render.attach(view.id, app.routes.find("/").default_route_info())
+	return app, render, session, real_render, view
 
 
 def connect_channel(real_render: ps.RenderSession, channel_id: str) -> None:
+	channel = real_render.channels._channels[channel_id]  # pyright: ignore[reportPrivateUsage]
 	real_render.channels.handle_client_connect(
-		{"type": "channel_connect", "channel": channel_id, "path": "/"}
+		{
+			"type": "channel_connect",
+			"channel": channel_id,
+			"view": channel.view_id or "",
+		}
 	)
 
 
@@ -143,7 +148,7 @@ def test_notification_update_state_keeps_callbacks_server_side():
 
 
 def test_notification_show_serializes_renderable_fields():
-	app, render, session, real_render, mount = build_route_context()
+	app, render, session, real_render, view = build_route_context()
 
 	def on_open(notification: dict[str, Any]) -> None:
 		notification["opened"] = True
@@ -152,7 +157,8 @@ def test_notification_show_serializes_renderable_fields():
 		app=app,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
-		route=mount.route,
+		route=view.route,
+		view=view,
 	):
 		store = NotificationsStore()
 		connect_channel(real_render, store._channel.id)  # pyright: ignore[reportPrivateUsage]
@@ -169,7 +175,7 @@ def test_notification_show_serializes_renderable_fields():
 	meta, payload = serialized
 	assert meta[4]
 	assert store.registry[ident]["onOpen"] is on_open
-	assert payload["path"] == "/"
+	assert payload["view"] == view.id
 	assert payload["payload"] == {
 		"id": ident,
 		"title": {"tag": "span", "children": ["Upload"]},
@@ -179,7 +185,7 @@ def test_notification_show_serializes_renderable_fields():
 
 
 def test_notification_update_serializes_renderable_fields():
-	app, render, session, real_render, mount = build_route_context()
+	app, render, session, real_render, view = build_route_context()
 
 	def on_close(notification: dict[str, Any]) -> None:
 		notification["closed"] = True
@@ -188,7 +194,8 @@ def test_notification_update_serializes_renderable_fields():
 		app=app,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
-		route=mount.route,
+		route=view.route,
+		view=view,
 	):
 		store = NotificationsStore()
 		connect_channel(real_render, store._channel.id)  # pyright: ignore[reportPrivateUsage]
@@ -206,7 +213,7 @@ def test_notification_update_serializes_renderable_fields():
 	meta, payload = serialized
 	assert meta[4]
 	assert store.registry["toast"]["onClose"] is on_close
-	assert payload["path"] == "/"
+	assert payload["view"] == view.id
 	assert payload["payload"] == {
 		"id": "toast",
 		"title": {"tag": "span", "children": ["Upload"]},
@@ -215,7 +222,7 @@ def test_notification_update_serializes_renderable_fields():
 
 
 def test_notification_update_state_serializes_renderable_fields():
-	app, render, session, real_render, mount = build_route_context()
+	app, render, session, real_render, view = build_route_context()
 
 	def on_close(notification: dict[str, Any]) -> None:
 		notification["closed"] = True
@@ -224,7 +231,8 @@ def test_notification_update_state_serializes_renderable_fields():
 		app=app,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
-		route=mount.route,
+		route=view.route,
+		view=view,
 	):
 		store = NotificationsStore()
 		connect_channel(real_render, store._channel.id)  # pyright: ignore[reportPrivateUsage]
@@ -243,7 +251,7 @@ def test_notification_update_state_serializes_renderable_fields():
 	meta, payload = serialized
 	assert meta[4]
 	assert store.registry["toast"]["onClose"] is on_close
-	assert payload["path"] == "/"
+	assert payload["view"] == view.id
 	assert payload["payload"] == {
 		"notifications": [
 			{

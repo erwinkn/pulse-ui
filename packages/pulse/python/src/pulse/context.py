@@ -8,7 +8,7 @@ from pulse.routing import RouteContext
 
 if TYPE_CHECKING:
 	from pulse.app import App
-	from pulse.render_session import RenderSession
+	from pulse.render_session import RenderSession, View
 	from pulse.user_session import UserSession
 
 _UNSET = object()
@@ -26,9 +26,10 @@ class PulseContext:
 		session: Per-user session (UserSession or None).
 		render: Per-connection render session (RenderSession or None).
 		route: Active route context (RouteContext or None).
-		source_route_path: Route mount path that originated the active callback/effect.
-		source_path: URL pathname that originated the active callback/effect.
-		source_mount_id: Route mount lifecycle id that originated the active callback/effect.
+		view: View that originated the active render/callback/effect.
+		source_pathname: URL pathname captured when the active callback/effect
+			was invoked. Used to drop view-bound navigations after the URL has
+			changed within the same view.
 
 	Example:
 		```python
@@ -44,9 +45,8 @@ class PulseContext:
 	session: "UserSession | None" = None
 	render: "RenderSession | None" = None
 	route: "RouteContext | None" = None
-	source_route_path: str | None = None
-	source_path: str | None = None
-	source_mount_id: str | None = None
+	view: "View | None" = None
+	source_pathname: str | None = None
 	_token: "Token[PulseContext | None] | None" = None
 
 	@classmethod
@@ -70,9 +70,8 @@ class PulseContext:
 		session: Any = _UNSET,
 		render: Any = _UNSET,
 		route: Any = _UNSET,
-		source_route_path: Any = _UNSET,
-		source_path: Any = _UNSET,
-		source_mount_id: Any = _UNSET,
+		view: Any = _UNSET,
+		source_pathname: Any = _UNSET,
 	) -> "PulseContext":
 		"""Create a new context with updated values.
 
@@ -82,9 +81,8 @@ class PulseContext:
 			session: New session (optional, inherits if not provided).
 			render: New render session (optional, inherits if not provided).
 			route: New route context (optional, inherits if not provided).
-			source_route_path: New source route path (optional, inherits if not provided).
-			source_path: New source URL path (optional, inherits if not provided).
-			source_mount_id: New source mount id (optional, inherits if not provided).
+			view: New originating view (optional, inherits if not provided).
+			source_pathname: New captured pathname (optional, inherits if not provided).
 
 		Returns:
 			New PulseContext instance with updated values.
@@ -95,14 +93,9 @@ class PulseContext:
 			session=ctx.session if session is _UNSET else session,
 			render=ctx.render if render is _UNSET else render,
 			route=ctx.route if route is _UNSET else route,
-			source_route_path=(
-				ctx.source_route_path
-				if source_route_path is _UNSET
-				else source_route_path
-			),
-			source_path=ctx.source_path if source_path is _UNSET else source_path,
-			source_mount_id=(
-				ctx.source_mount_id if source_mount_id is _UNSET else source_mount_id
+			view=ctx.view if view is _UNSET else view,
+			source_pathname=(
+				ctx.source_pathname if source_pathname is _UNSET else source_pathname
 			),
 		)
 

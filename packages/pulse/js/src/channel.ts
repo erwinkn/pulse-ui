@@ -67,7 +67,7 @@ export class ChannelBridge {
 	constructor(
 		private client: PulseSocketIOClient,
 		public readonly id: string,
-		public readonly path: string,
+		public readonly viewId: string,
 	) {}
 
 	emit(event: string, payload?: any): void {
@@ -262,13 +262,13 @@ export class ChannelBridge {
 
 class ClientPulseChannelManager implements PulseChannelManager {
 	#client: PulseSocketIOClient;
-	#path: string;
+	#viewId: string;
 	#leases = new Map<string, { channelId: string; released: boolean }>();
 	#disposed = false;
 
-	constructor(client: PulseSocketIOClient, path: string) {
+	constructor(client: PulseSocketIOClient, viewId: string) {
 		this.#client = client;
-		this.#path = path;
+		this.#viewId = viewId;
 	}
 
 	acquire(channelId: string): PulseChannelLease {
@@ -281,7 +281,7 @@ class ClientPulseChannelManager implements PulseChannelManager {
 		if (this.#leases.has(channelId)) {
 			throw new Error(`PulseChannelManager already acquired channel '${channelId}'`);
 		}
-		const bridge = this.#client.acquireChannel(channelId, this.#path);
+		const bridge = this.#client.acquireChannel(channelId, this.#viewId);
 		const lease = { channelId, released: false };
 		this.#leases.set(channelId, lease);
 		return {
@@ -306,13 +306,13 @@ class ClientPulseChannelManager implements PulseChannelManager {
 		if (lease.released) return;
 		lease.released = true;
 		this.#leases.delete(lease.channelId);
-		this.#client.releaseChannel(lease.channelId, this.#path);
+		this.#client.releaseChannel(lease.channelId, this.#viewId);
 	}
 }
 
 export function createPulseChannelManager(
 	client: PulseSocketIOClient,
-	path: string,
+	viewId: string,
 ): PulseChannelManager {
-	return new ClientPulseChannelManager(client, path);
+	return new ClientPulseChannelManager(client, viewId);
 }

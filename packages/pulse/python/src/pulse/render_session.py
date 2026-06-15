@@ -417,13 +417,17 @@ class RenderSession:
 		exc: BaseException,
 		details: dict[str, Any] | None = None,
 	):
+		# Format from the exception object, not the ambient sys.exc_info(): this
+		# is also called outside an `except` block (e.g. a deferred connect error),
+		# where traceback.format_exc() would yield "NoneType: None".
+		stack = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
 		self.send(
 			{
 				"type": "server_error",
 				"path": path,
 				"error": {
 					"message": str(exc),
-					"stack": traceback.format_exc(),
+					"stack": stack,
 					"phase": phase,
 					"details": details or {},
 				},
@@ -434,7 +438,7 @@ class RenderSession:
 			path,
 			phase,
 			exc,
-			traceback.format_exc(),
+			stack,
 		)
 
 	# ---- State transitions ----

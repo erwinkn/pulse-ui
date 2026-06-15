@@ -37,7 +37,7 @@ app = ps.App(
 | `api_prefix` | `str` | `"/_pulse"` | API route prefix |
 | `cors` | `CORSOptions` | Auto | CORS configuration |
 | `fastapi` | `dict` | `None` | FastAPI constructor options |
-| `session_timeout` | `float` | `60.0` | Session cleanup timeout (seconds) |
+| `session_timeout` | `float` | `60.0` | How long a disconnected render session stays resumable before being closed (seconds) |
 
 ## Deployment Modes
 

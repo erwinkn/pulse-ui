@@ -51,9 +51,9 @@ class App:
 | `proxy` | `Proxy` | `None` | Single-server proxy tuning |
 | `cors` | `CORSOptions` | `None` | CORS configuration |
 | `fastapi` | `dict` | `None` | Additional FastAPI options |
-| `session_timeout` | `float` | `60.0` | Session cleanup timeout (seconds) |
-| `prerender_queue_timeout` | `float` | `60.0` | Prerender queue timeout (seconds) |
-| `disconnect_queue_timeout` | `float` | `300.0` | Disconnected socket message queue timeout (seconds) |
+| `session_timeout` | `float` | `60.0` | How long a disconnected render session stays resumable before being closed (seconds) |
+| `prerender_queue_timeout` | `float` | `60.0` | How long a prerendered route waits for the client to attach before its render tree is released (seconds) |
+| `disconnect_queue_timeout` | `float` | `300.0` | How long updates are queued for a disconnected client before the route suspends — rendering pauses but state is kept; reconnecting within `session_timeout` resumes without a reload (seconds) |
 | `connection_status` | `ConnectionStatusConfig` | `None` | Connection status UI timing |
 | `render_loop_limit` | `int` | `50` | Maximum render loops before failing |
 

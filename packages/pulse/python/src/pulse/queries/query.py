@@ -88,9 +88,13 @@ class QueryState(Generic[T]):
 		is_fetching: Signal indicating if a fetch is in progress.
 		retries: Signal with current retry attempt count.
 		retry_reason: Signal with exception from last failed retry.
+		invalidated: Whether the data was explicitly marked stale. Persists
+			until the next fetch completes, so invalidating an unobserved
+			query forces a refetch when it is next observed or resumed.
 	"""
 
 	cfg: QueryConfig[T]
+	invalidated: bool
 
 	# Reactive signals for query state
 	data: Signal[T | None | Missing]
@@ -141,6 +145,7 @@ class QueryState(Generic[T]):
 		self.is_fetching = Signal(False, name=f"query.is_fetching({name})")
 		self.retries = Signal(0, name=f"query.retries({name})")
 		self.retry_reason = Signal(None, name=f"query.retry_reason({name})")
+		self.invalidated = False
 
 	def set_data(
 		self,
@@ -186,6 +191,7 @@ class QueryState(Generic[T]):
 		"""Set success state with data."""
 		self.data.write(data)
 		self.last_updated.write(time.time())
+		self.invalidated = False
 		self.error.write(None)
 		self.status.write("success")
 		if not manual:
@@ -197,6 +203,7 @@ class QueryState(Generic[T]):
 		"""Apply error state to the query."""
 		self.error.write(error)
 		self.last_updated.write(time.time())
+		self.invalidated = False
 		self.status.write("error")
 		if not manual:
 			self.is_fetching.write(False)
@@ -277,6 +284,7 @@ class KeyedQuery(Generic[T], Disposable):
 	_interval_effect: Effect | None
 	_interval: float | None
 	_interval_observer: "KeyedQueryResult[T] | None"
+	_suspended: bool
 
 	def __init__(
 		self,
@@ -305,6 +313,7 @@ class KeyedQuery(Generic[T], Disposable):
 		self._interval_effect = None
 		self._interval = None
 		self._interval_observer = None
+		self._suspended = False
 
 	# --- Delegate signal access to state ---
 	@property
@@ -500,7 +509,11 @@ class KeyedQuery(Generic[T], Disposable):
 		self._interval_observer = new_observer
 
 		if not interval_changed:
-			if self._interval_effect is None and new_interval is not None:
+			if (
+				self._interval_effect is None
+				and new_interval is not None
+				and not self._suspended
+			):
 				self._interval_effect = self._create_interval_effect(new_interval)
 			return
 
@@ -508,8 +521,43 @@ class KeyedQuery(Generic[T], Disposable):
 			self._interval_effect.dispose()
 			self._interval_effect = None
 
-		if new_interval is not None:
+		if new_interval is not None and not self._suspended:
 			self._interval_effect = self._create_interval_effect(new_interval)
+
+	def is_stale(self, stale_time: float = 0.0) -> bool:
+		"""Whether the data is invalidated or older than stale_time seconds."""
+		if self.state.invalidated:
+			return True
+		return (time.time() - self.state.last_updated.read()) > stale_time
+
+	def suspend(self) -> None:
+		"""Stop interval refetching while the session is disconnected."""
+		if self._suspended:
+			return
+		self._suspended = True
+		if self._interval_effect is not None:
+			self._interval_effect.dispose()
+			self._interval_effect = None
+
+	def resume(self) -> None:
+		"""Restart interval refetching and refetch stale data on reconnect."""
+		if not self._suspended:
+			return
+		self._suspended = False
+		# Recreating the interval effect runs an immediate catch-up fetch
+		self._update_interval()
+		if self._interval is not None:
+			return
+		observers = [obs for obs in self.observers if obs._enabled.value]  # pyright: ignore[reportPrivateUsage]
+		if not observers:
+			return
+		stale_time = min(obs._stale_time for obs in observers)  # pyright: ignore[reportPrivateUsage]
+		if self.is_stale(stale_time) and not self.is_scheduled:
+			self.run_fetch(
+				observers[0]._fetch_fn,  # pyright: ignore[reportPrivateUsage]
+				cancel_previous=False,
+				initiator=observers[0],
+			)
 
 	async def refetch(self, cancel_refetch: bool = True) -> ActionResult[T]:
 		"""
@@ -526,10 +574,12 @@ class KeyedQuery(Generic[T], Disposable):
 	def invalidate(self, cancel_refetch: bool = False):
 		"""
 		Marks query as stale. If there are active observers, triggers a refetch.
-		Uses the first observer's fetch function.
+		Without observers, the stale mark persists so the next observer (or a
+		session resume) refetches.
 
 		Note: Prefer calling invalidate() on KeyedQueryResult to ensure the correct fetch function is used.
 		"""
+		self.state.invalidated = True
 		if len(self.observers) > 0:
 			fetch_fn = self._get_first_observer_fetch_fn()
 			if not self.is_scheduled or cancel_refetch:
@@ -607,6 +657,8 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 	_enabled: Signal[bool]
 	_interval_effect: Effect | None
 	_data_computed: Computed[T | None | Missing]
+	_suspended: bool
+	_on_dispose: "Callable[[UnkeyedQueryResult[T]], None] | None"
 
 	def __init__(
 		self,
@@ -623,6 +675,7 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 		keep_previous_data: bool = False,
 		enabled: bool = True,
 		fetch_on_mount: bool = True,
+		on_dispose: "Callable[[UnkeyedQueryResult[T]], None] | None" = None,
 	):
 		self.state = QueryState(
 			name="unkeyed",
@@ -646,6 +699,8 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 		self._keep_previous_data = keep_previous_data
 		self._enabled = Signal(enabled, name="query.enabled(unkeyed)")
 		self._interval_effect = None
+		self._suspended = False
+		self._on_dispose = on_dispose
 
 		# Create effect with auto-tracking (deps=None)
 		# Pass state as fetcher since it has the Signal attributes directly
@@ -756,7 +811,9 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 
 	# --- Query operations ---
 	def is_stale(self) -> bool:
-		"""Check if the query data is stale based on stale_time."""
+		"""Check if the query data is invalidated or stale based on stale_time."""
+		if self.state.invalidated:
+			return True
 		return (time.time() - self.state.last_updated.read()) > self._stale_time
 
 	async def _run(self):
@@ -805,6 +862,7 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 
 	def invalidate(self):
 		"""Mark the query as stale and refetch through the effect."""
+		self.state.invalidated = True
 		if not self.is_scheduled:
 			self.schedule()
 
@@ -812,12 +870,36 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 		"""Cancel the current fetch if running."""
 		self._effect.cancel(cancel_interval=False)
 
+	def suspend(self) -> None:
+		"""Stop interval refetching while the session is disconnected."""
+		if self._suspended:
+			return
+		self._suspended = True
+		if self._interval_effect is not None:
+			self._interval_effect.dispose()
+			self._interval_effect = None
+
+	def resume(self) -> None:
+		"""Restart interval refetching and refetch stale data on reconnect."""
+		if not self._suspended:
+			return
+		self._suspended = False
+		if self._refetch_interval is not None:
+			# Recreating the interval effect runs an immediate catch-up fetch
+			self._setup_interval_effect(self._refetch_interval)
+			return
+		with Untrack():
+			if self._enabled.value and self.is_stale() and not self.is_scheduled:
+				self.schedule()
+
 	@override
 	def dispose(self):
 		"""Clean up the query and its effect."""
 		if self._interval_effect is not None:
 			self._interval_effect.dispose()
 		self._effect.dispose()
+		if self._on_dispose is not None:
+			self._on_dispose(self)
 
 
 class KeyedQueryResult(Generic[T], Disposable):
@@ -939,9 +1021,8 @@ class KeyedQueryResult(Generic[T], Disposable):
 		return cast(T | None, value)
 
 	def is_stale(self) -> bool:
-		"""Check if the query data is stale based on stale_time."""
-		query = self._query()
-		return (time.time() - query.last_updated.read()) > self._stale_time
+		"""Check if the query data is invalidated or stale based on stale_time."""
+		return self._query().is_stale(self._stale_time)
 
 	async def refetch(self, cancel_refetch: bool = True) -> ActionResult[T]:
 		"""
@@ -970,6 +1051,7 @@ class KeyedQueryResult(Generic[T], Disposable):
 	def invalidate(self):
 		"""Mark the query as stale and refetch using this observer's fetch function."""
 		query = self._query()
+		query.state.invalidated = True
 		if not query.is_scheduled and len(query.observers) > 0:
 			query.run_fetch(self._fetch_fn, cancel_previous=False, initiator=self)
 
@@ -1255,8 +1337,11 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		initial_data_updated_at: float | dt.datetime | None,
 		state: TState,
 	) -> UnkeyedQueryResult[T]:
-		"""Create a private unkeyed query."""
-		return UnkeyedQueryResult[T](
+		"""Create a private unkeyed query, registered with the session store
+		so it participates in suspend/resume."""
+		render = PulseContext.get().render
+		store = render.query_store if render is not None else None
+		result = UnkeyedQueryResult[T](
 			fetch_fn=fetch_fn,
 			on_success=bind_state(state, self._on_success_fn)
 			if self._on_success_fn
@@ -1274,7 +1359,11 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 			refetch_interval=self._refetch_interval,
 			enabled=self._enabled,
 			fetch_on_mount=self._fetch_on_mount,
+			on_dispose=store.unregister_unkeyed if store is not None else None,
 		)
+		if store is not None:
+			store.register_unkeyed(result)
+		return result
 
 	def __get__(self, obj: Any, objtype: Any = None) -> "QueryResult[T]":
 		if obj is None:

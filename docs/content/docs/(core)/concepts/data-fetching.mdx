@@ -129,6 +129,12 @@ async def user(self):
 
 This "just works" for most cases.
 
+Queries also follow the client's connection. If the user closes their laptop or
+tabs away long enough to disconnect, `refetch_interval` polling pauses — Pulse
+doesn't keep hitting your API for a screen nobody is looking at. When they come
+back, intervals restart and any stale data (older than `stale_time`) refetches
+automatically, so the user always returns to fresh data.
+
 ### Keyed queries
 
 Sometimes automatic tracking isn't what you want. Maybe you're reading multiple state properties but only want to refetch when one specific value changes:

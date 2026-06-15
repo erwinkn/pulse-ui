@@ -83,8 +83,7 @@ def run_js(expr: Any, *, result: bool = False) -> asyncio.Future[Any] | None:
 	return ctx.render.run_js(expr, result=result)
 
 
-MountState = Literal["pending", "active", "idle", "closed"]
-PendingAction = Literal["idle", "dispose"]
+MountState = Literal["pending", "active", "suspended", "closed"]
 T_Render = TypeVar("T_Render")
 
 
@@ -97,7 +96,8 @@ class RouteMount:
 	_pulse_ctx: PulseContext | None
 	initialized: bool
 	state: MountState
-	pending_action: PendingAction | None
+	ever_active: bool
+	dispose_on_timeout: bool
 	queue: list[ServerMessage] | None
 	queue_timeout: TimerHandleLike | None
 	mount_id: str
@@ -119,7 +119,8 @@ class RouteMount:
 		self.tree = RenderTree(route.render())
 		self.initialized = False
 		self.state = "pending"
-		self.pending_action = None
+		self.ever_active = False
+		self.dispose_on_timeout = False
 		self.queue = []
 		self.queue_timeout = None
 		self.mount_id = uuid.uuid4().hex
@@ -137,36 +138,27 @@ class RouteMount:
 			self.queue_timeout.cancel()
 			self.render.discard_timer(self.queue_timeout)
 			self.queue_timeout = None
-		self.pending_action = None
 
 	def _on_pending_timeout(self) -> None:
 		if self.state != "pending":
 			return
-		action = self.pending_action
-		self.pending_action = None
-		if action == "dispose":
+		# Mounts the client never attached to (e.g. crawler prerenders) and
+		# explicit detaches are garbage; attached mounts suspend so the user
+		# can resume with their state intact.
+		if self.dispose_on_timeout or not self.ever_active:
 			self.render.dispose_mount(self.path, self)
 			return
-		self.to_idle()
+		self.suspend()
 
-	def start_pending(self, timeout: float, *, action: PendingAction = "idle") -> None:
-		if self.state == "pending":
-			prev_action = self.pending_action
-			next_action: PendingAction = (
-				"dispose" if prev_action == "dispose" or action == "dispose" else "idle"
-			)
-			self._cancel_pending_timeout()
-			self.pending_action = next_action
-			self.queue_timeout = self.render.schedule_later(
-				timeout, self._on_pending_timeout
-			)
-			return
+	def start_pending(self, timeout: float, *, dispose: bool = False) -> None:
+		dispose = dispose or (self.state == "pending" and self.dispose_on_timeout)
 		self._cancel_pending_timeout()
-		if self.state == "idle" and self.effect:
-			self.effect.resume()
-		self.state = "pending"
-		self.queue = []
-		self.pending_action = action
+		if self.state != "pending":
+			if self.state == "suspended" and self.effect:
+				self.effect.resume()
+			self.state = "pending"
+			self.queue = []
+		self.dispose_on_timeout = dispose
 		self.queue_timeout = self.render.schedule_later(
 			timeout, self._on_pending_timeout
 		)
@@ -180,6 +172,18 @@ class RouteMount:
 				send_message(msg)
 		self.queue = None
 		self.state = "active"
+		self.ever_active = True
+		self.dispose_on_timeout = False
+
+	def suspend(self) -> None:
+		"""Pause rendering but keep the mounted tree and hook state for resume."""
+		if self.state != "pending":
+			return
+		self.state = "suspended"
+		self.queue = None
+		self._cancel_pending_timeout()
+		if self.effect:
+			self.effect.pause()
 
 	def deliver(
 		self, message: ServerMessage, send_message: Callable[[ServerMessage], Any]
@@ -194,15 +198,7 @@ class RouteMount:
 			return
 		if self.state == "closed":
 			raise RuntimeError(f"Message sent to closed mount {self.path!r}")
-
-	def to_idle(self) -> None:
-		if self.state != "pending":
-			return
-		self.state = "idle"
-		self.queue = None
-		self._cancel_pending_timeout()
-		if self.effect:
-			self.effect.pause()
+		# suspended: drop; the client gets a fresh init on resume
 
 	def ensure_effect(self, *, lazy: bool = False, flush: bool = True) -> None:
 		if self.effect is not None:
@@ -336,11 +332,16 @@ class RenderSession:
 			self._global_queue = []
 			for msg in queued:
 				self.send(msg)
+		# Restart query intervals and refetch stale data (no-op on first connect)
+		with PulseContext.update(render=self):
+			self.query_store.resume_all()
 
 	def disconnect(self):
-		"""WebSocket disconnected. Start queuing briefly before pausing."""
+		"""WebSocket disconnected. Queue briefly, then suspend mounts on timeout."""
 		self._send_message = None
 		self.connected = False
+		# Pause query interval refetching while nobody is watching
+		self.query_store.suspend_all()
 
 		for mount in self.route_mounts.values():
 			if mount.state == "active":
@@ -405,7 +406,6 @@ class RenderSession:
 			return
 		if mount.state == "pending":
 			mount.deliver(message, lambda _: None)
-		# idle: drop (effect should be paused anyway)
 
 	def report_error(
 		self,
@@ -485,7 +485,7 @@ class RenderSession:
 		"""
 		Client ready to receive updates for path.
 		- PENDING: flush queue, transition to ACTIVE
-		- IDLE: request reload
+		- SUSPENDED: re-render, send a fresh init, transition to ACTIVE
 		- ACTIVE: update route_info
 		- No mount: request reload
 		Returns True when callbacks can be accepted for this path.
@@ -493,16 +493,35 @@ class RenderSession:
 		path = ensure_absolute_path(path)
 		mount = self.route_mounts.get(path)
 
-		if mount is None or mount.state == "idle":
+		if mount is None:
 			# Initial render must come from prerender
 			self.send({"type": "reload"})
 			return False
 
-		# Update route info for active and pending mounts
 		mount.update_route(route_info)
+		if mount.state == "suspended":
+			return self._resume_mount(mount, path)
 		if mount.state == "pending" and self._send_message:
 			mount.activate(self._send_message)
 		return mount.state == "active"
+
+	def _resume_mount(self, mount: RouteMount, path: str) -> bool:
+		"""Reactivate a suspended mount by re-rendering and sending a fresh init.
+
+		The retained tree and hook state carry the user's work across the
+		disconnect; the client replaces its view with the new init.
+		"""
+		assert mount.effect is not None
+		mount.effect.resume()
+		with mount.effect.capture_deps(update_deps=True):
+			message = self.render(mount, path)
+		if message["type"] == "navigate_to":
+			self.send(message)
+			self.dispose_mount(path, mount)
+			return False
+		mount.state = "active"
+		self.send(message)
+		return True
 
 	def update_route(self, path: str, route_info: RouteInfo):
 		"""Update routing state (query params, etc.) for attached path."""
@@ -546,7 +565,7 @@ class RenderSession:
 			# by the replayed attach. The mount id was renewed above before this delay,
 			# so async work from the detached generation is still route-stale and cannot
 			# navigate during the grace period.
-			mount.start_pending(self.dev_strict_mode_detach_timeout, action="dispose")
+			mount.start_pending(self.dev_strict_mode_detach_timeout, dispose=True)
 			return
 		self.dispose_mount(path, mount)
 

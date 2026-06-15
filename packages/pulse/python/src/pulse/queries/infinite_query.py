@@ -184,6 +184,10 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 			observer = self._interval_observer
 			if observer is None:
 				return
+			# Don't stack a refetch behind one already queued/in flight (matches
+			# KeyedQuery's interval guard; also covers the resume() catch-up tick).
+			if self._has_pending_work():
+				return
 			self.invalidate(fetch_fn=observer._fetch_fn, observer=observer)  # pyright: ignore[reportPrivateUsage]
 
 		return Effect(
@@ -201,7 +205,11 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		self._interval_observer = new_observer
 
 		if not interval_changed:
-			if self._interval_effect is None and new_interval is not None:
+			if (
+				self._interval_effect is None
+				and new_interval is not None
+				and not self._suspended
+			):
 				self._interval_effect = self._create_interval_effect(new_interval)
 			return
 
@@ -209,8 +217,50 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 			self._interval_effect.dispose()
 			self._interval_effect = None
 
-		if new_interval is not None:
+		if new_interval is not None and not self._suspended:
 			self._interval_effect = self._create_interval_effect(new_interval)
+
+	def is_stale(self, stale_time: float = 0.0) -> bool:
+		"""Whether the data is invalidated or older than stale_time seconds."""
+		if self.invalidated:
+			return True
+		return (time.time() - self.last_updated.read()) > stale_time
+
+	def suspend(self) -> None:
+		"""Stop interval refetching while the session is disconnected."""
+		if self._suspended:
+			return
+		self._suspended = True
+		if self._interval_effect is not None:
+			self._interval_effect.dispose()
+			self._interval_effect = None
+
+	def resume(self) -> None:
+		"""Restart interval refetching and refetch stale data on reconnect."""
+		if not self._suspended:
+			return
+		self._suspended = False
+		# Recreating the interval effect runs an immediate catch-up fetch
+		self._update_interval()
+		if self._interval is not None:
+			return
+		observers = [obs for obs in self._observers if obs._enabled.value]  # pyright: ignore[reportPrivateUsage]
+		if not observers:
+			return
+		stale_time = min(obs._stale_time for obs in observers)  # pyright: ignore[reportPrivateUsage]
+		# Don't stack a refetch behind an action that's already queued or
+		# running (e.g. a slow initial fetch still in flight at reconnect).
+		if self.is_stale(stale_time) and not self._has_pending_work():
+			self.invalidate(
+				fetch_fn=observers[0]._fetch_fn,  # pyright: ignore[reportPrivateUsage]
+				observer=observers[0],
+			)
+
+	def _has_pending_work(self) -> bool:
+		"""Whether an action is queued or a fetch task is in flight."""
+		if self._queue:
+			return True
+		return self._queue_task is not None and not self._queue_task.done()
 
 	# Reactive state
 	pages: ReactiveList[Page[T, TParam]]
@@ -234,6 +284,8 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 	_interval_effect: Effect | None
 	_interval: float | None
 	_interval_observer: "InfiniteQueryResult[T, TParam] | None"
+	_suspended: bool
+	invalidated: bool
 
 	def __init__(
 		self,
@@ -298,6 +350,8 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		self._interval_effect = None
 		self._interval = None
 		self._interval_observer = None
+		self._suspended = False
+		self.invalidated = False
 
 	# ─────────────────────────────────────────────────────────────────────────
 	# Commit functions - update state after pages have been modified
@@ -325,6 +379,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		"""Synchronous commit - updates state based on current pages."""
 		self._update_has_more()
 		self.last_updated.write(time.time())
+		self.invalidated = False
 		self.error.write(None)
 		self.status.write("success")
 		self.retries.write(0)
@@ -334,6 +389,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		"""Synchronous error commit for set_error (no callbacks)."""
 		self.error.write(error)
 		self.last_updated.write(time.time())
+		self.invalidated = False
 		self.status.write("error")
 		self.is_fetching.write(False)
 
@@ -444,7 +500,12 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		fetch_fn: Callable[[TParam], Awaitable[T]] | None = None,
 		observer: "InfiniteQueryResult[T, TParam] | None" = None,
 	):
-		"""Enqueue a refetch. Synchronous - does not wait for completion."""
+		"""Enqueue a refetch. Synchronous - does not wait for completion.
+
+		Without observers, the stale mark persists so the next observer (or a
+		session resume) refetches.
+		"""
+		self.invalidated = True
 		if cancel_fetch:
 			self._cancel_queue()
 		if len(self._observers) > 0:
@@ -1001,8 +1062,7 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		return isinstance(self._query().current_action(), FetchPrevious)
 
 	def is_stale(self) -> bool:
-		query = self._query()
-		return (time.time() - query.last_updated.read()) > self._stale_time
+		return self._query().is_stale(self._stale_time)
 
 	async def fetch_next_page(
 		self,

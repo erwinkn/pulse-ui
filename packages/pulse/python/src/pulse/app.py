@@ -265,6 +265,7 @@ class App:
 	_render_to_user: dict[str, str]
 	_sessions_in_request: dict[str, int]
 	_socket_to_render: dict[str, str]
+	_render_to_socket: dict[str, str]
 	_connecting_sockets: set[str]
 	_pending_socket_messages: dict[str, list[Serialized]]
 	_render_cleanups: dict[str, TimerHandleLike]
@@ -344,8 +345,11 @@ class App:
 		self._user_to_render = defaultdict(list)
 		self._render_to_user = {}
 		self._sessions_in_request = {}
-		# Map websocket sid -> renderId for message routing
+		# Map websocket sid <-> renderId for message routing. A render has at
+		# most one current socket; the reverse map identifies it so a stale
+		# socket's disconnect cannot tear down a newer connection.
 		self._socket_to_render = {}
+		self._render_to_socket = {}
 		self._connecting_sockets = set()
 		self._pending_socket_messages = {}
 		# Map render_id -> cleanup timer handle for timeout-based expiry
@@ -609,6 +613,11 @@ class App:
 				self._sessions_in_request[session.sid] -= 1
 				if self._sessions_in_request[session.sid] == 0:
 					del self._sessions_in_request[session.sid]
+					# Sessions without render sessions would otherwise be retained
+					# forever: cookie-less clients (bots, health checks) mint one
+					# per request. Their state lives in the cookie/session store,
+					# so dropping the in-memory object is safe.
+					self.close_session_if_inactive(session.sid)
 
 		# Apply prefix to all routes
 		prefix = self.api_prefix
@@ -792,6 +801,8 @@ class App:
 				self._connecting_sockets.discard(sid)
 				self._pending_socket_messages.pop(sid, None)
 				self._socket_to_render.pop(sid, None)
+				if rid and self._render_to_socket.get(rid) == sid:
+					del self._render_to_socket[rid]
 				raise
 			await self._drain_pending_socket_messages(sid)
 
@@ -809,12 +820,14 @@ class App:
 
 			if not rid:
 				# Still refuse connections without a renderId
+				self.close_session_if_inactive(session.sid)
 				raise ConnectionRefusedError(
 					f"Socket connect missing render_id session={session.sid}"
 				)
 
 			# Allow reconnects where the provided renderId no longer exists by creating a new RenderSession
 			render = self.render_sessions.get(rid)
+			created_render = render is None
 			if render is None:
 				# The client will try to attach to a non-existing RouteMount, which will cause a reload down the line
 				render = self.create_render(
@@ -823,24 +836,17 @@ class App:
 			else:
 				owner = self._render_to_user.get(render.id)
 				if owner != session.sid:
+					self.close_session_if_inactive(session.sid)
 					raise ConnectionRefusedError(
 						f"Socket connect session mismatch render={render.id} "
 						+ f"owner={owner} session={session.sid}"
 					)
 
-			def on_message(message: ServerMessage):
-				payload = serialize(message)
-				# `serialize` returns a tuple, which socket.io will mistake for multiple arguments
-				payload = list(payload)
-				self._tasks.create_task(self.sio.emit("message", list(payload), to=sid))
-
-			render.connect(on_message)
-			# Map socket sid to renderId for message routing
-			self._socket_to_render[sid] = rid
-
-			# Cancel any pending cleanup since session is now connected
-			self._cancel_render_cleanup(rid)
-
+			# Authorize before binding the socket. A denied (re)connect must not
+			# rebind or tear down an existing render that another live socket may
+			# still be using; only the render we created for this attempt is ours
+			# to clean up.
+			connect_error: Exception | None = None
 			with PulseContext.update(session=session, render=render):
 
 				async def _next():
@@ -860,20 +866,50 @@ class App:
 					)
 					res = _normalize_connect_response(res)
 				except Exception as exc:
-					render.report_error("/", "connect", exc)
+					# Treat a middleware error as allow, but surface it to the
+					# client once the socket is bound (see below).
+					connect_error = exc
 					res = Ok(None)
 				if isinstance(res, Deny):
-					# Tear down the created session if denied
-					self.close_render(rid)
-					self._socket_to_render.pop(sid, None)
+					if created_render:
+						self.close_render(rid)
+					else:
+						self.close_session_if_inactive(session.sid)
 					raise ConnectionRefusedError("Socket connection denied")
+
+			def on_message(message: ServerMessage):
+				payload = serialize(message)
+				# `serialize` returns a tuple, which socket.io will mistake for multiple arguments
+				payload = list(payload)
+				self._tasks.create_task(self.sio.emit("message", list(payload), to=sid))
+
+			render.connect(on_message)
+			# Map socket sid to renderId for message routing. If the client
+			# reconnected before the old socket's disconnect fired, unmap the
+			# old socket so its late disconnect can't tear down this connection.
+			old_sid = self._render_to_socket.get(rid)
+			if old_sid is not None and old_sid != sid:
+				self._socket_to_render.pop(old_sid, None)
+			self._socket_to_render[sid] = rid
+			self._render_to_socket[rid] = sid
+
+			# Cancel any pending cleanup since session is now connected
+			self._cancel_render_cleanup(rid)
+
+			# Now that the socket is bound, surface any connect-middleware error
+			# (reported pre-bind it would be dropped for a fresh render).
+			if connect_error is not None:
+				render.report_error("/", "connect", connect_error)
 
 		@self.sio.event
 		def disconnect(sid: str):  # pyright: ignore[reportUnusedFunction]
 			self._connecting_sockets.discard(sid)
 			self._pending_socket_messages.pop(sid, None)
 			rid = self._socket_to_render.pop(sid, None)
-			if rid is not None:
+			# Only the render's current socket may disconnect it; a stale
+			# socket's late disconnect must not tear down a newer connection.
+			if rid is not None and self._render_to_socket.get(rid) == sid:
+				del self._render_to_socket[rid]
 				render = self.render_sessions.get(rid)
 				if render:
 					render.disconnect()
@@ -961,8 +997,11 @@ class App:
 			session = self.user_sessions.get(owner_sid)
 			if session is None:
 				return
-			# Cancel any pending cleanup for active sessions (connected sessions stay alive)
-			self._cancel_render_cleanup(rid)
+			# Cancel any leftover cleanup for connected sessions. Never cancel
+			# for disconnected renders: nothing would reschedule it and the
+			# session would survive past its timeout.
+			if render.connected:
+				self._cancel_render_cleanup(rid)
 			try:
 				if msg["type"] == "channel_message":
 					await self._handle_channel_message(render, session, msg)
@@ -1179,6 +1218,9 @@ class App:
 		# Cancel any pending cleanup task
 		self._cancel_render_cleanup(rid)
 		self._render_message_locks.pop(rid, None)
+		socket_sid = self._render_to_socket.pop(rid, None)
+		if socket_sid is not None:
+			self._socket_to_render.pop(socket_sid, None)
 
 		render = self.render_sessions.pop(rid, None)
 		if not render:
@@ -1198,7 +1240,9 @@ class App:
 			session.dispose()
 
 	def close_session_if_inactive(self, sid: str):
-		if len(self._user_to_render[sid]) == 0:
+		if sid in self._sessions_in_request:
+			return
+		if not self._user_to_render.get(sid):
 			self.close_session(sid)
 
 	async def reload_connected_clients(self) -> int:

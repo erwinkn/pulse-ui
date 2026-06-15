@@ -91,6 +91,10 @@ async def lazy_data(self) -> T: ...
 async def live_data(self) -> T: ...
 ```
 
+Interval polling pauses while the client is disconnected. On reconnect,
+intervals restart with a catch-up fetch and non-interval queries refetch if
+stale (older than `stale_time` or invalidated).
+
 Enable/disable programmatically:
 
 ```python
@@ -117,7 +121,7 @@ state.user.is_scheduled # True if a refetch is scheduled/running
 
 ```python
 state.user.refetch()     # Force refetch
-state.user.invalidate()  # Mark stale, refetch if observed
+state.user.invalidate()  # Mark stale; refetch now if observed, else on next observe/reconnect
 state.user.set_data(val) # Manually set data (optimistic update)
 await state.user.wait()  # Wait for current fetch to complete
 state.user.enable()      # Enable the query

@@ -76,7 +76,7 @@ def query(
 | `refetch_interval` | `float \| None` | `None` | Auto-refetch interval in seconds |
 | `keep_previous_data` | `bool` | `False` | Keep previous data while refetching. Preserves data across key changes, even if the new key has `initial_data`. |
 | `retries` | `int` | `3` | Number of retry attempts |
-| `retry_delay` | `float \| None` | `2.0` | Delay between retries in seconds |
+| `retry_delay` | `float \| None` | `2.0` | Base delay (seconds) for exponential backoff between retries; doubles each attempt, capped at 30s |
 | `initial_data_updated_at` | `float \| datetime \| None` | `None` | Timestamp for initial data staleness |
 | `enabled` | `bool` | `True` | Whether query is enabled |
 | `fetch_on_mount` | `bool` | `True` | Fetch when component mounts |
@@ -350,7 +350,7 @@ def infinite_query(
 | `refetch_interval` | `float \| None` | `None` | Auto-refetch interval in seconds |
 | `keep_previous_data` | `bool` | `False` | Keep previous data while refetching. Preserves data across key changes. |
 | `retries` | `int` | `3` | Number of retry attempts |
-| `retry_delay` | `float \| None` | `2.0` | Delay between retries in seconds |
+| `retry_delay` | `float \| None` | `2.0` | Base delay (seconds) for exponential backoff between retries; doubles each attempt, capped at 30s |
 | `enabled` | `bool` | `True` | Whether query is enabled |
 | `fetch_on_mount` | `bool` | `True` | Fetch when component mounts |
 | `key` | `QueryKey` | required | Query key (use `@query.key` for dynamic keys) |

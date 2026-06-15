@@ -22,7 +22,7 @@ class UserState(ps.State):
     stale_time=0,            # Seconds before data considered stale (default 0)
     gc_time=300.0,           # Seconds before unused cache is garbage collected
     retries=3,               # Retry attempts on failure
-    retry_delay=2.0,         # Delay between retries in seconds
+    retry_delay=2.0,         # Base delay (s); exponential backoff, doubles each retry, capped at 30s
     keep_previous_data=True, # Keep old data while refetching
     enabled=True,            # Whether query runs automatically (default True)
     fetch_on_mount=True,     # Fetch when component mounts (default True)

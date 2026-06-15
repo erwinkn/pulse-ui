@@ -165,7 +165,7 @@ The `@ps.query` decorator accepts options for common scenarios:
     keep_previous_data=True,  # Show old data while refetching (avoids flicker)
     stale_time=60.0,          # Data is "fresh" for 60 seconds
     retries=3,                # Retry failed requests up to 3 times
-    retry_delay=1.0,          # Wait 1 second between retries
+    retry_delay=1.0,          # Backoff base: 1s, then 2s, 4s... (capped at 30s)
     gc_time=300.0,            # Keep cached data around for 5 minutes
 )
 async def user(self):

@@ -332,7 +332,10 @@ class RenderSession:
 			self._global_queue = []
 			for msg in queued:
 				self.send(msg)
-		# Restart query intervals and refetch stale data (no-op on first connect)
+		# Restart query intervals and refetch stale data (no-op on first connect).
+		# Establishes render context here (so resume fetch-tasks register on this
+		# render); the session is inherited from the caller's context, which must
+		# wrap connect() so reconnect fetches match initial fetches.
 		with PulseContext.update(render=self):
 			self.query_store.resume_all()
 

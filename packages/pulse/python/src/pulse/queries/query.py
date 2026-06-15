@@ -47,6 +47,23 @@ T = TypeVar("T")
 TState = TypeVar("TState", bound=State)
 
 RETRY_DELAY_DEFAULT = 2.0 if not is_pytest() else 0.01
+RETRY_MAX_DELAY = 30.0
+"""Cap on the exponential backoff between retries (seconds), matching TanStack Query."""
+
+
+def retry_backoff_delay(
+	base: float, attempt: int, cap: float = RETRY_MAX_DELAY
+) -> float:
+	"""Exponential backoff for a 0-based retry attempt.
+
+	Mirrors TanStack Query's default ``min(base * 2**attempt, cap)``: the delay
+	doubles each retry so a flaky endpoint is not hammered at a fixed interval.
+
+	The exponent is clamped so an absurd ``retries`` count can't overflow the
+	float conversion (``2**1024`` exceeds the max float); the result is capped
+	long before that anyway.
+	"""
+	return min(base * 2.0 ** min(attempt, 1000), cap)
 
 
 @dataclass(slots=True)
@@ -58,7 +75,9 @@ class QueryConfig(Generic[T]):
 
 	Attributes:
 		retries: Number of retry attempts on failure (default 3).
-		retry_delay: Delay in seconds between retry attempts (default 2.0).
+		retry_delay: Base delay in seconds for exponential backoff between
+			retries; the delay doubles each attempt and is capped at 30s
+			(default 2.0).
 		initial_data: Initial data value or factory function.
 		initial_data_updated_at: Timestamp for initial data staleness calculation.
 		gc_time: Seconds to keep unused query in cache before garbage collection.
@@ -200,10 +219,14 @@ class QueryState(Generic[T]):
 			self.retry_reason.write(None)
 
 	def apply_error(self, error: Exception, manual: bool = False):
-		"""Apply error state to the query."""
+		"""Apply error state to the query.
+
+		Does not touch ``last_updated`` (which tracks the last successful data
+		fetch) nor clear ``invalidated``: a failed refetch must leave the query
+		stale so it remains eligible to refetch, matching TanStack Query (which
+		clears ``isInvalidated`` on success only).
+		"""
 		self.error.write(error)
-		self.last_updated.write(time.time())
-		self.invalidated = False
 		self.status.write("error")
 		if not manual:
 			self.is_fetching.write(False)
@@ -258,7 +281,9 @@ async def run_fetch_with_retries(
 			current_retries = state.retries.read()
 			if current_retries < state.cfg.retries:
 				state.failed_retry(e)
-				await asyncio.sleep(state.cfg.retry_delay)
+				await asyncio.sleep(
+					retry_backoff_delay(state.cfg.retry_delay, current_retries)
+				)
 			else:
 				state.retry_reason.write(e)
 				state.apply_error(e)
@@ -1435,7 +1460,8 @@ def query(
 		refetch_interval: Auto-refetch interval in seconds (default None, disabled).
 		keep_previous_data: Keep previous data while loading (default False).
 		retries: Number of retry attempts on failure (default 3).
-		retry_delay: Delay between retries in seconds (default 2.0).
+		retry_delay: Base delay (seconds) for exponential backoff between
+			retries — doubles each attempt, capped at 30s (default 2.0).
 		initial_data_updated_at: Timestamp for initial data staleness calculation.
 		enabled: Whether query is enabled (default True).
 		fetch_on_mount: Fetch when component mounts (default True).

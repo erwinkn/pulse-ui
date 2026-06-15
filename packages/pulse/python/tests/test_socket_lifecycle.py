@@ -6,6 +6,7 @@ before the old socket's disconnect event fires, the stale disconnect must not
 tear down the new connection or strand the render session's cleanup timer.
 """
 
+import asyncio
 from typing import Any, override
 
 import pulse as ps
@@ -65,6 +66,7 @@ class TogglableDenyMiddleware(ps.PulseMiddleware):
 	deny: bool
 
 	def __init__(self) -> None:
+		super().__init__()
 		self.deny = False
 
 	@override
@@ -147,10 +149,12 @@ async def test_connect_middleware_exception_is_surfaced_after_bind(
 	environ = make_environ(app, "user-1")
 	connect = app.sio.handlers["/"]["connect"]
 
-	sent: list[Any] = []
-	monkeypatch.setattr(
-		app.sio, "emit", lambda *a, **k: sent.append((a, k)) or _noop_future()
-	)
+	sent: list[tuple[Any, ...]] = []
+
+	async def fake_emit(*args: Any, **kwargs: Any) -> None:
+		sent.append(args)
+
+	monkeypatch.setattr(app.sio, "emit", fake_emit)
 
 	# Fresh render: connection is allowed despite the middleware raising
 	await connect("socket-a", environ, {"render_id": "render-1"})
@@ -158,27 +162,18 @@ async def test_connect_middleware_exception_is_surfaced_after_bind(
 	assert render.connected
 
 	# Give the emit task a tick to run
-	import asyncio
-
 	await asyncio.sleep(0)
 
 	# A server_error for the connect phase reached the (bound) client
-	flat = [a for (a, _k) in sent]
 	assert any(
-		args and args[0] == "message" and _is_connect_error(args) for args in flat
+		args
+		and args[0] == "message"
+		and "server_error" in str(args)
+		and "connect" in str(args)
+		for args in sent
 	), sent
 
 	await app.close()
-
-
-async def _noop_future() -> None:
-	return None
-
-
-def _is_connect_error(emit_args: Any) -> bool:
-	# emit("message", payload, to=sid) — payload is a serialized list
-	payload = emit_args[1] if len(emit_args) > 1 else None
-	return "server_error" in str(payload) and "connect" in str(payload)
 
 
 @pytest.mark.asyncio

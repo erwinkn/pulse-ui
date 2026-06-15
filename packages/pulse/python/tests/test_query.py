@@ -3605,3 +3605,19 @@ async def test_query_with_callable_list_key_updates_on_inplace_change():
 		return result._query().key == ("user", 2)  # pyright: ignore[reportPrivateUsage]
 
 	assert await wait_for(key_matches, timeout=0.2)
+
+
+def test_retry_backoff_delay_is_exponential_and_capped():
+	from pulse.queries.query import RETRY_MAX_DELAY, retry_backoff_delay
+
+	# Doubles each (0-based) attempt
+	assert retry_backoff_delay(1.0, 0) == 1.0
+	assert retry_backoff_delay(1.0, 1) == 2.0
+	assert retry_backoff_delay(1.0, 2) == 4.0
+	assert retry_backoff_delay(2.0, 3) == 16.0
+	# Capped
+	assert retry_backoff_delay(1.0, 20) == RETRY_MAX_DELAY
+	assert retry_backoff_delay(2.0, 10, cap=50.0) == 50.0
+	# Absurd attempt counts (retries >= 1024) must not overflow the float
+	assert retry_backoff_delay(1.0, 5000) == RETRY_MAX_DELAY
+	assert retry_backoff_delay(2.0, 100000) == RETRY_MAX_DELAY

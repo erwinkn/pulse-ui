@@ -35,7 +35,11 @@ from pulse.queries.common import (
 	bind_state,
 	normalize_key,
 )
-from pulse.queries.query import RETRY_DELAY_DEFAULT, QueryConfig
+from pulse.queries.query import (
+	RETRY_DELAY_DEFAULT,
+	QueryConfig,
+	retry_backoff_delay,
+)
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.reactive_extensions import ReactiveList, unwrap
 from pulse.scheduling import TimerHandleLike, create_task, later
@@ -386,10 +390,12 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		self.retry_reason.write(None)
 
 	def _commit_error_sync(self, error: Exception):
-		"""Synchronous error commit for set_error (no callbacks)."""
+		"""Synchronous error commit for set_error (no callbacks).
+
+		Leaves ``last_updated`` (last successful fetch) and ``invalidated``
+		untouched so a failed refetch stays stale, matching TanStack Query.
+		"""
 		self.error.write(error)
-		self.last_updated.write(time.time())
-		self.invalidated = False
 		self.status.write("error")
 		self.is_fetching.write(False)
 
@@ -657,9 +663,12 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 					except asyncio.CancelledError:
 						raise
 					except Exception as e:
-						if self.retries.read() < self.cfg.retries:
+						attempt = self.retries.read()
+						if attempt < self.cfg.retries:
 							self._record_retry(e)
-							await asyncio.sleep(self.cfg.retry_delay)
+							await asyncio.sleep(
+								retry_backoff_delay(self.cfg.retry_delay, attempt)
+							)
 							continue
 						raise
 			except asyncio.CancelledError:
@@ -1562,7 +1571,8 @@ def infinite_query(
 		refetch_interval: Auto-refetch interval in seconds (default None).
 		keep_previous_data: Keep previous data while loading (default False).
 		retries: Number of retry attempts on failure (default 3).
-		retry_delay: Delay between retries in seconds (default 2.0).
+		retry_delay: Base delay (seconds) for exponential backoff between
+			retries — doubles each attempt, capped at 30s (default 2.0).
 		initial_data_updated_at: Timestamp for initial data staleness.
 		enabled: Whether query is enabled (default True).
 		fetch_on_mount: Fetch when component mounts (default True).

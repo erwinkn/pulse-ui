@@ -67,6 +67,41 @@ async def test_invalidate_persists_without_observers():
 
 
 @pytest.mark.asyncio
+async def test_invalidated_survives_failed_refetch():
+	"""A failed refetch must leave an invalidated query stale, and must not
+	bump last_updated (matches TanStack: clear isInvalidated on success only)."""
+	store = QueryStore()
+	should_fail = {"v": False}
+
+	async def fetcher() -> int:
+		if should_fail["v"]:
+			raise ValueError("boom")
+		return 1
+
+	store.ensure(("a",), retries=0)
+	result = KeyedQueryResult(
+		Computed(lambda: store.ensure(("a",))),
+		fetch_fn=fetcher,
+		stale_time=1000.0,
+	)
+	await wait_for(lambda: result.data == 1)
+	query = store.ensure(("a",))
+	assert not query.is_stale(1000.0)  # fresh after success
+	last = query.last_updated.value
+
+	should_fail["v"] = True
+	query.invalidate()  # marks stale + triggers refetch
+	await wait_for(lambda: query.status() == "error")
+
+	# invalidated persists across the failed refetch → still stale
+	assert query.is_stale(1000.0)
+	# the error did not bump the "last successful update" timestamp
+	assert query.last_updated.value == last
+
+	result.dispose()
+
+
+@pytest.mark.asyncio
 async def test_is_stale_clears_after_refetch():
 	store = QueryStore()
 	counter = FetchCounter()
@@ -295,3 +330,36 @@ async def test_session_connection_drives_query_suspension():
 
 	result.dispose()
 	session.close()
+
+
+@pytest.mark.asyncio
+async def test_resume_fetch_runs_with_session_context():
+	"""A reconnect-triggered refetch must carry the session in PulseContext,
+	just like an initial fetch — so a fetch_fn reading ps.session() works.
+
+	connect() inherits the session from the caller's context (the orchestration
+	layer wraps it), rather than taking it as a parameter."""
+	sentinel = object()
+	render = RenderSession("test-id", RouteTree([]))
+	store = render.query_store
+	seen: list[Any] = []
+
+	async def fetcher() -> int:
+		seen.append(ps.PulseContext.get().session)
+		return 1
+
+	result = KeyedQueryResult(
+		Computed(lambda: store.ensure(("a",))), fetch_fn=fetcher, stale_time=0.0
+	)
+	await wait_for(lambda: result.data == 1)
+
+	# Disconnect (suspend), then reconnect inside the owning session's context
+	render.disconnect()
+	with ps.PulseContext.update(session=sentinel, render=render):
+		render.connect(lambda msg: None)
+
+	# The resume-triggered refetch observed the session in context
+	await wait_for(lambda: sentinel in seen)
+
+	result.dispose()
+	render.close()

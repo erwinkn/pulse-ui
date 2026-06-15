@@ -877,29 +877,34 @@ class App:
 						self.close_session_if_inactive(session.sid)
 					raise ConnectionRefusedError("Socket connection denied")
 
-			def on_message(message: ServerMessage):
-				payload = serialize(message)
-				# `serialize` returns a tuple, which socket.io will mistake for multiple arguments
-				payload = list(payload)
-				self._tasks.create_task(self.sio.emit("message", list(payload), to=sid))
+				# Bind the socket inside the session context so query resume
+				# (and recreated interval effects) capture the same
+				# (session, render) context as initial fetches.
+				def on_message(message: ServerMessage):
+					payload = serialize(message)
+					# `serialize` returns a tuple, which socket.io will mistake for multiple arguments
+					payload = list(payload)
+					self._tasks.create_task(
+						self.sio.emit("message", list(payload), to=sid)
+					)
 
-			render.connect(on_message)
-			# Map socket sid to renderId for message routing. If the client
-			# reconnected before the old socket's disconnect fired, unmap the
-			# old socket so its late disconnect can't tear down this connection.
-			old_sid = self._render_to_socket.get(rid)
-			if old_sid is not None and old_sid != sid:
-				self._socket_to_render.pop(old_sid, None)
-			self._socket_to_render[sid] = rid
-			self._render_to_socket[rid] = sid
+				render.connect(on_message)
+				# Map socket sid to renderId for message routing. If the client
+				# reconnected before the old socket's disconnect fired, unmap the
+				# old socket so its late disconnect can't tear down this connection.
+				old_sid = self._render_to_socket.get(rid)
+				if old_sid is not None and old_sid != sid:
+					self._socket_to_render.pop(old_sid, None)
+				self._socket_to_render[sid] = rid
+				self._render_to_socket[rid] = sid
 
-			# Cancel any pending cleanup since session is now connected
-			self._cancel_render_cleanup(rid)
+				# Cancel any pending cleanup since session is now connected
+				self._cancel_render_cleanup(rid)
 
-			# Now that the socket is bound, surface any connect-middleware error
-			# (reported pre-bind it would be dropped for a fresh render).
-			if connect_error is not None:
-				render.report_error("/", "connect", connect_error)
+				# Surface any connect-middleware error now that the socket is bound
+				# (reported pre-bind it would be dropped for a fresh render).
+				if connect_error is not None:
+					render.report_error("/", "connect", connect_error)
 
 		@self.sio.event
 		def disconnect(sid: str):  # pyright: ignore[reportUnusedFunction]

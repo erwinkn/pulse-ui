@@ -2085,3 +2085,40 @@ async def test_reprerender_does_not_accumulate_objects():
 	assert after == baseline
 
 	session.close()
+
+
+@pytest.mark.asyncio
+async def test_async_callback_error_reports_real_traceback():
+	"""An async callback that raises is reported from a task done-callback —
+	outside any `except` block — so report_error must still produce a real
+	stack (not the "NoneType: None" that traceback.format_exc() would give)."""
+
+	@ps.component
+	def Page():
+		async def on_click():
+			raise ValueError("async boom")
+
+		return ps.button(onClick=on_click)["go"]
+
+	routes = RouteTree([Route("a", Page)])
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	session.execute_callback("/a", first_callback_key(session, "/a"), [])
+	await wait_for(lambda: any(m["type"] == "server_error" for m in messages))
+
+	errors = [m for m in messages if m["type"] == "server_error"]
+	assert len(errors) == 1
+	err = cast(Any, errors[0])["error"]
+	assert err["phase"] == "callback"
+	assert err["details"]["async"] is True
+	assert "async boom" in err["stack"]
+	assert "ValueError" in err["stack"]
+	assert "NoneType: None" not in err["stack"]
+
+	session.close()

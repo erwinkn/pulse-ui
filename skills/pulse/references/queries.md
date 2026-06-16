@@ -22,7 +22,7 @@ class UserState(ps.State):
     stale_time=0,            # Seconds before data considered stale (default 0)
     gc_time=300.0,           # Seconds before unused cache is garbage collected
     retries=3,               # Retry attempts on failure
-    retry_delay=2.0,         # Delay between retries in seconds
+    retry_delay=2.0,         # Base delay (s); exponential backoff, doubles each retry, capped at 30s
     keep_previous_data=True, # Keep old data while refetching
     enabled=True,            # Whether query runs automatically (default True)
     fetch_on_mount=True,     # Fetch when component mounts (default True)
@@ -91,6 +91,10 @@ async def lazy_data(self) -> T: ...
 async def live_data(self) -> T: ...
 ```
 
+Interval polling pauses while the client is disconnected. On reconnect,
+intervals restart with a catch-up fetch and non-interval queries refetch if
+stale (older than `stale_time` or invalidated).
+
 Enable/disable programmatically:
 
 ```python
@@ -117,7 +121,7 @@ state.user.is_scheduled # True if a refetch is scheduled/running
 
 ```python
 state.user.refetch()     # Force refetch
-state.user.invalidate()  # Mark stale, refetch if observed
+state.user.invalidate()  # Mark stale; refetch now if observed, else on next observe/reconnect
 state.user.set_data(val) # Manually set data (optimistic update)
 await state.user.wait()  # Wait for current fetch to complete
 state.user.enable()      # Enable the query

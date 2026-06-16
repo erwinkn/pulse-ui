@@ -14,7 +14,7 @@ from typing import (
 	override,
 )
 
-from pulse.context import PulseContext
+from pulse.context import PULSE_CONTEXT
 from pulse.helpers import (
 	MISSING,
 	Disposable,
@@ -42,6 +42,7 @@ from pulse.state.state import State
 
 if TYPE_CHECKING:
 	from pulse.queries.protocol import QueryResult
+	from pulse.queries.store import QueryStore
 
 T = TypeVar("T")
 TState = TypeVar("TState", bound=State)
@@ -49,6 +50,7 @@ TState = TypeVar("TState", bound=State)
 RETRY_DELAY_DEFAULT = 2.0 if not is_pytest() else 0.01
 RETRY_MAX_DELAY = 30.0
 """Cap on the exponential backoff between retries (seconds), matching TanStack Query."""
+STATE_LOCAL_QUERY_STORE = "_pulse_local_query_store"
 
 
 def retry_backoff_delay(
@@ -64,6 +66,21 @@ def retry_backoff_delay(
 	long before that anyway.
 	"""
 	return min(base * 2.0 ** min(attempt, 1000), cap)
+
+
+def query_store_for_state(state: State) -> "QueryStore":
+	"""Return the render store, or a private state-local store outside render."""
+	ctx = PULSE_CONTEXT.get()
+	if ctx is not None and ctx.render is not None:
+		return ctx.render.query_store
+
+	store = getattr(state, STATE_LOCAL_QUERY_STORE, None)
+	if store is None:
+		from pulse.queries.store import QueryStore
+
+		store = QueryStore()
+		setattr(state, STATE_LOCAL_QUERY_STORE, store)
+	return store
 
 
 @dataclass(slots=True)
@@ -1318,10 +1335,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 			const_key = self._key  # ensure a constant reference
 			key_computed = Computed(lambda: const_key, name=f"query.key.{self.name}")
 
-		render = PulseContext.get().render
-		if render is None:
-			raise RuntimeError("No render session available")
-		store = render.query_store
+		store = query_store_for_state(state)
 
 		def query() -> KeyedQuery[T]:
 			key = key_computed()
@@ -1364,8 +1378,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 	) -> UnkeyedQueryResult[T]:
 		"""Create a private unkeyed query, registered with the session store
 		so it participates in suspend/resume."""
-		render = PulseContext.get().render
-		store = render.query_store if render is not None else None
+		store = query_store_for_state(state)
 		result = UnkeyedQueryResult[T](
 			fetch_fn=fetch_fn,
 			on_success=bind_state(state, self._on_success_fn)
@@ -1384,10 +1397,9 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 			refetch_interval=self._refetch_interval,
 			enabled=self._enabled,
 			fetch_on_mount=self._fetch_on_mount,
-			on_dispose=store.unregister_unkeyed if store is not None else None,
+			on_dispose=store.unregister_unkeyed,
 		)
-		if store is not None:
-			store.register_unkeyed(result)
+		store.register_unkeyed(result)
 		return result
 
 	def __get__(self, obj: Any, objtype: Any = None) -> "QueryResult[T]":

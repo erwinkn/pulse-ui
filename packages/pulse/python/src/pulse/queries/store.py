@@ -1,8 +1,8 @@
 import datetime as dt
 from collections.abc import Callable
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar, cast, override
 
-from pulse.helpers import MISSING, Missing
+from pulse.helpers import MISSING, Disposable, Missing
 from pulse.queries.common import Key, QueryKey, normalize_key
 from pulse.queries.infinite_query import InfiniteQuery, Page
 from pulse.queries.query import RETRY_DELAY_DEFAULT, KeyedQuery, UnkeyedQueryResult
@@ -10,7 +10,7 @@ from pulse.queries.query import RETRY_DELAY_DEFAULT, KeyedQuery, UnkeyedQueryRes
 T = TypeVar("T")
 
 
-class QueryStore:
+class QueryStore(Disposable):
 	"""
 	Store for query entries. Manages creation, retrieval, and disposal of queries.
 
@@ -171,3 +171,7 @@ class QueryStore:
 		self._entries.clear()
 		# Unkeyed results are owned and disposed by their States; just drop refs
 		self._unkeyed.clear()
+
+	@override
+	def dispose(self) -> None:
+		self.dispose_all()

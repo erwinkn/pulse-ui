@@ -7,7 +7,12 @@ import pulse as ps
 import pytest
 from pulse.helpers import MISSING
 from pulse.queries.protocol import QueryResult
-from pulse.queries.query import KeyedQuery, KeyedQueryResult, UnkeyedQueryResult
+from pulse.queries.query import (
+	STATE_LOCAL_QUERY_STORE,
+	KeyedQuery,
+	KeyedQueryResult,
+	UnkeyedQueryResult,
+)
 from pulse.queries.store import QueryStore
 from pulse.reactive import Computed, Untrack
 from pulse.render_session import RenderSession
@@ -3621,3 +3626,43 @@ def test_retry_backoff_delay_is_exponential_and_capped():
 	# Absurd attempt counts (retries >= 1024) must not overflow the float
 	assert retry_backoff_delay(1.0, 5000) == RETRY_MAX_DELAY
 	assert retry_backoff_delay(2.0, 100000) == RETRY_MAX_DELAY
+
+
+@pytest.mark.asyncio
+async def test_unkeyed_state_query_uses_local_store_without_render_context():
+	assert ps.PulseContext.get().render is None
+
+	class S(ps.State):
+		@ps.query(retries=0)
+		async def value(self) -> int:
+			return 1
+
+	state = S()
+	query = state.value
+	await query.wait()
+	assert query.data == 1
+
+	store = getattr(state, STATE_LOCAL_QUERY_STORE)
+	assert query in store._unkeyed  # pyright: ignore[reportPrivateUsage]
+	state.dispose()
+	assert store._unkeyed == set()  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
+async def test_keyed_state_query_uses_local_store_without_render_context():
+	assert ps.PulseContext.get().render is None
+
+	class S(ps.State):
+		@ps.query(retries=0, key=("value",))
+		async def value(self) -> int:
+			return 1
+
+	state = S()
+	query = state.value
+	await query.wait()
+	assert query.data == 1
+
+	store = getattr(state, STATE_LOCAL_QUERY_STORE)
+	assert store.get(("value",)) is not None
+	state.dispose()
+	assert store.get(("value",)) is None

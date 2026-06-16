@@ -12,10 +12,12 @@ export function serialize(data: Serializable): Serialized {
 	const sets: number[] = [];
 	const maps: number[] = [];
 
-	// Single global counter - increments once per node visit
+	// Single global counter - increments once per payload node visit
 	let globalIndex = 0;
 
 	function process(value: Serializable, context?: string): PlainJSON {
+		const idx = globalIndex++;
+
 		if (value == null || typeof value === "string" || typeof value === "boolean") {
 			return value;
 		}
@@ -34,7 +36,6 @@ export function serialize(data: Serializable): Serialized {
 			return value;
 		}
 
-		const idx = globalIndex++;
 		const prevRef = seen.get(value);
 		if (prevRef !== undefined) {
 			// Make sure to push the current index, but use the ref's index as the value!
@@ -111,15 +112,19 @@ export function deserialize<Data extends Serializable = Serializable>(
 	const sets = new Set(setsA);
 	const maps = new Set(mapsA);
 
-	const objects: Array<any> = [];
+	const objects = new Map<number, any>();
+	let globalIndex = 0;
 
 	function reconstruct(value: PlainJSON): any {
-		const idx = objects.length;
+		const idx = globalIndex++;
 		if (refs.has(idx)) {
-			// We increment the counter on refs during serialization. We're never
-			// going to use this entry, so we can just push null.
-			objects.push(null);
-			return objects[value as number];
+			if (typeof value !== "number") {
+				throw new Error("Reference payload must be a numeric index");
+			}
+			if (!objects.has(value)) {
+				throw new Error(`Dangling reference to index ${value}`);
+			}
+			return objects.get(value);
 		}
 
 		if (dates.has(idx)) {
@@ -130,14 +135,14 @@ export function deserialize<Data extends Serializable = Serializable>(
 			if (literal) {
 				const [y, m, d] = literal;
 				const dt = new Date(Date.UTC(y, m - 1, d));
-				objects.push(dt);
+				objects.set(idx, dt);
 				return dt;
 			}
 			if (isDateLiteral(value)) {
 				throw new Error(`Invalid date literal: ${value}`);
 			}
 			const dt = new Date(value);
-			objects.push(dt);
+			objects.set(idx, dt);
 			return dt;
 		}
 
@@ -156,7 +161,7 @@ export function deserialize<Data extends Serializable = Serializable>(
 		if (Array.isArray(value)) {
 			if (sets.has(idx)) {
 				const result = new Set();
-				objects.push(result);
+				objects.set(idx, result);
 				for (let i = 0; i < value.length; i++) {
 					result.add(reconstruct(value[i]));
 				}
@@ -165,7 +170,7 @@ export function deserialize<Data extends Serializable = Serializable>(
 
 			const length = value.length;
 			const arr = new Array(length);
-			objects.push(arr);
+			objects.set(idx, arr);
 			for (let i = 0; i < length; i++) {
 				arr[i] = reconstruct(value[i]);
 			}
@@ -175,7 +180,7 @@ export function deserialize<Data extends Serializable = Serializable>(
 		if (typeof value === "object") {
 			if (maps.has(idx)) {
 				const result = new Map<string, any>();
-				objects.push(result);
+				objects.set(idx, result);
 				const keys = Object.keys(value);
 				for (let i = 0; i < keys.length; i++) {
 					const key = keys[i];
@@ -185,7 +190,7 @@ export function deserialize<Data extends Serializable = Serializable>(
 			}
 
 			const result: Record<string, any> = {};
-			objects.push(result);
+			objects.set(idx, result);
 			const keys = Object.keys(value);
 			for (let i = 0; i < keys.length; i++) {
 				const key = keys[i];

@@ -140,6 +140,39 @@ describe("v4 serialization", () => {
 		// shared reference must be preserved at same indices
 		expect(parsed.when).toBe(parsed.same);
 	});
+	it("does not collide ref indices with string primitives", () => {
+		const shared = { domain: ["a", "b"] };
+		const data = { a: shared, b: shared };
+
+		const ser = serialize(data);
+		const parsed: any = deserialize(ser);
+
+		expect(parsed.a.domain).toEqual(["a", "b"]);
+		expect(parsed.a).toBe(parsed.b);
+	});
+	it("does not corrupt numeric primitives at ref indices", () => {
+		const shared: any[] = [];
+		const data = [shared, 0, shared];
+
+		const ser = serialize(data);
+		const parsed: any = deserialize(ser);
+
+		expect(parsed[0]).toBe(parsed[2]);
+		expect(parsed[1]).toBe(0);
+		expect(parsed[1]).not.toBe(parsed);
+	});
+	it("does not collide date indices with string primitives", () => {
+		const day = new Date("2024-01-02T00:00:00.000Z");
+		const data = { label: "2024-01-02", day };
+
+		const ser = serialize(data);
+		const parsed: any = deserialize(ser);
+
+		expect(parsed.label).toBe("2024-01-02");
+		expect(typeof parsed.label).toBe("string");
+		expect(parsed.day).toBeInstanceOf(Date);
+		expect(parsed.day.toISOString()).toBe("2024-01-02T00:00:00.000Z");
+	});
 	it("decodes date literals as UTC midnight dates", () => {
 		const ser: Serialized = [[[], [0], [], []], "2024-01-02"];
 		const parsed = deserialize(ser) as Date;

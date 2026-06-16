@@ -103,6 +103,42 @@ def test_dates_and_shared_references_v3():
 	assert parsed["when"] is parsed["same"]
 
 
+def test_ref_index_does_not_collide_with_string_primitive_v4():
+	shared = {"domain": ["a", "b"]}
+	data = {"a": shared, "b": shared}
+
+	payload = serialize(data)
+	parsed = deserialize(payload)
+
+	assert parsed["a"]["domain"] == ["a", "b"]
+	assert parsed["a"] is parsed["b"]
+
+
+def test_ref_index_does_not_corrupt_numeric_primitive_v4():
+	shared: list[object] = []
+	data = [shared, 0.0, shared]
+
+	payload = serialize(data)
+	parsed = deserialize(payload)
+
+	assert parsed[0] is parsed[2]
+	assert parsed[1] == 0.0
+	assert parsed[1] is not parsed
+
+
+def test_date_index_does_not_collide_with_string_primitive_v4():
+	day = dt.date(2024, 1, 2)
+	data = {"label": "2024-01-02", "day": day}
+
+	payload = serialize(data)
+	parsed = deserialize(payload)
+
+	assert parsed["label"] == "2024-01-02"
+	assert isinstance(parsed["label"], str)
+	assert parsed["day"] == day
+	assert isinstance(parsed["day"], dt.date)
+
+
 def test_date_roundtrip_v4():
 	day = dt.date(2024, 1, 2)
 	data = {"day": day}

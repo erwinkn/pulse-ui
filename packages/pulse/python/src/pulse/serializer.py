@@ -22,8 +22,8 @@ Serialized payload structure::
 - ``maps``  – indices that are ``Map`` instances; payload is an object mapping
   string keys to child payloads. Python reconstructs these as ``dict``.
 
-Nodes are assigned a single global index as they are visited (non-primitives
-only). This preserves shared references and cycles across nested structures
+Every payload node is assigned a single global index as it is visited. This
+preserves shared references and cycles across nested structures
 containing primitives, lists/tuples, ``dict``/plain objects, ``set``, ``date``
 and ``datetime`` objects.
 """
@@ -102,6 +102,9 @@ def serialize(data: Any) -> Serialized:
 
 	def process(value: Any) -> PlainJSON:
 		nonlocal global_index
+		idx = global_index
+		global_index += 1
+
 		if value is None or isinstance(value, (bool, int, str)):
 			return value
 		if isinstance(value, float):
@@ -113,9 +116,6 @@ def serialize(data: Any) -> Serialized:
 					+ "Replace with None or a sentinel value."
 				)
 			return value
-
-		idx = global_index
-		global_index += 1
 
 		obj_id = id(value)
 		prev_ref = seen.get(obj_id)
@@ -218,19 +218,20 @@ def deserialize(
 	sets = set(sets)
 	# we don't care about maps
 
-	objects: list[Any] = []
+	objects: dict[int, Any] = {}
+	global_index = 0
 
 	def reconstruct(value: PlainJSON) -> Any:
-		idx = len(objects)
+		nonlocal global_index
+		idx = global_index
+		global_index += 1
 
 		if idx in refs:
 			assert isinstance(value, (int, float)), (
 				"Reference payload must be numeric index"
 			)
-			# Placeholder to keep indices aligned
-			objects.append(None)
 			target_index = int(value)
-			assert 0 <= target_index < len(objects), (
+			assert target_index in objects, (
 				f"Dangling reference to index {target_index}"
 			)
 			return objects[target_index]
@@ -239,10 +240,10 @@ def deserialize(
 			assert isinstance(value, str), "Date payload must be an ISO string"
 			if _is_date_literal(value):
 				date_value = dt.date.fromisoformat(value)
-				objects.append(date_value)
+				objects[idx] = date_value
 				return date_value
 			dt_value = _datetime_from_iso(value)
-			objects.append(dt_value)
+			objects[idx] = dt_value
 			return dt_value
 
 		if value is None:
@@ -254,12 +255,12 @@ def deserialize(
 		if isinstance(value, list):
 			if idx in sets:
 				result_set: set[Any] = set()
-				objects.append(result_set)
+				objects[idx] = result_set
 				for entry in value:
 					result_set.add(reconstruct(entry))
 				return result_set
 			result_list: list[Any] = []
-			objects.append(result_list)
+			objects[idx] = result_list
 			for entry in value:
 				result_list.append(reconstruct(entry))
 			return result_list
@@ -267,7 +268,7 @@ def deserialize(
 		if isinstance(value, dict):
 			# Both maps and records are reconstructed as dictionaries in Python
 			result_dict: dict[str, Any] = {}
-			objects.append(result_dict)
+			objects[idx] = result_dict
 			for key, entry in value.items():
 				result_dict[str(key)] = reconstruct(entry)
 			return result_dict

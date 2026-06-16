@@ -25,7 +25,8 @@ Serialize a Python value to wire format.
 **Supported types:**
 - Primitives: `None`, `bool`, `int`, `float`, `str`
 - Collections: `list`, `tuple`, `dict`, `set`
-- `datetime.datetime` (converted to milliseconds since Unix epoch)
+- `datetime.datetime` (converted to ISO 8601 UTC strings)
+- `datetime.date` (converted to ISO 8601 date strings)
 - Dataclasses (serialized as dict of fields)
 - Objects with `__dict__` (public attributes only)
 
@@ -65,6 +66,7 @@ Deserialize wire format back to Python values.
 
 **Notes:**
 - `datetime` values are reconstructed as UTC-aware
+- `date` values are reconstructed as `datetime.date`
 - `set` values are reconstructed as Python sets
 - Shared references and cycles are restored
 
@@ -102,10 +104,10 @@ The serialized format is a tuple:
 ((refs, dates, sets, maps), payload)
 ```
 
-- `refs` - Indices where the value is a reference to a previously visited node
-- `dates` - Indices that are `datetime` objects (stored as millisecond timestamps)
-- `sets` - Indices that are `set` objects (stored as arrays)
-- `maps` - Indices that are `Map` objects (for JS interop)
+- `refs` - Payload-node indices where the value is a reference to a previously visited node
+- `dates` - Payload-node indices that are `date` or `datetime` objects
+- `sets` - Payload-node indices that are `set` objects (stored as arrays)
+- `maps` - Payload-node indices that are `Map` objects (for JS interop)
 
 This format preserves:
 - Shared references (same object referenced multiple times)

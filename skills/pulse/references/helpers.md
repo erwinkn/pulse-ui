@@ -146,7 +146,8 @@ serialized = ps.serialize(data)
 **Supported types:**
 - Primitives: `None`, `bool`, `int`, `float`, `str`
 - Collections: `list`, `tuple`, `dict`, `set`
-- `datetime.datetime` (as milliseconds since Unix epoch)
+- `datetime.datetime` (as ISO 8601 UTC strings)
+- `datetime.date` (as ISO 8601 date strings)
 - Dataclasses (as dict of fields)
 - Objects with `__dict__` (public attributes only)
 

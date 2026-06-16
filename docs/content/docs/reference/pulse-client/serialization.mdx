@@ -43,7 +43,7 @@ A tuple containing:
 | `null`, `undefined` | Passed through |
 | `boolean`, `string` | Passed through |
 | `number` | Passed through (NaN becomes null, Infinity throws) |
-| `Date` | Converted to timestamp |
+| `Date` | Converted to ISO 8601 string |
 | `Array` | Recursively processed |
 | `Set` | Converted to array |
 | `Map` | Converted to object (string keys only) |
@@ -63,7 +63,7 @@ const data = {
 };
 
 const serialized = serialize(data);
-// [[[], [0], [1], [2]], { name: "Alice", createdAt: 1705276800000, tags: ["admin", "active"], metadata: { version: 1 } }]
+// [[[], [2], [3], [6]], { name: "Alice", createdAt: "2024-01-15T00:00:00.000Z", tags: ["admin", "active"], metadata: { version: 1 } }]
 ```
 
 ### Circular References
@@ -131,10 +131,10 @@ The reconstructed JavaScript value with proper types restored.
 import { deserialize } from "pulse-ui-client";
 
 const serialized: Serialized = [
-  [[], [0], [1], [2]],
+  [[], [2], [3], [6]],
   {
     name: "Alice",
-    createdAt: 1705276800000,
+    createdAt: "2024-01-15T00:00:00.000Z",
     tags: ["admin", "active"],
     metadata: { version: 1 },
   },
@@ -180,18 +180,20 @@ type Serialized = [
 
 ### Index Tracking
 
-During serialization, a global counter increments for each visited node. The metadata arrays record which indices are special types:
+During serialization, a global counter increments for each visited payload node, including primitives. The metadata arrays record which indices are special types:
 
 ```ts
 // Example: { date: new Date(), items: new Set([1, 2]) }
 // Index 0: root object
 // Index 1: Date at "date" key
 // Index 2: Set at "items" key
+// Index 3: number 1 inside the Set
+// Index 4: number 2 inside the Set
 
 // Serialized:
 [
   [[], [1], [2], []],  // dates=[1], sets=[2]
-  { date: 1705276800000, items: [1, 2] }
+  { date: "2024-01-15T00:00:00.000Z", items: [1, 2] }
 ]
 ```
 
@@ -204,7 +206,7 @@ a.ref = b;  // circular
 
 // Serialized:
 [
-  [[3], [], [], []],  // refs=[3] (index 3 is a back-reference)
+  [[4], [], [], []],  // refs=[4] (index 4 is a back-reference)
   { name: "a", ref: { name: "b", ref: 0 } }
   //                              ^ references index 0
 ]

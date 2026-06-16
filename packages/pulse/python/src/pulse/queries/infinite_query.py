@@ -35,7 +35,12 @@ from pulse.queries.common import (
 	bind_state,
 	normalize_key,
 )
-from pulse.queries.query import RETRY_DELAY_DEFAULT, QueryConfig
+from pulse.queries.query import (
+	RETRY_DELAY_DEFAULT,
+	QueryConfig,
+	SuspendableQuery,
+	retry_backoff_delay,
+)
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.reactive_extensions import ReactiveList, unwrap
 from pulse.scheduling import TimerHandleLike, create_task, later
@@ -142,7 +147,7 @@ class InfiniteQueryConfig(QueryConfig[list[Page[T, TParam]]], Generic[T, TParam]
 	max_pages: int
 
 
-class InfiniteQuery(Generic[T, TParam], Disposable):
+class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
 	"""Paginated query that stores data as a list of Page(data, param)."""
 
 	key: Key
@@ -184,6 +189,10 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 			observer = self._interval_observer
 			if observer is None:
 				return
+			# Don't stack a refetch behind one already queued/in flight (matches
+			# KeyedQuery's interval guard; also covers the resume() catch-up tick).
+			if self._has_pending_work():
+				return
 			self.invalidate(fetch_fn=observer._fetch_fn, observer=observer)  # pyright: ignore[reportPrivateUsage]
 
 		return Effect(
@@ -201,16 +210,48 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		self._interval_observer = new_observer
 
 		if not interval_changed:
-			if self._interval_effect is None and new_interval is not None:
+			if (
+				self._interval_effect is None
+				and new_interval is not None
+				and not self._suspended
+			):
 				self._interval_effect = self._create_interval_effect(new_interval)
 			return
 
-		if self._interval_effect is not None:
-			self._interval_effect.dispose()
-			self._interval_effect = None
+		self._dispose_interval_effect()
 
-		if new_interval is not None:
+		if new_interval is not None and not self._suspended:
 			self._interval_effect = self._create_interval_effect(new_interval)
+
+	def is_stale(self, stale_time: float = 0.0) -> bool:
+		"""Whether the data is invalidated or older than stale_time seconds."""
+		if self.invalidated:
+			return True
+		return (time.time() - self.last_updated.read()) > stale_time
+
+	@override
+	def _resume_after_suspend(self) -> None:
+		# Recreating the interval effect runs an immediate catch-up fetch
+		self._update_interval()
+		if self._interval is not None:
+			return
+		observers = [obs for obs in self._observers if obs._enabled.value]  # pyright: ignore[reportPrivateUsage]
+		if not observers:
+			return
+		stale_time = min(obs._stale_time for obs in observers)  # pyright: ignore[reportPrivateUsage]
+		# Don't stack a refetch behind an action that's already queued or
+		# running (e.g. a slow initial fetch still in flight at reconnect).
+		if self.is_stale(stale_time) and not self._has_pending_work():
+			self.invalidate(
+				fetch_fn=observers[0]._fetch_fn,  # pyright: ignore[reportPrivateUsage]
+				observer=observers[0],
+			)
+
+	def _has_pending_work(self) -> bool:
+		"""Whether an action is queued or a fetch task is in flight."""
+		if self._queue:
+			return True
+		return self._queue_task is not None and not self._queue_task.done()
 
 	# Reactive state
 	pages: ReactiveList[Page[T, TParam]]
@@ -234,6 +275,8 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 	_interval_effect: Effect | None
 	_interval: float | None
 	_interval_observer: "InfiniteQueryResult[T, TParam] | None"
+	_suspended: bool
+	invalidated: bool
 
 	def __init__(
 		self,
@@ -295,9 +338,10 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		self._queue_task = None
 		self._observers = []
 		self._gc_handle = None
-		self._interval_effect = None
 		self._interval = None
 		self._interval_observer = None
+		self._init_suspendable_query()
+		self.invalidated = False
 
 	# ─────────────────────────────────────────────────────────────────────────
 	# Commit functions - update state after pages have been modified
@@ -325,15 +369,19 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		"""Synchronous commit - updates state based on current pages."""
 		self._update_has_more()
 		self.last_updated.write(time.time())
+		self.invalidated = False
 		self.error.write(None)
 		self.status.write("success")
 		self.retries.write(0)
 		self.retry_reason.write(None)
 
 	def _commit_error_sync(self, error: Exception):
-		"""Synchronous error commit for set_error (no callbacks)."""
+		"""Synchronous error commit for set_error (no callbacks).
+
+		Leaves ``last_updated`` (last successful fetch) and ``invalidated``
+		untouched so a failed refetch stays stale, matching TanStack Query.
+		"""
 		self.error.write(error)
-		self.last_updated.write(time.time())
 		self.status.write("error")
 		self.is_fetching.write(False)
 
@@ -444,7 +492,12 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		fetch_fn: Callable[[TParam], Awaitable[T]] | None = None,
 		observer: "InfiniteQueryResult[T, TParam] | None" = None,
 	):
-		"""Enqueue a refetch. Synchronous - does not wait for completion."""
+		"""Enqueue a refetch. Synchronous - does not wait for completion.
+
+		Without observers, the stale mark persists so the next observer (or a
+		session resume) refetches.
+		"""
+		self.invalidated = True
 		if cancel_fetch:
 			self._cancel_queue()
 		if len(self._observers) > 0:
@@ -596,9 +649,12 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 					except asyncio.CancelledError:
 						raise
 					except Exception as e:
-						if self.retries.read() < self.cfg.retries:
+						attempt = self.retries.read()
+						if attempt < self.cfg.retries:
 							self._record_retry(e)
-							await asyncio.sleep(self.cfg.retry_delay)
+							await asyncio.sleep(
+								retry_backoff_delay(self.cfg.retry_delay, attempt)
+							)
 							continue
 						raise
 			except asyncio.CancelledError:
@@ -813,9 +869,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		self._cancel_queue()
 		if self._queue_task and not self._queue_task.done():
 			self._queue_task.cancel()
-		if self._interval_effect is not None:
-			self._interval_effect.dispose()
-			self._interval_effect = None
+		self._dispose_interval_effect()
 		if self.cfg.on_dispose:
 			self.cfg.on_dispose(self)
 
@@ -1001,8 +1055,7 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		return isinstance(self._query().current_action(), FetchPrevious)
 
 	def is_stale(self) -> bool:
-		query = self._query()
-		return (time.time() - query.last_updated.read()) > self._stale_time
+		return self._query().is_stale(self._stale_time)
 
 	async def fetch_next_page(
 		self,
@@ -1502,7 +1555,8 @@ def infinite_query(
 		refetch_interval: Auto-refetch interval in seconds (default None).
 		keep_previous_data: Keep previous data while loading (default False).
 		retries: Number of retry attempts on failure (default 3).
-		retry_delay: Delay between retries in seconds (default 2.0).
+		retry_delay: Base delay (seconds) for exponential backoff between
+			retries — doubles each attempt, capped at 30s (default 2.0).
 		initial_data_updated_at: Timestamp for initial data staleness.
 		enabled: Whether query is enabled (default True).
 		fetch_on_mount: Fetch when component mounts (default True).

@@ -14,7 +14,7 @@ from typing import (
 	override,
 )
 
-from pulse.context import PulseContext
+from pulse.context import PULSE_CONTEXT
 from pulse.helpers import (
 	MISSING,
 	Disposable,
@@ -42,11 +42,45 @@ from pulse.state.state import State
 
 if TYPE_CHECKING:
 	from pulse.queries.protocol import QueryResult
+	from pulse.queries.store import QueryStore
 
 T = TypeVar("T")
 TState = TypeVar("TState", bound=State)
 
 RETRY_DELAY_DEFAULT = 2.0 if not is_pytest() else 0.01
+RETRY_MAX_DELAY = 30.0
+"""Cap on the exponential backoff between retries (seconds), matching TanStack Query."""
+STATE_LOCAL_QUERY_STORE = "_pulse_local_query_store"
+
+
+def retry_backoff_delay(
+	base: float, attempt: int, cap: float = RETRY_MAX_DELAY
+) -> float:
+	"""Exponential backoff for a 0-based retry attempt.
+
+	Mirrors TanStack Query's default ``min(base * 2**attempt, cap)``: the delay
+	doubles each retry so a flaky endpoint is not hammered at a fixed interval.
+
+	The exponent is clamped so an absurd ``retries`` count can't overflow the
+	float conversion (``2**1024`` exceeds the max float); the result is capped
+	long before that anyway.
+	"""
+	return min(base * 2.0 ** min(attempt, 1000), cap)
+
+
+def query_store_for_state(state: State) -> "QueryStore":
+	"""Return the render store, or a private state-local store outside render."""
+	ctx = PULSE_CONTEXT.get()
+	if ctx is not None and ctx.render is not None:
+		return ctx.render.query_store
+
+	store = getattr(state, STATE_LOCAL_QUERY_STORE, None)
+	if store is None:
+		from pulse.queries.store import QueryStore
+
+		store = QueryStore()
+		setattr(state, STATE_LOCAL_QUERY_STORE, store)
+	return store
 
 
 @dataclass(slots=True)
@@ -58,7 +92,9 @@ class QueryConfig(Generic[T]):
 
 	Attributes:
 		retries: Number of retry attempts on failure (default 3).
-		retry_delay: Delay in seconds between retry attempts (default 2.0).
+		retry_delay: Base delay in seconds for exponential backoff between
+			retries; the delay doubles each attempt and is capped at 30s
+			(default 2.0).
 		initial_data: Initial data value or factory function.
 		initial_data_updated_at: Timestamp for initial data staleness calculation.
 		gc_time: Seconds to keep unused query in cache before garbage collection.
@@ -88,9 +124,13 @@ class QueryState(Generic[T]):
 		is_fetching: Signal indicating if a fetch is in progress.
 		retries: Signal with current retry attempt count.
 		retry_reason: Signal with exception from last failed retry.
+		invalidated: Whether the data was explicitly marked stale. Persists
+			until the next fetch completes, so invalidating an unobserved
+			query forces a refetch when it is next observed or resumed.
 	"""
 
 	cfg: QueryConfig[T]
+	invalidated: bool
 
 	# Reactive signals for query state
 	data: Signal[T | None | Missing]
@@ -141,6 +181,7 @@ class QueryState(Generic[T]):
 		self.is_fetching = Signal(False, name=f"query.is_fetching({name})")
 		self.retries = Signal(0, name=f"query.retries({name})")
 		self.retry_reason = Signal(None, name=f"query.retry_reason({name})")
+		self.invalidated = False
 
 	def set_data(
 		self,
@@ -186,6 +227,7 @@ class QueryState(Generic[T]):
 		"""Set success state with data."""
 		self.data.write(data)
 		self.last_updated.write(time.time())
+		self.invalidated = False
 		self.error.write(None)
 		self.status.write("success")
 		if not manual:
@@ -194,9 +236,14 @@ class QueryState(Generic[T]):
 			self.retry_reason.write(None)
 
 	def apply_error(self, error: Exception, manual: bool = False):
-		"""Apply error state to the query."""
+		"""Apply error state to the query.
+
+		Does not touch ``last_updated`` (which tracks the last successful data
+		fetch) nor clear ``invalidated``: a failed refetch must leave the query
+		stale so it remains eligible to refetch, matching TanStack Query (which
+		clears ``isInvalidated`` on success only).
+		"""
 		self.error.write(error)
-		self.last_updated.write(time.time())
 		self.status.write("error")
 		if not manual:
 			self.is_fetching.write(False)
@@ -251,7 +298,9 @@ async def run_fetch_with_retries(
 			current_retries = state.retries.read()
 			if current_retries < state.cfg.retries:
 				state.failed_retry(e)
-				await asyncio.sleep(state.cfg.retry_delay)
+				await asyncio.sleep(
+					retry_backoff_delay(state.cfg.retry_delay, current_retries)
+				)
 			else:
 				state.retry_reason.write(e)
 				state.apply_error(e)
@@ -261,7 +310,38 @@ async def run_fetch_with_retries(
 				return
 
 
-class KeyedQuery(Generic[T], Disposable):
+class SuspendableQuery:
+	_suspended: bool = False
+	_interval_effect: Effect | None = None
+
+	def _init_suspendable_query(self) -> None:
+		self._suspended = False
+		self._interval_effect = None
+
+	def _dispose_interval_effect(self) -> None:
+		if self._interval_effect is not None:
+			self._interval_effect.dispose()
+			self._interval_effect = None
+
+	def suspend(self) -> None:
+		"""Stop interval refetching while the session is disconnected."""
+		if self._suspended:
+			return
+		self._suspended = True
+		self._dispose_interval_effect()
+
+	def resume(self) -> None:
+		"""Restart interval refetching and refetch stale data on reconnect."""
+		if not self._suspended:
+			return
+		self._suspended = False
+		self._resume_after_suspend()
+
+	def _resume_after_suspend(self) -> None:
+		raise NotImplementedError
+
+
+class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 	"""
 	Query for keyed queries (shared across observers).
 	Uses direct task management without dependency tracking.
@@ -277,6 +357,7 @@ class KeyedQuery(Generic[T], Disposable):
 	_interval_effect: Effect | None
 	_interval: float | None
 	_interval_observer: "KeyedQueryResult[T] | None"
+	_suspended: bool
 
 	def __init__(
 		self,
@@ -302,9 +383,9 @@ class KeyedQuery(Generic[T], Disposable):
 		self._task = None
 		self._task_initiator = None
 		self._gc_handle = None
-		self._interval_effect = None
 		self._interval = None
 		self._interval_observer = None
+		self._init_suspendable_query()
 
 	# --- Delegate signal access to state ---
 	@property
@@ -500,16 +581,41 @@ class KeyedQuery(Generic[T], Disposable):
 		self._interval_observer = new_observer
 
 		if not interval_changed:
-			if self._interval_effect is None and new_interval is not None:
+			if (
+				self._interval_effect is None
+				and new_interval is not None
+				and not self._suspended
+			):
 				self._interval_effect = self._create_interval_effect(new_interval)
 			return
 
-		if self._interval_effect is not None:
-			self._interval_effect.dispose()
-			self._interval_effect = None
+		self._dispose_interval_effect()
 
-		if new_interval is not None:
+		if new_interval is not None and not self._suspended:
 			self._interval_effect = self._create_interval_effect(new_interval)
+
+	def is_stale(self, stale_time: float = 0.0) -> bool:
+		"""Whether the data is invalidated or older than stale_time seconds."""
+		if self.state.invalidated:
+			return True
+		return (time.time() - self.state.last_updated.read()) > stale_time
+
+	@override
+	def _resume_after_suspend(self) -> None:
+		# Recreating the interval effect runs an immediate catch-up fetch
+		self._update_interval()
+		if self._interval is not None:
+			return
+		observers = [obs for obs in self.observers if obs._enabled.value]  # pyright: ignore[reportPrivateUsage]
+		if not observers:
+			return
+		stale_time = min(obs._stale_time for obs in observers)  # pyright: ignore[reportPrivateUsage]
+		if self.is_stale(stale_time) and not self.is_scheduled:
+			self.run_fetch(
+				observers[0]._fetch_fn,  # pyright: ignore[reportPrivateUsage]
+				cancel_previous=False,
+				initiator=observers[0],
+			)
 
 	async def refetch(self, cancel_refetch: bool = True) -> ActionResult[T]:
 		"""
@@ -526,10 +632,12 @@ class KeyedQuery(Generic[T], Disposable):
 	def invalidate(self, cancel_refetch: bool = False):
 		"""
 		Marks query as stale. If there are active observers, triggers a refetch.
-		Uses the first observer's fetch function.
+		Without observers, the stale mark persists so the next observer (or a
+		session resume) refetches.
 
 		Note: Prefer calling invalidate() on KeyedQueryResult to ensure the correct fetch function is used.
 		"""
+		self.state.invalidated = True
 		if len(self.observers) > 0:
 			fetch_fn = self._get_first_observer_fetch_fn()
 			if not self.is_scheduled or cancel_refetch:
@@ -580,14 +688,12 @@ class KeyedQuery(Generic[T], Disposable):
 		"""Clean up the query, cancelling any in-flight fetch."""
 		self.cancel_gc()
 		self.cancel()
-		if self._interval_effect is not None:
-			self._interval_effect.dispose()
-			self._interval_effect = None
+		self._dispose_interval_effect()
 		if self.cfg.on_dispose:
 			self.cfg.on_dispose(self)
 
 
-class UnkeyedQueryResult(Generic[T], Disposable):
+class UnkeyedQueryResult(Generic[T], Disposable, SuspendableQuery):
 	"""
 	Query for unkeyed queries (single observer with dependency tracking).
 	Uses an AsyncEffect to track dependencies and re-run on changes.
@@ -607,6 +713,8 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 	_enabled: Signal[bool]
 	_interval_effect: Effect | None
 	_data_computed: Computed[T | None | Missing]
+	_suspended: bool
+	_on_dispose: "Callable[[UnkeyedQueryResult[T]], None] | None"
 
 	def __init__(
 		self,
@@ -623,6 +731,7 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 		keep_previous_data: bool = False,
 		enabled: bool = True,
 		fetch_on_mount: bool = True,
+		on_dispose: "Callable[[UnkeyedQueryResult[T]], None] | None" = None,
 	):
 		self.state = QueryState(
 			name="unkeyed",
@@ -645,7 +754,8 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 		self._refetch_interval = interval
 		self._keep_previous_data = keep_previous_data
 		self._enabled = Signal(enabled, name="query.enabled(unkeyed)")
-		self._interval_effect = None
+		self._init_suspendable_query()
+		self._on_dispose = on_dispose
 
 		# Create effect with auto-tracking (deps=None)
 		# Pass state as fetcher since it has the Signal attributes directly
@@ -756,7 +866,9 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 
 	# --- Query operations ---
 	def is_stale(self) -> bool:
-		"""Check if the query data is stale based on stale_time."""
+		"""Check if the query data is invalidated or stale based on stale_time."""
+		if self.state.invalidated:
+			return True
 		return (time.time() - self.state.last_updated.read()) > self._stale_time
 
 	async def _run(self):
@@ -805,6 +917,7 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 
 	def invalidate(self):
 		"""Mark the query as stale and refetch through the effect."""
+		self.state.invalidated = True
 		if not self.is_scheduled:
 			self.schedule()
 
@@ -813,11 +926,22 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 		self._effect.cancel(cancel_interval=False)
 
 	@override
+	def _resume_after_suspend(self) -> None:
+		if self._refetch_interval is not None:
+			# Recreating the interval effect runs an immediate catch-up fetch
+			self._setup_interval_effect(self._refetch_interval)
+			return
+		with Untrack():
+			if self._enabled.value and self.is_stale() and not self.is_scheduled:
+				self.schedule()
+
+	@override
 	def dispose(self):
 		"""Clean up the query and its effect."""
-		if self._interval_effect is not None:
-			self._interval_effect.dispose()
+		self._dispose_interval_effect()
 		self._effect.dispose()
+		if self._on_dispose is not None:
+			self._on_dispose(self)
 
 
 class KeyedQueryResult(Generic[T], Disposable):
@@ -939,9 +1063,8 @@ class KeyedQueryResult(Generic[T], Disposable):
 		return cast(T | None, value)
 
 	def is_stale(self) -> bool:
-		"""Check if the query data is stale based on stale_time."""
-		query = self._query()
-		return (time.time() - query.last_updated.read()) > self._stale_time
+		"""Check if the query data is invalidated or stale based on stale_time."""
+		return self._query().is_stale(self._stale_time)
 
 	async def refetch(self, cancel_refetch: bool = True) -> ActionResult[T]:
 		"""
@@ -970,6 +1093,7 @@ class KeyedQueryResult(Generic[T], Disposable):
 	def invalidate(self):
 		"""Mark the query as stale and refetch using this observer's fetch function."""
 		query = self._query()
+		query.state.invalidated = True
 		if not query.is_scheduled and len(query.observers) > 0:
 			query.run_fetch(self._fetch_fn, cancel_previous=False, initiator=self)
 
@@ -1211,10 +1335,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 			const_key = self._key  # ensure a constant reference
 			key_computed = Computed(lambda: const_key, name=f"query.key.{self.name}")
 
-		render = PulseContext.get().render
-		if render is None:
-			raise RuntimeError("No render session available")
-		store = render.query_store
+		store = query_store_for_state(state)
 
 		def query() -> KeyedQuery[T]:
 			key = key_computed()
@@ -1255,8 +1376,10 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		initial_data_updated_at: float | dt.datetime | None,
 		state: TState,
 	) -> UnkeyedQueryResult[T]:
-		"""Create a private unkeyed query."""
-		return UnkeyedQueryResult[T](
+		"""Create a private unkeyed query, registered with the session store
+		so it participates in suspend/resume."""
+		store = query_store_for_state(state)
+		result = UnkeyedQueryResult[T](
 			fetch_fn=fetch_fn,
 			on_success=bind_state(state, self._on_success_fn)
 			if self._on_success_fn
@@ -1274,7 +1397,10 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 			refetch_interval=self._refetch_interval,
 			enabled=self._enabled,
 			fetch_on_mount=self._fetch_on_mount,
+			on_dispose=store.unregister_unkeyed,
 		)
+		store.register_unkeyed(result)
+		return result
 
 	def __get__(self, obj: Any, objtype: Any = None) -> "QueryResult[T]":
 		if obj is None:
@@ -1346,7 +1472,8 @@ def query(
 		refetch_interval: Auto-refetch interval in seconds (default None, disabled).
 		keep_previous_data: Keep previous data while loading (default False).
 		retries: Number of retry attempts on failure (default 3).
-		retry_delay: Delay between retries in seconds (default 2.0).
+		retry_delay: Base delay (seconds) for exponential backoff between
+			retries — doubles each attempt, capped at 30s (default 2.0).
 		initial_data_updated_at: Timestamp for initial data staleness calculation.
 		enabled: Whether query is enabled (default True).
 		fetch_on_mount: Fetch when component mounts (default True).

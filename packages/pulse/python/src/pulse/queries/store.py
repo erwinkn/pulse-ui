@@ -1,22 +1,59 @@
 import datetime as dt
 from collections.abc import Callable
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar, cast, override
 
-from pulse.helpers import MISSING, Missing
+from pulse.helpers import MISSING, Disposable, Missing
 from pulse.queries.common import Key, QueryKey, normalize_key
 from pulse.queries.infinite_query import InfiniteQuery, Page
-from pulse.queries.query import RETRY_DELAY_DEFAULT, KeyedQuery
+from pulse.queries.query import RETRY_DELAY_DEFAULT, KeyedQuery, UnkeyedQueryResult
 
 T = TypeVar("T")
 
 
-class QueryStore:
+class QueryStore(Disposable):
 	"""
 	Store for query entries. Manages creation, retrieval, and disposal of queries.
+
+	Also tracks the session's connection state: while suspended (client
+	disconnected), interval refetching is paused; on resume, intervals restart
+	and stale queries refetch.
 	"""
+
+	suspended: bool
 
 	def __init__(self):
 		self._entries: dict[Key, KeyedQuery[Any] | InfiniteQuery[Any, Any]] = {}
+		self._unkeyed: set[UnkeyedQueryResult[Any]] = set()
+		self.suspended = False
+
+	def register_unkeyed(self, result: UnkeyedQueryResult[Any]) -> None:
+		"""Track an unkeyed query result so it participates in suspend/resume."""
+		self._unkeyed.add(result)
+		if self.suspended:
+			result.suspend()
+
+	def unregister_unkeyed(self, result: UnkeyedQueryResult[Any]) -> None:
+		self._unkeyed.discard(result)
+
+	def suspend_all(self) -> None:
+		"""Pause interval refetching for all queries (client disconnected)."""
+		if self.suspended:
+			return
+		self.suspended = True
+		for entry in self._entries.values():
+			entry.suspend()
+		for result in self._unkeyed:
+			result.suspend()
+
+	def resume_all(self) -> None:
+		"""Restart intervals and refetch stale queries (client reconnected)."""
+		if not self.suspended:
+			return
+		self.suspended = False
+		for entry in list(self._entries.values()):
+			entry.resume()
+		for result in list(self._unkeyed):
+			result.resume()
 
 	def items(self):
 		"""Iterate over all (key, query) pairs in the store."""
@@ -58,6 +95,8 @@ class QueryStore:
 			retry_delay=retry_delay,
 			on_dispose=_on_dispose,
 		)
+		if self.suspended:
+			entry.suspend()
 		self._entries[nkey] = entry
 		return entry
 
@@ -120,6 +159,8 @@ class QueryStore:
 			retry_delay=retry_delay,
 			on_dispose=_on_dispose,
 		)
+		if self.suspended:
+			entry.suspend()
 		self._entries[nkey] = entry
 		return entry
 
@@ -128,3 +169,9 @@ class QueryStore:
 		for entry in list(self._entries.values()):
 			entry.dispose()
 		self._entries.clear()
+		# Unkeyed results are owned and disposed by their States; just drop refs
+		self._unkeyed.clear()
+
+	@override
+	def dispose(self) -> None:
+		self.dispose_all()

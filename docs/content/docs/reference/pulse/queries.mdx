@@ -76,11 +76,27 @@ def query(
 | `refetch_interval` | `float \| None` | `None` | Auto-refetch interval in seconds |
 | `keep_previous_data` | `bool` | `False` | Keep previous data while refetching. Preserves data across key changes, even if the new key has `initial_data`. |
 | `retries` | `int` | `3` | Number of retry attempts |
-| `retry_delay` | `float \| None` | `2.0` | Delay between retries in seconds |
+| `retry_delay` | `float \| None` | `2.0` | Base delay (seconds) for exponential backoff between retries; doubles each attempt, capped at 30s |
 | `initial_data_updated_at` | `float \| datetime \| None` | `None` | Timestamp for initial data staleness |
 | `enabled` | `bool` | `True` | Whether query is enabled |
 | `fetch_on_mount` | `bool` | `True` | Fetch when component mounts |
 | `key` | `QueryKey \| None` | `None` | Static key for shared queries |
+
+### Staleness and the connection lifecycle
+
+Queries follow the client's connection, similar to TanStack Query's window
+focus behavior:
+
+- While the client is **disconnected** (tab closed to the background, network
+  drop), `refetch_interval` polling pauses — no background fetches run for a
+  session nobody is watching.
+- When the client **reconnects**, intervals restart with an immediate
+  catch-up fetch, and non-interval queries refetch if their data is stale
+  (older than `stale_time`, or explicitly invalidated).
+
+Set `stale_time` to control how much staleness you tolerate on reconnect: with
+the default `0.0`, every reconnect refetches; with `stale_time=60`, data less
+than a minute old is reused as-is.
 
 ### Basic Usage
 
@@ -201,7 +217,9 @@ Start the initial fetch if needed, then wait for completion.
 
 #### `invalidate() -> None`
 
-Mark the query as stale and trigger a refetch.
+Mark the query as stale and trigger a refetch. If the query has no observers
+(no mounted component is using it), the stale mark persists: the query
+refetches the next time it is observed or when the session reconnects.
 
 ```python
 state.user.invalidate()
@@ -332,7 +350,7 @@ def infinite_query(
 | `refetch_interval` | `float \| None` | `None` | Auto-refetch interval in seconds |
 | `keep_previous_data` | `bool` | `False` | Keep previous data while refetching. Preserves data across key changes. |
 | `retries` | `int` | `3` | Number of retry attempts |
-| `retry_delay` | `float \| None` | `2.0` | Delay between retries in seconds |
+| `retry_delay` | `float \| None` | `2.0` | Base delay (seconds) for exponential backoff between retries; doubles each attempt, capped at 30s |
 | `enabled` | `bool` | `True` | Whether query is enabled |
 | `fetch_on_mount` | `bool` | `True` | Fetch when component mounts |
 | `key` | `QueryKey` | required | Query key (use `@query.key` for dynamic keys) |

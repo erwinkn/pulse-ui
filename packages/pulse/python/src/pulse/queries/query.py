@@ -293,7 +293,38 @@ async def run_fetch_with_retries(
 				return
 
 
-class KeyedQuery(Generic[T], Disposable):
+class SuspendableQuery:
+	_suspended: bool = False
+	_interval_effect: Effect | None = None
+
+	def _init_suspendable_query(self) -> None:
+		self._suspended = False
+		self._interval_effect = None
+
+	def _dispose_interval_effect(self) -> None:
+		if self._interval_effect is not None:
+			self._interval_effect.dispose()
+			self._interval_effect = None
+
+	def suspend(self) -> None:
+		"""Stop interval refetching while the session is disconnected."""
+		if self._suspended:
+			return
+		self._suspended = True
+		self._dispose_interval_effect()
+
+	def resume(self) -> None:
+		"""Restart interval refetching and refetch stale data on reconnect."""
+		if not self._suspended:
+			return
+		self._suspended = False
+		self._resume_after_suspend()
+
+	def _resume_after_suspend(self) -> None:
+		raise NotImplementedError
+
+
+class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 	"""
 	Query for keyed queries (shared across observers).
 	Uses direct task management without dependency tracking.
@@ -335,10 +366,9 @@ class KeyedQuery(Generic[T], Disposable):
 		self._task = None
 		self._task_initiator = None
 		self._gc_handle = None
-		self._interval_effect = None
 		self._interval = None
 		self._interval_observer = None
-		self._suspended = False
+		self._init_suspendable_query()
 
 	# --- Delegate signal access to state ---
 	@property
@@ -542,9 +572,7 @@ class KeyedQuery(Generic[T], Disposable):
 				self._interval_effect = self._create_interval_effect(new_interval)
 			return
 
-		if self._interval_effect is not None:
-			self._interval_effect.dispose()
-			self._interval_effect = None
+		self._dispose_interval_effect()
 
 		if new_interval is not None and not self._suspended:
 			self._interval_effect = self._create_interval_effect(new_interval)
@@ -555,20 +583,8 @@ class KeyedQuery(Generic[T], Disposable):
 			return True
 		return (time.time() - self.state.last_updated.read()) > stale_time
 
-	def suspend(self) -> None:
-		"""Stop interval refetching while the session is disconnected."""
-		if self._suspended:
-			return
-		self._suspended = True
-		if self._interval_effect is not None:
-			self._interval_effect.dispose()
-			self._interval_effect = None
-
-	def resume(self) -> None:
-		"""Restart interval refetching and refetch stale data on reconnect."""
-		if not self._suspended:
-			return
-		self._suspended = False
+	@override
+	def _resume_after_suspend(self) -> None:
 		# Recreating the interval effect runs an immediate catch-up fetch
 		self._update_interval()
 		if self._interval is not None:
@@ -655,14 +671,12 @@ class KeyedQuery(Generic[T], Disposable):
 		"""Clean up the query, cancelling any in-flight fetch."""
 		self.cancel_gc()
 		self.cancel()
-		if self._interval_effect is not None:
-			self._interval_effect.dispose()
-			self._interval_effect = None
+		self._dispose_interval_effect()
 		if self.cfg.on_dispose:
 			self.cfg.on_dispose(self)
 
 
-class UnkeyedQueryResult(Generic[T], Disposable):
+class UnkeyedQueryResult(Generic[T], Disposable, SuspendableQuery):
 	"""
 	Query for unkeyed queries (single observer with dependency tracking).
 	Uses an AsyncEffect to track dependencies and re-run on changes.
@@ -723,8 +737,7 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 		self._refetch_interval = interval
 		self._keep_previous_data = keep_previous_data
 		self._enabled = Signal(enabled, name="query.enabled(unkeyed)")
-		self._interval_effect = None
-		self._suspended = False
+		self._init_suspendable_query()
 		self._on_dispose = on_dispose
 
 		# Create effect with auto-tracking (deps=None)
@@ -895,20 +908,8 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 		"""Cancel the current fetch if running."""
 		self._effect.cancel(cancel_interval=False)
 
-	def suspend(self) -> None:
-		"""Stop interval refetching while the session is disconnected."""
-		if self._suspended:
-			return
-		self._suspended = True
-		if self._interval_effect is not None:
-			self._interval_effect.dispose()
-			self._interval_effect = None
-
-	def resume(self) -> None:
-		"""Restart interval refetching and refetch stale data on reconnect."""
-		if not self._suspended:
-			return
-		self._suspended = False
+	@override
+	def _resume_after_suspend(self) -> None:
 		if self._refetch_interval is not None:
 			# Recreating the interval effect runs an immediate catch-up fetch
 			self._setup_interval_effect(self._refetch_interval)
@@ -920,8 +921,7 @@ class UnkeyedQueryResult(Generic[T], Disposable):
 	@override
 	def dispose(self):
 		"""Clean up the query and its effect."""
-		if self._interval_effect is not None:
-			self._interval_effect.dispose()
+		self._dispose_interval_effect()
 		self._effect.dispose()
 		if self._on_dispose is not None:
 			self._on_dispose(self)

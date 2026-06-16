@@ -38,6 +38,7 @@ from pulse.queries.common import (
 from pulse.queries.query import (
 	RETRY_DELAY_DEFAULT,
 	QueryConfig,
+	SuspendableQuery,
 	retry_backoff_delay,
 )
 from pulse.reactive import Computed, Effect, Signal, Untrack
@@ -146,7 +147,7 @@ class InfiniteQueryConfig(QueryConfig[list[Page[T, TParam]]], Generic[T, TParam]
 	max_pages: int
 
 
-class InfiniteQuery(Generic[T, TParam], Disposable):
+class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
 	"""Paginated query that stores data as a list of Page(data, param)."""
 
 	key: Key
@@ -217,9 +218,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 				self._interval_effect = self._create_interval_effect(new_interval)
 			return
 
-		if self._interval_effect is not None:
-			self._interval_effect.dispose()
-			self._interval_effect = None
+		self._dispose_interval_effect()
 
 		if new_interval is not None and not self._suspended:
 			self._interval_effect = self._create_interval_effect(new_interval)
@@ -230,20 +229,8 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 			return True
 		return (time.time() - self.last_updated.read()) > stale_time
 
-	def suspend(self) -> None:
-		"""Stop interval refetching while the session is disconnected."""
-		if self._suspended:
-			return
-		self._suspended = True
-		if self._interval_effect is not None:
-			self._interval_effect.dispose()
-			self._interval_effect = None
-
-	def resume(self) -> None:
-		"""Restart interval refetching and refetch stale data on reconnect."""
-		if not self._suspended:
-			return
-		self._suspended = False
+	@override
+	def _resume_after_suspend(self) -> None:
 		# Recreating the interval effect runs an immediate catch-up fetch
 		self._update_interval()
 		if self._interval is not None:
@@ -351,10 +338,9 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		self._queue_task = None
 		self._observers = []
 		self._gc_handle = None
-		self._interval_effect = None
 		self._interval = None
 		self._interval_observer = None
-		self._suspended = False
+		self._init_suspendable_query()
 		self.invalidated = False
 
 	# ─────────────────────────────────────────────────────────────────────────
@@ -883,9 +869,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable):
 		self._cancel_queue()
 		if self._queue_task and not self._queue_task.done():
 			self._queue_task.cancel()
-		if self._interval_effect is not None:
-			self._interval_effect.dispose()
-			self._interval_effect = None
+		self._dispose_interval_effect()
 		if self.cfg.on_dispose:
 			self.cfg.on_dispose(self)
 

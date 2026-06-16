@@ -7,16 +7,21 @@ that updates from one session do not leak into the other.
 """
 
 import asyncio
+import gc
+from collections.abc import Callable, Iterator
 from typing import Any, cast, override
 
 import pulse as ps
 import pytest
 from pulse import javascript
+from pulse.hooks.core import HookContext
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import ServerMessage
+from pulse.reactive import Effect
 from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteInfo, RouteTree
 from pulse.test_helpers import wait_for
+from pulse.transpiler.nodes import Element, PulseNode
 
 
 @javascript
@@ -77,53 +82,48 @@ def expire_pending_mount(session: RenderSession, path: str) -> None:
 	session.route_mounts[path]._on_pending_timeout()  # pyright: ignore[reportPrivateUsage]
 
 
-# TODO: clean this up - this was refactored using GPT-5 and is thus quite hacky
-def mount_with_listener(session: RenderSession, path: str):
-	# Maintain a session-level set of listened paths and a shared message log
-	listened: set[str] | None = getattr(session, "_test_listened_paths", None)
-	if listened is None:
-		listened = set()
-		session._test_listened_paths = listened  # pyright: ignore[reportAttributeAccessIssue]
+class PathMessages:
+	messages: list[ServerMessage]
+	path: str
 
-	log: list[ServerMessage] | None = getattr(session, "_test_message_log", None)
-	if log is None:
-		log = []
-		session._test_message_log = log  # pyright: ignore[reportAttributeAccessIssue]
+	def __init__(self, messages: list[ServerMessage], path: str) -> None:
+		self.messages = messages
+		self.path = path
 
-		def on_message(msg: ServerMessage):
-			if msg.get("type") == "api_call":
-				return
-			p = msg.get("path")
-			if not isinstance(p, str):
-				return
-			# Only record messages for paths we're currently listening to
-			if p in getattr(session, "_test_listened_paths", set()):  # pyright: ignore[reportUnknownArgumentType]
-				session._test_message_log.append(msg)  # pyright: ignore[reportAttributeAccessIssue]
+	def __iter__(self) -> Iterator[ServerMessage]:
+		for message in self.messages:
+			if message.get("path") == self.path:
+				yield message
 
-		session.connect(on_message)
 
-	# Start listening for this path
-	listened.add(path)
+class RouteMessageLog:
+	session: RenderSession
+	listened_paths: set[str]
+	messages: list[ServerMessage]
 
-	class _PathMessages:
-		def __iter__(self):  # type: ignore[override]
-			for m in getattr(session, "_test_message_log", []):
-				if m.get("path") == path:
-					yield m
+	def __init__(self, session: RenderSession) -> None:
+		self.session = session
+		self.listened_paths = set()
+		self.messages = []
+		self.session.connect(self._record)
 
-	# Ensure RenderSession is present in PulseContext when attaching so the
-	# captured context for the render effect includes it
-	with ps.PulseContext.update(render=session):
-		session.prerender(sorted(listened))
-		session.attach(path, make_route_info(path))
+	def _record(self, message: ServerMessage) -> None:
+		if message.get("type") == "api_call":
+			return
+		path = message.get("path")
+		if isinstance(path, str) and path in self.listened_paths:
+			self.messages.append(message)
 
-	def disconnect():
-		# Stop listening for this path; messages are still in the shared log
-		lst = getattr(session, "_test_listened_paths", set())  # pyright: ignore[reportUnknownArgumentType]
-		if isinstance(lst, set):
-			lst.discard(path)
+	def mount(self, path: str) -> tuple[PathMessages, Callable[[], None]]:
+		self.listened_paths.add(path)
+		with ps.PulseContext.update(render=self.session):
+			self.session.prerender(sorted(self.listened_paths))
+			self.session.attach(path, make_route_info(path))
 
-	return _PathMessages(), disconnect
+		def disconnect() -> None:
+			self.listened_paths.discard(path)
+
+		return PathMessages(self.messages, path), disconnect
 
 
 def extract_count_from_ctx(session: RenderSession, path: str) -> int:
@@ -180,12 +180,14 @@ async def test_two_sessions_two_routes_are_isolated():
 	routes = make_routes()
 	s1 = RenderSession("s1", routes)
 	s2 = RenderSession("s2", routes)
+	log_s1 = RouteMessageLog(s1)
+	log_s2 = RouteMessageLog(s2)
 
 	# Mount both routes on both sessions and keep listeners active
-	msgs_s1_a, disc_s1_a = mount_with_listener(s1, "/a")
-	msgs_s1_b, disc_s1_b = mount_with_listener(s1, "/b")
-	msgs_s2_a, disc_s2_a = mount_with_listener(s2, "/a")
-	msgs_s2_b, disc_s2_b = mount_with_listener(s2, "/b")
+	msgs_s1_a, disc_s1_a = log_s1.mount("/a")
+	msgs_s1_b, disc_s1_b = log_s1.mount("/b")
+	msgs_s2_a, disc_s2_a = log_s2.mount("/a")
+	msgs_s2_b, disc_s2_b = log_s2.mount("/b")
 
 	# Initial counts are zero
 	assert extract_count_from_ctx(s1, "/a") == 0
@@ -279,12 +281,14 @@ async def test_global_state_shared_within_session_and_isolated_across_sessions()
 	routes = make_global_routes()
 	s1 = RenderSession("s1", routes)
 	s2 = RenderSession("s2", routes)
+	log_s1 = RouteMessageLog(s1)
+	log_s2 = RouteMessageLog(s2)
 
 	# Mount both routes on both sessions
-	msgs_s1_a, disc_s1_a = mount_with_listener(s1, "/a")
-	msgs_s1_b, disc_s1_b = mount_with_listener(s1, "/b")
-	msgs_s2_a, disc_s2_a = mount_with_listener(s2, "/a")
-	msgs_s2_b, disc_s2_b = mount_with_listener(s2, "/b")
+	msgs_s1_a, disc_s1_a = log_s1.mount("/a")
+	msgs_s1_b, disc_s1_b = log_s1.mount("/b")
+	msgs_s2_a, disc_s2_a = log_s2.mount("/a")
+	msgs_s2_b, disc_s2_b = log_s2.mount("/b")
 
 	# Initial counts are zero across both routes/sessions
 	assert extract_global_count(s1, "/a") == 0
@@ -348,7 +352,8 @@ async def test_global_state_disposed_on_session_close():
 		[Route("a", ps.component(lambda: ps.div()[ps.span()[str(accessor().count)]]))]
 	)
 	s = RenderSession("s1", routes)
-	_msgs, disc = mount_with_listener(s, "/a")
+	log = RouteMessageLog(s)
+	_msgs, disc = log.mount("/a")
 	# Ensure instance is created by rendering
 	assert extract_count_from_ctx(s, "/a") == 0
 
@@ -1948,12 +1953,6 @@ async def test_rerender_does_not_accumulate_objects():
 	any per-render retention in the renderer/transpiler/hooks would balloon a
 	single session over hours.
 	"""
-	import gc
-
-	from pulse.hooks.core import HookContext
-	from pulse.reactive import Effect
-	from pulse.transpiler.nodes import Element, PulseNode
-
 	routes = RouteTree([Route("a", StatefulCounter)])
 	session = RenderSession("test-id", routes)
 	session.connect(lambda msg: None)
@@ -2045,12 +2044,6 @@ async def test_reprerender_does_not_accumulate_objects():
 	Client-side navigations re-prerender mounted routes (e.g. layouts); each
 	one used to rebuild child components, stranding their old hook effects.
 	"""
-	import gc
-
-	from pulse.hooks.core import HookContext
-	from pulse.reactive import Effect
-	from pulse.transpiler.nodes import Element, PulseNode
-
 	routes = RouteTree([Route("a", NestedParent)])
 	session = RenderSession("test-id", routes)
 	session.connect(lambda msg: None)

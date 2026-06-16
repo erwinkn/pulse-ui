@@ -111,3 +111,62 @@ async def test_server_session_response_wait_survives_superseded_save(
 	assert any(
 		session_data.get("auth") == "second" for session_data in store.data.values()
 	)
+
+
+@pytest.mark.asyncio
+async def test_http_request_without_render_does_not_retain_user_session(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	"""Cookie-less requests (bots, health checks) must not accumulate sessions."""
+	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
+	app = ps.App(routes=[])
+	app.setup("http://example.com")
+
+	transport = httpx.ASGITransport(app=app.fastapi)
+	async with httpx.AsyncClient(
+		transport=transport, base_url="http://testserver"
+	) as client:
+		for _ in range(3):
+			resp = await client.get("/_pulse/health", cookies=None)
+			assert resp.status_code == 200
+
+	assert app.user_sessions == {}
+
+
+@pytest.mark.asyncio
+async def test_prerender_request_retains_user_session(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	"""Sessions that own a render session stay alive after the request."""
+	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
+
+	@ps.component
+	def home():
+		return ps.div("ok")
+
+	app = ps.App(routes=[ps.Route("a", home)])
+	app.setup("http://example.com")
+
+	transport = httpx.ASGITransport(app=app.fastapi)
+	async with httpx.AsyncClient(
+		transport=transport, base_url="http://testserver"
+	) as client:
+		resp = await client.post(
+			"/_pulse/prerender",
+			json={
+				"paths": ["/a"],
+				"routeInfo": {
+					"pathname": "/a",
+					"hash": "",
+					"query": "",
+					"queryParams": {},
+					"pathParams": {},
+					"catchall": [],
+				},
+			},
+		)
+		assert resp.status_code == 200
+
+	assert len(app.user_sessions) == 1
+	assert len(app.render_sessions) == 1
+	await app.close()

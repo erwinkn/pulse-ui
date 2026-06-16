@@ -79,8 +79,17 @@ class RenderTree:
 		self.rendered = False
 
 	def render(self) -> VDOM:
-		"""First render. Returns VDOM."""
-		renderer = Renderer()
+		"""Render and return the full VDOM.
+
+		On an already-rendered tree (re-prerender, resume after suspend),
+		reconciles in place first so component hook state is preserved, then
+		serializes without re-invoking components.
+		"""
+		if self.rendered:
+			self.rerender()
+			renderer = Renderer(reuse_contents=True)
+		else:
+			renderer = Renderer()
 		vdom, self.element = renderer.render_tree(self.element)
 		self.callbacks = renderer.callbacks
 		self.rendered = True
@@ -108,9 +117,14 @@ class RenderTree:
 
 
 class Renderer:
-	def __init__(self) -> None:
+	# Serialize already-rendered components from their contents instead of
+	# re-invoking them (which would mint fresh hook state for children).
+	reuse_contents: bool
+
+	def __init__(self, *, reuse_contents: bool = False) -> None:
 		self.callbacks: Callbacks = {}
 		self.operations: list[VDOMOperation] = []
+		self.reuse_contents = reuse_contents
 
 	# ------------------------------------------------------------------
 	# Rendering helpers
@@ -131,6 +145,9 @@ class Renderer:
 	def render_component(
 		self, component: PulseNode, path: str
 	) -> tuple[VDOM, PulseNode]:
+		if self.reuse_contents and component.contents is not None:
+			vdom, component.contents = self.render_tree(component.contents, path)
+			return vdom, component
 		if component.hooks is None:
 			component.hooks = HookContext()
 		with component.hooks:

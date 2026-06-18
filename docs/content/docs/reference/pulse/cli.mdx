@@ -50,6 +50,8 @@ pulse run app.py --address 0.0.0.0 --port 8080
 pulse run app.py --server-only --react-server-address http://localhost:5173
 ```
 
+In dev mode, before launching the web dev server `pulse run` installs web dependencies with Bun and generates the route files. Both steps are idempotent and fast on warm starts, so a fresh checkout works without a separate `pulse check --fix` or `pulse generate` first.
+
 If another Pulse dev instance is already running for the same app, stop it first or rerun with `--interrupt`.
 
 ---

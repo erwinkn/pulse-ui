@@ -302,6 +302,12 @@ async def maybe_await(value: T | Awaitable[T]) -> T:
 	return value
 
 
+def server_url(host: str, port: int | str) -> str:
+	"""Build a server URL, using https for non-local hosts."""
+	protocol = "http" if host in ("127.0.0.1", "localhost") else "https"
+	return f"{protocol}://{host}:{port}"
+
+
 def find_available_port(start_port: int = 8000, max_attempts: int = 100) -> int:
 	"""Find an available port starting from start_port."""
 	for port in range(start_port, start_port + max_attempts):

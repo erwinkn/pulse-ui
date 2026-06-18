@@ -302,10 +302,19 @@ async def maybe_await(value: T | Awaitable[T]) -> T:
 	return value
 
 
-def server_url(host: str, port: int | str) -> str:
-	"""Build a server URL, using https for non-local hosts."""
-	protocol = "http" if host in ("127.0.0.1", "localhost") else "https"
-	return f"{protocol}://{host}:{port}"
+def local_server_url(host: str, port: int | str) -> str:
+	"""Build the URL for a locally launched ``pulse run`` server.
+
+	``pulse run`` starts uvicorn over plain HTTP, so the URL is always http;
+	production TLS endpoints are configured explicitly via ``App(server_address=...)``
+	and never flow through here. Wildcard bind hosts (``0.0.0.0``, ``::``) are
+	normalized to localhost — a wildcard bind is not a connectable address, and
+	localhost is what a browser on the dev machine can reach. Other hosts (e.g. a
+	LAN IP for on-device testing) are kept as-is, still over http.
+	"""
+	if host in ("0.0.0.0", "::", ""):
+		host = "localhost"
+	return f"http://{host}:{port}"
 
 
 def find_available_port(start_port: int = 8000, max_attempts: int = 100) -> int:

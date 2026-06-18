@@ -45,6 +45,7 @@ from pulse.helpers import (
 	find_available_port,
 	get_client_address,
 	get_client_address_socketio,
+	local_server_url,
 )
 from pulse.hooks.core import hooks
 from pulse.messages import (
@@ -506,8 +507,7 @@ class App:
 			host = os.environ.get(ENV_PULSE_HOST)
 			port = os.environ.get(ENV_PULSE_PORT)
 			if host is not None and port is not None:
-				protocol = "http" if host in ("127.0.0.1", "localhost") else "https"
-				server_address = f"{protocol}://{host}:{port}"
+				server_address = local_server_url(host, port)
 			else:
 				server_address = self.dev_server_address
 

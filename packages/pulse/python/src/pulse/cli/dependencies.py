@@ -159,7 +159,7 @@ def prepare_web_dependencies(
 	web_root: Path,
 	*,
 	pulse_version: str,
-) -> DependencyPlan | None:
+) -> DependencyPlan:
 	"""Inspect registered components and return the Bun command needed to sync dependencies."""
 	to_add = check_web_dependencies(
 		web_root=web_root,

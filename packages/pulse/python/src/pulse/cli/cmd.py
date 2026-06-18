@@ -19,7 +19,6 @@ import typer
 from pulse.cli.dependencies import (
 	DependencyError,
 	DependencyPlan,
-	DependencyResolutionError,
 	check_web_dependencies,
 	prepare_web_dependencies,
 )
@@ -39,7 +38,7 @@ from pulse.env import (
 	PulseEnv,
 	env,
 )
-from pulse.helpers import find_available_port
+from pulse.helpers import find_available_port, server_url
 from pulse.version import __version__ as PULSE_PY_VERSION
 
 cli = typer.Typer(
@@ -153,31 +152,6 @@ def run(
 			web_root if web_root.exists() else app_ctx.app_file
 		)
 
-	if env.pulse_env == "dev" and not server_only:
-		try:
-			to_add = check_web_dependencies(
-				web_root,
-				pulse_version=PULSE_PY_VERSION,
-			)
-		except DependencyResolutionError as exc:
-			logger.error(str(exc))
-			raise typer.Exit(1) from None
-		except DependencyError as exc:
-			logger.error(str(exc))
-			raise typer.Exit(1) from None
-
-		if to_add:
-			try:
-				dep_plan = prepare_web_dependencies(
-					web_root,
-					pulse_version=PULSE_PY_VERSION,
-				)
-				if dep_plan:
-					_run_dependency_plan(logger, web_root, dep_plan)
-			except subprocess.CalledProcessError:
-				logger.error("Failed to install web dependencies with Bun.")
-				raise typer.Exit(1) from None
-
 	server_args = extra_flags if not web_only else []
 	web_args = extra_flags if web_only else []
 
@@ -211,9 +185,7 @@ def run(
 
 		# All required servers are ready, show announcement
 		announced = True
-		protocol = "http" if address in ("127.0.0.1", "localhost") else "https"
-		server_url = f"{protocol}://{address}:{port}"
-		logger.write_ready_announcement(address, port, server_url)
+		logger.write_ready_announcement(address, port, server_url(address, port))
 
 	# Build web command first (when needed) so we can set PULSE_REACT_SERVER_ADDRESS
 	# before building the uvicorn command, which needs that env var
@@ -252,6 +224,35 @@ def run(
 	exit_code = 1
 	try:
 		with FolderLock(web_root, address=address, port=port):
+			# Install web dependencies and generate route files before launching
+			# the web dev server. Without the install, a fresh checkout's web
+			# process dies with "react-router: command not found"; without codegen,
+			# it reads routes.ts before the server has generated "./pulse/routes"
+			# and dies with "Cannot find module './pulse/routes'". Both steps are
+			# idempotent and cheap on warm starts, and run under the lock so a
+			# rejected concurrent run never rewrites a live instance's files.
+			if env.pulse_env == "dev" and not server_only:
+				try:
+					dep_plan = prepare_web_dependencies(
+						web_root,
+						pulse_version=PULSE_PY_VERSION,
+					)
+				except DependencyError as exc:
+					logger.error(str(exc))
+					raise typer.Exit(1) from None
+				try:
+					_run_dependency_plan(logger, web_root, dep_plan)
+				except subprocess.CalledProcessError:
+					logger.error("Failed to install web dependencies with Bun.")
+					raise typer.Exit(1) from None
+				logger.print("Generating routes")
+				try:
+					app_instance.run_codegen(server_url(address, port))
+				except Exception:
+					logger.error("Failed to generate routes")
+					logger.print_exception()
+					raise typer.Exit(1) from None
+
 			try:
 				exit_code = execute_commands(
 					commands,
@@ -383,9 +384,6 @@ def check(
 			web_root,
 			pulse_version=PULSE_PY_VERSION,
 		)
-	except DependencyResolutionError as exc:
-		logger.error(str(exc))
-		raise typer.Exit(1) from None
 	except DependencyError as exc:
 		logger.error(str(exc))
 		raise typer.Exit(1) from None
@@ -408,8 +406,7 @@ def check(
 			web_root,
 			pulse_version=PULSE_PY_VERSION,
 		)
-		if dep_plan:
-			_run_dependency_plan(logger, web_root, dep_plan)
+		_run_dependency_plan(logger, web_root, dep_plan)
 		logger.success("Dependencies synced")
 	except subprocess.CalledProcessError:
 		logger.error("Failed to install web dependencies with Bun.")
@@ -574,8 +571,7 @@ def _apply_app_context_to_env(app_ctx: AppLoadResult) -> None:
 def _run_dependency_plan(
 	logger: CLILogger, web_root: Path, plan: DependencyPlan
 ) -> None:
-	if plan.to_add:
-		logger.print(f"Installing dependencies in {web_root}")
+	logger.print(f"Installing web dependencies in {web_root}")
 	subprocess.run(plan.command, cwd=web_root, check=True)
 
 

@@ -38,7 +38,7 @@ from pulse.env import (
 	PulseEnv,
 	env,
 )
-from pulse.helpers import find_available_port, server_url
+from pulse.helpers import find_available_port, local_server_url
 from pulse.version import __version__ as PULSE_PY_VERSION
 
 cli = typer.Typer(
@@ -185,7 +185,7 @@ def run(
 
 		# All required servers are ready, show announcement
 		announced = True
-		logger.write_ready_announcement(address, port, server_url(address, port))
+		logger.write_ready_announcement(address, port, local_server_url(address, port))
 
 	# Build web command first (when needed) so we can set PULSE_REACT_SERVER_ADDRESS
 	# before building the uvicorn command, which needs that env var
@@ -247,7 +247,7 @@ def run(
 					raise typer.Exit(1) from None
 				logger.print("Generating routes")
 				try:
-					app_instance.run_codegen(server_url(address, port))
+					app_instance.run_codegen(local_server_url(address, port))
 				except Exception:
 					logger.error("Failed to generate routes")
 					logger.print_exception()

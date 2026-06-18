@@ -390,6 +390,23 @@ def test_run_fails_on_dependency_conflict(
 	assert "conflict between react@18 and react@19" in result.output
 
 
+@pytest.mark.parametrize(
+	"host, expected",
+	[
+		("localhost", "http://localhost:8000"),
+		("127.0.0.1", "http://127.0.0.1:8000"),
+		("0.0.0.0", "http://localhost:8000"),  # wildcard -> reachable localhost
+		("::", "http://localhost:8000"),
+		("192.168.1.50", "http://192.168.1.50:8000"),  # LAN IP kept, still http
+		("example.com", "http://example.com:8000"),  # never https for `pulse run`
+	],
+)
+def test_local_server_url(host: str, expected: str):
+	from pulse.helpers import local_server_url
+
+	assert local_server_url(host, 8000) == expected
+
+
 def test_run_existing_lock_suggests_interrupt(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

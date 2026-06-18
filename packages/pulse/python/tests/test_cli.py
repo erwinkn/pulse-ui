@@ -9,6 +9,7 @@ from typing import Any, cast
 import pulse.cli.cmd as cmd_mod
 import pytest
 from pulse.cli.dependencies import (
+	DependencyPlan,
 	DependencyResolutionError,
 	convert_pep440_to_semver,
 	prepare_web_dependencies,
@@ -51,11 +52,22 @@ class _GenerateAppStub:
 
 class _RunAppStub:
 	def __init__(self, web_root: Path):
+		pulse_dir = "_pulse"
+		pulse_path = web_root / "app" / pulse_dir
 		self.codegen: Any = SimpleNamespace(
-			cfg=SimpleNamespace(web_root=web_root, pulse_dir="_pulse")
+			cfg=SimpleNamespace(
+				web_root=web_root, pulse_dir=pulse_dir, pulse_path=pulse_path
+			)
 		)
 		self.mode: str = "multi-server"
 		self.env: str = "dev"
+		self.codegen_calls: list[str] = []
+
+	def run_codegen(self, address: str) -> None:
+		self.codegen_calls.append(address)
+		routes_entry = self.codegen.cfg.pulse_path / "routes.ts"
+		routes_entry.parent.mkdir(parents=True, exist_ok=True)
+		routes_entry.write_text("export const routes = [];\n")
 
 
 def _make_generate_app_ctx(
@@ -245,17 +257,21 @@ def test_run_interrupt_stops_existing_server_before_finding_port(
 		calls.append(("find", port))
 		return port
 
-	def check_deps(web_root_arg: Path, *, pulse_version: str) -> list[str]:
-		return []
-
 	def execute(command_specs: list[CommandSpec], *, tag_mode: str) -> int:
 		commands.extend(command_specs)
 		return 0
 
+	def prepare(web_root_arg: Path, *, pulse_version: str) -> DependencyPlan:
+		return DependencyPlan(command=["bun", "i"], to_add=())
+
+	def run_plan(logger: object, web_root_arg: Path, plan: DependencyPlan) -> None:
+		return None
+
 	monkeypatch.setattr(cmd_mod, "load_app_from_target", load_app)
 	monkeypatch.setattr(cmd_mod, "interrupt_active_dev_server", interrupt)
 	monkeypatch.setattr(cmd_mod, "find_available_port", find_port)
-	monkeypatch.setattr(cmd_mod, "check_web_dependencies", check_deps)
+	monkeypatch.setattr(cmd_mod, "prepare_web_dependencies", prepare)
+	monkeypatch.setattr(cmd_mod, "_run_dependency_plan", run_plan)
 	monkeypatch.setattr(cmd_mod, "execute_commands", execute)
 
 	result = runner.invoke(cmd_mod.cli, ["run", "demo.py", "--plain", "--interrupt"])
@@ -265,6 +281,113 @@ def test_run_interrupt_stops_existing_server_before_finding_port(
 	assert ("find", 5173) in calls
 	assert "Stopped existing Pulse dev server at http://localhost:8000" in result.output
 	assert [command.name for command in commands] == ["web", "server"]
+
+
+def _patch_run_basics(
+	monkeypatch: pytest.MonkeyPatch, app_ctx: AppLoadResult
+) -> tuple[list[CommandSpec], list[list[str]]]:
+	"""Stub `run`'s side effects, capturing launched commands and install calls."""
+	commands: list[CommandSpec] = []
+	installed: list[list[str]] = []
+
+	def load_app(target: str, logger: object) -> AppLoadResult:
+		return app_ctx
+
+	def find_port(port: int) -> int:
+		return port
+
+	def prepare(web_root_arg: Path, *, pulse_version: str) -> DependencyPlan:
+		return DependencyPlan(command=["bun", "i"], to_add=())
+
+	def run_plan(logger: object, web_root_arg: Path, plan: DependencyPlan) -> None:
+		installed.append(plan.command)
+
+	def execute(command_specs: list[CommandSpec], *, tag_mode: str) -> int:
+		commands.extend(command_specs)
+		return 0
+
+	monkeypatch.setattr(cmd_mod, "load_app_from_target", load_app)
+	monkeypatch.setattr(cmd_mod, "find_available_port", find_port)
+	monkeypatch.setattr(cmd_mod, "prepare_web_dependencies", prepare)
+	monkeypatch.setattr(cmd_mod, "_run_dependency_plan", run_plan)
+	monkeypatch.setattr(cmd_mod, "execute_commands", execute)
+	return commands, installed
+
+
+def test_run_installs_and_generates_before_web(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+	"""`run` installs web deps and generates routes before launching the web server."""
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	app = cast(Any, app_ctx.app)
+
+	commands, installed = _patch_run_basics(monkeypatch, app_ctx)
+
+	result = runner.invoke(
+		cmd_mod.cli, ["run", "demo.py", "--plain", "--no-find-port", "--port", "8000"]
+	)
+
+	assert result.exit_code == 0, result.output
+	# Install runs, then codegen with the bind address, before commands launch.
+	assert installed == [["bun", "i"]]
+	assert app.codegen_calls == ["http://localhost:8000"]
+	assert (web_root / "app" / "_pulse" / "routes.ts").exists()
+	assert [c.name for c in commands] == ["web", "server"]
+
+
+def test_run_skips_install_and_codegen_for_server_only(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+	"""--server-only launches no web server, so deps/codegen are skipped."""
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	app = cast(Any, app_ctx.app)
+
+	commands, installed = _patch_run_basics(monkeypatch, app_ctx)
+
+	result = runner.invoke(
+		cmd_mod.cli,
+		[
+			"run",
+			"demo.py",
+			"--plain",
+			"--server-only",
+			"--no-find-port",
+			"--port",
+			"8000",
+		],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert installed == []
+	assert app.codegen_calls == []
+	assert [c.name for c in commands] == ["server"]
+
+
+def test_run_fails_on_dependency_conflict(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+	"""A dependency resolution conflict aborts `run` with a clear error."""
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+
+	_patch_run_basics(monkeypatch, app_ctx)
+
+	def conflict(web_root_arg: Path, *, pulse_version: str) -> DependencyPlan:
+		raise DependencyResolutionError("conflict between react@18 and react@19")
+
+	monkeypatch.setattr(cmd_mod, "prepare_web_dependencies", conflict)
+
+	result = runner.invoke(
+		cmd_mod.cli, ["run", "demo.py", "--plain", "--no-find-port", "--port", "8000"]
+	)
+
+	assert result.exit_code == 1
+	assert "conflict between react@18 and react@19" in result.output
 
 
 def test_run_existing_lock_suggests_interrupt(

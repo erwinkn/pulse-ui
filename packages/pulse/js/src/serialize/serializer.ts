@@ -36,6 +36,16 @@ export function serialize(data: Serializable): Serialized {
 			return value;
 		}
 
+		// Functions and symbols cannot cross the wire. Rather than crash the whole
+		// payload, coerce them to null — exactly like NaN above. A common real-world
+		// source is a React element ($$typeof is a symbol) leaking into a callback arg;
+		// one stray element shouldn't nuke an entire form submission. `idx` was already
+		// consumed at the top of `process`, so the dropped leaf behaves like any other
+		// primitive and the ref/date/set/map indices stay aligned with `deserialize`.
+		if (typeof value === "function" || typeof value === "symbol") {
+			return null;
+		}
+
 		const prevRef = seen.get(value);
 		if (prevRef !== undefined) {
 			// Make sure to push the current index, but use the ref's index as the value!
@@ -90,7 +100,16 @@ export function serialize(data: Serializable): Serialized {
 			return rec;
 		}
 
-		throw new Error(`Unsupported value in serialization: ${value}`);
+		// Reachable only for genuinely unsupported types that carry real data the
+		// caller likely intended to send (e.g. bigint) — unlike functions/symbols, we
+		// don't silently drop these. Build the message from `typeof`, never from `value`
+		// itself: interpolating a symbol here would throw "Cannot convert a symbol to a
+		// string", masking both the real error and the `context` path.
+		const where = context ? ` in '${context}'` : "";
+		throw new Error(
+			`Cannot serialize value of type '${typeof value}'${where}. ` +
+				`Only JSON-compatible values (plus Date, Map, and Set) can be sent over the wire.`,
+		);
 	}
 
 	const payload = process(data);

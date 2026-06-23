@@ -49,6 +49,8 @@ A tuple containing:
 | `Map` | Converted to object (string keys only) |
 | `Object` | Recursively processed |
 | Circular refs | Tracked and restored |
+| `function`, `symbol` | Coerced to null (e.g. a stray React element won't crash the payload) |
+| `bigint`, other | Throws a contextual error naming the type and path |
 
 ### Example
 
@@ -88,6 +90,16 @@ serialize({ value: Infinity });
 // NaN is converted to null (with no error)
 serialize({ value: NaN });
 // [[[], [], [], []], { value: null }]
+
+// Functions and symbols can't cross the wire, so they're coerced to null rather
+// than crashing the whole payload (a common source is a React element, whose
+// $$typeof is a symbol, leaking into a callback argument)
+serialize({ onClick: () => {}, label: "Save" });
+// [[[], [], [], []], { onClick: null, label: "Save" }]
+
+// bigint (and any other genuinely unsupported type) throws a contextual error
+serialize({ amount: 10n });
+// Error: Cannot serialize value of type 'bigint' in 'amount'.
 ```
 
 ---

@@ -184,9 +184,45 @@ describe("v4 serialization", () => {
 		expect(() => deserialize(ser)).toThrow("Invalid date literal: 2024-02-30");
 	});
 
-	it("throws on unsupported values (function/symbol)", () => {
-		expect(() => serialize({ x: () => {} } as any)).toThrow();
-		expect(() => serialize({ x: Symbol("s") } as any)).toThrow();
+	it("coerces non-serializable values (functions/symbols) to null", () => {
+		// Functions and symbols can't cross the wire; rather than crash the whole
+		// payload we coerce them to null (like NaN). A common real-world source is a
+		// React element (whose `$$typeof` is a symbol) leaking into a callback arg —
+		// one stray element shouldn't nuke an entire form submission.
+		const fromFunction: any = deserialize(serialize({ x: () => {}, keep: 1 } as any));
+		expect(fromFunction).toEqual({ x: null, keep: 1 });
+		const fromSymbol: any = deserialize(serialize({ x: Symbol("s"), keep: 2 } as any));
+		expect(fromSymbol).toEqual({ x: null, keep: 2 });
+	});
+
+	it("keeps indices aligned when a dropped leaf sits among shared refs and Dates", () => {
+		// The serializer tracks refs/dates by positional node index, so a coerced leaf
+		// must consume an index just like the primitive it becomes. This interleaves a
+		// function (→ null), a shared ref, and a Date to prove round-trips stay aligned.
+		const shared = { v: 1 };
+		const data = {
+			a: shared,
+			arr: [() => {}, shared],
+			d: new Date("1970-01-01T00:00:00.000Z"),
+		};
+
+		const parsed: any = deserialize(serialize(data as any));
+
+		expect(parsed.arr[0]).toBe(null);
+		expect(parsed.a).toBe(parsed.arr[1]); // shared reference preserved
+		expect(parsed.a).toEqual({ v: 1 });
+		expect(parsed.d).toBeInstanceOf(Date);
+		expect(parsed.d.toISOString()).toBe("1970-01-01T00:00:00.000Z");
+	});
+
+	it("throws a clear, contextual error on genuinely unsupported types (bigint)", () => {
+		// Unlike functions/symbols, a bigint is real data the caller likely intended to
+		// send, so we error (with the path) rather than coercing it away. The message is
+		// built from `typeof`, never the raw value — interpolating a symbol here is what
+		// used to throw the cryptic "Cannot convert a symbol to a string".
+		expect(() => serialize({ amount: 10n } as any)).toThrow(
+			"Cannot serialize value of type 'bigint' in 'amount'.",
+		);
 	});
 
 	it("coerces NaN to null", () => {

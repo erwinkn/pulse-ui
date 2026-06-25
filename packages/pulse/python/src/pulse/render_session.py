@@ -250,6 +250,7 @@ class RenderSession:
 	query_store: QueryStore
 	route_mounts: dict[str, RouteMount]
 	connected: bool
+	created_as_shell: bool
 	prerender_queue_timeout: float
 	dev_strict_mode_detach_timeout: float
 	disconnect_queue_timeout: float
@@ -277,6 +278,7 @@ class RenderSession:
 		dev_strict_mode_detach_timeout: float = 0.0,
 		disconnect_queue_timeout: float = 300.0,
 		render_loop_limit: int = 50,
+		created_as_shell: bool = False,
 	) -> None:
 		from pulse.channel import ChannelsManager
 		from pulse.forms import FormRegistry
@@ -290,6 +292,7 @@ class RenderSession:
 		self._global_states = {}
 		self._global_queue = []
 		self.connected = False
+		self.created_as_shell = created_as_shell
 		self.channels = ChannelsManager(self)
 		self.forms = FormRegistry(self)
 		self._pending_api = {}
@@ -320,6 +323,18 @@ class RenderSession:
 		details = {"effect": effect.name or "<unnamed>"}
 		for path in list(self.route_mounts.keys()):
 			self.report_error(path, "effect", exc, details)
+
+	@property
+	def is_shell(self) -> bool:
+		"""A placeholder render minted on stale-render-id reconnect.
+
+		Such a render exists only to tell the client to reload; it has no
+		route mounts and the client reloads with a fresh render id, so it can
+		never become a reconnectable session and is safe to reap on a short
+		TTL. Once a real route mounts (e.g. a prerender reuses this id), it is
+		no longer a shell.
+		"""
+		return self.created_as_shell and not self.route_mounts
 
 	# ---- Connection lifecycle ----
 

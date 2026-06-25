@@ -215,6 +215,11 @@ class App:
 		cors: CORS configuration. Auto-configured based on mode if not provided.
 		fastapi: Additional FastAPI constructor options.
 		session_timeout: Session cleanup timeout in seconds. Defaults to 60.0.
+		shell_render_timeout: Cleanup timeout in seconds for placeholder
+			"shell" renders minted on stale-render-id reconnect. These have no
+			mounts and only tell the client to reload, so they are reaped well
+			before the longer session_timeout reconnect grace window. Defaults
+			to 30.0.
 		connection_status: Connection status UI timing configuration.
 
 	Attributes:
@@ -276,6 +281,7 @@ class App:
 	_proxy: ReactProxy | None
 	proxy: Proxy
 	session_timeout: float
+	shell_render_timeout: float
 	connection_status: ConnectionStatusConfig
 	render_loop_limit: int
 	prerender_queue_timeout: float
@@ -299,6 +305,7 @@ class App:
 		cors: CORSOptions | None = None,
 		fastapi: dict[str, Any] | None = None,
 		session_timeout: float = 60.0,
+		shell_render_timeout: float = 30.0,
 		prerender_queue_timeout: float = 60.0,
 		disconnect_queue_timeout: float = 300.0,
 		connection_status: ConnectionStatusConfig | None = None,
@@ -360,6 +367,7 @@ class App:
 		self._timers = TimerRegistry(tasks=self._tasks, name="app")
 		self._proxy = None
 		self.session_timeout = session_timeout
+		self.shell_render_timeout = shell_render_timeout
 		self.prerender_queue_timeout = prerender_queue_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
 		self.connection_status = connection_status or ConnectionStatusConfig()
@@ -829,9 +837,16 @@ class App:
 			render = self.render_sessions.get(rid)
 			created_render = render is None
 			if render is None:
-				# The client will try to attach to a non-existing RouteMount, which will cause a reload down the line
+				# The client will try to attach to a non-existing RouteMount, which will cause a reload down the line.
+				# Mark it as a shell so it's reaped on the short shell TTL rather
+				# than held for the full session_timeout reconnect window: it has
+				# no mounts and the client reloads with a fresh render id, so it
+				# can never become a reconnectable session.
 				render = self.create_render(
-					rid, session, client_address=get_client_address_socketio(environ)
+					rid,
+					session,
+					client_address=get_client_address_socketio(environ),
+					shell=True,
 				)
 			else:
 				owner = self._render_to_user.get(render.id)
@@ -918,8 +933,13 @@ class App:
 				render = self.render_sessions.get(rid)
 				if render:
 					render.disconnect()
-					# Schedule cleanup after timeout (will keep session alive for reuse)
-					self._schedule_render_cleanup(rid)
+					# Schedule cleanup after timeout (will keep session alive for
+					# reuse). A mount-less shell render (minted on stale-render-id
+					# reconnect, only ever told the client to reload) can never
+					# reconnect usefully, so reap it on the short shell TTL instead
+					# of holding it for the full session_timeout grace window.
+					timeout = self.shell_render_timeout if render.is_shell else None
+					self._schedule_render_cleanup(rid, timeout=timeout)
 
 		@self.sio.event
 		async def message(sid: str, data: Serialized):  # pyright: ignore[reportUnusedFunction]
@@ -935,7 +955,7 @@ class App:
 				cleanup_handle.cancel()
 			self._timers.discard(cleanup_handle)
 
-	def _schedule_render_cleanup(self, rid: str):
+	def _schedule_render_cleanup(self, rid: str, *, timeout: float | None = None):
 		"""Schedule cleanup of a RenderSession after the configured timeout."""
 		render = self.render_sessions.get(rid)
 		if render is None:
@@ -947,6 +967,8 @@ class App:
 		# Cancel any existing cleanup task for this render session
 		self._cancel_render_cleanup(rid)
 
+		delay = self.session_timeout if timeout is None else timeout
+
 		# Schedule new cleanup task
 		def _cleanup():
 			render = self.render_sessions.get(rid)
@@ -954,12 +976,10 @@ class App:
 				return
 			# Only cleanup if not connected (if connected, keep it alive)
 			if not render.connected:
-				logger.info(
-					f"RenderSession {rid} expired after {self.session_timeout}s timeout"
-				)
+				logger.info(f"RenderSession {rid} expired after {delay}s timeout")
 				self.close_render(rid)
 
-		handle = self._timers.later(self.session_timeout, _cleanup)
+		handle = self._timers.later(delay, _cleanup)
 		self._render_cleanups[rid] = handle
 
 	async def _handle_socket_message(self, sid: str, data: Serialized) -> None:
@@ -1197,7 +1217,12 @@ class App:
 		return render
 
 	def create_render(
-		self, rid: str, session: UserSession, *, client_address: str | None = None
+		self,
+		rid: str,
+		session: UserSession,
+		*,
+		client_address: str | None = None,
+		shell: bool = False,
 	):
 		if rid in self.render_sessions:
 			raise ValueError(f"RenderSession {rid} already exists")
@@ -1206,6 +1231,7 @@ class App:
 			self.routes,
 			server_address=self.server_address,
 			client_address=client_address,
+			created_as_shell=shell,
 			prerender_queue_timeout=self.prerender_queue_timeout,
 			# Development React StrictMode replays PulseView effects as
 			# attach -> detach -> attach on first mount. Production should keep the

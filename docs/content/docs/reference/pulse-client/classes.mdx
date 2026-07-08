@@ -11,7 +11,7 @@ Core classes for Pulse client functionality.
 
 ## ChannelBridge
 
-Manages bidirectional communication over a Pulse channel. You get a ChannelBridge instance from the `usePulseChannel` hook.
+Manages bidirectional communication over a Pulse channel. You get a ChannelBridge instance from the `usePulseChannel` hook after it connects, or from a `usePulseChannelManager()` lease.
 
 ```ts
 class ChannelBridge {
@@ -50,6 +50,7 @@ emit(event: string, payload?: any): void
 
 ```ts
 const channel = usePulseChannel("notifications");
+if (!channel) return;
 
 // Notify server of user activity (no response expected)
 channel.emit("user_active", { page: "/dashboard" });
@@ -79,6 +80,7 @@ request(event: string, payload?: any): Promise<any>
 
 ```ts
 const channel = usePulseChannel("api");
+if (!channel) return;
 
 // Fetch data from server
 const users = await channel.request("get_users", { limit: 10 });
@@ -114,6 +116,8 @@ const channel = usePulseChannel("notifications");
 
 // Subscribe to events
 useEffect(() => {
+  if (!channel) return;
+
   const unsubscribe = channel.on("notification", (data) => {
     showToast(data.message);
   });
@@ -123,6 +127,8 @@ useEffect(() => {
 
 // Handle server requests
 useEffect(() => {
+  if (!channel) return;
+
   return channel.on("confirm_action", async (data) => {
     const confirmed = await showConfirmDialog(data.message);
     return { confirmed };
@@ -147,6 +153,8 @@ function LiveAuction({ auctionId }: { auctionId: string }) {
 
   // Listen for bid updates
   useEffect(() => {
+    if (!channel) return;
+
     return channel.on("bid_update", (data) => {
       setCurrentBid(data.amount);
     });
@@ -154,6 +162,8 @@ function LiveAuction({ auctionId }: { auctionId: string }) {
 
   // Place a bid
   const placeBid = async (amount: number) => {
+    if (!channel) return;
+
     try {
       const result = await channel.request("place_bid", { amount });
       if (!result.success) {

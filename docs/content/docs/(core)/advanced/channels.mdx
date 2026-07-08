@@ -93,7 +93,7 @@ The notification appears instantly for the user, without them clicking anything.
 
 ## Creating a channel
 
-Create a channel inside a component using `ps.channel()`. Each channel is automatically scoped to the current user session and route.
+Create a channel inside a component using `ps.channel()`. Each channel is tied to the current user session. Browser views subscribe to it when they render a client component that calls `usePulseChannel(channel.id)`.
 
 ```python
 import pulse as ps
@@ -106,7 +106,7 @@ def ChatRoom():
     # ... rest of component
 ```
 
-The string argument (`"chat"`) is an identifier that helps with debugging. If you don't provide one, Pulse generates a UUID automatically. The channel is cleaned up automatically when the component unmounts or the user navigates away.
+The string argument (`"chat"`) is an identifier that helps with debugging. If you don't provide one, Pulse generates a UUID automatically. The channel is cleaned up automatically when the owning route mount unmounts.
 
 ## Handling events from the client
 
@@ -163,6 +163,8 @@ from pulse.js.pulse import usePulseChannel
 @ps.javascript(jsx=True)
 def ChatClient(*, channelId: str):
     bridge = usePulseChannel(channelId)
+    if bridge is None:
+        return None
 
     # Listen for events from the server
     def on_new_message(payload):
@@ -188,11 +190,13 @@ The `usePulseChannel` hook returns a bridge object with three methods:
 - `emit(event, payload)` - Send events to the server (fire-and-forget)
 - `request(event, payload)` - Send a request and await the server's response
 
+Channel payloads can include Pulse renderable values. When a renderable value is sent through a route-owned channel, Pulse hydrates it with that route's client component registry.
+
 ## Channel lifecycle
 
-Channels are tied to the route where they're created. When the user navigates to a different route, the channel closes automatically and resources are cleaned up. This prevents memory leaks and stale connections.
+Channels are one-to-one. `ps.channel()` creates a server-owned channel for the view currently rendering, and `usePulseChannel(channel.id)` connects one browser endpoint for that same view. `channel.emit()` and `channel.request()` send to that endpoint only.
 
-If you need a channel that persists across route changes (like a global notification system), create it at a higher level in your component tree, such as in a layout component.
+When the owning view unmounts, Pulse closes every channel created by that route mount. A client release only detaches the browser endpoint; it does not own the server channel lifetime. If you need a channel that persists across route changes, create it from a layout that stays mounted.
 
 You can also close a channel manually when you're done with it:
 

@@ -161,7 +161,7 @@ ch = ps.channel("chat")
 
 @ch.on("message")
 def handle_message(data):
-    ch.broadcast("new_message", data)
+    ch.emit("new_message", data)
 ```
 
 ## Main Exports

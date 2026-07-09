@@ -90,6 +90,12 @@ export interface ServerJsExecMessage {
 	expr: VDOMNode;
 }
 
+export interface ServerPayloadRefMessage {
+	type: "payload_ref";
+	id: string;
+	size: number;
+}
+
 export type ServerMessage =
 	| ServerInitMessage
 	| ServerUpdateMessage
@@ -100,7 +106,8 @@ export type ServerMessage =
 	| ServerAttachAckMessage
 	| ServerChannelRequestMessage
 	| ServerChannelResponseMessage
-	| ServerJsExecMessage;
+	| ServerJsExecMessage
+	| ServerPayloadRefMessage;
 
 export interface ClientCallbackMessage {
 	type: "callback";

@@ -6,8 +6,11 @@ to define routes and configure their Pulse application.
 """
 
 import asyncio
+import gzip
+import json
 import logging
 import os
+import uuid
 from collections import defaultdict
 from collections.abc import Awaitable, Sequence
 from contextlib import asynccontextmanager
@@ -88,6 +91,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 FRAMEWORK_API_PREFIX = "/_pulse"
 MAX_PENDING_SOCKET_MESSAGES = 100
+PAYLOAD_STASH_TTL = 60.0
 PULSE_ENDPOINT_UNWRAP_MARKER = "__pulse_endpoint_unwrap__"
 
 
@@ -267,6 +271,7 @@ class App:
 	_socket_to_render: dict[str, str]
 	_connecting_sockets: set[str]
 	_pending_socket_messages: dict[str, list[Serialized]]
+	_payload_stashes: dict[str, dict[str, tuple[bytes, TimerHandleLike]]]
 	_render_cleanups: dict[str, TimerHandleLike]
 	_render_message_locks: dict[str, asyncio.Lock]
 	_tasks: TaskRegistry
@@ -278,6 +283,7 @@ class App:
 	render_loop_limit: int
 	prerender_queue_timeout: float
 	disconnect_queue_timeout: float
+	large_message_threshold: int | None
 
 	def __init__(
 		self,
@@ -299,9 +305,12 @@ class App:
 		session_timeout: float = 60.0,
 		prerender_queue_timeout: float = 60.0,
 		disconnect_queue_timeout: float = 300.0,
+		large_message_threshold: int | None = 256 * 1024,
 		connection_status: ConnectionStatusConfig | None = None,
 		render_loop_limit: int = 50,
 	):
+		if large_message_threshold is not None and large_message_threshold < 0:
+			raise ValueError("large_message_threshold must be >= 0 or None")
 		# Resolve mode from environment and expose on the app instance
 		self.env = envvars.pulse_env
 		self.mode = mode
@@ -348,6 +357,7 @@ class App:
 		self._socket_to_render = {}
 		self._connecting_sockets = set()
 		self._pending_socket_messages = {}
+		self._payload_stashes = {}
 		# Map render_id -> cleanup timer handle for timeout-based expiry
 		self._render_cleanups = {}
 		self._render_message_locks = {}
@@ -357,6 +367,7 @@ class App:
 		self.session_timeout = session_timeout
 		self.prerender_queue_timeout = prerender_queue_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
+		self.large_message_threshold = large_message_threshold
 		self.connection_status = connection_status or ConnectionStatusConfig()
 		self.render_loop_limit = render_loop_limit
 
@@ -746,6 +757,36 @@ class App:
 
 			return await render.forms.handle_submit(form_id, request, session)
 
+		@self.fastapi.get(f"{prefix}/payloads/{{render_id}}/{{payload_id}}")
+		async def get_payload(  # pyright: ignore[reportUnusedFunction]
+			render_id: str, payload_id: str
+		) -> Response:
+			session = PulseContext.get().session
+			if session is None:
+				raise RuntimeError("Internal error: couldn't resolve user session")
+
+			render = self._get_render_for_session(render_id, session)
+			if render is None:
+				raise HTTPException(status_code=404, detail="Payload not found")
+
+			stash = self._payload_stashes.get(render.id)
+			if stash is None:
+				raise HTTPException(status_code=404, detail="Payload not found")
+			stash_entry = stash.pop(payload_id, None)
+			if stash_entry is None:
+				raise HTTPException(status_code=404, detail="Payload not found")
+			payload, handle = stash_entry
+			if not handle.cancelled():
+				handle.cancel()
+			self._timers.discard(handle)
+			if len(stash) == 0:
+				self._payload_stashes.pop(render.id, None)
+			return Response(
+				content=payload,
+				media_type="application/json",
+				headers={"Content-Encoding": "gzip"},
+			)
+
 		# Call on_setup hooks after FastAPI routes/middleware are in place
 		for plugin in self.plugins:
 			plugin.on_setup(self)
@@ -829,9 +870,7 @@ class App:
 					)
 
 			def on_message(message: ServerMessage):
-				payload = serialize(message)
-				# `serialize` returns a tuple, which socket.io will mistake for multiple arguments
-				payload = list(payload)
+				payload = self._serialize_server_message(render.id, message)
 				self._tasks.create_task(self.sio.emit("message", list(payload), to=sid))
 
 			render.connect(on_message)
@@ -885,6 +924,38 @@ class App:
 			await self._handle_socket_message(sid, data)
 
 		self.status = AppStatus.initialized
+
+	def _serialize_server_message(
+		self, render_id: str, message: ServerMessage
+	) -> Serialized:
+		payload = serialize(message)
+		threshold = self.large_message_threshold
+		if threshold is None:
+			return payload
+		encoded = json.dumps(payload, separators=(",", ":"))
+		encoded_bytes = encoded.encode("utf-8")
+		size = len(encoded_bytes)
+		if size <= threshold:
+			return payload
+
+		payload_id = uuid.uuid4().hex
+		compressed = gzip.compress(encoded_bytes)
+		handle = self._timers.later(
+			PAYLOAD_STASH_TTL, self._evict_payload_stash, render_id, payload_id
+		)
+		self._payload_stashes.setdefault(render_id, {})[payload_id] = (
+			compressed,
+			handle,
+		)
+		return serialize({"type": "payload_ref", "id": payload_id, "size": size})
+
+	def _evict_payload_stash(self, render_id: str, payload_id: str) -> None:
+		stash = self._payload_stashes.get(render_id)
+		if stash is None:
+			return
+		stash.pop(payload_id, None)
+		if len(stash) == 0:
+			self._payload_stashes.pop(render_id, None)
 
 	def _cancel_render_cleanup(self, rid: str):
 		"""Cancel any pending cleanup task for a render session."""
@@ -1179,6 +1250,12 @@ class App:
 		# Cancel any pending cleanup task
 		self._cancel_render_cleanup(rid)
 		self._render_message_locks.pop(rid, None)
+		stash = self._payload_stashes.pop(rid, None)
+		if stash is not None:
+			for _, handle in stash.values():
+				if not handle.cancelled():
+					handle.cancel()
+				self._timers.discard(handle)
 
 		render = self.render_sessions.pop(rid, None)
 		if not render:

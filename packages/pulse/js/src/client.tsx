@@ -12,10 +12,12 @@ import type {
 	ServerError,
 	ServerJsExecMessage,
 	ServerMessage,
+	ServerPayloadRefMessage,
 } from "./messages";
 import type { PulsePrerenderView } from "./pulse";
 import { extractEvent } from "./serialize/events";
 import { deserialize, serialize } from "./serialize/serializer";
+import type { Serialized } from "./serialize/serializer";
 import type { VDOMUpdate } from "./vdom";
 
 function documentIsHidden(): boolean {
@@ -24,6 +26,12 @@ function documentIsHidden(): boolean {
 
 function browserIsOnline(): boolean {
 	return typeof navigator === "undefined" || navigator.onLine !== false;
+}
+
+const PAYLOAD_FETCH_BACKOFF_MS = [5, 10, 20];
+
+function wait(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export interface SocketIODirectives {
@@ -69,6 +77,7 @@ export class PulseSocketIOClient {
 	#pendingCallbacks: Map<string, ClientCallbackMessage[]>;
 	#socket: Socket | null = null;
 	#messageQueue: ClientMessage[];
+	#serverMessageQueue: Promise<void> = Promise.resolve();
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
 	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
 	#url: string;
@@ -197,6 +206,7 @@ export class PulseSocketIOClient {
 				query: this.#directives.socketio?.query,
 			});
 			this.#socket = socket;
+			this.#serverMessageQueue = Promise.resolve();
 
 			socket.on("connect", () => {
 				if (this.#socket !== socket) return;
@@ -240,7 +250,14 @@ export class PulseSocketIOClient {
 			// Wrap in an arrow function to avoid losing the `this` reference
 			socket.on("message", (data) => {
 				if (this.#socket !== socket) return;
-				this.#handleServerMessage(deserialize(data, { coerceNullsToUndefined: true }));
+				this.#serverMessageQueue = this.#serverMessageQueue
+					.then(
+						() => this.#processServerMessage(socket, data),
+						() => this.#processServerMessage(socket, data),
+					)
+					.catch((err) => {
+						console.error("[PulseClient] Failed to process server message", err);
+					});
 			});
 		});
 	}
@@ -342,6 +359,85 @@ export class PulseSocketIOClient {
 		this.#socket = null;
 		this.#handleTransportDisconnect();
 		socket.disconnect();
+	}
+
+	async #processServerMessage(socket: Socket, data: unknown): Promise<void> {
+		const message = deserialize<ServerMessage>(data as any, {
+			coerceNullsToUndefined: true,
+		});
+		if (message.type !== "payload_ref") {
+			this.#handleServerMessage(message);
+			return;
+		}
+
+		const payload = await this.#fetchPayloadRef(socket, message);
+		if (payload === null || this.#socket !== socket) return;
+		this.#handleServerMessage(
+			deserialize<ServerMessage>(payload, { coerceNullsToUndefined: true }),
+		);
+	}
+
+	async #fetchPayloadRef(
+		socket: Socket,
+		message: ServerPayloadRefMessage,
+	): Promise<Serialized | null> {
+		const renderId =
+			this.#directives.socketio?.auth?.render_id ??
+			this.#directives.headers?.["X-Pulse-Render-Id"];
+		if (!renderId) {
+			this.#recoverPayloadFetch(socket, new Error("Missing Pulse render id"));
+			return null;
+		}
+
+		let lastError: unknown = null;
+		for (let attempt = 0; attempt <= PAYLOAD_FETCH_BACKOFF_MS.length; attempt++) {
+			if (this.#socket !== socket) return null;
+			let retry = true;
+			try {
+				const url = new URL(
+					`/_pulse/payloads/${encodeURIComponent(renderId)}/${encodeURIComponent(message.id)}`,
+					this.#url,
+				);
+				for (const [key, value] of Object.entries(this.#directives.query ?? {})) {
+					url.searchParams.set(key, value);
+				}
+				const response = await fetch(url, {
+					method: "GET",
+					headers: this.#directives.headers,
+					credentials: "include",
+				});
+				if (this.#socket !== socket) return null;
+				if (response.status === 404) {
+					lastError = new Error(`Payload ${message.id} was not found`);
+					retry = false;
+				} else if (!response.ok) {
+					lastError = new Error(
+						`Payload ${message.id} failed with HTTP ${response.status}`,
+					);
+				} else {
+					const payload = (await response.json()) as Serialized;
+					if (this.#socket !== socket) return null;
+					return payload;
+				}
+			} catch (err) {
+				lastError = err;
+			}
+
+			if (!retry || attempt === PAYLOAD_FETCH_BACKOFF_MS.length) {
+				this.#recoverPayloadFetch(socket, lastError);
+				return null;
+			}
+			await wait(PAYLOAD_FETCH_BACKOFF_MS[attempt]);
+		}
+		return null;
+	}
+
+	#recoverPayloadFetch(socket: Socket, err: unknown): void {
+		if (this.#socket !== socket) return;
+		// The server considers the message delivered, so the missed update cannot be
+		// replayed; a full reload is the only way back to consistent state.
+		console.error("[PulseClient] Failed to fetch server payload; reloading", err);
+		window.location.reload();
 	}
 
 	#handleServerMessage(message: ServerMessage) {

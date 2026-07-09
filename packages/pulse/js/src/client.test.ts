@@ -61,11 +61,12 @@ async function makeClient(
 		initialErrorDelay: 0,
 		reconnectErrorDelay: 0,
 	},
+	directives = {},
 ) {
 	const { PulseSocketIOClient } = await import("./client");
 	return new PulseSocketIOClient(
 		"http://pulse.test",
-		{},
+		directives,
 		vi.fn() as any,
 		connectionStatus,
 	);
@@ -81,6 +82,24 @@ function sentMessages(target: FakeSocket = socket) {
 
 function waitForEffects() {
 	return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function wait(ms: number) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function messageResponse(message: object) {
+	return new Response(JSON.stringify(serialize(message)), {
+		status: 200,
+		headers: { "content-type": "application/json" },
+	});
+}
+
+function payloadDirectives() {
+	return {
+		query: { pulse_deployment: "dep-1" },
+		socketio: { auth: { render_id: "render-1" } },
+	};
 }
 
 describe("PulseSocketIOClient attach ack", () => {
@@ -117,6 +136,7 @@ describe("PulseSocketIOClient attach ack", () => {
 				attachId: attach.attachId,
 			}),
 		);
+		await waitForEffects();
 
 		expect(sentMessages()[1]).toMatchObject({
 			type: "callback",
@@ -143,6 +163,7 @@ describe("PulseSocketIOClient attach ack", () => {
 				attachId: attach.attachId,
 			}),
 		);
+		await waitForEffects();
 
 		expect(sentMessages().map((message) => message.type)).toEqual([
 			"attach",
@@ -287,6 +308,107 @@ describe("PulseSocketIOClient attach ack", () => {
 		await waitForEffects();
 
 		expect(reload).not.toHaveBeenCalled();
+	});
+});
+
+describe("PulseSocketIOClient payload refs", () => {
+	beforeEach(() => {
+		io.mockClear();
+	});
+
+	it("processes payload refs and later socket messages in original order", async () => {
+		const events: string[] = [];
+		const client = await makeClient(undefined, payloadDirectives());
+		const connected = client.connect();
+		client.attach("/", {
+			routeInfo,
+			onInit: vi.fn(() => events.push("init")),
+			onUpdate: vi.fn(() => events.push("update")),
+			onJsExec: vi.fn(),
+			onServerError: vi.fn(),
+		});
+		socket.trigger("connect");
+		await connected;
+
+		let resolveFetch: (response: Response) => void = () => {};
+		const fetchResponse = new Promise<Response>((resolve) => {
+			resolveFetch = resolve;
+		});
+		const fetchMock = vi
+			.spyOn(globalThis, "fetch")
+			.mockReturnValue(fetchResponse as ReturnType<typeof fetch>);
+
+		socket.trigger("message", serialize({ type: "payload_ref", id: "p1", size: 100 }));
+		socket.trigger(
+			"message",
+			serialize({ type: "vdom_update", path: "/", ops: [] }),
+		);
+		await waitForEffects();
+		expect(events).toEqual([]);
+
+		resolveFetch(messageResponse({ type: "vdom_init", path: "/", vdom: [] }));
+		await waitForEffects();
+		await waitForEffects();
+
+		expect(events).toEqual(["init", "update"]);
+		fetchMock.mockRestore();
+	});
+
+	it("retries a payload ref fetch then applies the message", async () => {
+		const events: string[] = [];
+		const client = await makeClient(undefined, payloadDirectives());
+		const connected = client.connect();
+		client.attach("/", {
+			routeInfo,
+			onInit: vi.fn(() => events.push("init")),
+			onUpdate: vi.fn(),
+			onJsExec: vi.fn(),
+			onServerError: vi.fn(),
+		});
+		socket.trigger("connect");
+		await connected;
+
+		const fetchMock = vi
+			.spyOn(globalThis, "fetch")
+			.mockRejectedValueOnce(new Error("network down"))
+			.mockResolvedValueOnce(messageResponse({ type: "vdom_init", path: "/", vdom: [] }));
+
+		socket.trigger("message", serialize({ type: "payload_ref", id: "p1", size: 100 }));
+		await wait(20);
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		const url = fetchMock.mock.calls[0]![0] as URL;
+		expect(url.pathname).toBe("/_pulse/payloads/render-1/p1");
+		expect(url.searchParams.get("pulse_deployment")).toBe("dep-1");
+		expect(events).toEqual(["init"]);
+		fetchMock.mockRestore();
+	});
+
+	it("reloads after permanent payload ref failure", async () => {
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+		const reload = vi.fn();
+		Object.defineProperty(window.location, "reload", {
+			configurable: true,
+			value: reload,
+		});
+		const client = await makeClient(undefined, payloadDirectives());
+		const connected = client.connect();
+		client.attach("/", view);
+		socket.trigger("connect");
+		await connected;
+
+		const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response("missing", { status: 404 }) as any,
+		);
+
+		socket.trigger("message", serialize({ type: "payload_ref", id: "p1", size: 100 }));
+		await waitForEffects();
+		await waitForEffects();
+
+		expect(reload).toHaveBeenCalled();
+		expect(consoleError).toHaveBeenCalled();
+		fetchMock.mockRestore();
+		consoleError.mockRestore();
 	});
 });
 

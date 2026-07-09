@@ -208,6 +208,9 @@ Registering to receive messages on a channel. When events arrive, your handler f
 **Broadcast**
 Sending a message to all connected clients, not just one. Used for features like live notifications or collaborative editing.
 
+**Claim Check / Payload Offloading**
+A pattern for keeping large messages off the WebSocket. Instead of sending a big payload over the socket (where it would block everything queued behind it), Pulse stashes it, sends a tiny reference, and lets the browser fetch the real payload over HTTP. This gives retries while keeping the socket free for small, fast updates. Controlled by `App(large_message_threshold=...)`.
+
 ## JavaScript Interop
 
 **Transpilation**

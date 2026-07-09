@@ -28,6 +28,7 @@ class App:
         session_timeout: float = 60.0,
         prerender_queue_timeout: float = 60.0,
         disconnect_queue_timeout: float = 300.0,
+        large_message_threshold: int | None = 256 * 1024,
         connection_status: ConnectionStatusConfig | None = None,
         render_loop_limit: int = 50,
     ): ...
@@ -54,6 +55,7 @@ class App:
 | `session_timeout` | `float` | `60.0` | Session cleanup timeout (seconds) |
 | `prerender_queue_timeout` | `float` | `60.0` | Prerender queue timeout (seconds) |
 | `disconnect_queue_timeout` | `float` | `300.0` | Disconnected socket message queue timeout (seconds) |
+| `large_message_threshold` | `int \| None` | `256 * 1024` | Byte size above which server→client messages are offloaded to HTTP. `None` disables. See [Large messages](/docs/advanced/large-messages). |
 | `connection_status` | `ConnectionStatusConfig` | `None` | Connection status UI timing |
 | `render_loop_limit` | `int` | `50` | Maximum render loops before failing |
 

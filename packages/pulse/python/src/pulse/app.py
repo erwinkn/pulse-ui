@@ -888,11 +888,13 @@ class App:
 						self.sio.emit("message", list(payload), to=sid)
 					)
 
+				old_sid = self._render_to_socket.get(rid)
+				if old_sid is not None and old_sid != sid:
+					render.resync()
 				render.connect(on_message)
 				# Map socket sid to renderId for message routing. If the client
 				# reconnected before the old socket's disconnect fired, unmap the
 				# old socket so its late disconnect can't tear down this connection.
-				old_sid = self._render_to_socket.get(rid)
 				if old_sid is not None and old_sid != sid:
 					self._socket_to_render.pop(old_sid, None)
 				self._socket_to_render[sid] = rid

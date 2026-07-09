@@ -7,10 +7,15 @@ tear down the new connection or strand the render session's cleanup timer.
 """
 
 import asyncio
-from typing import Any, override
+from typing import Any, cast, override
 
 import pulse as ps
 import pytest
+from pulse.messages import ServerMessage
+from pulse.queries.query import KeyedQueryResult
+from pulse.reactive import Computed
+from pulse.serializer import Serialized, deserialize, serialize
+from pulse.test_helpers import wait_for
 from pulse.user_session import CookieSessionStore
 
 
@@ -26,6 +31,31 @@ def make_environ(app: ps.App, sid: str) -> dict[str, str]:
 	assert isinstance(store, CookieSessionStore)
 	cookie = store.encode(sid, {})
 	return {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
+
+
+def make_route_info(pathname: str) -> ps.RouteInfo:
+	return {
+		"pathname": pathname,
+		"hash": "",
+		"query": "",
+		"queryParams": {},
+		"pathParams": {},
+		"catchall": [],
+	}
+
+
+class CounterState(ps.State):
+	value: str = "before"
+
+	def mark_after_dead(self) -> None:
+		self.value = "after-dead"
+
+
+@ps.component
+def Counter():
+	with ps.init():
+		state = CounterState()
+	return ps.button(onClick=state.mark_after_dead)[state.value]
 
 
 @pytest.mark.asyncio
@@ -59,6 +89,121 @@ async def test_stale_socket_disconnect_does_not_clobber_live_connection(
 	assert "render-1" in app._render_cleanups  # pyright: ignore[reportPrivateUsage]
 	assert app._socket_to_render == {}  # pyright: ignore[reportPrivateUsage]
 
+	await app.close()
+
+
+@pytest.mark.asyncio
+async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
+	app = ps.App(routes=[ps.Route("/", Counter)])
+	app.setup("http://example.com")
+	environ = make_environ(app, "user-1")
+	auth = {"render_id": "render-1"}
+	connect = app.sio.handlers["/"]["connect"]
+	messages: dict[str, list[ServerMessage]] = {}
+
+	async def fake_emit(event: str, data: Any, *, to: str) -> None:
+		if event == "message":
+			message = deserialize(cast(Serialized, data))
+			messages.setdefault(to, []).append(cast(ServerMessage, message))
+
+	monkeypatch.setattr(app.sio, "emit", fake_emit)
+
+	await connect("socket-a", environ, auth)
+	render = app.render_sessions["render-1"]
+	user_session = app.user_sessions["user-1"]
+	with ps.PulseContext.update(session=user_session, render=render):
+		render.prerender(["/"], make_route_info("/"))
+
+	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+		"socket-a",
+		serialize(
+			{
+				"type": "attach",
+				"path": "/",
+				"routeInfo": make_route_info("/"),
+				"attachId": "attach-a",
+			}
+		),
+	)
+	await wait_for(
+		lambda: any(
+			message["type"] == "attach_ack" for message in messages.get("socket-a", [])
+		)
+	)
+	assert not [
+		message for message in messages["socket-a"] if message["type"] == "vdom_init"
+	]
+
+	fetch_count = 0
+	fresh_fetch_count = 0
+
+	async def fetch() -> int:
+		nonlocal fetch_count
+		fetch_count += 1
+		return fetch_count
+
+	async def fetch_fresh() -> int:
+		nonlocal fresh_fetch_count
+		fresh_fetch_count += 1
+		return fresh_fetch_count
+
+	with ps.PulseContext.update(session=user_session, render=render):
+		render.query_store.ensure(("value",))
+		query = KeyedQueryResult(
+			Computed(lambda: render.query_store.ensure(("value",))),
+			fetch_fn=fetch,
+			stale_time=0.0,
+		)
+		render.query_store.ensure(("fresh-value",))
+		fresh_query = KeyedQueryResult(
+			Computed(lambda: render.query_store.ensure(("fresh-value",))),
+			fetch_fn=fetch_fresh,
+			stale_time=1000.0,
+		)
+	await wait_for(lambda: query.data == 1)
+	await wait_for(lambda: fresh_query.data == 1)
+
+	# The browser has lost socket-a, but the server still considers it live.
+	callback = next(iter(render.route_mounts["/"].tree.callbacks))
+	render.execute_callback("/", callback, [])
+	render.flush()
+	await wait_for(
+		lambda: any(
+			message["type"] == "vdom_update" for message in messages.get("socket-a", [])
+		)
+	)
+
+	await connect("socket-b", environ, auth)
+	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+		"socket-b",
+		serialize(
+			{
+				"type": "attach",
+				"path": "/",
+				"routeInfo": make_route_info("/"),
+				"attachId": "attach-b",
+			}
+		),
+	)
+	await wait_for(lambda: fetch_count == 2)
+	await wait_for(
+		lambda: any(
+			message["type"] == "attach_ack" for message in messages.get("socket-b", [])
+		)
+	)
+
+	init_messages = [
+		message for message in messages["socket-b"] if message["type"] == "vdom_init"
+	]
+	assert len(init_messages) == 1
+	assert "after-dead" in str(init_messages[0]["vdom"])
+	assert fresh_fetch_count == 1
+
+	query.dispose()
+	fresh_query.dispose()
 	await app.close()
 
 

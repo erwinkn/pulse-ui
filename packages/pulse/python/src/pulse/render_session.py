@@ -339,6 +339,14 @@ class RenderSession:
 		with PulseContext.update(render=self):
 			self.query_store.resume_all()
 
+	def resync(self) -> None:
+		"""Prepare active mounts and queries for a replacement WebSocket."""
+		self.query_store.suspend_all()
+		for mount in self.route_mounts.values():
+			if mount.state == "active":
+				mount.start_pending(self.disconnect_queue_timeout)
+				mount.suspend()
+
 	def disconnect(self):
 		"""WebSocket disconnected. Queue briefly, then suspend mounts on timeout."""
 		self._send_message = None

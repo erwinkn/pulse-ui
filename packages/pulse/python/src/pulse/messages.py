@@ -101,6 +101,12 @@ class ServerJsExecMessage(TypedDict):
 	expr: VDOMNode
 
 
+class ServerPayloadRefMessage(TypedDict):
+	type: Literal["payload_ref"]
+	id: str
+	size: int
+
+
 # ====================
 # Client messages
 # ====================
@@ -176,6 +182,7 @@ ServerMessage = (
 	| ServerAttachAckMessage
 	| ServerChannelMessage
 	| ServerJsExecMessage
+	| ServerPayloadRefMessage
 )
 
 

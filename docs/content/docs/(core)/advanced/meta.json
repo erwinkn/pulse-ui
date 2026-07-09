@@ -5,6 +5,7 @@
     "refs",
     "js-interop",
     "custom-hooks",
-    "middleware"
+    "middleware",
+    "large-messages"
   ]
 }

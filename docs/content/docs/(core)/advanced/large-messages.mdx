@@ -1,0 +1,56 @@
+---
+title: "Large messages"
+---
+
+Pulse sends every UI update to the browser over a single ordered WebSocket. That ordering is what keeps your app consistent—messages arrive in exactly the order the server produced them. But it has a downside: a single multi-megabyte message blocks every message queued behind it while it drains, including the heartbeats that keep the connection alive. A big enough payload can stall interactive updates and even trip a ping timeout that drops the socket. On top of that, if the connection drops mid-message, the whole message has to be sent again.
+
+To avoid this, Pulse transparently offloads large messages to HTTP using a [claim check](/docs/glossary) pattern. You don't have to do anything—it's on by default. The only knob is a single `App` option.
+
+```python
+import pulse as ps
+
+app = ps.App(
+    routes=[...],
+    large_message_threshold=512 * 1024,  # bytes; default is 256 * 1024 (256 KiB)
+)
+```
+
+When an outgoing message's JSON encoding is larger than `large_message_threshold`, the server gzip-compresses it, stashes it, and sends a tiny reference over the socket instead. The browser fetches the real payload over HTTP (which can be retried independently), then processes it in order with everything else. The socket stays free for the small, fast, interactive updates it's good at.
+
+Most of the time you'll never notice this happening. It kicks in for things like a query returning a large dataset or an initial render of a big table.
+
+## Tuning the threshold
+
+The default (256 KiB) is a good starting point. Raise it if you'd rather keep moderately large messages on the socket, or lower it if you're seeing latency spikes from big updates.
+
+```python
+# Offload sooner (more messages go over HTTP)
+app = ps.App(routes=[...], large_message_threshold=64 * 1024)
+
+# Disable offloading entirely (everything stays on the socket)
+app = ps.App(routes=[...], large_message_threshold=None)
+```
+
+## What you'll see in devtools
+
+Because the mechanism is invisible in your Python code, the browser's network tab is where you'll spot it. Offloaded messages show up as `GET` requests to:
+
+```
+/_pulse/payloads/{render_id}/{payload_id}
+```
+
+These responses come back with `Content-Encoding: gzip`, so devtools will show a compressed transfer size smaller than the decoded size.
+
+## Operational notes
+
+- **Compressed.** Payloads are gzip-compressed on the server and served with `Content-Encoding: gzip`.
+- **One-shot.** Each payload is deleted the first time it's fetched. A second request for the same payload returns `404`.
+- **Session-scoped.** A payload can only be fetched by the user session that owns its render session. Requests from anyone else get a `404`.
+- **Short-lived.** If a payload is never fetched (say the tab closed), it's evicted from the server after 60 seconds.
+- **Self-healing.** If the browser can't fetch a payload after a few retries, it reloads the page—the missed update can't be replayed, so a reload is the clean way back to a consistent state.
+
+## See also
+
+- [Channels](/docs/advanced/channels) — server-initiated messages over the socket
+- [App reference](/docs/reference/pulse/app) — the full list of `ps.App` options
+- [Glossary](/docs/glossary) — WebSocket, serialization, and other terms

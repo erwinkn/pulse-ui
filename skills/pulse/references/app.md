@@ -38,6 +38,7 @@ app = ps.App(
 | `cors` | `CORSOptions` | Auto | CORS configuration |
 | `fastapi` | `dict` | `None` | FastAPI constructor options |
 | `session_timeout` | `float` | `60.0` | Session cleanup timeout (seconds) |
+| `large_message_threshold` | `int \| None` | `256 * 1024` | Byte size above which server→client messages are offloaded to HTTP. `None` disables. |
 
 ## Deployment Modes
 
@@ -179,6 +180,29 @@ app = ps.App(
     ),
 )
 ```
+
+## Large Message Offloading
+
+Large server→client messages block every other message behind them on the ordered WebSocket (including heartbeats). Pulse transparently offloads them to HTTP using a claim-check pattern.
+
+```python
+app = ps.App(
+    routes=[...],
+    large_message_threshold=512 * 1024,  # Default: 256 * 1024 (256 KiB)
+)
+
+# Disable offloading entirely (send everything over the socket)
+app = ps.App(routes=[...], large_message_threshold=None)
+```
+
+When an outgoing message's JSON encoding exceeds the threshold, the server gzip-compresses it, stashes it, and sends a tiny `payload_ref` over the socket. The client fetches `GET /_pulse/payloads/{render_id}/{payload_id}` and processes it in order with other messages.
+
+- Payloads are gzip-compressed (served with `Content-Encoding: gzip`).
+- One-shot: each payload is deleted on first fetch.
+- Scoped to the owning user's session (ownership is validated on fetch).
+- Unfetched stash entries expire after 60 seconds.
+- If a fetch fails after retries, the client reloads the page to recover.
+- Must be `>= 0` or `None`; a negative value raises `ValueError`.
 
 ## Middleware
 

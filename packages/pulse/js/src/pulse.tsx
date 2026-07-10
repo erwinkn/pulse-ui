@@ -11,9 +11,8 @@ import {
 import { useLocation, useNavigate, useParams } from "react-router";
 import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
 import type { RouteInfo } from "./helpers";
-import type { ServerError } from "./messages";
+import type { ServerError, ViewSnapshot } from "./messages";
 import { VDOMRenderer } from "./renderer";
-import type { VDOM } from "./vdom";
 
 // =================================================================
 // Types
@@ -31,9 +30,7 @@ export interface PulseConfig {
 	apiPrefix: string;
 }
 
-export type PulsePrerenderView = {
-	vdom: VDOM;
-};
+export type PulsePrerenderView = ViewSnapshot;
 
 export type PulsePrerender = {
 	views: Record<string, PulsePrerenderView>;
@@ -222,7 +219,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 	// biome-ignore lint/correctness/useExhaustiveDependencies: We don't want to detach on navigation, so another useEffect syncs the routeInfo on navigation.
 	useEffect(() => {
 		if (inBrowser) {
-			client.attach(path, {
+			client.attach(path, initialView, {
 				routeInfo,
 				onInit: (view) => {
 					setTree(renderer.init(view));
@@ -240,7 +237,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 					} catch (e) {
 						error = e instanceof Error ? e.message : String(e);
 					}
-					client.sendJsResult(msg.id, result, error);
+					client.sendJsResult(msg.viewId, msg.id, result, error);
 				},
 				onServerError: setServerError,
 			});
@@ -260,19 +257,24 @@ export function PulseView({ path, registry }: PulseViewProps) {
 	}, [client, path, routeInfo]);
 	// Hack for our current prerendering setup on client-side navigation. Will be improved soon
 	const hasRendered = useRef(false);
+	const renderedWith = useRef(renderer);
 	useIsomorphicLayoutEffect(() => {
 		// First rendering pass, no need to update the tree
 		if (!hasRendered.current) {
 			hasRendered.current = true;
 		}
 		// 2nd+ rendering pass. Happens when a route stays mounted on navigation.
-		else {
+		else if (renderedWith.current !== renderer) {
 			setTree(renderer.init(initialView));
 		}
+		else {
+			client.installSnapshot(path, initialView);
+		}
+		renderedWith.current = renderer;
 		// Note: Do NOT reset hasRendered in cleanup. The cleanup runs when effect 
 		// deps change and at least once on mount with strict mode,
 		// not just on unmount, which would cause subsequent runs to skip setTree.
-	}, [initialView, renderer]);
+	}, [client, initialView, path, renderer]);
 
 	if (serverError) {
 		return <ServerErrorPopup error={serverError} />;

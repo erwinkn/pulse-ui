@@ -10,16 +10,20 @@ from pulse.channel import Channel
 from pulse.context import PulseContext
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import (
+	RouteOrigin,
 	ServerApiCallMessage,
+	ServerAttachAckMessage,
+	ServerErrorMessage,
 	ServerErrorPhase,
 	ServerInitMessage,
 	ServerJsExecMessage,
 	ServerMessage,
 	ServerNavigateToMessage,
 	ServerUpdateMessage,
+	ViewSnapshot,
 )
 from pulse.queries.store import QueryStore
-from pulse.reactive import REACTIVE_CONTEXT, Effect, Untrack, flush_effects
+from pulse.reactive import REACTIVE_CONTEXT, Effect, flush_effects
 from pulse.renderer import RenderTree
 from pulse.routing import (
 	Layout,
@@ -100,7 +104,8 @@ class RouteMount:
 	dispose_on_timeout: bool
 	queue: list[ServerMessage] | None
 	queue_timeout: TimerHandleLike | None
-	mount_id: str
+	view_id: str
+	revision: int
 	render_batch_id: int
 	render_batch_renders: int
 
@@ -123,15 +128,16 @@ class RouteMount:
 		self.dispose_on_timeout = False
 		self.queue = []
 		self.queue_timeout = None
-		self.mount_id = uuid.uuid4().hex
+		self.view_id = uuid.uuid4().hex
+		self.revision = -1
 		self.render_batch_id = -1
 		self.render_batch_renders = 0
 
 	def update_route(self, route_info: RouteInfo) -> None:
 		self.route.update(route_info)
 
-	def renew_mount_id(self) -> None:
-		self.mount_id = uuid.uuid4().hex
+	def origin(self) -> RouteOrigin:
+		return {"viewId": self.view_id, "pathname": self.route.pathname}
 
 	def _cancel_pending_timeout(self) -> None:
 		if self.queue_timeout is not None:
@@ -163,11 +169,13 @@ class RouteMount:
 			timeout, self._on_pending_timeout
 		)
 
-	def activate(self, send_message: Callable[[ServerMessage], Any]) -> None:
+	def activate(
+		self, send_message: Callable[[ServerMessage], Any], *, flush: bool = True
+	) -> None:
 		if self.state != "pending":
 			return
 		self._cancel_pending_timeout()
-		if self.queue:
+		if flush and self.queue:
 			for msg in self.queue:
 				send_message(msg)
 		self.queue = None
@@ -199,6 +207,16 @@ class RouteMount:
 		if self.state == "closed":
 			raise RuntimeError(f"Message sent to closed mount {self.path!r}")
 		# suspended: drop; the client gets a fresh init on resume
+
+	def can_replay_from(self, revision: int) -> bool:
+		current = revision
+		for message in self.queue or []:
+			if message["type"] != "vdom_update":
+				continue
+			if message["viewId"] != self.view_id or message["baseRevision"] != current:
+				return False
+			current = message["revision"]
+		return current == self.revision
 
 	def ensure_effect(self, *, lazy: bool = False, flush: bool = True) -> None:
 		if self.effect is not None:
@@ -258,7 +276,7 @@ class RenderSession:
 	_client_address: str | None
 	_send_message: Callable[[ServerMessage], Any] | None
 	_pending_api: dict[str, asyncio.Future[dict[str, Any]]]
-	_pending_js_results: dict[str, asyncio.Future[Any]]
+	_pending_js_results: dict[str, tuple[str, asyncio.Future[Any]]]
 	_ref_channel: Channel | None
 	_ref_channels_by_route: dict[str, Channel]
 	_global_states: dict[str, State]
@@ -323,7 +341,9 @@ class RenderSession:
 
 	# ---- Connection lifecycle ----
 
-	def connect(self, send_message: Callable[[ServerMessage], Any]):
+	def connect(
+		self, send_message: Callable[[ServerMessage], Any], *, replacing: bool = False
+	):
 		"""WebSocket connected. Set sender, don't auto-flush (attach does that)."""
 		self._send_message = send_message
 		self.connected = True
@@ -337,15 +357,10 @@ class RenderSession:
 		# render); the session is inherited from the caller's context, which must
 		# wrap connect() so reconnect fetches match initial fetches.
 		with PulseContext.update(render=self):
-			self.query_store.resume_all()
-
-	def resync(self) -> None:
-		"""Prepare active mounts and queries for a replacement WebSocket."""
-		self.query_store.suspend_all()
-		for mount in self.route_mounts.values():
-			if mount.state == "active":
-				mount.start_pending(self.disconnect_queue_timeout)
-				mount.suspend()
+			if replacing:
+				self.query_store.reconnect_all()
+			else:
+				self.query_store.resume_all()
 
 	def disconnect(self):
 		"""WebSocket disconnected. Queue briefly, then suspend mounts on timeout."""
@@ -362,32 +377,13 @@ class RenderSession:
 
 	def send(self, message: ServerMessage):
 		"""Route message based on mount state."""
-		# Forced navigation is global. Route-bound navigation is dropped once
-		# its source route has unmounted.
+		# Forced navigation is global. Origin-bound navigation is dropped once
+		# its source view or pathname is no longer current.
 		if message.get("type") == "navigate_to":
-			source_route_path = message.get("sourceRoutePath")
-			source_path = message.get("sourcePath")
-			source_mount_id = message.get("sourceMountId")
-			if isinstance(source_route_path, str) and isinstance(source_path, str):
-				mount = self.route_mounts.get(ensure_absolute_path(source_route_path))
-				source_path = ensure_absolute_path(source_path)
-				if (
-					mount is None
-					or mount.route.pathname != source_path
-					or (
-						isinstance(source_mount_id, str)
-						and mount.mount_id != source_mount_id
-					)
-				):
-					return
-			elif isinstance(source_path, str):
-				source_path = ensure_absolute_path(source_path)
-				with Untrack():
-					source_path_is_active = any(
-						mount.route.pathname == source_path
-						for mount in self.route_mounts.values()
-					)
-				if not source_path_is_active:
+			origin = message.get("origin")
+			if origin is not None:
+				mount = self._get_mount_by_view_id(origin["viewId"])
+				if mount is None or mount.route.pathname != origin["pathname"]:
 					return
 			if self._send_message:
 				self._send_message(message)
@@ -411,6 +407,9 @@ class RenderSession:
 			if self._send_message:
 				self._send_message(message)
 			return
+		view_id = message.get("viewId")
+		if isinstance(view_id, str) and view_id != mount.view_id:
+			return
 
 		if self._send_message:
 			mount.deliver(message, self._send_message)
@@ -429,18 +428,20 @@ class RenderSession:
 		# is also called outside an `except` block (e.g. a deferred connect error),
 		# where traceback.format_exc() would yield "NoneType: None".
 		stack = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-		self.send(
-			{
-				"type": "server_error",
-				"path": path,
-				"error": {
-					"message": str(exc),
-					"stack": stack,
-					"phase": phase,
-					"details": details or {},
-				},
-			}
+		message = ServerErrorMessage(
+			type="server_error",
+			path=path,
+			error={
+				"message": str(exc),
+				"stack": stack,
+				"phase": phase,
+				"details": details or {},
+			},
 		)
+		mount = self.route_mounts.get(ensure_absolute_path(path))
+		if mount is not None:
+			message["viewId"] = mount.view_id
+		self.send(message)
 		logger.error(
 			"Error reported for path %r during %s: %s\n%s",
 			path,
@@ -496,14 +497,20 @@ class RenderSession:
 
 	# ---- Client lifecycle ----
 
-	def attach(self, path: str, route_info: RouteInfo) -> bool:
+	def attach(
+		self,
+		path: str,
+		route_info: RouteInfo,
+		view_id: str,
+		revision: int,
+		attach_id: str,
+	) -> ServerAttachAckMessage | None:
 		"""
 		Client ready to receive updates for path.
-		- PENDING: flush queue, transition to ACTIVE
-		- SUSPENDED: re-render, send a fresh init, transition to ACTIVE
-		- ACTIVE: update route_info
+		- PENDING: replay a contiguous queue or send a snapshot
+		- SUSPENDED: re-render and include a snapshot
+		- ACTIVE: acknowledge matching state or include a snapshot
 		- No mount: request reload
-		Returns True when callbacks can be accepted for this path.
 		"""
 		path = ensure_absolute_path(path)
 		mount = self.route_mounts.get(path)
@@ -511,38 +518,61 @@ class RenderSession:
 		if mount is None:
 			# Initial render must come from prerender
 			self.send({"type": "reload"})
-			return False
+			return None
+		if mount.view_id != view_id:
+			self.send({"type": "reload"})
+			return None
 
 		mount.update_route(route_info)
-		if mount.state == "suspended":
-			return self._resume_mount(mount, path)
-		if mount.state == "pending" and self._send_message:
+		ack = ServerAttachAckMessage(
+			type="attach_ack",
+			path=path,
+			attachId=attach_id,
+			viewId=mount.view_id,
+			revision=mount.revision,
+		)
+		if mount.state == "pending" and mount.can_replay_from(revision):
+			assert self._send_message is not None
 			mount.activate(self._send_message)
-		return mount.state == "active"
+			ack["revision"] = mount.revision
+			return ack
+		if mount.state == "active" and revision == mount.revision:
+			return ack
 
-	def _resume_mount(self, mount: RouteMount, path: str) -> bool:
-		"""Reactivate a suspended mount by re-rendering and sending a fresh init.
+		snapshot = self._snapshot_mount(mount, path)
+		if snapshot is None:
+			return None
+		ack["viewId"] = snapshot["viewId"]
+		ack["revision"] = snapshot["revision"]
+		ack["snapshot"] = snapshot
+		return ack
 
-		The retained tree and hook state carry the user's work across the
-		disconnect; the client replaces its view with the new init.
-		"""
+	def _snapshot_mount(self, mount: RouteMount, path: str) -> ViewSnapshot | None:
 		assert mount.effect is not None
-		mount.effect.resume()
+		if mount.state == "suspended":
+			mount.start_pending(self.disconnect_queue_timeout)
 		with mount.effect.capture_deps(update_deps=True):
 			message = self.render(mount, path)
 		if message["type"] == "navigate_to":
 			self.send(message)
 			self.dispose_mount(path, mount)
-			return False
-		mount.state = "active"
-		self.send(message)
-		return True
+			return None
+		if mount.state == "pending":
+			assert self._send_message is not None
+			mount.activate(self._send_message, flush=False)
+		return {
+			"viewId": message["viewId"],
+			"revision": message["revision"],
+			"vdom": message["vdom"],
+		}
 
-	def update_route(self, path: str, route_info: RouteInfo):
+	def update_route(
+		self, path: str, route_info: RouteInfo, view_id: str, revision: int
+	) -> None:
 		"""Update routing state (query params, etc.) for attached path."""
 		path = ensure_absolute_path(path)
 		mount = self.route_mounts.get(path)
-		if mount is None:
+		if mount is None or mount.view_id != view_id:
 			# No-op when mount does not exist yet.
 			# Route updates may arrive before prerender; prerender creates the mount with
 			# the authoritative RouteInfo, so replaying/stashing is unnecessary.
@@ -550,7 +580,14 @@ class RenderSession:
 		try:
 			mount.update_route(route_info)
 			if mount.state == "pending" and self._send_message:
-				mount.activate(self._send_message)
+				if mount.can_replay_from(revision):
+					mount.activate(self._send_message)
+				else:
+					self._send_message(
+						{"type": "resync_view", "path": path, "viewId": view_id}
+					)
+			elif mount.state == "active" and revision != mount.revision:
+				self.send({"type": "resync_view", "path": path, "viewId": view_id})
 		except Exception as e:
 			self.report_error(path, "navigate", e)
 
@@ -565,24 +602,22 @@ class RenderSession:
 		except Exception as e:
 			self.report_error(path, "unmount", e)
 
-	def detach(self, path: str):
+	def detach(self, path: str, view_id: str) -> bool:
 		"""Client route unmounted. Dispose immediately outside dev StrictMode replay."""
 		path = ensure_absolute_path(path)
-		self._ref_channels_by_route.pop(path, None)
 		mount = self.route_mounts.get(path)
-		if not mount:
-			return
-		mount.renew_mount_id()
+		if mount is None or mount.view_id != view_id:
+			return False
+		self._ref_channels_by_route.pop(path, None)
 		if self.dev_strict_mode_detach_timeout > 0:
 			# React StrictMode in development intentionally replays mount effects as
 			# attach -> detach -> attach without another prerender. Keep the mount for
 			# a very short dev-only window so that synthetic cleanup can be cancelled
-			# by the replayed attach. The mount id was renewed above before this delay,
-			# so async work from the detached generation is still route-stale and cannot
-			# navigate during the grace period.
+			# by the replayed attach. This remains the same logical view.
 			mount.start_pending(self.dev_strict_mode_detach_timeout, dispose=True)
-			return
+			return True
 		self.dispose_mount(path, mount)
+		return True
 
 	# ---- Effect creation ----
 
@@ -608,17 +643,11 @@ class RenderSession:
 	) -> T_Render | ServerNavigateToMessage:
 		ctx = PulseContext.get()
 		render_session = ctx.session if session is None else session
-		with Untrack():
-			source_path = mount.route.pathname
-			source_route_path = mount.route.route_path
-			source_mount_id = mount.mount_id
 		with PulseContext.update(
 			session=render_session,
 			render=self,
 			route=mount.route,
-			source_route_path=source_route_path,
-			source_path=source_path,
-			source_mount_id=source_mount_id,
+			origin=mount.origin(),
 		):
 			try:
 				self._check_render_loop(mount, path)
@@ -629,6 +658,7 @@ class RenderSession:
 					path=r.path,
 					replace=r.replace,
 					hard=False,
+					origin=mount.origin(),
 				)
 			except NotFoundInterrupt:
 				ctx = PulseContext.get()
@@ -637,6 +667,7 @@ class RenderSession:
 					path=ctx.app.not_found,
 					replace=True,
 					hard=False,
+					origin=mount.origin(),
 				)
 
 	def render(
@@ -645,7 +676,14 @@ class RenderSession:
 		def _render() -> ServerInitMessage:
 			vdom = mount.tree.render()
 			mount.initialized = True
-			return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
+			mount.revision += 1
+			return ServerInitMessage(
+				type="vdom_init",
+				path=path,
+				viewId=mount.view_id,
+				revision=mount.revision,
+				vdom=vdom,
+			)
 
 		message = self._render_with_interrupts(
 			mount, path, session=session, render_fn=_render
@@ -660,7 +698,16 @@ class RenderSession:
 				raise RuntimeError(f"rerender called before init for {path!r}")
 			ops = mount.tree.rerender()
 			if ops:
-				return ServerUpdateMessage(type="vdom_update", path=path, ops=ops)
+				base_revision = mount.revision
+				mount.revision += 1
+				return ServerUpdateMessage(
+					type="vdom_update",
+					path=path,
+					viewId=mount.view_id,
+					baseRevision=base_revision,
+					revision=mount.revision,
+					ops=ops,
+				)
 			return None
 
 		return self._render_with_interrupts(
@@ -690,7 +737,7 @@ class RenderSession:
 			if not fut.done():
 				fut.cancel()
 		self._pending_api.clear()
-		for fut in self._pending_js_results.values():
+		for _, fut in self._pending_js_results.values():
 			if not fut.done():
 				fut.cancel()
 		self._pending_js_results.clear()
@@ -708,6 +755,12 @@ class RenderSession:
 		if not mount:
 			raise ValueError(f"No active route for '{path}'")
 		return mount
+
+	def _get_mount_by_view_id(self, view_id: str) -> RouteMount | None:
+		return next(
+			(mount for mount in self.route_mounts.values() if mount.view_id == view_id),
+			None,
+		)
 
 	def get_global_state(self, key: str, factory: Callable[[], Any]) -> Any:
 		"""Return a per-session singleton for the provided key."""
@@ -761,31 +814,32 @@ class RenderSession:
 		"""Remove a timer handle from the session registry."""
 		self._timers.discard(handle)
 
-	def execute_callback(self, path: str, key: str, args: list[Any] | tuple[Any, ...]):
+	def execute_callback(
+		self,
+		path: str,
+		view_id: str,
+		key: str,
+		args: list[Any] | tuple[Any, ...],
+	) -> None:
 		path = ensure_absolute_path(path)
 		mount = self.route_mounts.get(path)
-		if mount is None or mount.state == "closed":
+		if mount is None or mount.state == "closed" or mount.view_id != view_id:
 			logger.warning("Dropping callback %r for missing route %r", key, path)
 			return
 		cb = mount.tree.callbacks.get(key)
 		if cb is None:
 			logger.warning("Dropping stale callback %r for route %r", key, path)
+			self.send({"type": "resync_view", "path": path, "viewId": view_id})
 			return
 
 		def report(e: BaseException, is_async: bool = False):
 			self.report_error(path, "callback", e, {"callback": key, "async": is_async})
 
 		try:
-			with Untrack():
-				source_path = mount.route.pathname
-				source_route_path = mount.route.route_path
-				source_mount_id = mount.mount_id
 			with PulseContext.update(
 				render=self,
 				route=mount.route,
-				source_route_path=source_route_path,
-				source_path=source_path,
-				source_mount_id=source_mount_id,
+				origin=mount.origin(),
 			):
 				res = cb.fn(*(args if cb.accepts_varargs else args[: cb.n_args]))
 				if iscoroutine(res):
@@ -921,6 +975,8 @@ class RenderSession:
 			)
 
 		ctx = PulseContext.get()
+		if ctx.origin is None:
+			raise RuntimeError("run_js() requires an active route view")
 		exec_id = next_id()
 
 		# Get route pattern path (e.g., "/users/:id") not pathname (e.g., "/users/123")
@@ -931,6 +987,7 @@ class RenderSession:
 			ServerJsExecMessage(
 				type="js_exec",
 				path=path,
+				viewId=ctx.origin["viewId"],
 				id=exec_id,
 				expr=expr.render(),
 			)
@@ -939,7 +996,7 @@ class RenderSession:
 		if result:
 			loop = asyncio.get_running_loop()
 			future: asyncio.Future[object] = loop.create_future()
-			self._pending_js_results[exec_id] = future
+			self._pending_js_results[exec_id] = (ctx.origin["viewId"], future)
 
 			def _on_timeout() -> None:
 				self._pending_js_results.pop(exec_id, None)
@@ -958,9 +1015,13 @@ class RenderSession:
 		if exec_id is None:
 			return
 		exec_id = str(exec_id)
-		fut = self._pending_js_results.pop(exec_id, None)
-		if fut is None or fut.done():
+		pending = self._pending_js_results.get(exec_id)
+		if pending is None:
 			return
+		view_id, fut = pending
+		if data.get("viewId") != view_id or fut.done():
+			return
+		self._pending_js_results.pop(exec_id, None)
 		error = data.get("error")
 		if error is not None:
 			fut.set_exception(JsExecError(error))

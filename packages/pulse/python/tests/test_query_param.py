@@ -71,8 +71,10 @@ class TestQueryParam:
 		assert len(messages) == 1
 		msg = messages[0]
 		assert msg["type"] == "navigate_to"
-		assert msg.get("sourceRoutePath") == "/"
-		assert msg.get("sourcePath") == "/"
+		assert msg.get("origin") == {
+			"viewId": session.route_mounts["/"].view_id,
+			"pathname": "/",
+		}
 		parsed = urlparse(str(msg["path"]))
 		query = parse_qs(parsed.query)
 		assert query["q"] == ["next"]

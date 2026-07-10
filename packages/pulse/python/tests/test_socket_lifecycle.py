@@ -115,7 +115,8 @@ async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 	render = app.render_sessions["render-1"]
 	user_session = app.user_sessions["user-1"]
 	with ps.PulseContext.update(session=user_session, render=render):
-		render.prerender(["/"], make_route_info("/"))
+		initial = render.prerender(["/"], make_route_info("/"))["/"]
+	assert initial["type"] == "vdom_init"
 
 	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
 		"socket-a",
@@ -124,6 +125,8 @@ async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 				"type": "attach",
 				"path": "/",
 				"routeInfo": make_route_info("/"),
+				"viewId": initial["viewId"],
+				"revision": initial["revision"],
 				"attachId": "attach-a",
 			}
 		),
@@ -133,8 +136,14 @@ async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 			message["type"] == "attach_ack" for message in messages.get("socket-a", [])
 		)
 	)
-	assert not [
-		message for message in messages["socket-a"] if message["type"] == "vdom_init"
+	assert messages["socket-a"] == [
+		{
+			"type": "attach_ack",
+			"path": "/",
+			"attachId": "attach-a",
+			"viewId": initial["viewId"],
+			"revision": initial["revision"],
+		}
 	]
 
 	fetch_count = 0
@@ -168,7 +177,7 @@ async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 
 	# The browser has lost socket-a, but the server still considers it live.
 	callback = next(iter(render.route_mounts["/"].tree.callbacks))
-	render.execute_callback("/", callback, [])
+	render.execute_callback("/", initial["viewId"], callback, [])
 	render.flush()
 	await wait_for(
 		lambda: any(
@@ -184,6 +193,8 @@ async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 				"type": "attach",
 				"path": "/",
 				"routeInfo": make_route_info("/"),
+				"viewId": initial["viewId"],
+				"revision": initial["revision"],
 				"attachId": "attach-b",
 			}
 		),
@@ -195,11 +206,18 @@ async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 		)
 	)
 
-	init_messages = [
-		message for message in messages["socket-b"] if message["type"] == "vdom_init"
-	]
-	assert len(init_messages) == 1
-	assert "after-dead" in str(init_messages[0]["vdom"])
+	assert len(messages["socket-b"]) == 1
+	ack = messages["socket-b"][0]
+	assert ack["type"] == "attach_ack"
+	assert ack["path"] == "/"
+	assert ack["attachId"] == "attach-b"
+	assert ack["viewId"] == initial["viewId"]
+	assert ack["revision"] > initial["revision"]
+	snapshot = ack.get("snapshot")
+	assert snapshot is not None
+	assert snapshot["viewId"] == ack["viewId"]
+	assert snapshot["revision"] == ack["revision"]
+	assert "after-dead" in str(snapshot["vdom"])
 	assert fresh_fetch_count == 1
 
 	query.dispose()

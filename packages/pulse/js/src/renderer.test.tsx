@@ -194,6 +194,49 @@ describe("VDOMRenderer", () => {
 		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["b"]);
 	});
 
+	it("cancels callbacks pending from a replaced snapshot", async () => {
+		const { renderer, invokeCallback } = makeRenderer();
+		const tree = renderer.init({
+			viewId: "view-1",
+			revision: 0,
+			vdom: {
+				tag: "button",
+				props: { onClick: "$cb:20" },
+				eval: ["onClick"],
+			},
+		});
+		(tree as React.ReactElement<{ onClick: () => void }>).props.onClick();
+
+		renderer.init({
+			viewId: "view-1",
+			revision: 1,
+			vdom: { tag: "div", children: ["replacement"] },
+		});
+		await new Promise((resolve) => setTimeout(resolve, 30));
+
+		expect(invokeCallback).not.toHaveBeenCalled();
+	});
+
+	it("disconnects refs from a replaced snapshot", () => {
+		const { renderer, sent } = makeRenderer();
+		const refVDOM = {
+			tag: "input",
+			props: { ref: { __pulse_ref__: { channelId: "channel-1", refId: "ref-1" } } },
+			eval: ["ref"],
+		};
+		const first = renderer.init({ viewId: "view-1", revision: 0, vdom: refVDOM });
+		const firstRef = (first as React.ReactElement<{ ref: (node: unknown) => void }>).props.ref;
+		firstRef({});
+
+		const second = renderer.init({ viewId: "view-1", revision: 1, vdom: refVDOM });
+		const secondRef = (second as React.ReactElement<{ ref: (node: unknown) => void }>).props.ref;
+		secondRef({});
+		firstRef(null);
+
+		expect(sent.filter((message) => message.event === "ref:mounted")).toHaveLength(2);
+		expect(sent.filter((message) => message.event === "ref:unmounted")).toHaveLength(0);
+	});
+
 	it("keeps a pending debounced call when the delay changes", async () => {
 		const { renderer, invokeCallback } = makeRenderer();
 		let tree = renderer.renderNode({

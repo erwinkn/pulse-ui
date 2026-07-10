@@ -31,10 +31,10 @@ export type {
 	ServerChannelResponseMessage,
 	ServerError,
 	ServerErrorMessage,
-	ServerInitMessage,
 	ServerMessage,
 	ServerNavigateToMessage,
 	ServerUpdateMessage,
+	ViewSnapshot,
 } from "./messages";
 export type { PulseConfig, PulsePrerender, PulseProviderProps } from "./pulse";
 // Core React bindings

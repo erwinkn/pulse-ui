@@ -4,9 +4,9 @@ from typing import cast
 
 import pulse as ps
 import pytest
-from pulse.messages import ClientPulseMessage
+from pulse.messages import ClientPulseMessage, ServerAttachAckMessage, ServerMessage
 from pulse.render_session import RenderSession
-from pulse.serializer import serialize
+from pulse.serializer import Serialized, deserialize, serialize
 from pulse.user_session import UserSession
 
 
@@ -52,6 +52,9 @@ async def test_socket_messages_for_render_are_serialized(
 						"pathParams": {},
 						"catchall": [],
 					},
+					"viewId": "view-1",
+					"revision": 0,
+					"attachId": "attach-1",
 				}
 			),
 		)
@@ -65,6 +68,7 @@ async def test_socket_messages_for_render_are_serialized(
 				{
 					"type": "callback",
 					"path": "/",
+					"viewId": "view-1",
 					"callback": "1.onClick",
 					"args": [],
 				}
@@ -100,13 +104,27 @@ async def test_attach_sends_ack_after_route_is_attached(
 	app = ps.App()
 	render = RenderSession("render-1", app.routes)
 	session = SimpleNamespace(sid="session-1", data={})
-	sent: list[dict[str, str]] = []
+	events: list[tuple[str, object]] = []
+	ack = ServerAttachAckMessage(
+		type="attach_ack",
+		path="/",
+		attachId="attach-1",
+		viewId="view-1",
+		revision=7,
+	)
 
-	def attach(_path: str, _route_info: object) -> bool:
-		return True
+	def attach(
+		path: str,
+		route_info: object,
+		view_id: str,
+		revision: int,
+		attach_id: str,
+	) -> ServerAttachAckMessage:
+		events.append(("attach", (path, route_info, view_id, revision, attach_id)))
+		return ack
 
-	def send(message: dict[str, str]) -> None:
-		sent.append(message)
+	def send(message: ServerMessage) -> None:
+		events.append(("send", message))
 
 	monkeypatch.setattr(render, "attach", attach)
 	monkeypatch.setattr(render, "send", send)
@@ -125,11 +143,28 @@ async def test_attach_sends_ack_after_route_is_attached(
 				"pathParams": {},
 				"catchall": [],
 			},
+			"viewId": "view-1",
+			"revision": 3,
 			"attachId": "attach-1",
 		},
 	)
 
-	assert sent == [{"type": "attach_ack", "path": "/", "attachId": "attach-1"}]
+	assert [event[0] for event in events] == ["attach", "send"]
+	assert events[0][1] == (
+		"/",
+		{
+			"pathname": "/",
+			"hash": "",
+			"query": "",
+			"queryParams": {},
+			"pathParams": {},
+			"catchall": [],
+		},
+		"view-1",
+		3,
+		"attach-1",
+	)
+	assert events[1][1] == ack
 
 
 @pytest.mark.asyncio
@@ -139,12 +174,18 @@ async def test_attach_does_not_ack_when_route_needs_reload(
 	app = ps.App()
 	render = RenderSession("render-1", app.routes)
 	session = SimpleNamespace(sid="session-1", data={})
-	sent: list[dict[str, str]] = []
+	sent: list[ServerMessage] = []
 
-	def attach(_path: str, _route_info: object) -> bool:
-		return False
+	def attach(
+		_path: str,
+		_route_info: object,
+		_view_id: str,
+		_revision: int,
+		_attach_id: str,
+	) -> None:
+		return None
 
-	def send(message: dict[str, str]) -> None:
+	def send(message: ServerMessage) -> None:
 		sent.append(message)
 
 	monkeypatch.setattr(render, "attach", attach)
@@ -164,6 +205,8 @@ async def test_attach_does_not_ack_when_route_needs_reload(
 				"pathParams": {},
 				"catchall": [],
 			},
+			"viewId": "view-1",
+			"revision": 0,
 			"attachId": "attach-1",
 		},
 	)
@@ -201,6 +244,9 @@ async def test_socket_messages_wait_for_connect_to_finish(
 					"pathParams": {},
 					"catchall": [],
 				},
+				"viewId": "view-1",
+				"revision": 0,
+				"attachId": "attach-1",
 			}
 		),
 	)
@@ -210,6 +256,7 @@ async def test_socket_messages_wait_for_connect_to_finish(
 			{
 				"type": "callback",
 				"path": "/",
+				"viewId": "view-1",
 				"callback": "1.onClick",
 				"args": [],
 			}
@@ -233,3 +280,64 @@ async def test_socket_messages_wait_for_connect_to_finish(
 	assert "socket-1" not in app._connecting_sockets  # pyright: ignore[reportPrivateUsage]
 
 	render.close()
+
+
+@pytest.mark.asyncio
+async def test_socket_sender_is_fifo_and_non_concurrent(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	app = ps.App()
+	first_started = asyncio.Event()
+	release_first = asyncio.Event()
+	second_finished = asyncio.Event()
+	events: list[str] = []
+	active_sends = 0
+	max_active_sends = 0
+
+	async def emit(event: str, data: object, *, to: str) -> None:
+		nonlocal active_sends, max_active_sends
+		assert event == "message"
+		assert to == "socket-1"
+		message = cast(ServerMessage, deserialize(cast(Serialized, data)))
+		active_sends += 1
+		max_active_sends = max(max_active_sends, active_sends)
+		events.append(f"start:{message['type']}")
+		if message["type"] == "reload":
+			first_started.set()
+			await release_first.wait()
+		active_sends -= 1
+		events.append(f"end:{message['type']}")
+		if message["type"] == "navigate_to":
+			second_finished.set()
+
+	monkeypatch.setattr(app.sio, "emit", emit)
+	app._start_socket_sender("socket-1")  # pyright: ignore[reportPrivateUsage]
+	app._send_socket_message(  # pyright: ignore[reportPrivateUsage]
+		"socket-1", {"type": "reload"}
+	)
+	app._send_socket_message(  # pyright: ignore[reportPrivateUsage]
+		"socket-1",
+		{
+			"type": "navigate_to",
+			"path": "/next",
+			"replace": False,
+			"hard": False,
+		},
+	)
+
+	await asyncio.wait_for(first_started.wait(), timeout=1)
+	await asyncio.sleep(0)
+	assert events == ["start:reload"]
+	assert max_active_sends == 1
+
+	release_first.set()
+	await asyncio.wait_for(second_finished.wait(), timeout=1)
+	assert events == [
+		"start:reload",
+		"end:reload",
+		"start:navigate_to",
+		"end:navigate_to",
+	]
+	assert max_active_sends == 1
+
+	await app.close()

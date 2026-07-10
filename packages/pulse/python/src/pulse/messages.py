@@ -4,18 +4,34 @@ from pulse.routing import RouteInfo
 from pulse.transpiler.vdom import VDOM, VDOMNode, VDOMOperation
 
 
+class ViewSnapshot(TypedDict):
+	viewId: str
+	revision: int
+	vdom: VDOM
+
+
+class RouteOrigin(TypedDict):
+	viewId: str
+	pathname: str
+
+
 # ====================
 # Server messages
 # ====================
 class ServerInitMessage(TypedDict):
 	type: Literal["vdom_init"]
 	path: str
+	viewId: str
+	revision: int
 	vdom: VDOM
 
 
 class ServerUpdateMessage(TypedDict):
 	type: Literal["vdom_update"]
 	path: str
+	viewId: str
+	baseRevision: int
+	revision: int
 	ops: list[VDOMOperation]
 
 
@@ -38,6 +54,7 @@ class ServerErrorInfo(TypedDict, total=False):
 class ServerErrorMessage(TypedDict):
 	type: Literal["server_error"]
 	path: str
+	viewId: NotRequired[str]
 	error: ServerErrorInfo
 
 
@@ -46,9 +63,7 @@ class ServerNavigateToMessage(TypedDict):
 	path: str
 	replace: bool
 	hard: bool
-	sourceRoutePath: NotRequired[str]
-	sourcePath: NotRequired[str]
-	sourceMountId: NotRequired[str]
+	origin: NotRequired[RouteOrigin]
 
 
 class ServerReloadMessage(TypedDict):
@@ -59,6 +74,15 @@ class ServerAttachAckMessage(TypedDict):
 	type: Literal["attach_ack"]
 	path: str
 	attachId: str
+	viewId: str
+	revision: int
+	snapshot: NotRequired[ViewSnapshot]
+
+
+class ServerResyncViewMessage(TypedDict):
+	type: Literal["resync_view"]
+	path: str
+	viewId: str
 
 
 class ServerApiCallMessage(TypedDict):
@@ -97,6 +121,7 @@ class ServerJsExecMessage(TypedDict):
 
 	type: Literal["js_exec"]
 	path: str
+	viewId: str
 	id: str
 	expr: VDOMNode
 
@@ -107,6 +132,7 @@ class ServerJsExecMessage(TypedDict):
 class ClientCallbackMessage(TypedDict):
 	type: Literal["callback"]
 	path: str
+	viewId: str
 	callback: str
 	args: list[Any]
 
@@ -115,18 +141,23 @@ class ClientAttachMessage(TypedDict):
 	type: Literal["attach"]
 	path: str
 	routeInfo: RouteInfo
-	attachId: NotRequired[str]
+	viewId: str
+	revision: int
+	attachId: str
 
 
 class ClientUpdateMessage(TypedDict):
 	type: Literal["update"]
 	path: str
 	routeInfo: RouteInfo
+	viewId: str
+	revision: int
 
 
 class ClientDetachMessage(TypedDict):
 	type: Literal["detach"]
 	path: str
+	viewId: str
 
 
 class ClientApiResultMessage(TypedDict):
@@ -160,6 +191,7 @@ class ClientJsResultMessage(TypedDict):
 	"""Result of client-side JS execution."""
 
 	type: Literal["js_result"]
+	viewId: str
 	id: str
 	result: Any
 	error: str | None
@@ -174,6 +206,7 @@ ServerMessage = (
 	| ServerNavigateToMessage
 	| ServerReloadMessage
 	| ServerAttachAckMessage
+	| ServerResyncViewMessage
 	| ServerChannelMessage
 	| ServerJsExecMessage
 )

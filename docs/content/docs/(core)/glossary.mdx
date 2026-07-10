@@ -191,6 +191,12 @@ A unique identifier linking a browser to server-side session data. Usually store
 **Render Session**
 In Pulse, an isolated execution context per browser tab. Each tab has its own component instances and state—refreshing a tab resets its render session.
 
+**View ID**
+The stable identity of one mounted Pulse route. It stays the same across WebSocket reconnections and changes when the route mount is replaced.
+
+**View Revision**
+The version of a mounted view's virtual DOM. Pulse uses revisions to detect missed updates and replace the view with a current snapshot when needed.
+
 ## Real-time Communication
 
 **WebSocket**

@@ -269,6 +269,8 @@ class App:
 	_render_to_socket: dict[str, str]
 	_connecting_sockets: set[str]
 	_pending_socket_messages: dict[str, list[Serialized]]
+	_socket_send_queues: dict[str, asyncio.Queue[list[Any]]]
+	_socket_send_tasks: dict[str, asyncio.Task[Any]]
 	_render_cleanups: dict[str, TimerHandleLike]
 	_render_message_locks: dict[str, asyncio.Lock]
 	_tasks: TaskRegistry
@@ -353,6 +355,8 @@ class App:
 		self._render_to_socket = {}
 		self._connecting_sockets = set()
 		self._pending_socket_messages = {}
+		self._socket_send_queues = {}
+		self._socket_send_tasks = {}
 		# Map render_id -> cleanup timer handle for timeout-based expiry
 		self._render_cleanups = {}
 		self._render_message_locks = {}
@@ -800,6 +804,7 @@ class App:
 			except Exception:
 				self._connecting_sockets.discard(sid)
 				self._pending_socket_messages.pop(sid, None)
+				self._stop_socket_sender(sid)
 				self._socket_to_render.pop(sid, None)
 				if rid and self._render_to_socket.get(rid) == sid:
 					del self._render_to_socket[rid]
@@ -880,23 +885,22 @@ class App:
 				# Bind the socket inside the session context so query resume
 				# (and recreated interval effects) capture the same
 				# (session, render) context as initial fetches.
-				def on_message(message: ServerMessage):
-					payload = serialize(message)
-					# `serialize` returns a tuple, which socket.io will mistake for multiple arguments
-					payload = list(payload)
-					self._tasks.create_task(
-						self.sio.emit("message", list(payload), to=sid)
-					)
-
 				old_sid = self._render_to_socket.get(rid)
 				if old_sid is not None and old_sid != sid:
-					render.resync()
-				render.connect(on_message)
+					self._stop_socket_sender(old_sid)
+					self._socket_to_render.pop(old_sid, None)
+				self._start_socket_sender(sid)
+
+				def on_message(message: ServerMessage):
+					self._send_socket_message(sid, message)
+
+				render.connect(
+					on_message,
+					replacing=old_sid is not None and old_sid != sid,
+				)
 				# Map socket sid to renderId for message routing. If the client
 				# reconnected before the old socket's disconnect fired, unmap the
 				# old socket so its late disconnect can't tear down this connection.
-				if old_sid is not None and old_sid != sid:
-					self._socket_to_render.pop(old_sid, None)
 				self._socket_to_render[sid] = rid
 				self._render_to_socket[rid] = sid
 
@@ -912,6 +916,7 @@ class App:
 		def disconnect(sid: str):  # pyright: ignore[reportUnusedFunction]
 			self._connecting_sockets.discard(sid)
 			self._pending_socket_messages.pop(sid, None)
+			self._stop_socket_sender(sid)
 			rid = self._socket_to_render.pop(sid, None)
 			# Only the render's current socket may disconnect it; a stale
 			# socket's late disconnect must not tear down a newer connection.
@@ -928,6 +933,37 @@ class App:
 			await self._handle_socket_message(sid, data)
 
 		self.status = AppStatus.initialized
+
+	def _start_socket_sender(self, sid: str) -> None:
+		self._stop_socket_sender(sid)
+		queue: asyncio.Queue[list[Any]] = asyncio.Queue()
+		self._socket_send_queues[sid] = queue
+
+		async def _send() -> None:
+			try:
+				while True:
+					payload = await queue.get()
+					await self.sio.emit("message", payload, to=sid)
+			except asyncio.CancelledError:
+				raise
+			except Exception:
+				logger.exception("Socket sender failed for %s", sid)
+
+		self._socket_send_tasks[sid] = self._tasks.create_task(
+			_send(), name=f"socket-sender:{sid}"
+		)
+
+	def _stop_socket_sender(self, sid: str) -> None:
+		self._socket_send_queues.pop(sid, None)
+		task = self._socket_send_tasks.pop(sid, None)
+		if task is not None and not task.done():
+			task.cancel()
+
+	def _send_socket_message(self, sid: str, message: ServerMessage) -> None:
+		queue = self._socket_send_queues.get(sid)
+		if queue is None:
+			return
+		queue.put_nowait(list(serialize(message)))
 
 	def _cancel_render_cleanup(self, rid: str):
 		"""Cancel any pending cleanup task for a render session."""
@@ -1023,23 +1059,26 @@ class App:
 	) -> None:
 		async def _next() -> Ok[None]:
 			if msg["type"] == "attach":
-				attached = render.attach(msg["path"], msg["routeInfo"])
-				attach_id = msg.get("attachId")
-				if attached and isinstance(attach_id, str):
-					render.send(
-						{
-							"type": "attach_ack",
-							"path": msg["path"],
-							"attachId": attach_id,
-						}
-					)
+				ack = render.attach(
+					msg["path"],
+					msg["routeInfo"],
+					msg["viewId"],
+					msg["revision"],
+					msg["attachId"],
+				)
+				if ack is not None:
+					render.send(ack)
 			elif msg["type"] == "update":
-				render.update_route(msg["path"], msg["routeInfo"])
+				render.update_route(
+					msg["path"], msg["routeInfo"], msg["viewId"], msg["revision"]
+				)
 			elif msg["type"] == "callback":
-				render.execute_callback(msg["path"], msg["callback"], msg["args"])
+				render.execute_callback(
+					msg["path"], msg["viewId"], msg["callback"], msg["args"]
+				)
 			elif msg["type"] == "detach":
-				render.detach(msg["path"])
-				render.channels.remove_route(msg["path"])
+				if render.detach(msg["path"], msg["viewId"]):
+					render.channels.remove_route(msg["path"])
 			elif msg["type"] == "api_result":
 				render.handle_api_result(dict(msg))
 			elif msg["type"] == "js_result":
@@ -1228,6 +1267,7 @@ class App:
 		socket_sid = self._render_to_socket.pop(rid, None)
 		if socket_sid is not None:
 			self._socket_to_render.pop(socket_sid, None)
+			self._stop_socket_sender(socket_sid)
 
 		render = self.render_sessions.pop(rid, None)
 		if not render:

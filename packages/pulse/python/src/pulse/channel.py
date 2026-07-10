@@ -172,12 +172,12 @@ class ChannelsManager:
 			return
 
 		route_ctx = None
-		source_mount_id = None
+		origin = None
 		if channel.route_path is not None:
 			try:
 				mount = render.get_route_mount(channel.route_path)
 				route_ctx = mount.route
-				source_mount_id = mount.mount_id
+				origin = mount.origin()
 			except Exception:
 				route_ctx = None
 
@@ -187,11 +187,7 @@ class ChannelsManager:
 					session=session,
 					render=render,
 					route=route_ctx,
-					source_route_path=(
-						route_ctx.route_path if route_ctx is not None else None
-					),
-					source_path=route_ctx.pathname if route_ctx is not None else None,
-					source_mount_id=source_mount_id,
+					origin=origin,
 				):
 					result = await channel.dispatch(event, payload, request_id)
 			except Exception as exc:

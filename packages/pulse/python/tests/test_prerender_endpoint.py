@@ -39,3 +39,7 @@ async def test_prerender_normalizes_paths(monkeypatch: pytest.MonkeyPatch):
 	payload = deserialize(resp.json())
 	assert "/a" in payload["views"]
 	assert "a" not in payload["views"]
+	view = payload["views"]["/a"]
+	assert view["type"] == "vdom_init"
+	assert isinstance(view["viewId"], str)
+	assert view["revision"] == 0

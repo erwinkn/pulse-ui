@@ -6,15 +6,18 @@ import type { RouteInfo } from "./helpers";
 import type { VDOM, VDOMNode, VDOMUpdate } from "./vdom";
 
 // Based on pulse/messages.py
-export interface ServerInitMessage {
-	type: "vdom_init";
-	path: string;
+export interface ViewSnapshot {
+	viewId: string;
+	revision: number;
 	vdom: VDOM;
 }
 
 export interface ServerUpdateMessage {
 	type: "vdom_update";
 	path: string;
+	viewId: string;
+	baseRevision: number;
+	revision: number;
 	ops: VDOMUpdate[];
 }
 
@@ -28,6 +31,7 @@ export interface ServerError {
 export interface ServerErrorMessage {
 	type: "server_error";
 	path: string;
+	viewId?: string;
 	error: ServerError;
 }
 
@@ -68,9 +72,10 @@ export interface ServerNavigateToMessage {
 	path: string;
 	replace: boolean;
 	hard: boolean;
-	sourceRoutePath?: string;
-	sourcePath?: string;
-	sourceMountId?: string;
+	origin?: {
+		viewId: string;
+		pathname: string;
+	};
 }
 
 export interface ServerReloadMessage {
@@ -81,23 +86,33 @@ export interface ServerAttachAckMessage {
 	type: "attach_ack";
 	path: string;
 	attachId: string;
+	viewId: string;
+	revision: number;
+	snapshot?: ViewSnapshot;
+}
+
+export interface ServerResyncViewMessage {
+	type: "resync_view";
+	path: string;
+	viewId: string;
 }
 
 export interface ServerJsExecMessage {
 	type: "js_exec";
 	path: string;
+	viewId: string;
 	id: string;
 	expr: VDOMNode;
 }
 
 export type ServerMessage =
-	| ServerInitMessage
 	| ServerUpdateMessage
 	| ServerErrorMessage
 	| ServerApiCallMessage
 	| ServerNavigateToMessage
 	| ServerReloadMessage
 	| ServerAttachAckMessage
+	| ServerResyncViewMessage
 	| ServerChannelRequestMessage
 	| ServerChannelResponseMessage
 	| ServerJsExecMessage;
@@ -105,6 +120,7 @@ export type ServerMessage =
 export interface ClientCallbackMessage {
 	type: "callback";
 	path: string;
+	viewId: string;
 	callback: string;
 	args: any[];
 }
@@ -114,15 +130,20 @@ export interface ClientAttachMessage {
 	path: string;
 	routeInfo: RouteInfo;
 	attachId: string;
+	viewId: string;
+	revision: number;
 }
 export interface ClientUpdateMessage {
 	type: "update";
 	path: string;
+	viewId: string;
+	revision: number;
 	routeInfo: RouteInfo;
 }
 export interface ClientDetachMessage {
 	type: "detach";
 	path: string;
+	viewId: string;
 }
 
 export interface ClientApiResultMessage {
@@ -158,6 +179,7 @@ export type ClientChannelMessage = ClientChannelRequestMessage | ClientChannelRe
 
 export interface ClientJsResultMessage {
 	type: "js_result";
+	viewId: string;
 	id: string;
 	result: any;
 	error: string | null;

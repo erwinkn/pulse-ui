@@ -259,11 +259,8 @@ def navigate(
 		"replace": replace,
 		"hard": hard,
 	}
-	if not force and ctx.route is not None:
-		message["sourceRoutePath"] = ctx.source_route_path or ctx.route.route_path
-		message["sourcePath"] = ctx.source_path or ctx.route.pathname
-		if ctx.source_mount_id is not None:
-			message["sourceMountId"] = ctx.source_mount_id
+	if not force and ctx.origin is not None:
+		message["origin"] = ctx.origin
 	ctx.render.send(message)
 
 

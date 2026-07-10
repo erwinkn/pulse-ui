@@ -71,7 +71,11 @@ export class VDOMRenderer {
 		this.#registry = registry;
 		this.#callbackEntries = new Set();
 		this.#metaMap = new WeakMap();
-		this.#refRegistry = new RefRegistry((channelId) => {
+		this.#refRegistry = this.#createRefRegistry();
+	}
+
+	#createRefRegistry(): RefRegistry {
+		return new RefRegistry((channelId) => {
 			return this.#client._ensureChannelEntry(channelId).bridge;
 		});
 	}
@@ -461,6 +465,11 @@ export class VDOMRenderer {
 	}
 
 	init(view: PulsePrerenderView & { vdom: VDOM }): ReactNode {
+		this.clearPendingCallbacks();
+		this.#callbackEntries.clear();
+		this.#metaMap = new WeakMap();
+		this.#refRegistry.dispose();
+		this.#refRegistry = this.#createRefRegistry();
 		return this.renderNode(view.vdom);
 	}
 

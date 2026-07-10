@@ -16,7 +16,7 @@ import pytest
 from pulse import javascript
 from pulse.hooks.core import HookContext
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
-from pulse.messages import ServerMessage
+from pulse.messages import ServerAttachAckMessage, ServerMessage
 from pulse.reactive import Effect
 from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteInfo, RouteTree
@@ -82,6 +82,61 @@ def expire_pending_mount(session: RenderSession, path: str) -> None:
 	session.route_mounts[path]._on_pending_timeout()  # pyright: ignore[reportPrivateUsage]
 
 
+def attach_mount(
+	session: RenderSession,
+	path: str,
+	route_info: RouteInfo | None = None,
+	*,
+	view_id: str | None = None,
+	revision: int | None = None,
+	attach_id: str = "test-attach",
+) -> ServerAttachAckMessage | None:
+	mount = session.route_mounts.get(path)
+	return session.attach(
+		path,
+		route_info or make_route_info(path),
+		view_id or (mount.view_id if mount is not None else "missing-view"),
+		(mount.revision if mount is not None else 0) if revision is None else revision,
+		attach_id,
+	)
+
+
+def execute_callback(
+	session: RenderSession,
+	path: str,
+	key: str,
+	args: list[Any] | tuple[Any, ...] = (),
+	*,
+	view_id: str | None = None,
+) -> None:
+	mount = session.route_mounts[path]
+	session.execute_callback(path, view_id or mount.view_id, key, args)
+
+
+def detach_mount(
+	session: RenderSession, path: str, *, view_id: str | None = None
+) -> bool:
+	mount = session.route_mounts[path]
+	return session.detach(path, view_id or mount.view_id)
+
+
+def update_mount_route(
+	session: RenderSession,
+	path: str,
+	route_info: RouteInfo,
+	*,
+	view_id: str | None = None,
+	revision: int | None = None,
+) -> None:
+	mount = session.route_mounts[path]
+	session.update_route(
+		path,
+		route_info,
+		view_id or mount.view_id,
+		mount.revision if revision is None else revision,
+	)
+
+
 class PathMessages:
 	messages: list[ServerMessage]
 	path: str
@@ -118,7 +173,7 @@ class RouteMessageLog:
 		self.listened_paths.add(path)
 		with ps.PulseContext.update(render=self.session):
 			self.session.prerender(sorted(self.listened_paths))
-			self.session.attach(path, make_route_info(path))
+			attach_mount(self.session, path)
 
 		def disconnect() -> None:
 			self.listened_paths.discard(path)
@@ -147,30 +202,25 @@ def first_callback_key(session: RenderSession, path: str) -> str:
 async def test_pulse_context_update_can_clear_route_source():
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	session.connect(lambda _message: None)
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a")
 
 	route = session.route_mounts["/a"].route
 	with ps.PulseContext.update(
 		render=session,
 		route=route,
-		source_route_path=route.route_path,
-		source_path=route.pathname,
-		source_mount_id=session.route_mounts["/a"].mount_id,
+		origin=session.route_mounts["/a"].origin(),
 	):
 		with ps.PulseContext.update(
 			route=None,
-			source_route_path=None,
-			source_path=None,
-			source_mount_id=None,
+			origin=None,
 		):
 			ctx = ps.PulseContext.get()
 			assert ctx.route is None
-			assert ctx.source_route_path is None
-			assert ctx.source_path is None
-			assert ctx.source_mount_id is None
+			assert ctx.origin is None
 
 	session.close()
 
@@ -196,7 +246,7 @@ async def test_two_sessions_two_routes_are_isolated():
 	assert extract_count_from_ctx(s2, "/b") == 0
 
 	# Click a button in session 1 route a (button is second child, index 1)
-	s1.execute_callback("/a", "1.onClick", [])
+	execute_callback(s1, "/a", "1.onClick", [])
 	s1.flush()
 	s2.flush()
 
@@ -213,7 +263,7 @@ async def test_two_sessions_two_routes_are_isolated():
 	assert len([m for m in msgs_s2_b if m["type"] == "vdom_update"]) == 0
 
 	# Click a button in session 2 route a (button is second child, index 1)
-	s2.execute_callback("/a", "1.onClick", [])
+	execute_callback(s2, "/a", "1.onClick", [])
 	s1.flush()
 	s2.flush()
 
@@ -297,7 +347,7 @@ async def test_global_state_shared_within_session_and_isolated_across_sessions()
 	assert extract_global_count(s2, "/b") == 0
 
 	# Increment in s1 on route a
-	s1.execute_callback("/a", "1.onClick", [])
+	execute_callback(s1, "/a", "1.onClick", [])
 	s1.flush()
 	s2.flush()
 
@@ -316,7 +366,7 @@ async def test_global_state_shared_within_session_and_isolated_across_sessions()
 	assert len([m for m in msgs_s2_b if m["type"] == "vdom_update"]) == 0
 
 	# Increment in s2 on route b
-	s2.execute_callback("/b", "1.onClick", [])
+	execute_callback(s2, "/b", "1.onClick", [])
 	s1.flush()
 	s2.flush()
 
@@ -382,8 +432,8 @@ def test_global_navigate_to_bypasses_pending_mount_queue():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a", "/a/b"])
-		session.attach("/a", make_route_info("/a"))
-		session.attach("/a/b", make_route_info("/a/b"))
+		attach_mount(session, "/a", make_route_info("/a"))
+		attach_mount(session, "/a/b", make_route_info("/a/b"))
 
 	mount = session.route_mounts["/a/b"]
 	mount.start_pending(10)
@@ -415,7 +465,7 @@ def test_navigate_to_queued_as_global_on_disconnect():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	session.disconnect()
 	session.send(
@@ -458,7 +508,7 @@ async def test_attach_without_prerender_requests_reload():
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	assert "/a" not in session.route_mounts
 	assert len(messages) == 1
@@ -490,11 +540,11 @@ async def test_async_callback_navigation_after_detach_is_ignored_by_default():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
-	session.execute_callback("/a", first_callback_key(session, "/a"), [])
+	execute_callback(session, "/a", first_callback_key(session, "/a"), [])
 	await started.wait()
-	session.detach("/a")
+	detach_mount(session, "/a")
 	release.set()
 	await asyncio.wait_for(completed.wait(), timeout=0.2)
 	await asyncio.sleep(0)
@@ -526,11 +576,11 @@ async def test_async_callback_force_navigation_after_detach_still_navigates():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
-	session.execute_callback("/a", first_callback_key(session, "/a"), [])
+	execute_callback(session, "/a", first_callback_key(session, "/a"), [])
 	await started.wait()
-	session.detach("/a")
+	detach_mount(session, "/a")
 	release.set()
 	await wait_for(lambda: any(msg["type"] == "navigate_to" for msg in messages))
 
@@ -554,9 +604,10 @@ def test_route_bound_navigation_uses_current_path_for_dynamic_routes():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/items/:id"], route_info)
-		session.attach("/items/:id", route_info)
+		attach_mount(session, "/items/:id", route_info)
 
-	session.execute_callback(
+	execute_callback(
+		session,
 		"/items/:id",
 		first_callback_key(session, "/items/:id"),
 		[],
@@ -565,9 +616,10 @@ def test_route_bound_navigation_uses_current_path_for_dynamic_routes():
 	navigations = [msg for msg in messages if msg["type"] == "navigate_to"]
 	assert len(navigations) == 1
 	assert navigations[0]["path"] == "/after"
-	assert navigations[0].get("sourceRoutePath") == "/items/:id"
-	assert navigations[0].get("sourcePath") == "/items/123"
-	assert isinstance(navigations[0].get("sourceMountId"), str)
+	assert navigations[0].get("origin") == {
+		"viewId": session.route_mounts["/items/:id"].view_id,
+		"pathname": "/items/123",
+	}
 
 	session.close()
 
@@ -581,18 +633,17 @@ def test_route_bound_navigation_validates_source_route_identity():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"], route_info)
-		session.attach("/a", route_info)
+		attach_mount(session, "/a", route_info)
 		session.prerender(["/b"], route_info)
-		session.attach("/b", route_info)
+		attach_mount(session, "/b", route_info)
 
 	mount = session.route_mounts["/a"]
 	with ps.PulseContext.update(
 		render=session,
 		route=mount.route,
-		source_route_path=mount.route.route_path,
-		source_path=mount.route.pathname,
+		origin=mount.origin(),
 	):
-		session.detach("/a")
+		detach_mount(session, "/a")
 		ps.navigate("/after")
 
 	assert "/b" in session.route_mounts
@@ -624,15 +675,15 @@ async def test_async_callback_navigation_after_same_url_remount_is_ignored():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
-	session.execute_callback("/a", first_callback_key(session, "/a"), [])
+	execute_callback(session, "/a", first_callback_key(session, "/a"), [])
 	await started.wait()
-	session.detach("/a")
+	detach_mount(session, "/a")
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	release.set()
 	await asyncio.wait_for(completed.wait(), timeout=0.2)
@@ -669,13 +720,13 @@ async def test_async_callback_navigation_after_route_update_is_ignored_by_defaul
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/items/:id"], first_info)
-		session.attach("/items/:id", first_info)
+		attach_mount(session, "/items/:id", first_info)
 
-	session.execute_callback(
-		"/items/:id", first_callback_key(session, "/items/:id"), []
+	execute_callback(
+		session, "/items/:id", first_callback_key(session, "/items/:id"), []
 	)
 	await started.wait()
-	session.attach("/items/:id", next_info)
+	attach_mount(session, "/items/:id", next_info)
 	release.set()
 	await asyncio.wait_for(completed.wait(), timeout=0.2)
 	await asyncio.sleep(0)
@@ -694,19 +745,18 @@ def test_queued_route_bound_navigation_is_revalidated_on_reconnect():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	session.disconnect()
 	mount = session.route_mounts["/a"]
 	with ps.PulseContext.update(
 		render=session,
 		route=mount.route,
-		source_route_path=mount.route.route_path,
-		source_path=mount.route.pathname,
+		origin=mount.origin(),
 	):
 		ps.navigate("/after")
 
-	session.detach("/a")
+	detach_mount(session, "/a")
 	session.connect(messages.append)
 
 	assert not [msg for msg in messages if msg["type"] == "navigate_to"]
@@ -736,10 +786,10 @@ async def test_later_callback_runs_after_detach_but_route_navigation_is_ignored(
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
-	session.execute_callback("/a", first_callback_key(session, "/a"), [])
-	session.detach("/a")
+	execute_callback(session, "/a", first_callback_key(session, "/a"), [])
+	detach_mount(session, "/a")
 
 	await asyncio.wait_for(fired.wait(), timeout=0.2)
 	await asyncio.sleep(0)
@@ -761,7 +811,7 @@ async def test_disconnect_pauses_render_effects():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	mount = session.route_mounts["/a"]
 	assert mount.effect is not None
@@ -789,7 +839,7 @@ async def test_reconnect_flushes_queue_when_pending():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	assert len(messages1) == 0
 
@@ -804,7 +854,7 @@ async def test_reconnect_flushes_queue_when_pending():
 
 	# Attach again (simulating client reconnection)
 	with ps.PulseContext.update(render=session):
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	# Queue was empty, so no messages sent. State is now ACTIVE.
 	assert len(messages2) == 0
@@ -821,20 +871,26 @@ def test_prerender_of_active_path_queues_updates_until_route_sync():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	messages.clear()
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"], make_route_info("/a"))
+		prerendered = session.prerender(["/a"], make_route_info("/a"))["/a"]
+	assert prerendered["type"] == "vdom_init"
 
-	session.execute_callback("/a", first_callback_key(session, "/a"), [])
+	execute_callback(session, "/a", first_callback_key(session, "/a"), [])
 	session.flush()
 
 	assert messages == []
 
 	with ps.PulseContext.update(render=session):
-		session.update_route("/a", make_route_info("/a"))
+		update_mount_route(
+			session,
+			"/a",
+			make_route_info("/a"),
+			revision=prerendered["revision"],
+		)
 
 	updates = [message for message in messages if message["type"] == "vdom_update"]
 	assert len(updates) == 1
@@ -853,14 +909,24 @@ async def test_messages_dropped_while_disconnected():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 	messages.clear()
 
 	# Disconnect
 	session.disconnect()
 
 	# Try to send a message while disconnected
-	session.send({"type": "vdom_update", "path": "/a", "ops": []})  # type: ignore[typeddict-item]
+	mount = session.route_mounts["/a"]
+	session.send(
+		{
+			"type": "vdom_update",
+			"path": "/a",
+			"viewId": mount.view_id,
+			"baseRevision": mount.revision,
+			"revision": mount.revision,
+			"ops": [],
+		}
+	)
 
 	# Reconnect
 	messages2: list[ServerMessage] = []
@@ -891,7 +957,7 @@ async def test_route_info_updated_on_reconnect():
 	}
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"], route_info1)
-		session.attach("/a", route_info1)
+		attach_mount(session, "/a", route_info1)
 
 	mount = session.route_mounts["/a"]
 	assert mount.route.query == "foo=bar"
@@ -911,7 +977,7 @@ async def test_route_info_updated_on_reconnect():
 		"catchall": [],
 	}
 	with ps.PulseContext.update(render=session):
-		session.attach("/a", route_info2)
+		attach_mount(session, "/a", route_info2)
 
 	# Route info should be updated
 	assert mount.route.query == "baz=qux"
@@ -933,6 +999,136 @@ def StatefulCounter():
 	]
 
 
+def test_view_revision_protocol_tracks_snapshots_and_updates():
+	routes = RouteTree([Route("a", StatefulCounter)])
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		initial = session.prerender(["/a"], make_route_info("/a"))["/a"]
+	assert initial["type"] == "vdom_init"
+	mount = session.route_mounts["/a"]
+	assert initial["viewId"] == mount.view_id
+	assert initial["revision"] == mount.revision == 0
+
+	ack = attach_mount(session, "/a", attach_id="initial")
+	assert ack == {
+		"type": "attach_ack",
+		"path": "/a",
+		"attachId": "initial",
+		"viewId": mount.view_id,
+		"revision": 0,
+	}
+
+	execute_callback(session, "/a", "1.onClick")
+	session.flush()
+	assert len(messages) == 1
+	update = messages[0]
+	assert update["type"] == "vdom_update"
+	assert update["viewId"] == mount.view_id
+	assert update["baseRevision"] == 0
+	assert update["revision"] == mount.revision == 1
+
+	assert session.rerender(mount, "/a") is None
+	assert mount.revision == 1
+
+	session.close()
+
+
+def test_active_attach_revision_mismatch_returns_authoritative_snapshot():
+	routes = RouteTree([Route("a", StatefulCounter)])
+	session = RenderSession("test-id", routes)
+	session.connect(lambda _message: None)
+
+	with ps.PulseContext.update(render=session):
+		initial = session.prerender(["/a"], make_route_info("/a"))["/a"]
+	assert initial["type"] == "vdom_init"
+	attach_mount(session, "/a")
+	execute_callback(session, "/a", "1.onClick")
+	session.flush()
+
+	ack = attach_mount(
+		session,
+		"/a",
+		revision=initial["revision"],
+		attach_id="stale-attach",
+	)
+	assert ack is not None
+	snapshot = ack.get("snapshot")
+	assert snapshot is not None
+	assert snapshot["viewId"] == session.route_mounts["/a"].view_id
+	assert snapshot["revision"] == ack["revision"] == 2
+	assert "1" in str(snapshot["vdom"])
+
+	session.close()
+
+
+def test_wrong_view_messages_cannot_mutate_current_mount():
+	routes = RouteTree([Route("a", StatefulCounter)])
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"], make_route_info("/a"))
+	attach_mount(session, "/a")
+	mount = session.route_mounts["/a"]
+
+	execute_callback(session, "/a", "1.onClick", view_id="stale-view")
+	session.flush()
+	stale_info = make_route_info("/stale")
+	update_mount_route(
+		session,
+		"/a",
+		stale_info,
+		view_id="stale-view",
+		revision=mount.revision,
+	)
+	assert detach_mount(session, "/a", view_id="stale-view") is False
+	assert (
+		attach_mount(
+			session,
+			"/a",
+			view_id="stale-view",
+			revision=mount.revision,
+		)
+		is None
+	)
+
+	assert session.route_mounts["/a"] is mount
+	assert mount.revision == 0
+	assert mount.route.pathname == "/a"
+	assert messages == [{"type": "reload"}]
+
+	session.close()
+
+
+def test_stale_route_revision_requests_view_resync():
+	routes = RouteTree([Route("a", StatefulCounter)])
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"], make_route_info("/a"))
+	attach_mount(session, "/a")
+	mount = session.route_mounts["/a"]
+	execute_callback(session, "/a", "1.onClick")
+	session.flush()
+	messages.clear()
+
+	update_mount_route(
+		session,
+		"/a",
+		make_route_info("/a"),
+		revision=mount.revision - 1,
+	)
+	assert messages == [{"type": "resync_view", "path": "/a", "viewId": mount.view_id}]
+
+	session.close()
+
+
 @pytest.mark.asyncio
 async def test_state_preserved_across_reconnect():
 	"""Test that state changes are reflected in VDOM after reconnect."""
@@ -945,14 +1141,14 @@ async def test_state_preserved_across_reconnect():
 
 	with ps.PulseContext.update(render=session):
 		result = session.prerender(["/a"], make_route_info("/a"))["/a"]
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	# Should have initial vdom_init with count 0
 	assert result["type"] == "vdom_init"
 	assert "0" in str(result["vdom"])
 
 	# Execute the increment callback
-	session.execute_callback("/a", "1.onClick", [])
+	execute_callback(session, "/a", "1.onClick", [])
 	session.flush()
 
 	# Should have vdom_update
@@ -963,9 +1159,10 @@ async def test_state_preserved_across_reconnect():
 	session.disconnect()
 	mount = session.route_mounts["/a"]
 	assert mount.state == "pending"
+	client_revision = mount.revision
 
 	# Execute another increment while disconnected (will be queued)
-	session.execute_callback("/a", "1.onClick", [])
+	execute_callback(session, "/a", "1.onClick", [])
 	session.flush()
 
 	# The update should be queued
@@ -978,11 +1175,14 @@ async def test_state_preserved_across_reconnect():
 	session.connect(lambda msg: messages2.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.attach("/a", make_route_info("/a"))
+		ack = attach_mount(session, "/a", revision=client_revision)
 
 	# Queue should be flushed - should get the queued vdom_update
+	assert ack is not None and "snapshot" not in ack
 	assert len(messages2) == 1
 	assert messages2[0]["type"] == "vdom_update"
+	assert messages2[0]["baseRevision"] == client_revision
+	assert messages2[0]["revision"] == ack["revision"]
 
 	# Verify the count is now 2 (two increments)
 	vdom = mount.tree.render()
@@ -1002,7 +1202,7 @@ async def test_mount_suspended_after_disconnect_timeout():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	mount = session.route_mounts["/a"]
 	assert mount.effect is not None
@@ -1039,8 +1239,8 @@ async def test_attach_resumes_suspended_mounts_with_fresh_init():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a", "/b"])
-		session.attach("/a", make_route_info("/a"))
-		session.attach("/b", make_route_info("/b"))
+		attach_mount(session, "/a", make_route_info("/a"))
+		attach_mount(session, "/b", make_route_info("/b"))
 
 	assert len(messages1) == 0
 
@@ -1058,10 +1258,16 @@ async def test_attach_resumes_suspended_mounts_with_fresh_init():
 	session.connect(lambda msg: messages2.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		assert session.attach("/a", make_route_info("/a")) is True
-		assert session.attach("/b", make_route_info("/b")) is True
+		ack_a = attach_mount(session, "/a")
+		ack_b = attach_mount(session, "/b")
 
-	assert [m["type"] for m in messages2] == ["vdom_init", "vdom_init"]
+	assert ack_a is not None
+	assert ack_b is not None
+	snapshot_a = ack_a.get("snapshot")
+	snapshot_b = ack_b.get("snapshot")
+	assert snapshot_a is not None and snapshot_a["viewId"] == mount_a.view_id
+	assert snapshot_b is not None and snapshot_b["viewId"] == mount_b.view_id
+	assert messages2 == []
 	assert mount_a.state == "active"
 	assert mount_b.state == "active"
 	assert mount_a.effect is not None and mount_a.effect.paused is False
@@ -1081,9 +1287,9 @@ async def test_suspend_resume_preserves_state():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"], make_route_info("/a"))
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
-	session.execute_callback("/a", "1.onClick", [])
+	execute_callback(session, "/a", "1.onClick", [])
 	session.flush()
 
 	# Disconnect long enough for the mount to suspend
@@ -1092,24 +1298,25 @@ async def test_suspend_resume_preserves_state():
 	assert session.route_mounts["/a"].state == "suspended"
 
 	# State written while suspended is reflected on resume
-	session.execute_callback("/a", "1.onClick", [])
+	execute_callback(session, "/a", "1.onClick", [])
 	session.flush()
 
 	# Reconnect: attach resumes with a fresh init carrying the current count
 	messages2: list[ServerMessage] = []
 	session.connect(lambda msg: messages2.append(msg))
 	with ps.PulseContext.update(render=session):
-		assert session.attach("/a", make_route_info("/a")) is True
+		ack = attach_mount(session, "/a")
 
-	assert len(messages2) == 1
-	init = messages2[0]
-	assert init["type"] == "vdom_init"
-	assert "2" in str(init["vdom"])
+	assert ack is not None
+	snapshot = ack.get("snapshot")
+	assert snapshot is not None
+	assert "2" in str(snapshot["vdom"])
+	assert messages2 == []
 
 	# Callbacks keep working after resume
-	session.execute_callback("/a", "1.onClick", [])
+	execute_callback(session, "/a", "1.onClick", [])
 	session.flush()
-	assert any(m["type"] == "vdom_update" for m in messages2[1:])
+	assert any(m["type"] == "vdom_update" for m in messages2)
 
 	session.close()
 
@@ -1130,7 +1337,7 @@ async def test_call_api_timeout():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	# Call API with a very short timeout - no response will arrive
 	with pytest.raises(asyncio.TimeoutError):
@@ -1153,7 +1360,7 @@ async def test_call_api_success_before_timeout():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	# Start the API call
 	api_task = asyncio.create_task(session.call_api("/test", timeout=1.0))
@@ -1198,10 +1405,13 @@ async def test_run_js_timeout():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	# Run JS with result=True and short timeout
-	with ps.PulseContext.update(render=session, route=session.route_mounts["/a"].route):
+	mount = session.route_mounts["/a"]
+	with ps.PulseContext.update(
+		render=session, route=mount.route, origin=mount.origin()
+	):
 		future = session.run_js(get_answer(), result=True, timeout=0.05)
 
 	assert future is not None
@@ -1227,10 +1437,13 @@ async def test_run_js_success_before_timeout():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	# Run JS with result=True
-	with ps.PulseContext.update(render=session, route=session.route_mounts["/a"].route):
+	mount = session.route_mounts["/a"]
+	with ps.PulseContext.update(
+		render=session, route=mount.route, origin=mount.origin()
+	):
 		future = session.run_js(get_answer(), result=True, timeout=1.0)
 
 	assert future is not None
@@ -1241,7 +1454,14 @@ async def test_run_js_success_before_timeout():
 	exec_id = cast(Any, js_msgs[0])["id"]
 
 	# Simulate client response
-	session.handle_js_result({"id": exec_id, "result": 42, "error": None})
+	session.handle_js_result(
+		{
+			"id": exec_id,
+			"viewId": mount.view_id,
+			"result": 42,
+			"error": None,
+		}
+	)
 
 	# The future should resolve with the result
 	result = await future
@@ -1261,7 +1481,7 @@ async def test_session_close_cancels_pending_api():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	# Create a pending API future manually (simulating an in-flight request)
 	loop = asyncio.get_running_loop()
@@ -1287,12 +1507,15 @@ async def test_session_close_cancels_pending_js():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	# Create a pending JS future manually
 	loop = asyncio.get_running_loop()
 	fut: asyncio.Future[Any] = loop.create_future()
-	session._pending_js_results["test-id"] = fut  # pyright: ignore[reportPrivateUsage]
+	session._pending_js_results["test-id"] = (  # pyright: ignore[reportPrivateUsage]
+		session.route_mounts["/a"].view_id,
+		fut,
+	)
 
 	# Close the session
 	session.close()
@@ -1345,6 +1568,7 @@ async def test_session_close_ignores_cancelled_callback_tasks():
 
 	routes = RouteTree([Route("a", AsyncCallbackComponent)])
 	session = RenderSession("test-id", routes)
+	session.connect(lambda _message: None)
 
 	errors: list[dict[str, Any]] = []
 	loop = asyncio.get_running_loop()
@@ -1357,12 +1581,12 @@ async def test_session_close_ignores_cancelled_callback_tasks():
 	try:
 		with ps.PulseContext.update(render=session):
 			session.prerender(["/a"])
-			session.attach("/a", make_route_info("/a"))
+			attach_mount(session, "/a", make_route_info("/a"))
 
 		callbacks = session.route_mounts["/a"].tree.callbacks
 		assert len(callbacks) == 1
 		key = next(iter(callbacks))
-		session.execute_callback("/a", key, [])
+		execute_callback(session, "/a", key, [])
 		assert await wait_for(lambda: started.is_set(), timeout=0.2)
 
 		session.close()
@@ -1423,10 +1647,11 @@ async def test_session_close_cancels_cleanup_timers():
 
 	routes = RouteTree([Route("a", component)])
 	session = RenderSession("test-id", routes)
+	session.connect(lambda _message: None)
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	assert state_box
 	session.close()
@@ -1557,7 +1782,7 @@ async def test_prerender_then_attach_works():
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	# Should transition to active, queue flushed (empty)
 	assert mount.state == "active"
@@ -1599,9 +1824,9 @@ async def test_prerender_seeds_effect_deps_for_updates():
 	assert mount.effect.runs == 0
 
 	with ps.PulseContext.update(render=session):
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
-	session.execute_callback("/a", "1.onClick", [])
+	execute_callback(session, "/a", "1.onClick", [])
 	session.flush()
 
 	assert len([m for m in messages if m["type"] == "vdom_update"]) == 1
@@ -1620,8 +1845,8 @@ async def test_prerender_keeps_mounts_for_unrendered_paths():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a", "/b"])
-		session.attach("/a", make_route_info("/a"))
-		session.attach("/b", make_route_info("/b"))
+		attach_mount(session, "/a", make_route_info("/a"))
+		attach_mount(session, "/b", make_route_info("/b"))
 
 	mount_a = session.route_mounts["/a"]
 	mount_b = session.route_mounts["/b"]
@@ -1648,9 +1873,9 @@ async def test_prerender_keeps_mounts_for_unrendered_paths():
 	assert mount_b.effect is effect_b
 
 	messages.clear()
-	session.update_route("/a", nav_info)
+	update_mount_route(session, "/a", nav_info)
 	assert mount_a.state == "active"
-	session.execute_callback("/a", "1.onClick", [])
+	execute_callback(session, "/a", "1.onClick", [])
 	session.flush()
 
 	assert len([m for m in messages if m["type"] == "vdom_update"]) == 1
@@ -1686,7 +1911,7 @@ async def test_attach_after_redirect_prerender_requests_reload():
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.attach("/cond", make_route_info("/cond"))
+		attach_mount(session, "/cond", make_route_info("/cond"))
 
 	# Should request reload and not create a mount
 	assert "/cond" not in session.route_mounts
@@ -1726,16 +1951,16 @@ async def test_detach_immediate_removes_mount_and_disposes_effect():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	mount = session.route_mounts["/a"]
 	effect = mount.effect
 	assert effect is not None
 
-	session.detach("/a")
+	detach_mount(session, "/a")
 
 	assert "/a" not in session.route_mounts
-	assert len(effect.deps) == 0
+	assert all(effect not in dependency.obs for dependency in effect.deps)
 	assert effect.parent is None
 
 	session.close()
@@ -1749,19 +1974,19 @@ def test_dev_strict_mode_detach_replay_reuses_mount_without_reload():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	mount = session.route_mounts["/a"]
-	first_mount_id = mount.mount_id
+	first_view_id = mount.view_id
 
-	session.detach("/a")
+	detach_mount(session, "/a")
 
 	assert session.route_mounts["/a"] is mount
 	assert mount.state == "pending"
-	assert mount.mount_id != first_mount_id
+	assert mount.view_id == first_view_id
 
 	with ps.PulseContext.update(render=session):
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	assert session.route_mounts["/a"] is mount
 	assert mount.state == "active"
@@ -1774,12 +1999,13 @@ def test_dev_strict_mode_detach_replay_reuses_mount_without_reload():
 async def test_dev_strict_mode_detach_disposes_after_timeout():
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes, dev_strict_mode_detach_timeout=0.01)
+	session.connect(lambda _message: None)
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
-	session.detach("/a")
+	detach_mount(session, "/a")
 
 	await wait_for(lambda: "/a" not in session.route_mounts)
 
@@ -1792,7 +2018,7 @@ def test_detach_nonexistent_path_is_noop():
 	session = RenderSession("test-id", routes)
 
 	# Should not raise
-	session.detach("/nonexistent")
+	assert session.detach("/nonexistent", "missing-view") is False
 
 	session.close()
 
@@ -1816,7 +2042,7 @@ async def test_update_route_updates_route_context():
 	}
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"], initial_info)
-		session.attach("/a", initial_info)
+		attach_mount(session, "/a", initial_info)
 
 	mount = session.route_mounts["/a"]
 	assert mount.route.query == "x=1"
@@ -1830,7 +2056,7 @@ async def test_update_route_updates_route_context():
 		"pathParams": {},
 		"catchall": [],
 	}
-	session.update_route("/a", updated_info)
+	update_mount_route(session, "/a", updated_info)
 
 	assert mount.route.query == "y=2"
 	assert mount.route.hash == "section"
@@ -1848,7 +2074,9 @@ def test_update_route_missing_mount_is_noop(monkeypatch: pytest.MonkeyPatch):
 
 	monkeypatch.setattr(session, "report_error", report_error)
 
-	session.update_route("/missing", make_route_info("/missing"))
+	session.update_route(
+		"/missing", make_route_info("/missing"), "missing-view", revision=0
+	)
 
 	assert reported == []
 
@@ -1865,7 +2093,7 @@ def test_execute_callback_missing_mount_is_noop(monkeypatch: pytest.MonkeyPatch)
 
 	monkeypatch.setattr(session, "report_error", report_error)
 
-	session.execute_callback("/missing", "1.onClick", [])
+	session.execute_callback("/missing", "missing-view", "1.onClick", [])
 
 	assert reported == []
 
@@ -1875,6 +2103,7 @@ def test_execute_callback_missing_mount_is_noop(monkeypatch: pytest.MonkeyPatch)
 def test_execute_callback_stale_key_is_noop(monkeypatch: pytest.MonkeyPatch):
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	session.connect(lambda _message: None)
 	reported: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
 	def report_error(*args: Any, **kwargs: Any) -> None:
@@ -1884,9 +2113,9 @@ def test_execute_callback_stale_key_is_noop(monkeypatch: pytest.MonkeyPatch):
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
-	session.execute_callback("/a", "missing.onClick", [])
+	execute_callback(session, "/a", "missing.onClick", [])
 
 	assert reported == []
 
@@ -1937,7 +2166,7 @@ async def test_attach_after_dispose_requests_reload():
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	assert len(messages) == 1
 	assert messages[0]["type"] == "reload"
@@ -1959,10 +2188,10 @@ async def test_rerender_does_not_accumulate_objects():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"], make_route_info("/a"))
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	def rerender_once():
-		session.execute_callback("/a", "1.onClick", [])
+		execute_callback(session, "/a", "1.onClick", [])
 		session.flush()
 
 	tracked = (Element, PulseNode, HookContext, Effect)
@@ -2021,10 +2250,10 @@ async def test_reprerender_preserves_child_component_state():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"], make_route_info("/a"))
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	# Bump the child component's state
-	session.execute_callback("/a", "0.onClick", [])
+	execute_callback(session, "/a", "0.onClick", [])
 	session.flush()
 
 	# Re-prerender the mounted route (client-side navigation re-init)
@@ -2050,12 +2279,12 @@ async def test_reprerender_does_not_accumulate_objects():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"], make_route_info("/a"))
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
 	def reprerender_once():
 		with ps.PulseContext.update(render=session):
 			session.prerender(["/a"], make_route_info("/a"))
-			session.attach("/a", make_route_info("/a"))
+			attach_mount(session, "/a", make_route_info("/a"))
 
 	tracked = (Element, PulseNode, HookContext, Effect)
 
@@ -2100,9 +2329,9 @@ async def test_async_callback_error_reports_real_traceback():
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
-		session.attach("/a", make_route_info("/a"))
+		attach_mount(session, "/a", make_route_info("/a"))
 
-	session.execute_callback("/a", first_callback_key(session, "/a"), [])
+	execute_callback(session, "/a", first_callback_key(session, "/a"), [])
 	await wait_for(lambda: any(m["type"] == "server_error" for m in messages))
 
 	errors = [m for m in messages if m["type"] == "server_error"]

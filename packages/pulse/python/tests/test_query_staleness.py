@@ -12,6 +12,7 @@ from typing import Any
 
 import pulse as ps
 import pytest
+from pulse.queries.infinite_query import InfiniteQuery, InfiniteQueryResult
 from pulse.queries.query import KeyedQueryResult, UnkeyedQueryResult
 from pulse.queries.store import QueryStore
 from pulse.reactive import Computed
@@ -30,6 +31,10 @@ class FetchCounter:
 		self.count += 1
 		return self.count
 
+	async def fetch_page(self, _page_param: int) -> int:
+		self.count += 1
+		return self.count
+
 
 def observe(
 	store: QueryStore,
@@ -41,6 +46,23 @@ def observe(
 	return KeyedQueryResult(
 		Computed(lambda: store.ensure(key)), fetch_fn=counter.fetch, **kwargs
 	)
+
+
+def observe_infinite(
+	store: QueryStore,
+	key: tuple[Any, ...],
+	counter: FetchCounter,
+	**kwargs: Any,
+) -> tuple[InfiniteQuery[int, int], InfiniteQueryResult[int, int]]:
+	query: InfiniteQuery[int, int] = store.ensure_infinite(
+		key, initial_page_param=0, get_next_page_param=lambda _pages: None
+	)
+	result = InfiniteQueryResult(
+		Computed(lambda: query, name=f"inf({key})"),
+		fetch_fn=counter.fetch_page,
+		**kwargs,
+	)
+	return query, result
 
 
 @pytest.mark.asyncio
@@ -163,6 +185,157 @@ async def test_resume_skips_fresh_queries():
 
 
 @pytest.mark.asyncio
+async def test_reconnect_all_refetches_stale_queries():
+	store = QueryStore()
+	keyed_counter = FetchCounter()
+	unkeyed_counter = FetchCounter()
+	infinite_counter = FetchCounter()
+	keyed = observe(store, ("keyed",), keyed_counter, stale_time=0.0)
+	unkeyed = UnkeyedQueryResult(
+		unkeyed_counter.fetch,
+		stale_time=0.0,
+		on_dispose=store.unregister_unkeyed,
+	)
+	store.register_unkeyed(unkeyed)
+	_infinite_query, infinite = observe_infinite(
+		store, ("infinite",), infinite_counter, stale_time=0.0
+	)
+	await wait_for(
+		lambda: keyed_counter.count
+		== unkeyed_counter.count
+		== infinite_counter.count
+		== 1
+	)
+
+	store.reconnect_all()
+
+	await wait_for(
+		lambda: keyed_counter.count
+		== unkeyed_counter.count
+		== infinite_counter.count
+		== 2
+	)
+	assert store.suspended is False
+
+	keyed.dispose()
+	unkeyed.dispose()
+	infinite.dispose()
+
+
+@pytest.mark.asyncio
+async def test_reconnect_all_preserves_intervals_and_skips_fresh_queries():
+	store = QueryStore()
+	keyed_counter = FetchCounter()
+	unkeyed_counter = FetchCounter()
+	infinite_counter = FetchCounter()
+	keyed = observe(
+		store,
+		("keyed-interval",),
+		keyed_counter,
+		stale_time=1000.0,
+		refetch_interval=100.0,
+	)
+	unkeyed = UnkeyedQueryResult(
+		unkeyed_counter.fetch,
+		stale_time=1000.0,
+		refetch_interval=100.0,
+		on_dispose=store.unregister_unkeyed,
+	)
+	store.register_unkeyed(unkeyed)
+	infinite_query, infinite = observe_infinite(
+		store,
+		("infinite-interval",),
+		infinite_counter,
+		stale_time=1000.0,
+		refetch_interval=100.0,
+	)
+	await wait_for(
+		lambda: keyed_counter.count
+		== unkeyed_counter.count
+		== infinite_counter.count
+		== 1
+	)
+	keyed_query = store.ensure(("keyed-interval",))
+	interval_effects = (
+		keyed_query._interval_effect,  # pyright: ignore[reportPrivateUsage]
+		unkeyed._interval_effect,  # pyright: ignore[reportPrivateUsage]
+		infinite_query._interval_effect,  # pyright: ignore[reportPrivateUsage]
+	)
+
+	store.reconnect_all()
+	await asyncio.sleep(0.02)
+
+	assert keyed_counter.count == 1
+	assert unkeyed_counter.count == 1
+	assert infinite_counter.count == 1
+	assert keyed_query._interval_effect is interval_effects[0]  # pyright: ignore[reportPrivateUsage]
+	assert unkeyed._interval_effect is interval_effects[1]  # pyright: ignore[reportPrivateUsage]
+	assert infinite_query._interval_effect is interval_effects[2]  # pyright: ignore[reportPrivateUsage]
+
+	keyed.dispose()
+	unkeyed.dispose()
+	infinite.dispose()
+
+
+@pytest.mark.asyncio
+async def test_reconnect_all_does_not_stack_inflight_fetches():
+	store = QueryStore()
+	release = asyncio.Event()
+	calls = {"keyed": 0, "unkeyed": 0, "infinite": 0}
+
+	async def fetch_keyed() -> int:
+		calls["keyed"] += 1
+		await release.wait()
+		return calls["keyed"]
+
+	async def fetch_unkeyed() -> int:
+		calls["unkeyed"] += 1
+		await release.wait()
+		return calls["unkeyed"]
+
+	async def fetch_infinite(_page_param: int) -> int:
+		calls["infinite"] += 1
+		await release.wait()
+		return calls["infinite"]
+
+	keyed = KeyedQueryResult(
+		Computed(lambda: store.ensure(("keyed-inflight",))),
+		fetch_fn=fetch_keyed,
+		stale_time=0.0,
+	)
+	unkeyed = UnkeyedQueryResult(
+		fetch_unkeyed,
+		stale_time=0.0,
+		on_dispose=store.unregister_unkeyed,
+	)
+	store.register_unkeyed(unkeyed)
+	infinite_query: InfiniteQuery[int, int] = store.ensure_infinite(
+		("infinite-inflight",),
+		initial_page_param=0,
+		get_next_page_param=lambda _pages: None,
+	)
+	infinite = InfiniteQueryResult(
+		Computed(lambda: infinite_query, name="inf(reconnect-inflight)"),
+		fetch_fn=fetch_infinite,
+		stale_time=0.0,
+	)
+	await wait_for(lambda: all(count == 1 for count in calls.values()))
+
+	store.reconnect_all()
+	await asyncio.sleep(0.01)
+
+	assert calls == {"keyed": 1, "unkeyed": 1, "infinite": 1}
+
+	release.set()
+	await asyncio.gather(keyed.wait(), unkeyed.wait(), infinite_query.wait())
+	assert calls == {"keyed": 1, "unkeyed": 1, "infinite": 1}
+
+	keyed.dispose()
+	unkeyed.dispose()
+	infinite.dispose()
+
+
+@pytest.mark.asyncio
 async def test_unkeyed_suspend_resume_interval():
 	store = QueryStore()
 	counter = FetchCounter()
@@ -223,8 +396,6 @@ async def test_infinite_invalidate_marks_stale_without_observers():
 @pytest.mark.asyncio
 async def test_infinite_resume_does_not_stack_fetch_on_inflight():
 	"""Resume during an in-flight infinite fetch must not enqueue a duplicate."""
-	from pulse.queries.infinite_query import InfiniteQuery, InfiniteQueryResult
-
 	calls = 0
 	release = asyncio.Event()
 
@@ -267,8 +438,6 @@ async def test_infinite_resume_does_not_stack_fetch_on_inflight():
 async def test_infinite_interval_resume_does_not_stack_fetch_on_inflight():
 	"""Resume of an interval infinite query must not stack a fetch via the
 	recreated interval effect's immediate catch-up tick."""
-	from pulse.queries.infinite_query import InfiniteQuery, InfiniteQueryResult
-
 	calls = 0
 	release = asyncio.Event()
 

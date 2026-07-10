@@ -337,7 +337,14 @@ class SuspendableQuery:
 		self._suspended = False
 		self._resume_after_suspend()
 
+	def reconnect(self) -> None:
+		"""Refetch stale data without restarting an active interval."""
+		self._refetch_if_stale()
+
 	def _resume_after_suspend(self) -> None:
+		raise NotImplementedError
+
+	def _refetch_if_stale(self) -> None:
 		raise NotImplementedError
 
 
@@ -606,6 +613,10 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 		self._update_interval()
 		if self._interval is not None:
 			return
+		self._refetch_if_stale()
+
+	@override
+	def _refetch_if_stale(self) -> None:
 		observers = [obs for obs in self.observers if obs._enabled.value]  # pyright: ignore[reportPrivateUsage]
 		if not observers:
 			return
@@ -931,6 +942,10 @@ class UnkeyedQueryResult(Generic[T], Disposable, SuspendableQuery):
 			# Recreating the interval effect runs an immediate catch-up fetch
 			self._setup_interval_effect(self._refetch_interval)
 			return
+		self._refetch_if_stale()
+
+	@override
+	def _refetch_if_stale(self) -> None:
 		with Untrack():
 			if self._enabled.value and self.is_stale() and not self.is_scheduled:
 				self.schedule()

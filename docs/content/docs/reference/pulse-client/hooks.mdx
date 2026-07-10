@@ -88,7 +88,8 @@ interface PulseClient {
 
   // Route management
   updateRoute(path: string, routeInfo: RouteInfo): void;
-  attach(path: string, view: MountedView): void;
+  attach(path: string, snapshot: ViewSnapshot, view: MountedView): void;
+  installSnapshot(path: string, snapshot: ViewSnapshot): void;
   detach(path: string): void;
 
   // Callbacks
@@ -239,6 +240,8 @@ function usePulsePrerender(path: string): PulsePrerenderView
 
 ```ts
 interface PulsePrerenderView {
+  viewId: string;
+  revision: number;
   vdom: VDOM;
 }
 ```

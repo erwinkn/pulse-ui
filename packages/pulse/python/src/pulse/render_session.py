@@ -355,7 +355,8 @@ class RouteMount:
 				raise RuntimeError(f"Pending mount missing queue for {self.path!r}")
 			if self.snapshot_required:
 				return
-			if len(self.queue) >= self.render.pending_message_limit:
+			# Leave one sender-queue slot for the attach acknowledgement.
+			if len(self.queue) >= self.render.pending_message_limit - 1:
 				self.queue.clear()
 				self.snapshot_required = True
 				return

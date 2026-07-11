@@ -773,12 +773,14 @@ class RenderSession:
 		current = self.route_mounts.get(path)
 		if current is not mount:
 			return
+		self.route_mounts.pop(path, None)
+		self._ref_channels_by_route.pop(path, None)
 		try:
-			self.route_mounts.pop(path, None)
-			self._ref_channels_by_route.pop(path, None)
 			mount.dispose()
 		except Exception as e:
 			self.report_error(path, "unmount", e)
+		finally:
+			self.channels.remove_route(path)
 
 	def detach(self, path: str, view_id: str, instance_id: str) -> bool:
 		"""Client route unmounted. Dispose immediately outside dev StrictMode replay."""
@@ -790,7 +792,6 @@ class RenderSession:
 			or mount.instance_id != instance_id
 		):
 			return False
-		self._ref_channels_by_route.pop(path, None)
 		if self.dev_strict_mode_detach_timeout > 0:
 			# React StrictMode in development intentionally replays mount effects as
 			# attach -> detach -> attach without another prerender. Keep the mount for

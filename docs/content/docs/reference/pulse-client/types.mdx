@@ -406,7 +406,6 @@ interface ClientUpdateMessage {
   type: "update";
   path: string;
   viewId: string;
-  instanceId: string;
   revision: number;
   routeInfo: RouteInfo;
 }
@@ -421,6 +420,7 @@ interface ClientDetachMessage {
   type: "detach";
   path: string;
   viewId: string;
+  instanceId: string;
 }
 ```
 

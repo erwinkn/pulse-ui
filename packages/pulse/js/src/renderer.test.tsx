@@ -35,6 +35,7 @@ describe("VDOMRenderer", () => {
 	function makeRenderer(registry: Record<string, unknown> = {}) {
 		const { client, invokeCallback, sent } = makeClient();
 		const renderer = new VDOMRenderer(client, "/test", registry);
+		renderer.commit("view-1", 0);
 		return { renderer, invokeCallback, sent };
 	}
 
@@ -84,7 +85,13 @@ describe("VDOMRenderer", () => {
 		const button = tree as React.ReactElement;
 		expect(typeof (button.props as any).onClick).toBe("function");
 		(button.props as any).onClick("value");
-		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["value"]);
+		expect(invokeCallback).toHaveBeenCalledWith(
+			"/test",
+			"view-1",
+			0,
+			"onClick",
+			["value"],
+		);
 	});
 
 	it("hydrates ref specs into callbacks", () => {
@@ -191,10 +198,10 @@ describe("VDOMRenderer", () => {
 		await new Promise((resolve) => setTimeout(resolve, 20));
 		expect(invokeCallback).not.toHaveBeenCalled();
 		await new Promise((resolve) => setTimeout(resolve, 40));
-		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["b"]);
+		expect(invokeCallback).toHaveBeenCalledWith("/test", "view-1", 0, "onClick", ["b"]);
 	});
 
-	it("cancels callbacks pending from a replaced snapshot", async () => {
+	it("preserves callbacks pending from a same-view snapshot", async () => {
 		const { renderer, invokeCallback } = makeRenderer();
 		const tree = renderer.init({
 			viewId: "view-1",
@@ -214,7 +221,7 @@ describe("VDOMRenderer", () => {
 		});
 		await new Promise((resolve) => setTimeout(resolve, 30));
 
-		expect(invokeCallback).not.toHaveBeenCalled();
+		expect(invokeCallback).toHaveBeenCalledWith("/test", "view-1", 0, "onClick", []);
 	});
 
 	it("disconnects refs from a replaced snapshot", () => {
@@ -234,7 +241,7 @@ describe("VDOMRenderer", () => {
 		firstRef(null);
 
 		expect(sent.filter((message) => message.event === "ref:mounted")).toHaveLength(2);
-		expect(sent.filter((message) => message.event === "ref:unmounted")).toHaveLength(0);
+		expect(sent.filter((message) => message.event === "ref:unmounted")).toHaveLength(1);
 	});
 
 	it("keeps a pending debounced call when the delay changes", async () => {
@@ -260,7 +267,7 @@ describe("VDOMRenderer", () => {
 		await new Promise((resolve) => setTimeout(resolve, 25));
 		expect(invokeCallback).not.toHaveBeenCalled();
 		await new Promise((resolve) => setTimeout(resolve, 40));
-		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", ["a"]);
+		expect(invokeCallback).toHaveBeenCalledWith("/test", "view-1", 0, "onClick", ["a"]);
 	});
 
 	it("keeps a pending debounced call when a node moves", async () => {
@@ -302,10 +309,16 @@ describe("VDOMRenderer", () => {
 		]);
 
 		await new Promise((resolve) => setTimeout(resolve, 60));
-		expect(invokeCallback).toHaveBeenCalledWith("/test", "1.onClick", ["value"]);
+		expect(invokeCallback).toHaveBeenCalledWith(
+			"/test",
+			"view-1",
+			0,
+			"0.onClick",
+			["value"],
+		);
 	});
 
-	it("drops pending debounced callbacks when a node is removed", async () => {
+	it("preserves pending debounced callbacks when a node is removed", async () => {
 		const { renderer, invokeCallback } = makeRenderer();
 		let tree = renderer.renderNode({
 			tag: "div",
@@ -339,10 +352,16 @@ describe("VDOMRenderer", () => {
 		]);
 
 		await new Promise((resolve) => setTimeout(resolve, 60));
-		expect(invokeCallback).not.toHaveBeenCalled();
+		expect(invokeCallback).toHaveBeenCalledWith(
+			"/test",
+			"view-1",
+			0,
+			"1.onClick",
+			["value"],
+		);
 	});
 
-	it("drops pending debounced callbacks when a node is replaced", async () => {
+	it("preserves pending debounced callbacks when a node is replaced", async () => {
 		const { renderer, invokeCallback } = makeRenderer();
 		let tree = renderer.renderNode({
 			tag: "button",
@@ -363,10 +382,16 @@ describe("VDOMRenderer", () => {
 		const root = tree as React.ReactElement;
 		expect(root.type).toBe("div");
 		await new Promise((resolve) => setTimeout(resolve, 60));
-		expect(invokeCallback).not.toHaveBeenCalled();
+		expect(invokeCallback).toHaveBeenCalledWith(
+			"/test",
+			"view-1",
+			0,
+			"onClick",
+			["value"],
+		);
 	});
 
-	it("drops pending debounced callbacks when eval is cleared", async () => {
+	it("preserves pending debounced callbacks when eval is cleared", async () => {
 		const { renderer, invokeCallback } = makeRenderer();
 		let tree = renderer.renderNode({
 			tag: "button",
@@ -387,10 +412,16 @@ describe("VDOMRenderer", () => {
 		const root = tree as React.ReactElement;
 		expect(root.type).toBe("button");
 		await new Promise((resolve) => setTimeout(resolve, 60));
-		expect(invokeCallback).not.toHaveBeenCalled();
+		expect(invokeCallback).toHaveBeenCalledWith(
+			"/test",
+			"view-1",
+			0,
+			"onClick",
+			["value"],
+		);
 	});
 
-	it("drops pending debounced callbacks when a render-prop subtree is replaced", async () => {
+	it("preserves pending debounced callbacks when a render-prop subtree is replaced", async () => {
 		const { renderer, invokeCallback } = makeRenderer();
 		let tree = renderer.renderNode({
 			tag: "div",
@@ -419,7 +450,13 @@ describe("VDOMRenderer", () => {
 		const nextRoot = tree as React.ReactElement;
 		expect((nextRoot.props as any).render.type).toBe("span");
 		await new Promise((resolve) => setTimeout(resolve, 60));
-		expect(invokeCallback).not.toHaveBeenCalled();
+		expect(invokeCallback).toHaveBeenCalledWith(
+			"/test",
+			"view-1",
+			0,
+			"render.onClick",
+			["value"],
+		);
 	});
 
 	it("clears pending debounced calls after switching to immediate", async () => {
@@ -626,14 +663,27 @@ describe("VDOMRenderer", () => {
 		];
 
 		tree = renderer.applyUpdates(tree, ops);
+		renderer.commit("view-1", 1);
 		const root = tree as React.ReactElement;
 		const kids = childrenArray(root) as React.ReactElement[];
 
 		(kids[0].props as any).onClick("from-B");
-		expect(invokeCallback).toHaveBeenCalledWith("/test", "0.onClick", ["from-B"]);
+		expect(invokeCallback).toHaveBeenCalledWith(
+			"/test",
+			"view-1",
+			1,
+			"0.onClick",
+			["from-B"],
+		);
 
 		(kids[1].props as any).onClick("from-A");
-		expect(invokeCallback).toHaveBeenCalledWith("/test", "1.onClick", ["from-A"]);
+		expect(invokeCallback).toHaveBeenCalledWith(
+			"/test",
+			"view-1",
+			1,
+			"1.onClick",
+			["from-A"],
+		);
 	});
 
 	it("clears children when reconciliation N=0", () => {
@@ -653,7 +703,6 @@ describe("VDOMRenderer", () => {
 				reuse: [[], []],
 			},
 		]);
-
 		const root = tree as React.ReactElement;
 		expect(childrenArray(root)).toHaveLength(0);
 	});
@@ -670,10 +719,17 @@ describe("VDOMRenderer", () => {
 				data: { eval: ["onClick"], set: { onClick: "$cb" } },
 			},
 		]);
+		renderer.commit("view-1", 1);
 		const b1 = tree as React.ReactElement;
 		expect(typeof (b1.props as any).onClick).toBe("function");
 		(b1.props as any).onClick(1);
-		expect(invokeCallback).toHaveBeenCalledWith("/test", "onClick", [1]);
+		expect(invokeCallback).toHaveBeenCalledWith(
+			"/test",
+			"view-1",
+			1,
+			"onClick",
+			[1],
+		);
 
 		// Clear eval => onClick becomes plain JSON "$cb"
 		tree = renderer.applyUpdates(tree, [

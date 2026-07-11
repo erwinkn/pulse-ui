@@ -128,6 +128,7 @@ async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 				"viewId": initial["viewId"],
 				"revision": initial["revision"],
 				"attachId": "attach-a",
+				"instanceId": "instance-1",
 			}
 		),
 	)
@@ -177,7 +178,9 @@ async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 
 	# The browser has lost socket-a, but the server still considers it live.
 	callback = next(iter(render.route_mounts["/"].tree.callbacks))
-	render.execute_callback("/", initial["viewId"], callback, [])
+	render.execute_callback(
+		"/", initial["viewId"], render.route_mounts["/"].revision, callback, []
+	)
 	render.flush()
 	await wait_for(
 		lambda: any(
@@ -196,6 +199,7 @@ async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 				"viewId": initial["viewId"],
 				"revision": initial["revision"],
 				"attachId": "attach-b",
+				"instanceId": "instance-1",
 			}
 		),
 	)

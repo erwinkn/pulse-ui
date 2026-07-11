@@ -100,4 +100,19 @@ describe("RefRegistry", () => {
 		registry.dispose();
 		expect(() => registry.getCallback("chan-2", "ref-2")).not.toThrow();
 	});
+
+	it("unmounts live refs exactly once when disposed", () => {
+		const bridge = new FakeBridge();
+		const registry = new RefRegistry(() => bridge as any);
+		const cb = registry.getCallback("chan-1", "ref-1");
+		cb({});
+
+		registry.dispose();
+		cb(null);
+
+		expect(bridge.emitted).toEqual([
+			{ event: "ref:mounted", payload: { refId: "ref-1" } },
+			{ event: "ref:unmounted", payload: { refId: "ref-1" } },
+		]);
+	});
 });

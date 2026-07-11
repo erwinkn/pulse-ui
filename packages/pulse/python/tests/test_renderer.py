@@ -1,7 +1,8 @@
 import asyncio
 from collections.abc import Sequence
+from functools import partial
 from pathlib import Path
-from types import SimpleNamespace
+from types import CellType, FunctionType, SimpleNamespace
 from typing import Any, cast, override
 
 import pulse as ps
@@ -10,7 +11,7 @@ from pulse.component import component
 from pulse.dom.tags import button, div, li, span, ul
 from pulse.hooks.core import HookContext
 from pulse.refs import RefHandle
-from pulse.renderer import RenderTree
+from pulse.renderer import RenderTree, callbacks_equivalent
 from pulse.transpiler.nodes import Element, PulseNode, Value
 from pulse.transpiler.vdom import VDOMElement, VDOMExpr
 
@@ -348,6 +349,257 @@ def test_render_tree_debounced_callbacks():
 		],
 	}
 	assert set(tree.callbacks.keys()) == {"0.onClick"}
+
+
+def _callback_with_capture(value: Any):
+	def callback() -> Any:
+		return value
+
+	return callback
+
+
+def _callback_with_default(value: Any):
+	def callback(captured: Any = value) -> Any:
+		return captured
+
+	return callback
+
+
+def test_callback_memoization_does_not_merge_distinct_closure_cells():
+	tree = RenderTree(button(onClick=_callback_with_capture((1, "a", frozenset({2})))))
+	tree.render()
+	first = tree.callbacks["onClick"].fn
+
+	tree.rerender(button(onClick=_callback_with_capture((1, "a", frozenset({2})))))
+
+	assert tree.callbacks["onClick"].fn is not first
+
+
+def test_callback_memoization_reuses_equivalent_default_captures():
+	tree = RenderTree(button(onClick=_callback_with_default((1, "a", frozenset({2})))))
+	tree.render()
+	first = tree.callbacks["onClick"].fn
+
+	tree.rerender(button(onClick=_callback_with_default((1, "a", frozenset({2})))))
+
+	assert tree.callbacks["onClick"].fn is first
+
+
+def test_callback_memoization_requires_the_same_code_and_callable_kind():
+	def make_callback():
+		return lambda: "value"
+
+	def other_callback():
+		return "value"
+
+	class CallableObject:
+		def __call__(self) -> str:
+			return "value"
+
+	assert callbacks_equivalent(make_callback(), make_callback())
+	assert not callbacks_equivalent(make_callback(), other_callback)
+	shared = CallableObject()
+	assert callbacks_equivalent(shared, shared)
+	assert not callbacks_equivalent(CallableObject(), CallableObject())
+
+	left = make_callback()
+	right = make_callback()
+	left.metadata = "custom"  # pyright: ignore[reportFunctionMemberAccess]
+	assert not callbacks_equivalent(left, right)
+
+
+def test_callback_memoization_tracks_changed_and_repeated_captures():
+	tree = RenderTree(button(onClick=_callback_with_capture("a")))
+	tree.render()
+	first = tree.callbacks["onClick"].fn
+
+	tree.rerender(button(onClick=_callback_with_capture("b")))
+	second = tree.callbacks["onClick"].fn
+	tree.rerender(button(onClick=_callback_with_capture("a")))
+	third = tree.callbacks["onClick"].fn
+
+	assert second is not first
+	assert third is not first
+	assert [first(), second(), third()] == ["a", "b", "a"]
+
+
+def test_callback_memoization_rejects_fresh_closures_even_with_shared_mutable_capture():
+	shared: list[str] = []
+	tree = RenderTree(button(onClick=_callback_with_capture(shared)))
+	tree.render()
+	first = tree.callbacks["onClick"].fn
+
+	tree.rerender(button(onClick=_callback_with_capture(shared)))
+	assert tree.callbacks["onClick"].fn is not first
+
+	tree.rerender(button(onClick=_callback_with_capture([])))
+	assert tree.callbacks["onClick"].fn is not first
+
+
+def test_callback_memoization_never_calls_arbitrary_equality_or_hash():
+	class Hostile:
+		@override
+		def __eq__(self, _other: object) -> bool:
+			raise AssertionError("must not compare captures")
+
+		@override
+		def __hash__(self) -> int:
+			raise AssertionError("must not hash captures")
+
+	shared = Hostile()
+	assert not callbacks_equivalent(
+		_callback_with_capture(shared), _callback_with_capture(shared)
+	)
+	assert not callbacks_equivalent(
+		_callback_with_capture(Hostile()), _callback_with_capture(Hostile())
+	)
+
+
+def test_callback_memoization_distinguishes_types_signed_zero_and_nan():
+	assert not callbacks_equivalent(
+		_callback_with_capture(True), _callback_with_capture(1)
+	)
+	assert not callbacks_equivalent(
+		_callback_with_capture(-0.0), _callback_with_capture(0.0)
+	)
+	assert not callbacks_equivalent(
+		_callback_with_capture(float("nan")), _callback_with_capture(float("nan"))
+	)
+
+
+def test_callback_memoization_compares_defaults_and_kwdefaults():
+	assert callbacks_equivalent(
+		_callback_with_default("a"), _callback_with_default("a")
+	)
+	assert not callbacks_equivalent(
+		_callback_with_default("a"), _callback_with_default("b")
+	)
+	shared: list[str] = []
+	assert callbacks_equivalent(
+		_callback_with_default(shared), _callback_with_default(shared)
+	)
+	assert not callbacks_equivalent(
+		_callback_with_default([]), _callback_with_default([])
+	)
+
+	def make_kw(value: Any):
+		def callback(*, captured: Any = value) -> Any:
+			return captured
+
+		return callback
+
+	assert callbacks_equivalent(make_kw("a"), make_kw("a"))
+	assert not callbacks_equivalent(make_kw("a"), make_kw("b"))
+
+
+def test_callback_memoization_supports_bound_methods_and_partials():
+	class Receiver:
+		def callback(self, value: Any = "value") -> Any:
+			return value
+
+	left = Receiver()
+	right = Receiver()
+	assert callbacks_equivalent(left.callback, left.callback)
+	assert not callbacks_equivalent(left.callback, right.callback)
+	assert callbacks_equivalent(
+		partial(left.callback, "a"), partial(left.callback, "a")
+	)
+	assert not callbacks_equivalent(
+		partial(left.callback, "a"), partial(left.callback, "b")
+	)
+	assert not callbacks_equivalent(
+		partial(left.callback, []), partial(left.callback, [])
+	)
+
+
+def test_callback_memoization_rejects_different_globals_and_empty_cells():
+	def callback() -> None:
+		return None
+
+	other_globals = FunctionType(callback.__code__, {})
+	assert not callbacks_equivalent(callback, other_globals)
+
+	template = _callback_with_capture("value")
+	left_empty = FunctionType(
+		template.__code__, template.__globals__, closure=(CellType(),)
+	)
+	right_empty = FunctionType(
+		template.__code__, template.__globals__, closure=(CellType(),)
+	)
+	assert not callbacks_equivalent(left_empty, right_empty)
+
+
+def test_callback_memoization_rejects_nonlocal_writes():
+	def make_callback():
+		value = 0
+
+		def callback() -> int:
+			nonlocal value
+			value += 1
+			return value
+
+		return callback
+
+	assert not callbacks_equivalent(make_callback(), make_callback())
+
+
+def test_callback_memoization_rejects_cells_rebound_by_sibling_closures():
+	def make_callbacks():
+		value = "initial"
+
+		def read() -> str:
+			return value
+
+		def write() -> None:
+			nonlocal value
+			value = "changed"
+
+		return read, write
+
+	old_read, _ = make_callbacks()
+	new_read, new_write = make_callbacks()
+	assert not callbacks_equivalent(old_read, new_read)
+	new_write()
+	assert old_read() == "initial"
+	assert new_read() == "changed"
+
+
+def test_callback_memoization_crosses_debounce_transitions_and_updates_delay():
+	tree = RenderTree(button(onClick=_callback_with_default("value")))
+	tree.render()
+	first = tree.callbacks["onClick"].fn
+
+	ops = tree.rerender(
+		button(onClick=ps.debounced(_callback_with_default("value"), 100))
+	)
+	assert tree.callbacks["onClick"].fn is first
+	assert any(
+		op["type"] == "update_props"
+		and op["data"].get("set", {}).get("onClick") == "$cb:100"
+		for op in ops
+	)
+
+	ops = tree.rerender(
+		button(onClick=ps.debounced(_callback_with_default("value"), 200))
+	)
+	assert tree.callbacks["onClick"].fn is first
+	assert any(
+		op["type"] == "update_props"
+		and op["data"].get("set", {}).get("onClick") == "$cb:200"
+		for op in ops
+	)
+
+	tree.rerender(button(onClick=_callback_with_default("value")))
+	assert tree.callbacks["onClick"].fn is first
+
+
+def test_removed_callback_is_not_memoized_when_readded():
+	tree = RenderTree(button(onClick=_callback_with_capture("value")))
+	tree.render()
+	first = tree.callbacks["onClick"].fn
+	tree.rerender(button())
+	tree.rerender(button(onClick=_callback_with_capture("value")))
+	assert tree.callbacks["onClick"].fn is not first
 
 
 def test_callback_arg_count_skips_defaulted_params():

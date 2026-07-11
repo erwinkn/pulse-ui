@@ -93,4 +93,80 @@ describe("ChannelBridge", () => {
 		expect(second).not.toBe(first);
 		expect(() => second.on("event", vi.fn())).not.toThrow();
 	});
+
+	it("resets after 10,000 unanswered requests", async () => {
+		const { bridge, sent } = makeClient();
+		const pending: Promise<any>[] = [];
+		for (let index = 0; index < 10_000; index++) {
+			pending.push(bridge.request("never-answers", index));
+		}
+
+		await expect(bridge.request("overflow")).rejects.toThrow("exceeded 10,000");
+		expect(sent).toHaveLength(10_000);
+		expect(bridge.isClosed).toBe(true);
+		const settled = await Promise.allSettled(pending);
+		expect(settled.every((result) => result.status === "rejected")).toBe(true);
+	});
+
+	it("resets after 10,000 events arrive without handlers", () => {
+		const { bridge } = makeClient();
+		for (let index = 0; index < 10_001; index++) {
+			bridge.handleServerMessage({
+				type: "channel_message",
+				channel: "chan-1",
+				event: "unhandled",
+				payload: index,
+			});
+		}
+
+		expect(bridge.isClosed).toBe(true);
+		expect(() => bridge.on("unhandled", vi.fn())).toThrow("Channel is closed");
+	});
+
+	it("does not retain requests when sending throws", async () => {
+		const { bridge, sendMessage } = makeClient();
+		sendMessage.mockImplementationOnce(() => {
+			throw new Error("send failed");
+		});
+
+		await expect(bridge.request("fails")).rejects.toThrow("send failed");
+		expect(bridge.isClosed).toBe(false);
+		const pending = bridge.request("works");
+		expect(sendMessage).toHaveBeenCalledTimes(2);
+		bridge.dispose(new PulseChannelResetError("done"));
+		await expect(pending).rejects.toThrow("done");
+	});
+
+	it("bounds server requests whose handlers remain pending", () => {
+		const { bridge } = makeClient();
+		bridge.on("wait", () => new Promise(() => {}));
+		for (let index = 0; index < 10_001; index++) {
+			bridge.handleServerMessage({
+				type: "channel_message",
+				channel: "chan-1",
+				event: "wait",
+				requestId: String(index),
+			});
+		}
+
+		expect(bridge.isClosed).toBe(true);
+	});
+
+	it("does not respond after closing during an in-flight server request", async () => {
+		const { bridge, sendMessage } = makeClient();
+		let resolve!: (value: string) => void;
+		bridge.on("wait", () => new Promise<string>((done) => (resolve = done)));
+		bridge.handleServerMessage({
+			type: "channel_message",
+			channel: "chan-1",
+			event: "wait",
+			requestId: "request-1",
+		});
+
+		bridge.dispose(new PulseChannelResetError("closed"));
+		resolve("late");
+		await new Promise((done) => setTimeout(done, 0));
+
+		expect(sendMessage).not.toHaveBeenCalled();
+	});
 });

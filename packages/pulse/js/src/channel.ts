@@ -21,6 +21,10 @@ interface PendingRequest {
 	reject: (error: any) => void;
 }
 
+const CHANNEL_QUEUE_LIMIT = 10_000;
+const CHANNEL_QUEUE_OVERFLOW_MESSAGE =
+	"Pulse channel queue exceeded 10,000 messages; channel was reset";
+
 function randomId(): string {
 	if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
 		return crypto.randomUUID().replace(/-/g, "");
@@ -54,12 +58,17 @@ export class ChannelBridge {
 	private handlers = new Map<string, Set<ChannelEventHandler>>();
 	private pending = new Map<string, PendingRequest>();
 	private backlog: ServerChannelRequestMessage[] = [];
+	private inFlightRequests = 0;
 	private closed = false;
 
 	constructor(
 		private client: PulseSocketIOClient,
 		public readonly id: string,
 	) {}
+
+	get isClosed(): boolean {
+		return this.closed;
+	}
 
 	emit(event: string, payload?: any): void {
 		this.ensureOpen();
@@ -73,16 +82,24 @@ export class ChannelBridge {
 
 	request(event: string, payload?: any): Promise<any> {
 		this.ensureOpen();
+		if (!this.reserveQueueSlot()) {
+			return Promise.reject(new PulseChannelResetError(CHANNEL_QUEUE_OVERFLOW_MESSAGE));
+		}
 		const requestId = randomId();
 		return new Promise((resolve, reject) => {
 			this.pending.set(requestId, { resolve, reject });
-			this.client.sendMessage({
-				type: "channel_message",
-				channel: this.id,
-				event,
-				payload,
-				requestId,
-			});
+			try {
+				this.client.sendMessage({
+					type: "channel_message",
+					channel: this.id,
+					event,
+					payload,
+					requestId,
+				});
+			} catch (error) {
+				this.pending.delete(requestId);
+				reject(error);
+			}
 		});
 	}
 
@@ -122,11 +139,19 @@ export class ChannelBridge {
 			return true;
 		}
 		if (message.requestId) {
+			if (!this.reserveQueueSlot()) return true;
+			this.inFlightRequests += 1;
 			void this.dispatchRequest(
 				message as ServerChannelRequestMessage & {
 					requestId: string;
 				},
-			);
+			)
+				.catch((error) => {
+					console.error("Pulse channel request error", error);
+				})
+				.finally(() => {
+					this.inFlightRequests -= 1;
+				});
 		} else {
 			this.dispatchEvent(message);
 		}
@@ -163,6 +188,7 @@ export class ChannelBridge {
 	private dispatchEvent(message: ServerChannelRequestMessage): void {
 		const handlers = this.handlers.get(message.event);
 		if (!handlers || handlers.size === 0) {
+			if (!this.reserveQueueSlot()) return;
 			this.backlog.push(message);
 			return;
 		}
@@ -200,6 +226,7 @@ export class ChannelBridge {
 				}
 			}
 		}
+		if (this.closed) return;
 		if (error) {
 			this.client.sendMessage({
 				type: "channel_message",
@@ -230,6 +257,17 @@ export class ChannelBridge {
 		} else {
 			entry.resolve(message.payload);
 		}
+	}
+
+	private reserveQueueSlot(): boolean {
+		if (
+			this.pending.size + this.backlog.length + this.inFlightRequests <
+			CHANNEL_QUEUE_LIMIT
+		) {
+			return true;
+		}
+		this.close(new PulseChannelResetError(CHANNEL_QUEUE_OVERFLOW_MESSAGE));
+		return false;
 	}
 
 	private close(reason: PulseChannelResetError): void {

@@ -8,6 +8,7 @@ that updates from one session do not leak into the other.
 
 import asyncio
 import gc
+import weakref
 from collections.abc import Callable, Iterator
 from typing import Any, cast, override
 
@@ -18,7 +19,8 @@ from pulse.hooks.core import HookContext
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import ServerAttachAckMessage, ServerMessage
 from pulse.reactive import Effect
-from pulse.render_session import RenderSession
+from pulse.render_session import CALLBACK_UNAVAILABLE, CallbackHistory, RenderSession
+from pulse.renderer import Callback, RenderTree
 from pulse.routing import Route, RouteInfo, RouteTree
 from pulse.test_helpers import wait_for
 from pulse.transpiler.nodes import Element, PulseNode
@@ -43,6 +45,247 @@ class CounterState(ps.State):
 	@ps.effect
 	def on_change(self):
 		_ = self.count  # track
+
+
+def make_callback(fn: Callable[..., Any], n_args: int = 0) -> Callback:
+	return Callback(fn, n_args)
+
+
+def test_callback_history_stores_versions_only_when_callbacks_change():
+	history = CallbackHistory(300.0)
+	callback = make_callback(lambda: None)
+	for revision in range(301):
+		history.record(revision, {"action": callback}, now=revision * 0.1)
+
+	assert history.version_count == 1
+	assert history.oldest_revision == 0
+	assert history.latest_revision == 300
+	assert history.lookup(0, "action", now=30.0) is callback
+	assert history.lookup(300, "action", now=30.0) is callback
+
+
+def test_callback_history_tracks_only_changed_keys_and_exact_closures():
+	history = CallbackHistory(300.0)
+	stable = make_callback(lambda: "stable")
+	old = make_callback(lambda: "old")
+	new = make_callback(lambda: "new")
+	history.record(0, {"stable": stable, "changing": old}, now=0.0)
+	history.record(1, {"stable": stable, "changing": new}, now=1.0)
+
+	assert history.version_count == 3
+	assert history.lookup(0, "stable", now=1.0) is stable
+	assert history.lookup(1, "stable", now=1.0) is stable
+	assert history.lookup(0, "changing", now=1.0) is old
+	assert history.lookup(1, "changing", now=1.0) is new
+
+
+def test_callback_history_tracks_signature_metadata_changes():
+	history = CallbackHistory(300.0)
+
+	def callback(*args: Any) -> tuple[Any, ...]:
+		return args
+
+	history.record(0, {"action": Callback(callback, 0, False)}, now=0.0)
+	history.record(1, {"action": Callback(callback, 1, False)}, now=1.0)
+	history.record(2, {"action": Callback(callback, 1, True)}, now=2.0)
+
+	assert history.version_count == 3
+	assert history.lookup(0, "action", now=2.0) == Callback(callback, 0, False)
+	assert history.lookup(1, "action", now=2.0) == Callback(callback, 1, False)
+	assert history.lookup(2, "action", now=2.0) == Callback(callback, 1, True)
+
+
+def test_callback_history_distinguishes_missing_and_unavailable_revisions():
+	history = CallbackHistory(10.0)
+	callback = make_callback(lambda: None)
+	history.record(0, {}, now=0.0)
+	history.record(1, {"action": callback}, now=1.0)
+	history.record(2, {}, now=2.0)
+	history.record(3, {"action": callback}, now=3.0)
+
+	assert history.lookup(0, "action", now=3.0) is None
+	assert history.lookup(1, "action", now=3.0) is callback
+	assert history.lookup(2, "action", now=3.0) is None
+	assert history.lookup(3, "action", now=3.0) is callback
+	assert history.lookup(-1, "action", now=3.0) is CALLBACK_UNAVAILABLE
+	assert history.lookup(4, "action", now=3.0) is CALLBACK_UNAVAILABLE
+
+
+def test_callback_history_ttl_starts_when_revision_is_superseded():
+	history = CallbackHistory(300.0)
+	old = make_callback(lambda: "old")
+	new = make_callback(lambda: "new")
+	history.record(0, {"action": old}, now=0.0)
+	history.record(1, {"action": new}, now=1_000.0)
+
+	assert history.lookup(0, "action", now=1_299.999) is old
+	assert history.lookup(0, "action", now=1_300.0) is CALLBACK_UNAVAILABLE
+	assert history.lookup(1, "action", now=10_000.0) is new
+
+
+def test_callback_history_hard_limit_advances_retained_floor(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	monkeypatch.setattr("pulse.render_session.CALLBACK_HISTORY_VERSIONS", 2)
+	history = CallbackHistory(300.0)
+
+	def callback_for(value: int) -> Callable[[], int]:
+		return lambda: value
+
+	callbacks = [make_callback(callback_for(value)) for value in range(3)]
+	for revision, callback in enumerate(callbacks):
+		history.record(revision, {"action": callback}, now=float(revision))
+
+	assert history.version_count == 2
+	assert history.oldest_revision == 1
+	assert history.lookup(0, "action", now=2.0) is CALLBACK_UNAVAILABLE
+	assert history.lookup(1, "action", now=2.0) is callbacks[1]
+	assert history.lookup(2, "action", now=2.0) is callbacks[2]
+
+
+def test_callback_history_revision_limit_bounds_empty_rerenders(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	monkeypatch.setattr("pulse.render_session.CALLBACK_HISTORY_REVISIONS", 2)
+	history = CallbackHistory(300.0)
+	callback = make_callback(lambda: None)
+	for revision in range(3):
+		history.record(revision, {"action": callback}, now=float(revision))
+
+	assert history.oldest_revision == 1
+	assert history.latest_revision == 2
+	assert history.version_count == 1
+	assert history.lookup(0, "action", now=2.0) is CALLBACK_UNAVAILABLE
+	assert history.lookup(1, "action", now=2.0) is callback
+
+
+def test_callback_history_rejects_nonsequential_revisions():
+	history = CallbackHistory(300.0)
+	history.record(0, {}, now=0.0)
+	with pytest.raises(RuntimeError, match="must be sequential"):
+		history.record(2, {}, now=1.0)
+
+
+def test_callback_history_pruning_keeps_floor_baseline_and_releases_old_closures():
+	class Marker:
+		pass
+
+	marker = Marker()
+	marker_ref = weakref.ref(marker)
+
+	def old_callback(value: Marker = marker) -> Marker:
+		return value
+
+	old = make_callback(old_callback)
+	stable = make_callback(lambda: "stable")
+	new = make_callback(lambda: "new")
+	history = CallbackHistory(10.0)
+	history.record(0, {"old": old, "stable": stable}, now=0.0)
+	history.record(1, {"old": new, "stable": stable}, now=1.0)
+	history.record(2, {"old": new, "stable": stable}, now=2.0)
+
+	del marker, old_callback, old
+	history.prune(now=11.0)
+	gc.collect()
+
+	assert history.oldest_revision == 1
+	assert history.lookup(1, "old", now=11.0) is new
+	assert history.lookup(1, "stable", now=11.0) is stable
+	assert history.version_count == 2
+	assert marker_ref() is None
+
+
+def test_callback_history_prunes_changes_separated_by_unchanged_revisions():
+	history = CallbackHistory(1.0)
+	old = make_callback(lambda: "old")
+	new = make_callback(lambda: "new")
+	history.record(0, {"action": old}, now=0.0)
+	history.record(1, {"action": old}, now=1.0)
+	history.record(2, {"action": new}, now=2.0)
+
+	history.prune(now=3.0)
+
+	assert history.oldest_revision == 2
+	assert history.version_count == 1
+	assert history.lookup(2, "action", now=3.0) is new
+
+
+def test_callback_history_clear_releases_all_state():
+	history = CallbackHistory(300.0)
+	history.record(0, {"action": make_callback(lambda: None)}, now=0.0)
+	history.clear()
+
+	assert history.current == {}
+	assert history.versions == {}
+	assert history.version_count == 0
+	assert history.lookup(0, "action", now=0.0) is CALLBACK_UNAVAILABLE
+
+
+def test_callback_memoization_minimizes_history_without_merging_real_changes():
+	def handler(value: str):
+		def callback(captured: str = value) -> str:
+			return captured
+
+		return callback
+
+	tree = RenderTree(ps.button(onClick=handler("a")))
+	history = CallbackHistory(300.0)
+	tree.render()
+	history.record(0, tree.callbacks, now=0.0)
+	first = tree.callbacks["onClick"]
+
+	for revision in range(1, 101):
+		tree.rerender(ps.button(onClick=handler("a")))
+		history.record(revision, tree.callbacks, now=float(revision))
+
+	assert history.version_count == 1
+	assert tree.callbacks["onClick"].fn is first.fn
+
+	tree.rerender(ps.button(onClick=handler("b")))
+	history.record(101, tree.callbacks, now=101.0)
+	second = tree.callbacks["onClick"]
+
+	assert history.version_count == 2
+	assert history.lookup(0, "onClick", now=101.0) is first
+	assert history.lookup(101, "onClick", now=101.0) is second
+	assert first.fn() == "a"
+	assert second.fn() == "b"
+
+
+def test_callback_history_preserves_keys_across_reconciliation_moves():
+	def callback() -> None:
+		pass
+
+	tree = RenderTree(
+		ps.div(ps.button("button", key="button", onClick=callback), ps.span("text"))
+	)
+	history = CallbackHistory(300.0)
+	tree.render()
+	history.record(0, tree.callbacks, now=0.0)
+	old = tree.callbacks["0.onClick"]
+
+	tree.rerender(
+		ps.div(ps.span("text"), ps.button("button", key="button", onClick=callback))
+	)
+	history.record(1, tree.callbacks, now=1.0)
+
+	assert history.lookup(0, "0.onClick", now=1.0) is old
+	assert history.lookup(1, "0.onClick", now=1.0) is None
+	assert history.lookup(0, "1.onClick", now=1.0) is None
+	assert history.lookup(1, "1.onClick", now=1.0) is tree.callbacks["1.onClick"]
+
+
+def test_mount_callback_retention_matches_disconnect_timeout():
+	session = RenderSession(
+		"test-id",
+		RouteTree([Route("a", simple_component)]),
+		disconnect_queue_timeout=123.0,
+	)
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"], make_route_info("/a"))
+
+	assert session.route_mounts["/a"].callback_history.retention_seconds == 123.0
+	session.close()
 
 
 def Counter(session_name: str, key_prefix: str):
@@ -90,6 +333,7 @@ def attach_mount(
 	view_id: str | None = None,
 	revision: int | None = None,
 	attach_id: str = "test-attach",
+	instance_id: str = "test-instance",
 ) -> ServerAttachAckMessage | None:
 	mount = session.route_mounts.get(path)
 	return session.attach(
@@ -98,6 +342,7 @@ def attach_mount(
 		view_id or (mount.view_id if mount is not None else "missing-view"),
 		(mount.revision if mount is not None else 0) if revision is None else revision,
 		attach_id,
+		instance_id,
 	)
 
 
@@ -108,16 +353,27 @@ def execute_callback(
 	args: list[Any] | tuple[Any, ...] = (),
 	*,
 	view_id: str | None = None,
+	revision: int | None = None,
 ) -> None:
 	mount = session.route_mounts[path]
-	session.execute_callback(path, view_id or mount.view_id, key, args)
+	session.execute_callback(
+		path,
+		view_id or mount.view_id,
+		mount.revision if revision is None else revision,
+		key,
+		args,
+	)
 
 
 def detach_mount(
-	session: RenderSession, path: str, *, view_id: str | None = None
+	session: RenderSession,
+	path: str,
+	*,
+	view_id: str | None = None,
+	instance_id: str = "test-instance",
 ) -> bool:
 	mount = session.route_mounts[path]
-	return session.detach(path, view_id or mount.view_id)
+	return session.detach(path, view_id or mount.view_id, instance_id)
 
 
 def update_mount_route(
@@ -863,6 +1119,38 @@ async def test_reconnect_flushes_queue_when_pending():
 	session.close()
 
 
+def test_pending_update_overflow_collapses_to_snapshot():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes, pending_message_limit=2)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"], make_route_info("/a"))
+	attach_mount(session, "/a")
+	mount = session.route_mounts["/a"]
+	client_revision = mount.revision
+	session.disconnect()
+
+	for _ in range(3):
+		message = session.rerender(mount, "/a")
+		assert message is not None
+		session.send(message)
+
+	assert mount.queue == []
+	assert mount.snapshot_required is True
+
+	session.connect(messages.append)
+	ack = attach_mount(session, "/a", revision=client_revision)
+	assert ack is not None
+	snapshot = ack.get("snapshot")
+	assert snapshot is not None
+	assert snapshot["revision"] == mount.revision
+	assert mount.state == "active"
+
+	session.close()
+
+
 def test_prerender_of_active_path_queues_updates_until_route_sync():
 	routes = make_routes()
 	session = RenderSession("test-id", routes)
@@ -1030,9 +1318,61 @@ def test_view_revision_protocol_tracks_snapshots_and_updates():
 	assert update["baseRevision"] == 0
 	assert update["revision"] == mount.revision == 1
 
-	assert session.rerender(mount, "/a") is None
-	assert mount.revision == 1
+	empty_update = session.rerender(mount, "/a")
+	assert empty_update is not None
+	assert empty_update["type"] == "vdom_update"
+	assert empty_update["baseRevision"] == 1
+	assert empty_update["revision"] == mount.revision == 2
+	assert empty_update["ops"] == []
 
+	session.close()
+
+
+def test_callbacks_execute_against_their_render_revision():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+	session.connect(lambda _message: None)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"], make_route_info("/a"))
+	attach_mount(session, "/a")
+	mount = session.route_mounts["/a"]
+	calls: list[str] = []
+
+	mount.callback_history.clear()
+	mount.tree.callbacks = {"action": Callback(lambda: calls.append("old"), 0)}
+	mount.record_callbacks()
+	old_revision = mount.revision
+	mount.revision += 1
+	mount.tree.callbacks = {"action": Callback(lambda: calls.append("new"), 0)}
+	mount.record_callbacks()
+
+	execute_callback(session, "/a", "action", revision=old_revision)
+	execute_callback(session, "/a", "action", revision=mount.revision)
+
+	assert calls == ["old", "new"]
+	session.close()
+
+
+def test_unavailable_callback_revision_requests_resync():
+	routes = RouteTree([Route("a", StatefulCounter)])
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"], make_route_info("/a"))
+	attach_mount(session, "/a")
+	mount = session.route_mounts["/a"]
+	old_revision = mount.revision
+	old_key = first_callback_key(session, "/a")
+	mount.callback_history.retention_seconds = 0.0
+	assert session.rerender(mount, "/a") is not None
+	messages.clear()
+
+	execute_callback(session, "/a", old_key, revision=old_revision)
+
+	assert messages == [{"type": "resync_view", "path": "/a", "viewId": mount.view_id}]
 	session.close()
 
 
@@ -1995,6 +2335,39 @@ def test_dev_strict_mode_detach_replay_reuses_mount_without_reload():
 	session.close()
 
 
+def test_real_remount_during_strict_mode_grace_rotates_view_identity():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes, dev_strict_mode_detach_timeout=10.0)
+	session.connect(lambda _message: None)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		attach_mount(session, "/a", make_route_info("/a"), instance_id="old")
+
+	mount = session.route_mounts["/a"]
+	old_view_id = mount.view_id
+	assert detach_mount(session, "/a", instance_id="old") is True
+
+	with ps.PulseContext.update(render=session):
+		ack = attach_mount(
+			session,
+			"/a",
+			make_route_info("/a"),
+			view_id=old_view_id,
+			instance_id="new",
+		)
+
+	assert ack is not None
+	assert ack["viewId"] != old_view_id
+	snapshot = ack.get("snapshot")
+	assert snapshot is not None
+	assert snapshot["viewId"] == ack["viewId"]
+	assert mount.instance_id == "new"
+	assert detach_mount(session, "/a", instance_id="old") is False
+
+	session.close()
+
+
 @pytest.mark.asyncio
 async def test_dev_strict_mode_detach_disposes_after_timeout():
 	routes = RouteTree([Route("a", simple_component)])
@@ -2018,7 +2391,7 @@ def test_detach_nonexistent_path_is_noop():
 	session = RenderSession("test-id", routes)
 
 	# Should not raise
-	assert session.detach("/nonexistent", "missing-view") is False
+	assert session.detach("/nonexistent", "missing-view", "missing-instance") is False
 
 	session.close()
 
@@ -2093,7 +2466,7 @@ def test_execute_callback_missing_mount_is_noop(monkeypatch: pytest.MonkeyPatch)
 
 	monkeypatch.setattr(session, "report_error", report_error)
 
-	session.execute_callback("/missing", "missing-view", "1.onClick", [])
+	session.execute_callback("/missing", "missing-view", 0, "1.onClick", [])
 
 	assert reported == []
 

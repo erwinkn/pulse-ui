@@ -121,6 +121,7 @@ export interface ClientCallbackMessage {
 	type: "callback";
 	path: string;
 	viewId: string;
+	revision: number;
 	callback: string;
 	args: any[];
 }
@@ -132,6 +133,7 @@ export interface ClientAttachMessage {
 	attachId: string;
 	viewId: string;
 	revision: number;
+	instanceId: string;
 }
 export interface ClientUpdateMessage {
 	type: "update";
@@ -144,6 +146,7 @@ export interface ClientDetachMessage {
 	type: "detach";
 	path: string;
 	viewId: string;
+	instanceId: string;
 }
 
 export interface ClientApiResultMessage {

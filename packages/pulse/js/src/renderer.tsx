@@ -25,12 +25,25 @@ type Env = Record<string, unknown>;
 
 type CallbackDelay = number | null;
 
+type CallbackInvocation = {
+	viewId: string;
+	revision: number;
+	callback: string;
+	args: any[];
+};
+
 type CallbackEntry = {
 	fn: (...args: any[]) => void;
 	delayMs: CallbackDelay;
 	timer: ReturnType<typeof setTimeout> | null;
-	lastArgs: any[] | null;
+	lastInvocation: CallbackInvocation | null;
 	dueAt: number | null;
+	meta: ElementMeta;
+	prop: string;
+	committedViewId: string | null;
+	committedRevision: number | null;
+	committedKey: string | null;
+	active: boolean;
 };
 
 function parseCallbackPlaceholder(value: unknown): CallbackDelay | undefined {
@@ -58,6 +71,8 @@ export class VDOMRenderer {
 	#path: string;
 	#registry: ComponentRegistry;
 	#refRegistry: RefRegistry;
+	#committedViewId: string | null = null;
+	#committedRevision: number | null = null;
 
 	// Track callback entries for teardown.
 	#callbackEntries: Set<CallbackEntry>;
@@ -242,28 +257,34 @@ export class VDOMRenderer {
 			clearTimeout(entry.timer);
 		}
 		entry.timer = null;
-		entry.lastArgs = null;
+		entry.lastInvocation = null;
 		entry.dueAt = null;
+		if (!entry.active) this.#callbackEntries.delete(entry);
 	}
 
-	#firePending(entry: CallbackEntry, fire: (args: any[]) => void) {
-		const args = entry.lastArgs;
+	#firePending(entry: CallbackEntry) {
+		const invocation = entry.lastInvocation;
 		this.#clearPending(entry);
-		if (!args) return;
-		fire(args);
+		if (!invocation) return;
+		this.#client.invokeCallback(
+			this.#path,
+			invocation.viewId,
+			invocation.revision,
+			invocation.callback,
+			invocation.args,
+		);
 	}
 
 	#scheduleDebounced(
 		entry: CallbackEntry,
 		delayMs: number,
-		args: any[],
-		fire: (args: any[]) => void,
+		invocation: CallbackInvocation,
 	) {
 		if (entry.timer) clearTimeout(entry.timer);
-		entry.lastArgs = args;
+		entry.lastInvocation = invocation;
 		entry.dueAt = Date.now() + delayMs;
 		entry.timer = setTimeout(() => {
-			this.#firePending(entry, fire);
+			this.#firePending(entry);
 		}, delayMs);
 	}
 
@@ -272,8 +293,8 @@ export class VDOMRenderer {
 		if (!callbacks) return;
 		const entry = callbacks.get(prop);
 		if (!entry) return;
-		this.#clearPending(entry);
-		this.#callbackEntries.delete(entry);
+		entry.active = false;
+		if (!entry.timer) this.#callbackEntries.delete(entry);
 		callbacks.delete(prop);
 		if (callbacks.size === 0) {
 			meta.callbacks = undefined;
@@ -287,23 +308,46 @@ export class VDOMRenderer {
 		const callbacks = meta.callbacks;
 		let entry = callbacks.get(prop);
 		if (!entry) {
-			const fire = (args: any[]) => {
-				const key = this.#propPath(meta.path ?? "", prop);
-				this.#client.invokeCallback(this.#path, key, args);
-			};
 			entry = {
 				fn: (...args: any[]) => {
+					if (
+						entry!.committedViewId == null ||
+						entry!.committedRevision == null ||
+						entry!.committedKey == null
+					) {
+						throw new Error("[Pulse] Callback fired before its view committed");
+					}
+					const invocation: CallbackInvocation = {
+						viewId: entry!.committedViewId,
+						revision: entry!.committedRevision,
+						callback: entry!.committedKey,
+						args: args.map(extractEvent),
+					};
 					if (entry!.delayMs == null) {
-						fire(args);
+						this.#client.invokeCallback(
+							this.#path,
+							invocation.viewId,
+							invocation.revision,
+							invocation.callback,
+							invocation.args,
+						);
 						return;
 					}
-					const callArgs = args.map(extractEvent);
-					this.#scheduleDebounced(entry!, entry!.delayMs, callArgs, fire);
+					this.#scheduleDebounced(entry!, entry!.delayMs, invocation);
 				},
 				delayMs: null,
 				timer: null,
-				lastArgs: null,
+				lastInvocation: null,
 				dueAt: null,
+				meta,
+				prop,
+				committedViewId: this.#committedViewId,
+				committedRevision: this.#committedRevision,
+				committedKey:
+					this.#committedViewId == null
+						? null
+						: this.#propPath(meta.path ?? "", prop),
+				active: true,
 			};
 			callbacks.set(prop, entry);
 			this.#callbackEntries.add(entry);
@@ -329,8 +373,8 @@ export class VDOMRenderer {
 		const callbacks = meta?.callbacks;
 		if (callbacks && callbacks.size > 0) {
 			for (const entry of callbacks.values()) {
-				this.#clearPending(entry);
-				this.#callbackEntries.delete(entry);
+				entry.active = false;
+				if (!entry.timer) this.#callbackEntries.delete(entry);
 			}
 			callbacks.clear();
 			meta!.callbacks = undefined;
@@ -381,8 +425,18 @@ export class VDOMRenderer {
 		for (const entry of Array.from(this.#callbackEntries)) {
 			this.#clearPending(entry);
 		}
-		// Keep entries so StrictMode cleanup (no real unmount) can still cancel
-		// future debounced calls on the reused renderer instance.
+		// Active bindings remain registered for later commits.
+	}
+
+	commit(viewId: string, revision: number): void {
+		this.#committedViewId = viewId;
+		this.#committedRevision = revision;
+		for (const entry of this.#callbackEntries) {
+			if (!entry.active) continue;
+			entry.committedViewId = viewId;
+			entry.committedRevision = revision;
+			entry.committedKey = this.#propPath(entry.meta.path ?? "", entry.prop);
+		}
 	}
 
 	renderNode(node: VDOMNode, currentPath = ""): ReactNode {
@@ -465,15 +519,23 @@ export class VDOMRenderer {
 	}
 
 	init(view: PulsePrerenderView & { vdom: VDOM }): ReactNode {
-		this.clearPendingCallbacks();
-		this.#callbackEntries.clear();
+		const replacesView = this.#committedViewId !== null && this.#committedViewId !== view.viewId;
+		for (const entry of Array.from(this.#callbackEntries)) {
+			entry.active = false;
+			if (replacesView) this.#clearPending(entry);
+			if (!entry.timer) this.#callbackEntries.delete(entry);
+		}
 		this.#metaMap = new WeakMap();
 		this.#refRegistry.dispose();
 		this.#refRegistry = this.#createRefRegistry();
+		this.#committedViewId = view.viewId;
+		this.#committedRevision = view.revision;
 		return this.renderNode(view.vdom);
 	}
 
 	dispose(): void {
+		this.clearPendingCallbacks();
+		this.#callbackEntries.clear();
 		this.#refRegistry.dispose();
 	}
 

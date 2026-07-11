@@ -133,6 +133,7 @@ class ClientCallbackMessage(TypedDict):
 	type: Literal["callback"]
 	path: str
 	viewId: str
+	revision: int
 	callback: str
 	args: list[Any]
 
@@ -144,6 +145,7 @@ class ClientAttachMessage(TypedDict):
 	viewId: str
 	revision: int
 	attachId: str
+	instanceId: str
 
 
 class ClientUpdateMessage(TypedDict):
@@ -158,6 +160,7 @@ class ClientDetachMessage(TypedDict):
 	type: Literal["detach"]
 	path: str
 	viewId: str
+	instanceId: str
 
 
 class ClientApiResultMessage(TypedDict):

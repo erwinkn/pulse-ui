@@ -6,7 +6,9 @@ import type { ViewSnapshot } from "./messages";
 import { deserialize, serialize } from "./serialize/serializer";
 
 class FakeSocket {
+	active = true;
 	connected = false;
+	connectCalls = 0;
 	emitted: [string, unknown][] = [];
 	#handlers = new Map<string, (...args: any[]) => void>();
 
@@ -27,7 +29,13 @@ class FakeSocket {
 	}
 
 	disconnect(): void {
+		this.active = false;
 		this.trigger("disconnect");
+	}
+
+	connect(): void {
+		this.active = true;
+		this.connectCalls += 1;
 	}
 }
 
@@ -115,7 +123,7 @@ describe("PulseSocketIOClient attach ack", () => {
 	it("queues callbacks until the active attach is acknowledged", async () => {
 		const client = await makeClient();
 		const connected = client.connect();
-		client.attach("/", snapshot, view);
+		client.attach("/", snapshot, "instance-1", view);
 		socket.trigger("connect");
 		await connected;
 
@@ -127,7 +135,7 @@ describe("PulseSocketIOClient attach ack", () => {
 			revision: 0,
 		});
 
-		client.invokeCallback("/", "1.onClick", []);
+		client.invokeCallback("/", "view-1", 0, "1.onClick", []);
 		expect(sentMessages()).toHaveLength(1);
 
 		socket.trigger(
@@ -153,7 +161,7 @@ describe("PulseSocketIOClient attach ack", () => {
 		const onUpdate = vi.fn();
 		const client = await makeClient();
 		const connected = client.connect();
-		client.attach("/", snapshot, { ...view, onUpdate });
+		client.attach("/", snapshot, "instance-1", { ...view, onUpdate });
 		socket.trigger("connect");
 		await connected;
 
@@ -196,7 +204,7 @@ describe("PulseSocketIOClient attach ack", () => {
 		const onUpdate = vi.fn();
 		const client = await makeClient();
 		const connected = client.connect();
-		client.attach("/", snapshot, { ...view, onUpdate });
+		client.attach("/", snapshot, "instance-1", { ...view, onUpdate });
 		socket.trigger("connect");
 		await connected;
 		const firstAttach = sentMessages()[0]!;
@@ -232,12 +240,12 @@ describe("PulseSocketIOClient attach ack", () => {
 		const onInit = vi.fn();
 		const client = await makeClient();
 		const connected = client.connect();
-		client.attach("/", snapshot, { ...view, onInit });
+		client.attach("/", snapshot, "instance-1", { ...view, onInit });
 		socket.trigger("connect");
 		await connected;
 		const attach = sentMessages()[0]!;
 
-		client.invokeCallback("/", "old.onClick", []);
+		client.invokeCallback("/", "view-1", 0, "old.onClick", []);
 		receive({
 			type: "attach_ack",
 			path: "/",
@@ -254,7 +262,7 @@ describe("PulseSocketIOClient attach ack", () => {
 		});
 		expect(sentMessages().map((message) => message.type)).toEqual(["attach"]);
 
-		client.invokeCallback("/", "new.onClick", []);
+		client.invokeCallback("/", "view-2", 4, "new.onClick", []);
 		expect(sentMessages().at(-1)).toMatchObject({
 			type: "callback",
 			viewId: "view-2",
@@ -266,7 +274,7 @@ describe("PulseSocketIOClient attach ack", () => {
 		const onInit = vi.fn();
 		const client = await makeClient();
 		const connected = client.connect();
-		client.attach("/", snapshot, { ...view, onInit });
+		client.attach("/", snapshot, "instance-1", { ...view, onInit });
 		socket.trigger("connect");
 		await connected;
 		const attach = sentMessages()[0]!;
@@ -281,7 +289,7 @@ describe("PulseSocketIOClient attach ack", () => {
 		});
 
 		expect(onInit).not.toHaveBeenCalled();
-		client.invokeCallback("/", "1.onClick", []);
+		client.invokeCallback("/", "view-1", 0, "1.onClick", []);
 		expect(sentMessages()).toHaveLength(1);
 	});
 
@@ -289,7 +297,7 @@ describe("PulseSocketIOClient attach ack", () => {
 		const onInit = vi.fn();
 		const client = await makeClient();
 		const connected = client.connect();
-		client.attach("/", snapshot, { ...view, onInit });
+		client.attach("/", snapshot, "instance-1", { ...view, onInit });
 		socket.trigger("connect");
 		await connected;
 		const attach = sentMessages()[0]!;
@@ -324,12 +332,46 @@ describe("PulseSocketIOClient attach ack", () => {
 		const onInit = vi.fn();
 		const client = await makeClient();
 		const connected = client.connect();
-		client.attach("/", snapshot, { ...view, onInit });
+		client.attach("/", snapshot, "instance-1", { ...view, onInit });
 		socket.trigger("connect");
 		await connected;
+		const firstAttach = sentMessages()[0] as any;
 
 		client.installSnapshot("/", { viewId: "view-2", revision: 3, vdom: "loader" });
 		client.installSnapshot("/", { viewId: "view-2", revision: 2, vdom: "stale" });
+		const snapshotAttach = sentMessages().find(
+			(message: any) => message.type === "attach" && message.viewId === "view-2",
+		) as any;
+		expect(snapshotAttach).toMatchObject({
+			type: "attach",
+			viewId: "view-2",
+			revision: 3,
+			instanceId: "instance-1",
+		});
+
+		client.invokeCallback("/", "view-2", 3, "onClick", ["value"]);
+		receive({
+			type: "attach_ack",
+			path: "/",
+			attachId: firstAttach.attachId,
+			viewId: "view-1",
+			revision: 0,
+		});
+		expect(sentMessages().filter((message: any) => message.type === "callback")).toHaveLength(0);
+
+		receive({
+			type: "attach_ack",
+			path: "/",
+			attachId: snapshotAttach.attachId,
+			viewId: "view-2",
+			revision: 3,
+		});
+		expect(sentMessages().at(-1)).toMatchObject({
+			type: "callback",
+			viewId: "view-2",
+			revision: 3,
+			callback: "onClick",
+		});
 		client.updateRoute("/", routeInfo);
 
 		expect(onInit).toHaveBeenCalledWith({
@@ -350,7 +392,7 @@ describe("PulseSocketIOClient attach ack", () => {
 		const onServerError = vi.fn();
 		const client = await makeClient(undefined, frameworkNavigate);
 		const connected = client.connect();
-		client.attach("/", snapshot, { ...view, onServerError });
+		client.attach("/", snapshot, "instance-1", { ...view, onServerError });
 		socket.trigger("connect");
 		await connected;
 		const error = { message: "failed", phase: "render" };
@@ -380,7 +422,7 @@ describe("PulseSocketIOClient attach ack", () => {
 	it("reattaches only for a resync request targeting the active view", async () => {
 		const client = await makeClient();
 		const connected = client.connect();
-		client.attach("/", snapshot, view);
+		client.attach("/", snapshot, "instance-1", view);
 		socket.trigger("connect");
 		await connected;
 		const attach = sentMessages()[0]!;
@@ -403,7 +445,7 @@ describe("PulseSocketIOClient attach ack", () => {
 		const onJsExec = vi.fn();
 		const client = await makeClient();
 		const connected = client.connect();
-		client.attach("/", snapshot, { ...view, onJsExec });
+		client.attach("/", snapshot, "instance-1", { ...view, onJsExec });
 		socket.trigger("connect");
 		await connected;
 
@@ -427,13 +469,13 @@ describe("PulseSocketIOClient attach ack", () => {
 	it("drops queued callbacks when the path detaches before ack", async () => {
 		const client = await makeClient();
 		const connected = client.connect();
-		client.attach("/", snapshot, view);
+		client.attach("/", snapshot, "instance-1", view);
 		socket.trigger("connect");
 		await connected;
 
 		const attach = sentMessages()[0]!;
-		client.invokeCallback("/", "1.onClick", []);
-		client.detach("/");
+		client.invokeCallback("/", "view-1", 0, "1.onClick", []);
+		client.detach("/", "instance-1");
 		socket.trigger(
 			"message",
 			serialize({
@@ -455,7 +497,7 @@ describe("PulseSocketIOClient attach ack", () => {
 	it("suspends hidden tabs without clearing active views and reattaches on resume", async () => {
 		const client = await makeClient();
 		const connected = client.connect();
-		client.attach("/", snapshot, view);
+		client.attach("/", snapshot, "instance-1", view);
 		const firstSocket = socket;
 		firstSocket.trigger("connect");
 		await connected;
@@ -508,6 +550,18 @@ describe("PulseSocketIOClient attach ack", () => {
 		await waitForEffects();
 
 		expect(reload).not.toHaveBeenCalled();
+	});
+
+	it("reconnects after the server forcefully disconnects the socket", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		socket.active = false;
+
+		socket.trigger("disconnect");
+
+		expect(socket.connectCalls).toBe(1);
 	});
 
 	it("reloads when resume from suspension cannot reconnect", async () => {
@@ -605,6 +659,106 @@ describe("PulseSocketIOClient attach ack", () => {
 	});
 });
 
+describe("PulseSocketIOClient queue limit", () => {
+	beforeEach(() => {
+		io.mockClear();
+	});
+
+	it("accepts 10,000 disconnected messages and fails explicitly on overflow", async () => {
+		const reload = vi.fn();
+		Object.defineProperty(window.location, "reload", {
+			configurable: true,
+			value: reload,
+		});
+		const client = await makeClient();
+		const message = {
+			type: "js_result" as const,
+			viewId: "view-1",
+			id: "test",
+			result: null,
+			error: null,
+		};
+
+		for (let index = 0; index < 10_000; index++) client.sendMessage(message);
+		expect(() => client.sendMessage(message)).toThrow("queue exceeded 10,000 messages");
+		expect(reload).toHaveBeenCalledTimes(1);
+		expect(() => client.sendMessage(message)).toThrow("queue exceeded 10,000 messages");
+		expect(reload).toHaveBeenCalledTimes(1);
+
+		client.disconnect();
+		client.sendMessage({ ...message, id: "after-reset" });
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		expect(sentMessages()).toHaveLength(1);
+		expect(sentMessages()[0]).toMatchObject({
+			type: "js_result",
+			viewId: "view-1",
+			id: "after-reset",
+		});
+	});
+
+	it("shares the limit between messages and callbacks awaiting attach", async () => {
+		const reload = vi.fn();
+		Object.defineProperty(window.location, "reload", {
+			configurable: true,
+			value: reload,
+		});
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		client.attach("/", snapshot, "instance-1", view);
+
+		for (let index = 0; index < 9_999; index++) {
+			client.invokeCallback("/", "view-1", 0, "onClick", [index]);
+		}
+		client.suspend();
+		client.sendMessage({
+			type: "js_result",
+			viewId: "view-1",
+			id: "fills-shared-limit",
+			result: null,
+			error: null,
+		});
+
+		expect(() =>
+			client.invokeCallback("/", "view-1", 0, "onClick", [10_000]),
+		).toThrow("queue exceeded 10,000 messages");
+		expect(reload).toHaveBeenCalledTimes(1);
+	});
+
+	it("releases queued callback capacity when a view is replaced", async () => {
+		const reload = vi.fn();
+		Object.defineProperty(window.location, "reload", {
+			configurable: true,
+			value: reload,
+		});
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		client.attach("/", snapshot, "instance-1", view);
+
+		for (let index = 0; index < 10_000; index++) {
+			client.invokeCallback("/", "view-1", 0, "old.onClick", [index]);
+		}
+		client.installSnapshot("/", {
+			viewId: "view-2",
+			revision: 0,
+			vdom: "replacement",
+		});
+		for (let index = 0; index < 10_000; index++) {
+			client.invokeCallback("/", "view-2", 0, "new.onClick", [index]);
+		}
+
+		expect(reload).not.toHaveBeenCalled();
+		expect(() =>
+			client.invokeCallback("/", "view-2", 0, "new.onClick", [10_000]),
+		).toThrow("queue exceeded 10,000 messages");
+	});
+});
+
 describe("PulseProvider connection handling", () => {
 	beforeEach(() => {
 		io.mockClear();
@@ -693,6 +847,72 @@ describe("PulseProvider connection handling", () => {
 		);
 
 		expect(mounted.container.textContent).toBe("second");
+		mounted.unmount();
+	});
+
+	it("keeps callbacks usable with StrictMode enabled", async () => {
+		const { PulseProvider, PulseView } = await import("./pulse");
+		const mounted = render(
+			React.createElement(
+				React.StrictMode,
+				null,
+				React.createElement(
+					MemoryRouter,
+					null,
+					React.createElement(PulseProvider, {
+						config: {
+							serverAddress: "http://pulse.test",
+							apiPrefix: "/_pulse",
+							connectionStatus: {
+								initialConnectingDelay: 0,
+								initialErrorDelay: 0,
+								reconnectErrorDelay: 0,
+							},
+						},
+						prerender: {
+							views: {
+								"/": {
+									viewId: "view-1",
+									revision: 0,
+									vdom: {
+										tag: "button",
+										props: { onClick: "$cb" },
+										eval: ["onClick"],
+										children: ["click"],
+									},
+								},
+							},
+							directives: {},
+						},
+						children: React.createElement(PulseView, { path: "/", registry: {} }),
+					}),
+				),
+			),
+		);
+
+		await act(async () => {
+			socket.trigger("connect");
+			await waitForEffects();
+		});
+		const attaches = sentMessages().filter((message: any) => message.type === "attach") as any[];
+		expect(attaches.length).toBeGreaterThanOrEqual(1);
+		expect(new Set(attaches.map((message) => message.instanceId)).size).toBe(1);
+		const attach = attaches.at(-1)!;
+		receive({
+			type: "attach_ack",
+			path: "/",
+			attachId: attach.attachId,
+			viewId: "view-1",
+			revision: 0,
+		});
+
+		await act(async () => mounted.getByText("click").click());
+		expect(sentMessages().at(-1)).toMatchObject({
+			type: "callback",
+			viewId: "view-1",
+			revision: 0,
+			callback: "onClick",
+		});
 		mounted.unmount();
 	});
 });

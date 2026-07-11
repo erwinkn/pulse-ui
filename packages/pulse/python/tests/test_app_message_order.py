@@ -55,6 +55,7 @@ async def test_socket_messages_for_render_are_serialized(
 					"viewId": "view-1",
 					"revision": 0,
 					"attachId": "attach-1",
+					"instanceId": "instance-1",
 				}
 			),
 		)
@@ -69,6 +70,7 @@ async def test_socket_messages_for_render_are_serialized(
 					"type": "callback",
 					"path": "/",
 					"viewId": "view-1",
+					"revision": 0,
 					"callback": "1.onClick",
 					"args": [],
 				}
@@ -119,8 +121,11 @@ async def test_attach_sends_ack_after_route_is_attached(
 		view_id: str,
 		revision: int,
 		attach_id: str,
+		instance_id: str,
 	) -> ServerAttachAckMessage:
-		events.append(("attach", (path, route_info, view_id, revision, attach_id)))
+		events.append(
+			("attach", (path, route_info, view_id, revision, attach_id, instance_id))
+		)
 		return ack
 
 	def send(message: ServerMessage) -> None:
@@ -146,6 +151,7 @@ async def test_attach_sends_ack_after_route_is_attached(
 			"viewId": "view-1",
 			"revision": 3,
 			"attachId": "attach-1",
+			"instanceId": "instance-1",
 		},
 	)
 
@@ -163,6 +169,7 @@ async def test_attach_sends_ack_after_route_is_attached(
 		"view-1",
 		3,
 		"attach-1",
+		"instance-1",
 	)
 	assert events[1][1] == ack
 
@@ -182,6 +189,7 @@ async def test_attach_does_not_ack_when_route_needs_reload(
 		_view_id: str,
 		_revision: int,
 		_attach_id: str,
+		_instance_id: str,
 	) -> None:
 		return None
 
@@ -208,6 +216,7 @@ async def test_attach_does_not_ack_when_route_needs_reload(
 			"viewId": "view-1",
 			"revision": 0,
 			"attachId": "attach-1",
+			"instanceId": "instance-1",
 		},
 	)
 
@@ -247,6 +256,7 @@ async def test_socket_messages_wait_for_connect_to_finish(
 				"viewId": "view-1",
 				"revision": 0,
 				"attachId": "attach-1",
+				"instanceId": "instance-1",
 			}
 		),
 	)
@@ -257,6 +267,7 @@ async def test_socket_messages_wait_for_connect_to_finish(
 				"type": "callback",
 				"path": "/",
 				"viewId": "view-1",
+				"revision": 0,
 				"callback": "1.onClick",
 				"args": [],
 			}
@@ -340,4 +351,79 @@ async def test_socket_sender_is_fifo_and_non_concurrent(
 	]
 	assert max_active_sends == 1
 
+	await app.close()
+
+
+@pytest.mark.asyncio
+async def test_socket_sender_disconnects_and_cleans_up_after_emit_failure(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	app = ps.App()
+	disconnected = asyncio.Event()
+	sent = asyncio.Event()
+	emit_calls = 0
+
+	async def emit(_event: str, _data: object, *, to: str) -> None:
+		nonlocal emit_calls
+		assert to == "socket-1"
+		emit_calls += 1
+		if emit_calls == 1:
+			raise RuntimeError("transport failed")
+		sent.set()
+
+	async def disconnect(sid: str) -> None:
+		assert sid == "socket-1"
+		disconnected.set()
+
+	monkeypatch.setattr(app.sio, "emit", emit)
+	monkeypatch.setattr(app.sio, "disconnect", disconnect)
+	app._start_socket_sender("socket-1")  # pyright: ignore[reportPrivateUsage]
+	app._send_socket_message(  # pyright: ignore[reportPrivateUsage]
+		"socket-1", {"type": "reload"}
+	)
+
+	await asyncio.wait_for(disconnected.wait(), timeout=1)
+	assert "socket-1" not in app._socket_send_queues  # pyright: ignore[reportPrivateUsage]
+	assert "socket-1" not in app._socket_send_tasks  # pyright: ignore[reportPrivateUsage]
+
+	app._start_socket_sender("socket-1")  # pyright: ignore[reportPrivateUsage]
+	app._send_socket_message(  # pyright: ignore[reportPrivateUsage]
+		"socket-1", {"type": "reload"}
+	)
+	await asyncio.wait_for(sent.wait(), timeout=1)
+
+	await app.close()
+
+
+@pytest.mark.asyncio
+async def test_socket_sender_disconnects_when_queue_overflows(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	app = ps.App(socket_send_queue_limit=1)
+	first_started = asyncio.Event()
+	release_first = asyncio.Event()
+	disconnected = asyncio.Event()
+
+	async def emit(_event: str, _data: object, *, to: str) -> None:
+		assert to == "socket-1"
+		first_started.set()
+		await release_first.wait()
+
+	async def disconnect(sid: str) -> None:
+		assert sid == "socket-1"
+		disconnected.set()
+
+	monkeypatch.setattr(app.sio, "emit", emit)
+	monkeypatch.setattr(app.sio, "disconnect", disconnect)
+	app._start_socket_sender("socket-1")  # pyright: ignore[reportPrivateUsage]
+	app._send_socket_message("socket-1", {"type": "reload"})  # pyright: ignore[reportPrivateUsage]
+	await asyncio.wait_for(first_started.wait(), timeout=1)
+
+	app._send_socket_message("socket-1", {"type": "reload"})  # pyright: ignore[reportPrivateUsage]
+	app._send_socket_message("socket-1", {"type": "reload"})  # pyright: ignore[reportPrivateUsage]
+
+	await asyncio.wait_for(disconnected.wait(), timeout=1)
+	assert "socket-1" not in app._socket_send_queues  # pyright: ignore[reportPrivateUsage]
+	assert "socket-1" not in app._socket_send_tasks  # pyright: ignore[reportPrivateUsage]
+	release_first.set()
 	await app.close()

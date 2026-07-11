@@ -1112,8 +1112,7 @@ class App:
 					msg["args"],
 				)
 			elif msg["type"] == "detach":
-				if render.detach(msg["path"], msg["viewId"], msg["instanceId"]):
-					render.channels.remove_route(msg["path"])
+				render.detach(msg["path"], msg["viewId"], msg["instanceId"])
 			elif msg["type"] == "api_result":
 				render.handle_api_result(dict(msg))
 			elif msg["type"] == "js_result":

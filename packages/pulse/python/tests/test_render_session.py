@@ -10,6 +10,7 @@ import asyncio
 import gc
 import weakref
 from collections.abc import Callable, Iterator
+from types import SimpleNamespace
 from typing import Any, cast, override
 
 import pulse as ps
@@ -2331,6 +2332,40 @@ def test_dev_strict_mode_detach_replay_reuses_mount_without_reload():
 	assert session.route_mounts["/a"] is mount
 	assert mount.state == "active"
 	assert not [msg for msg in messages if msg["type"] == "reload"]
+
+	session.close()
+
+
+def test_dev_strict_mode_detach_replay_preserves_route_resources():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes, dev_strict_mode_detach_timeout=10.0)
+	session.connect(lambda _message: None)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		attach_mount(session, "/a", make_route_info("/a"))
+
+	mount = session.route_mounts["/a"]
+	with ps.PulseContext.update(
+		render=session,
+		route=mount.route,
+		session=SimpleNamespace(sid="session-1"),
+	):
+		channel = session.channels.create("route-channel")
+		ref_channel = session.get_ref_channel()
+
+	detach_mount(session, "/a")
+	assert not channel.closed
+	assert not ref_channel.closed
+
+	with ps.PulseContext.update(render=session):
+		attach_mount(session, "/a", make_route_info("/a"))
+	assert not channel.closed
+	assert not ref_channel.closed
+
+	session.dispose_mount("/a", mount)
+	assert channel.closed
+	assert ref_channel.closed
 
 	session.close()
 

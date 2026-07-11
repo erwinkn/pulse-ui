@@ -224,6 +224,40 @@ async def test_attach_does_not_ack_when_route_needs_reload(
 
 
 @pytest.mark.asyncio
+async def test_detach_leaves_route_cleanup_to_mount_disposal(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	app = ps.App()
+	render = RenderSession("render-1", app.routes)
+	session = SimpleNamespace(sid="session-1", data={})
+	detached: list[tuple[str, str, str]] = []
+	removed_routes: list[str] = []
+
+	def detach(path: str, view_id: str, instance_id: str) -> None:
+		detached.append((path, view_id, instance_id))
+
+	def remove_route(path: str) -> None:
+		removed_routes.append(path)
+
+	monkeypatch.setattr(render, "detach", detach)
+	monkeypatch.setattr(render.channels, "remove_route", remove_route)
+
+	await app._handle_pulse_message(  # pyright: ignore[reportPrivateUsage]
+		render,
+		cast(UserSession, cast(object, session)),
+		{
+			"type": "detach",
+			"path": "/",
+			"viewId": "view-1",
+			"instanceId": "instance-1",
+		},
+	)
+
+	assert detached == [("/", "view-1", "instance-1")]
+	assert removed_routes == []
+
+
+@pytest.mark.asyncio
 async def test_socket_messages_wait_for_connect_to_finish(
 	monkeypatch: pytest.MonkeyPatch,
 ):

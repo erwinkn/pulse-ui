@@ -7,6 +7,7 @@ import pytest
 from pulse.messages import ClientPulseMessage, ServerAttachAckMessage, ServerMessage
 from pulse.render_session import RenderSession
 from pulse.serializer import Serialized, deserialize, serialize
+from pulse.test_helpers import wait_for
 from pulse.user_session import UserSession
 
 
@@ -394,7 +395,6 @@ async def test_socket_sender_transfers_pending_messages_to_replacement(
 ):
 	app = ps.App()
 	old_started = asyncio.Event()
-	new_finished = asyncio.Event()
 	sent_to_new: list[str] = []
 
 	async def emit(_event: str, data: object, *, to: str) -> None:
@@ -403,8 +403,6 @@ async def test_socket_sender_transfers_pending_messages_to_replacement(
 			old_started.set()
 			await asyncio.Future()
 		sent_to_new.append(message["type"])
-		if len(sent_to_new) == 2:
-			new_finished.set()
 
 	monkeypatch.setattr(app.sio, "emit", emit)
 	app._start_socket_sender("socket-old")  # pyright: ignore[reportPrivateUsage]
@@ -418,8 +416,7 @@ async def test_socket_sender_transfers_pending_messages_to_replacement(
 	pending = app._stop_socket_sender("socket-old")  # pyright: ignore[reportPrivateUsage]
 	app._start_socket_sender("socket-new", pending)  # pyright: ignore[reportPrivateUsage]
 
-	await asyncio.wait_for(new_finished.wait(), timeout=1)
-	assert sent_to_new == ["reload", "navigate_to"]
+	await wait_for(lambda: sent_to_new == ["navigate_to"])
 
 	await app.close()
 

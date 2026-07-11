@@ -389,6 +389,42 @@ async def test_socket_sender_is_fifo_and_non_concurrent(
 
 
 @pytest.mark.asyncio
+async def test_socket_sender_transfers_pending_messages_to_replacement(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	app = ps.App()
+	old_started = asyncio.Event()
+	new_finished = asyncio.Event()
+	sent_to_new: list[str] = []
+
+	async def emit(_event: str, data: object, *, to: str) -> None:
+		message = cast(ServerMessage, deserialize(cast(Serialized, data)))
+		if to == "socket-old":
+			old_started.set()
+			await asyncio.Future()
+		sent_to_new.append(message["type"])
+		if len(sent_to_new) == 2:
+			new_finished.set()
+
+	monkeypatch.setattr(app.sio, "emit", emit)
+	app._start_socket_sender("socket-old")  # pyright: ignore[reportPrivateUsage]
+	app._send_socket_message("socket-old", {"type": "reload"})  # pyright: ignore[reportPrivateUsage]
+	app._send_socket_message(  # pyright: ignore[reportPrivateUsage]
+		"socket-old",
+		{"type": "navigate_to", "path": "/next", "replace": False, "hard": False},
+	)
+	await asyncio.wait_for(old_started.wait(), timeout=1)
+
+	pending = app._stop_socket_sender("socket-old")  # pyright: ignore[reportPrivateUsage]
+	app._start_socket_sender("socket-new", pending)  # pyright: ignore[reportPrivateUsage]
+
+	await asyncio.wait_for(new_finished.wait(), timeout=1)
+	assert sent_to_new == ["reload", "navigate_to"]
+
+	await app.close()
+
+
+@pytest.mark.asyncio
 async def test_socket_sender_disconnects_and_cleans_up_after_emit_failure(
 	monkeypatch: pytest.MonkeyPatch,
 ):

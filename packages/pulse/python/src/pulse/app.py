@@ -1307,6 +1307,7 @@ class App:
 			# normal immediate detach semantics; only dev gets a tiny grace window.
 			dev_strict_mode_detach_timeout=0.1 if self.env == "dev" else 0.0,
 			disconnect_queue_timeout=self.disconnect_queue_timeout,
+			pending_message_limit=self.socket_send_queue_limit,
 			render_loop_limit=self.render_loop_limit,
 		)
 		self.render_sessions[rid] = render

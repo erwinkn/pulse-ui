@@ -1133,10 +1133,14 @@ def test_pending_update_overflow_collapses_to_snapshot():
 	client_revision = mount.revision
 	session.disconnect()
 
-	for _ in range(3):
-		message = session.rerender(mount, "/a")
-		assert message is not None
-		session.send(message)
+	message = session.rerender(mount, "/a")
+	assert message is not None
+	session.send(message)
+	assert len(mount.queue or []) == 1
+
+	message = session.rerender(mount, "/a")
+	assert message is not None
+	session.send(message)
 
 	assert mount.queue == []
 	assert mount.snapshot_required is True

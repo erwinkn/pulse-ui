@@ -190,8 +190,19 @@ export function PulseView({ path, registry }: PulseViewProps) {
 		() => new VDOMRenderer(client, path, registry),
 		[client, path, registry],
 	);
-	const [tree, setTree] = useState<ReactNode>(() => renderer.init(initialView));
+	const [instanceId] = useState(
+		() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+	);
+	const disposeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const [rendered, setRendered] = useState(() => ({
+		tree: renderer.init(initialView),
+		viewId: initialView.viewId,
+		revision: initialView.revision,
+	}));
 	const [serverError, setServerError] = useState<ServerError | null>(null);
+	useIsomorphicLayoutEffect(() => {
+		renderer.commit(rendered.viewId, rendered.revision);
+	}, [rendered.revision, rendered.viewId, renderer]);
 
 	const location = useLocation();
 	const params = useParams();
@@ -219,14 +230,26 @@ export function PulseView({ path, registry }: PulseViewProps) {
 	// biome-ignore lint/correctness/useExhaustiveDependencies: We don't want to detach on navigation, so another useEffect syncs the routeInfo on navigation.
 	useEffect(() => {
 		if (inBrowser) {
-			client.attach(path, initialView, {
+			if (disposeTimer.current) {
+				clearTimeout(disposeTimer.current);
+				disposeTimer.current = null;
+			}
+			client.attach(path, initialView, instanceId, {
 				routeInfo,
 				onInit: (view) => {
-					setTree(renderer.init(view));
+					setRendered({
+						tree: renderer.init(view),
+						viewId: view.viewId,
+						revision: view.revision,
+					});
 					setServerError(null);
 				},
-				onUpdate: (ops) => {
-					setTree((prev) => (prev == null ? prev : renderer.applyUpdates(prev, ops)));
+				onUpdate: (ops, viewId, revision) => {
+					setRendered((prev) => ({
+						tree: prev.tree == null ? prev.tree : renderer.applyUpdates(prev.tree, ops),
+						viewId,
+						revision,
+					}));
 					setServerError(null);
 				},
 				onJsExec: (msg) => {
@@ -242,13 +265,19 @@ export function PulseView({ path, registry }: PulseViewProps) {
 				onServerError: setServerError,
 			});
 			return () => {
-				renderer.clearPendingCallbacks();
-				renderer.dispose();
-				client.detach(path);
+				client.detach(path, instanceId);
+				if (process.env.NODE_ENV === "production") {
+					renderer.dispose();
+					return;
+				}
+				disposeTimer.current = setTimeout(() => {
+					disposeTimer.current = null;
+					renderer.dispose();
+				}, 0);
 			};
 		}
 		//  routeInfo is NOT included here on purpose
-	}, [client, renderer, path]);
+	}, [client, instanceId, renderer, path]);
 
 	useEffect(() => {
 		if (inBrowser) {
@@ -265,7 +294,11 @@ export function PulseView({ path, registry }: PulseViewProps) {
 		}
 		// 2nd+ rendering pass. Happens when a route stays mounted on navigation.
 		else if (renderedWith.current !== renderer) {
-			setTree(renderer.init(initialView));
+			setRendered({
+				tree: renderer.init(initialView),
+				viewId: initialView.viewId,
+				revision: initialView.revision,
+			});
 		}
 		else {
 			client.installSnapshot(path, initialView);
@@ -280,7 +313,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 		return <ServerErrorPopup error={serverError} />;
 	}
 
-	return tree;
+	return rendered.tree;
 }
 
 function ServerErrorPopup({ error }: { error: ServerError }) {

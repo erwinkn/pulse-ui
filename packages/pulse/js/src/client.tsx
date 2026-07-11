@@ -26,6 +26,10 @@ function browserIsOnline(): boolean {
 	return typeof navigator === "undefined" || navigator.onLine !== false;
 }
 
+const CLIENT_QUEUE_LIMIT = 10_000;
+const CLIENT_QUEUE_OVERFLOW_MESSAGE =
+	"Pulse client queue exceeded 10,000 messages; reloading to restore synchronization";
+
 export interface SocketIODirectives {
 	headers?: Record<string, string>;
 	auth?: Record<string, string>;
@@ -39,7 +43,7 @@ export interface Directives {
 export interface MountedView {
 	routeInfo: RouteInfo;
 	onInit: (view: ViewSnapshot) => void;
-	onUpdate: (ops: VDOMUpdate[]) => void;
+	onUpdate: (ops: VDOMUpdate[], viewId: string, revision: number) => void;
 	onJsExec: (msg: ServerJsExecMessage) => void;
 	onServerError: (error: ServerError) => void;
 }
@@ -56,16 +60,17 @@ export interface PulseClient {
 	onConnectionChange(listener: ConnectionStatusListener): () => void;
 	// Messages
 	updateRoute(path: string, routeInfo: RouteInfo): void;
-	invokeCallback(path: string, callback: string, args: any[]): void;
+	invokeCallback(path: string, viewId: string, revision: number, callback: string, args: any[]): void;
 	// VDOM subscription
-	attach(path: string, snapshot: ViewSnapshot, view: MountedView): void;
+	attach(path: string, snapshot: ViewSnapshot, instanceId: string, view: MountedView): void;
 	installSnapshot(path: string, snapshot: ViewSnapshot): void;
-	detach(path: string): void;
+	detach(path: string, instanceId: string): void;
 }
 
 interface ActiveView extends MountedView {
 	viewId: string;
 	revision: number;
+	instanceId: string;
 }
 
 export class PulseSocketIOClient {
@@ -73,8 +78,10 @@ export class PulseSocketIOClient {
 	#activeAttachIds: Map<string, string>;
 	#ackedAttachIds: Map<string, string>;
 	#pendingCallbacks: Map<string, ClientCallbackMessage[]>;
+	#pendingCallbackCount = 0;
 	#socket: Socket | null = null;
 	#messageQueue: ClientMessage[];
+	#queueOverflowed = false;
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
 	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
 	#url: string;
@@ -241,6 +248,7 @@ export class PulseSocketIOClient {
 				console.log("[SocketIOTransport] Disconnected");
 				this.#handleTransportDisconnect();
 				this.#handleDisconnected();
+				if (!socket.active && !this.#suspended) socket.connect();
 			});
 
 			// Wrap in an arrow function to avoid losing the `this` reference
@@ -267,16 +275,20 @@ export class PulseSocketIOClient {
 	}
 
 	public sendMessage(payload: ClientMessage) {
+		if (this.#queueOverflowed) {
+			throw new Error(CLIENT_QUEUE_OVERFLOW_MESSAGE);
+		}
 		if (this.isConnected()) {
 			// console.log("[SocketIOTransport] Sending:", payload);
 			this.#socket!.emit("message", serialize(payload as any));
 		} else {
 			// console.log("[SocketIOTransport] Queuing message:", payload);
+			this.#reserveQueueSlot();
 			this.#messageQueue.push(payload);
 		}
 	}
 
-	public attach(path: string, snapshot: ViewSnapshot, view: MountedView) {
+	public attach(path: string, snapshot: ViewSnapshot, instanceId: string, view: MountedView) {
 		if (this.#activeViews.has(path)) {
 			throw new Error(`Path ${path} is already attached`);
 		}
@@ -284,6 +296,7 @@ export class PulseSocketIOClient {
 			...view,
 			viewId: snapshot.viewId,
 			revision: snapshot.revision,
+			instanceId,
 		});
 		this.#sendAttach(path);
 	}
@@ -293,6 +306,7 @@ export class PulseSocketIOClient {
 		if (!view) return;
 		if (snapshot.viewId === view.viewId && snapshot.revision <= view.revision) return;
 		this.#installSnapshot(path, view, snapshot);
+		this.#sendAttach(path);
 	}
 
 	public updateRoute(path: string, routeInfo: RouteInfo) {
@@ -309,14 +323,14 @@ export class PulseSocketIOClient {
 		}
 	}
 
-	public detach(path: string) {
+	public detach(path: string, instanceId: string) {
 		const view = this.#activeViews.get(path);
-		if (!view) return;
+		if (!view || view.instanceId !== instanceId) return;
 		this.#activeViews.delete(path);
 		this.#activeAttachIds.delete(path);
 		this.#ackedAttachIds.delete(path);
-		this.#pendingCallbacks.delete(path);
-		void this.sendMessage({ type: "detach", path, viewId: view.viewId });
+		this.#deletePendingCallbacks(path);
+		void this.sendMessage({ type: "detach", path, viewId: view.viewId, instanceId });
 	}
 
 	public suspend() {
@@ -344,11 +358,13 @@ export class PulseSocketIOClient {
 		this.#clearTimeouts();
 		this.#closeSocket();
 		this.#messageQueue = [];
+		this.#queueOverflowed = false;
 		this.#connectionListeners.clear();
 		this.#activeViews.clear();
 		this.#activeAttachIds.clear();
 		this.#ackedAttachIds.clear();
 		this.#pendingCallbacks.clear();
+		this.#pendingCallbackCount = 0;
 		for (const { bridge } of this.#channels.values()) {
 			bridge.dispose(new PulseChannelResetError("Client disconnected"));
 		}
@@ -380,7 +396,7 @@ export class PulseSocketIOClient {
 					return;
 				}
 				view.revision = message.revision;
-				view.onUpdate(message.ops);
+				view.onUpdate(message.ops, message.viewId, message.revision);
 				break;
 			}
 			case "server_error": {
@@ -519,15 +535,22 @@ export class PulseSocketIOClient {
 		}
 	}
 
-	public invokeCallback(path: string, callback: string, args: any[]) {
+	public invokeCallback(
+		path: string,
+		viewId: string,
+		revision: number,
+		callback: string,
+		args: any[],
+	) {
 		const view = this.#activeViews.get(path);
-		if (!view) return;
+		if (!view || view.viewId !== viewId) return;
 		const message: ClientCallbackMessage = {
 			type: "callback",
 			path,
-			viewId: view.viewId,
+			viewId,
+			revision,
 			callback,
-			args: args.map(extractEvent),
+			args,
 		};
 		if (this.#isAttachAcked(path)) {
 			this.sendMessage(message);
@@ -634,6 +657,7 @@ export class PulseSocketIOClient {
 			attachId,
 			viewId: view.viewId,
 			revision: view.revision,
+			instanceId: view.instanceId,
 		};
 		if (socket) {
 			socket.emit("message", serialize(message));
@@ -669,9 +693,10 @@ export class PulseSocketIOClient {
 	}
 
 	#installSnapshot(path: string, view: ActiveView, snapshot: ViewSnapshot): void {
+		const replacesView = view.viewId !== snapshot.viewId;
 		view.viewId = snapshot.viewId;
 		view.revision = snapshot.revision;
-		this.#pendingCallbacks.delete(path);
+		if (replacesView) this.#deletePendingCallbacks(path);
 		view.onInit(snapshot);
 	}
 
@@ -682,9 +707,11 @@ export class PulseSocketIOClient {
 	}
 
 	#queueCallback(message: ClientCallbackMessage): void {
+		this.#reserveQueueSlot();
 		const queue = this.#pendingCallbacks.get(message.path) ?? [];
 		queue.push(message);
 		this.#pendingCallbacks.set(message.path, queue);
+		this.#pendingCallbackCount += 1;
 	}
 
 	#flushPendingCallbacks(path: string): void {
@@ -692,9 +719,29 @@ export class PulseSocketIOClient {
 		const queue = this.#pendingCallbacks.get(path);
 		if (!queue) return;
 		this.#pendingCallbacks.delete(path);
+		this.#pendingCallbackCount -= queue.length;
 		for (const message of queue) {
 			this.sendMessage(message);
 		}
+	}
+
+	#deletePendingCallbacks(path: string): void {
+		const queue = this.#pendingCallbacks.get(path);
+		if (!queue) return;
+		this.#pendingCallbacks.delete(path);
+		this.#pendingCallbackCount -= queue.length;
+	}
+
+	#reserveQueueSlot(): void {
+		if (this.#messageQueue.length + this.#pendingCallbackCount < CLIENT_QUEUE_LIMIT) return;
+		this.#queueOverflowed = true;
+		this.#messageQueue = [];
+		this.#pendingCallbacks.clear();
+		this.#pendingCallbackCount = 0;
+		this.#closeSocket();
+		this.#setStatus("error");
+		if (typeof window !== "undefined") window.location.reload();
+		throw new Error(CLIENT_QUEUE_OVERFLOW_MESSAGE);
 	}
 
 	_ensureChannelEntry(id: string): {

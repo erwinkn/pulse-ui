@@ -378,6 +378,7 @@ interface ClientAttachMessage {
   attachId: string;
   viewId: string;
   revision: number;
+  instanceId: string;
 }
 ```
 
@@ -390,6 +391,7 @@ interface ClientCallbackMessage {
   type: "callback";
   path: string;
   viewId: string;
+  revision: number;
   callback: string;
   args: any[];
 }
@@ -404,6 +406,7 @@ interface ClientUpdateMessage {
   type: "update";
   path: string;
   viewId: string;
+  instanceId: string;
   revision: number;
   routeInfo: RouteInfo;
 }
@@ -601,10 +604,16 @@ interface PulseClient {
   isConnected(): boolean;
   onConnectionChange(listener: ConnectionStatusListener): () => void;
   updateRoute(path: string, routeInfo: RouteInfo): void;
-  invokeCallback(path: string, callback: string, args: any[]): void;
-  attach(path: string, snapshot: ViewSnapshot, view: MountedView): void;
+  invokeCallback(
+    path: string,
+    viewId: string,
+    revision: number,
+    callback: string,
+    args: any[],
+  ): void;
+  attach(path: string, snapshot: ViewSnapshot, instanceId: string, view: MountedView): void;
   installSnapshot(path: string, snapshot: ViewSnapshot): void;
-  detach(path: string): void;
+  detach(path: string, instanceId: string): void;
 }
 ```
 
@@ -631,8 +640,8 @@ Callbacks for a mounted view.
 ```ts
 interface MountedView {
   routeInfo: RouteInfo;
-  onInit: (view: PulsePrerenderView) => void;
-  onUpdate: (ops: VDOMUpdate[]) => void;
+  onInit: (view: ViewSnapshot) => void;
+  onUpdate: (ops: VDOMUpdate[], viewId: string, revision: number) => void;
   onJsExec: (msg: ServerJsExecMessage) => void;
   onServerError: (error: ServerError) => void;
 }

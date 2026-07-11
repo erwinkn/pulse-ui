@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import inspect
+import math
+import struct
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from types import NoneType
+from functools import partial
+from types import FunctionType, MethodType, NoneType
 from typing import Any, NamedTuple, TypeAlias, cast
 
 from pulse.debounce import Debounced
@@ -49,6 +52,112 @@ class Callback(NamedTuple):
 
 
 Callbacks = dict[str, Callback]
+
+
+_NOT_IMMUTABLE = object()
+
+
+def _immutable_key(value: Any) -> Any:
+	if type(value) in (NoneType, bool, int, str, bytes):
+		return (type(value), value)
+	if type(value) is float:
+		if math.isnan(value):
+			return _NOT_IMMUTABLE
+		return (float, struct.pack("!d", value))
+	if type(value) is complex:
+		if math.isnan(value.real) or math.isnan(value.imag):
+			return _NOT_IMMUTABLE
+		return (
+			complex,
+			struct.pack("!d", value.real),
+			struct.pack("!d", value.imag),
+		)
+	if type(value) is tuple:
+		items = tuple(_immutable_key(item) for item in value)
+		if _NOT_IMMUTABLE in items:
+			return _NOT_IMMUTABLE
+		return (tuple, items)
+	if type(value) is frozenset:
+		items = tuple(_immutable_key(item) for item in value)
+		if _NOT_IMMUTABLE in items:
+			return _NOT_IMMUTABLE
+		return (frozenset, frozenset(items))
+	return _NOT_IMMUTABLE
+
+
+def _capture_values_equal(left: Any, right: Any) -> bool:
+	if left is right:
+		return True
+	left_key = _immutable_key(left)
+	if left_key is _NOT_IMMUTABLE:
+		return False
+	right_key = _immutable_key(right)
+	return right_key is not _NOT_IMMUTABLE and left_key == right_key
+
+
+def _capture_sequences_equal(left: tuple[Any, ...], right: tuple[Any, ...]) -> bool:
+	return len(left) == len(right) and all(
+		_capture_values_equal(left_item, right_item)
+		for left_item, right_item in zip(left, right, strict=True)
+	)
+
+
+def _function_values_equal(left: FunctionType, right: FunctionType) -> bool:
+	if (
+		left.__code__ is not right.__code__
+		or left.__globals__ is not right.__globals__
+		or left.__dict__
+		or right.__dict__
+	):
+		return False
+	if not _capture_sequences_equal(left.__defaults__ or (), right.__defaults__ or ()):
+		return False
+	left_kw = left.__kwdefaults__ or {}
+	right_kw = right.__kwdefaults__ or {}
+	if left_kw.keys() != right_kw.keys() or any(
+		not _capture_values_equal(left_kw[key], right_kw[key]) for key in left_kw
+	):
+		return False
+	left_closure = left.__closure__ or ()
+	right_closure = right.__closure__ or ()
+	if len(left_closure) != len(right_closure):
+		return False
+	for left_cell, right_cell in zip(left_closure, right_closure, strict=True):
+		if left_cell is not right_cell:
+			return False
+	return True
+
+
+def callbacks_equivalent(left: Callable[..., Any], right: Callable[..., Any]) -> bool:
+	"""Return true only when reusing left cannot detach it from right's closure state."""
+	if left is right:
+		return True
+	if isinstance(left, FunctionType) and isinstance(right, FunctionType):
+		return _function_values_equal(left, right)
+	if isinstance(left, MethodType) and isinstance(right, MethodType):
+		return left.__func__ is right.__func__ and left.__self__ is right.__self__
+	if isinstance(left, partial) and isinstance(right, partial):
+		left_keywords = left.keywords or {}
+		right_keywords = right.keywords or {}
+		return (
+			callbacks_equivalent(left.func, right.func)
+			and _capture_sequences_equal(left.args, right.args)
+			and left_keywords.keys() == right_keywords.keys()
+			and all(
+				_capture_values_equal(left_keywords[key], right_keywords[key])
+				for key in left_keywords
+			)
+		)
+	return False
+
+
+def _canonical_callback(
+	fn: Callable[..., Any], previous: PropValue | None
+) -> Callable[..., Any]:
+	previous_fn = previous.fn if isinstance(previous, Debounced) else previous
+	if callable(previous_fn) and callbacks_equivalent(previous_fn, fn):
+		return previous_fn
+	return fn
 
 
 @dataclass(slots=True)
@@ -457,10 +566,17 @@ class Renderer:
 				eval_keys.add(key)
 				if isinstance(old_value, (Element, PulseNode)):
 					unmount_element(old_value)
+				fn = _canonical_callback(value.fn, old_value)
 				if normalized is None:
 					normalized = current.copy()
-				normalized[key] = value
-				register_callback(self.callbacks, prop_path, value.fn)
+				normalized[key] = (
+					old_value
+					if isinstance(old_value, Debounced)
+					and old_value.fn is fn
+					and old_value.delay_ms == value.delay_ms
+					else Debounced(fn=fn, delay_ms=value.delay_ms)
+				)
+				register_callback(self.callbacks, prop_path, fn)
 				prev_delay = (
 					old_value.delay_ms if isinstance(old_value, Debounced) else None
 				)
@@ -472,10 +588,11 @@ class Renderer:
 				eval_keys.add(key)
 				if isinstance(old_value, (Element, PulseNode)):
 					unmount_element(old_value)
+				fn = _canonical_callback(value, old_value)
 				if normalized is None:
 					normalized = current.copy()
-				normalized[key] = value
-				register_callback(self.callbacks, prop_path, value)
+				normalized[key] = fn
+				register_callback(self.callbacks, prop_path, fn)
 				if not callable(old_value) or isinstance(old_value, Debounced):
 					updated[key] = CALLBACK_PLACEHOLDER
 				continue

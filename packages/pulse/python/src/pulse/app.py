@@ -282,6 +282,7 @@ class App:
 	render_loop_limit: int
 	prerender_queue_timeout: float
 	disconnect_queue_timeout: float
+	socket_send_queue_limit: int
 
 	def __init__(
 		self,
@@ -303,6 +304,7 @@ class App:
 		session_timeout: float = 60.0,
 		prerender_queue_timeout: float = 60.0,
 		disconnect_queue_timeout: float = 300.0,
+		socket_send_queue_limit: int = 100,
 		connection_status: ConnectionStatusConfig | None = None,
 		render_loop_limit: int = 50,
 	):
@@ -366,6 +368,7 @@ class App:
 		self.session_timeout = session_timeout
 		self.prerender_queue_timeout = prerender_queue_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
+		self.socket_send_queue_limit = socket_send_queue_limit
 		self.connection_status = connection_status or ConnectionStatusConfig()
 		self.render_loop_limit = render_loop_limit
 
@@ -936,7 +939,9 @@ class App:
 
 	def _start_socket_sender(self, sid: str) -> None:
 		self._stop_socket_sender(sid)
-		queue: asyncio.Queue[list[Any]] = asyncio.Queue()
+		queue: asyncio.Queue[list[Any]] = asyncio.Queue(
+			maxsize=self.socket_send_queue_limit
+		)
 		self._socket_send_queues[sid] = queue
 
 		async def _send() -> None:
@@ -948,6 +953,8 @@ class App:
 				raise
 			except Exception:
 				logger.exception("Socket sender failed for %s", sid)
+				if self._retire_socket_sender(sid, queue):
+					await self._disconnect_failed_socket(sid)
 
 		self._socket_send_tasks[sid] = self._tasks.create_task(
 			_send(), name=f"socket-sender:{sid}"
@@ -959,11 +966,34 @@ class App:
 		if task is not None and not task.done():
 			task.cancel()
 
+	def _retire_socket_sender(self, sid: str, queue: asyncio.Queue[list[Any]]) -> bool:
+		if self._socket_send_queues.get(sid) is not queue:
+			return False
+		self._socket_send_queues.pop(sid, None)
+		task = self._socket_send_tasks.pop(sid, None)
+		if task is not None and task is not asyncio.current_task() and not task.done():
+			task.cancel()
+		return True
+
+	async def _disconnect_failed_socket(self, sid: str) -> None:
+		try:
+			await self.sio.disconnect(sid)
+		except Exception:
+			logger.exception("Failed to disconnect socket %s", sid)
+
 	def _send_socket_message(self, sid: str, message: ServerMessage) -> None:
 		queue = self._socket_send_queues.get(sid)
 		if queue is None:
 			return
-		queue.put_nowait(list(serialize(message)))
+		try:
+			queue.put_nowait(list(serialize(message)))
+		except asyncio.QueueFull:
+			logger.error("Socket sender queue overflowed for %s", sid)
+			if self._retire_socket_sender(sid, queue):
+				self._tasks.create_task(
+					self._disconnect_failed_socket(sid),
+					name=f"socket-disconnect:{sid}",
+				)
 
 	def _cancel_render_cleanup(self, rid: str):
 		"""Cancel any pending cleanup task for a render session."""
@@ -1065,6 +1095,7 @@ class App:
 					msg["viewId"],
 					msg["revision"],
 					msg["attachId"],
+					msg["instanceId"],
 				)
 				if ack is not None:
 					render.send(ack)
@@ -1074,10 +1105,14 @@ class App:
 				)
 			elif msg["type"] == "callback":
 				render.execute_callback(
-					msg["path"], msg["viewId"], msg["callback"], msg["args"]
+					msg["path"],
+					msg["viewId"],
+					msg["revision"],
+					msg["callback"],
+					msg["args"],
 				)
 			elif msg["type"] == "detach":
-				if render.detach(msg["path"], msg["viewId"]):
+				if render.detach(msg["path"], msg["viewId"], msg["instanceId"]):
 					render.channels.remove_route(msg["path"])
 			elif msg["type"] == "api_result":
 				render.handle_api_result(dict(msg))

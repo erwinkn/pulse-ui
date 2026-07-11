@@ -1,9 +1,14 @@
 import asyncio
+import bisect
+import heapq
 import logging
+import time
 import traceback
 import uuid
 from asyncio import iscoroutine
+from collections import deque
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 
 from pulse.channel import Channel
@@ -24,7 +29,7 @@ from pulse.messages import (
 )
 from pulse.queries.store import QueryStore
 from pulse.reactive import REACTIVE_CONTEXT, Effect, flush_effects
-from pulse.renderer import RenderTree
+from pulse.renderer import Callback, Callbacks, RenderTree
 from pulse.routing import (
 	Layout,
 	Route,
@@ -89,6 +94,146 @@ def run_js(expr: Any, *, result: bool = False) -> asyncio.Future[Any] | None:
 
 MountState = Literal["pending", "active", "suspended", "closed"]
 T_Render = TypeVar("T_Render")
+CALLBACK_HISTORY_VERSIONS = 20_000
+CALLBACK_HISTORY_REVISIONS = 100_000
+CALLBACK_UNAVAILABLE = object()
+
+
+@dataclass(slots=True)
+class CallbackVersion:
+	revision: int
+	callback: Callback | None
+
+
+@dataclass(slots=True)
+class CallbackRevision:
+	revision: int
+	superseded_at: float | None = None
+
+
+class CallbackHistory:
+	retention_seconds: float
+	current: Callbacks
+	revisions: deque[CallbackRevision]
+	versions: dict[str, list[CallbackVersion]]
+	next_changes: list[tuple[int, str]]
+	version_count: int
+
+	def __init__(self, retention_seconds: float) -> None:
+		self.retention_seconds = retention_seconds
+		self.current = {}
+		self.revisions = deque()
+		self.versions = {}
+		self.next_changes = []
+		self.version_count = 0
+
+	@property
+	def oldest_revision(self) -> int | None:
+		return self.revisions[0].revision if self.revisions else None
+
+	@property
+	def latest_revision(self) -> int | None:
+		return self.revisions[-1].revision if self.revisions else None
+
+	def clear(self) -> None:
+		self.current.clear()
+		self.revisions.clear()
+		self.versions.clear()
+		self.next_changes.clear()
+		self.version_count = 0
+
+	def record(self, revision: int, callbacks: Callbacks, *, now: float) -> None:
+		latest = self.latest_revision
+		if latest is not None and revision != latest + 1:
+			raise RuntimeError(
+				f"Callback revisions must be sequential: got {revision} after {latest}"
+			)
+		if self.revisions:
+			self.revisions[-1].superseded_at = now
+
+		for key in self.current.keys() | callbacks.keys():
+			previous = self.current.get(key)
+			current = callbacks.get(key)
+			if self._same_callback(previous, current):
+				continue
+			versions = self.versions.setdefault(key, [])
+			versions.append(CallbackVersion(revision, current))
+			if len(versions) == 2:
+				heapq.heappush(self.next_changes, (revision, key))
+			self.version_count += 1
+
+		self.current = dict(callbacks)
+		self.revisions.append(CallbackRevision(revision))
+		self.prune(now=now)
+
+	def lookup(
+		self, revision: int, key: str, *, now: float
+	) -> Callback | object | None:
+		self.prune(now=now)
+		oldest = self.oldest_revision
+		latest = self.latest_revision
+		if oldest is None or revision < oldest or latest is None or revision > latest:
+			return CALLBACK_UNAVAILABLE
+		versions = self.versions.get(key)
+		if not versions:
+			return None
+		index = bisect.bisect_right(
+			versions, revision, key=lambda version: version.revision
+		)
+		if index == 0:
+			return None
+		return versions[index - 1].callback
+
+	def prune(self, *, now: float) -> None:
+		while len(self.revisions) > 1:
+			oldest = self.revisions[0]
+			assert oldest.superseded_at is not None
+			within_ttl = now - oldest.superseded_at < self.retention_seconds
+			within_version_limit = self.version_count <= CALLBACK_HISTORY_VERSIONS
+			within_revision_limit = len(self.revisions) <= CALLBACK_HISTORY_REVISIONS
+			if within_ttl and within_version_limit and within_revision_limit:
+				break
+			self.revisions.popleft()
+			floor = self.revisions[0].revision
+			self._prune_versions(floor)
+
+	def _prune_versions(self, floor: int) -> None:
+		while self.next_changes and self.next_changes[0][0] <= floor:
+			revision, key = heapq.heappop(self.next_changes)
+			versions = self.versions.get(key)
+			if not versions or len(versions) < 2 or versions[1].revision != revision:
+				continue
+			self._prune_key(key, floor)
+			versions = self.versions.get(key)
+			if versions and len(versions) >= 2:
+				heapq.heappush(self.next_changes, (versions[1].revision, key))
+
+	def _prune_key(self, key: str, floor: int) -> None:
+		versions = self.versions.get(key)
+		if not versions:
+			return
+		index = (
+			bisect.bisect_right(versions, floor, key=lambda version: version.revision)
+			- 1
+		)
+		if index < 0:
+			return
+		keep_from = index if versions[index].callback is not None else index + 1
+		if keep_from:
+			del versions[:keep_from]
+			self.version_count -= keep_from
+		if not versions:
+			self.versions.pop(key, None)
+
+	@staticmethod
+	def _same_callback(left: Callback | None, right: Callback | None) -> bool:
+		if left is None or right is None:
+			return left is right
+		return (
+			left.fn is right.fn
+			and left.n_args == right.n_args
+			and left.accepts_varargs == right.accepts_varargs
+		)
 
 
 class RouteMount:
@@ -104,8 +249,11 @@ class RouteMount:
 	dispose_on_timeout: bool
 	queue: list[ServerMessage] | None
 	queue_timeout: TimerHandleLike | None
+	snapshot_required: bool
 	view_id: str
 	revision: int
+	instance_id: str | None
+	callback_history: CallbackHistory
 	render_batch_id: int
 	render_batch_renders: int
 
@@ -128,8 +276,11 @@ class RouteMount:
 		self.dispose_on_timeout = False
 		self.queue = []
 		self.queue_timeout = None
+		self.snapshot_required = False
 		self.view_id = uuid.uuid4().hex
 		self.revision = -1
+		self.instance_id = None
+		self.callback_history = CallbackHistory(render.disconnect_queue_timeout)
 		self.render_batch_id = -1
 		self.render_batch_renders = 0
 
@@ -164,6 +315,7 @@ class RouteMount:
 				self.effect.resume()
 			self.state = "pending"
 			self.queue = []
+			self.snapshot_required = False
 		self.dispose_on_timeout = dispose
 		self.queue_timeout = self.render.schedule_later(
 			timeout, self._on_pending_timeout
@@ -179,6 +331,7 @@ class RouteMount:
 			for msg in self.queue:
 				send_message(msg)
 		self.queue = None
+		self.snapshot_required = False
 		self.state = "active"
 		self.ever_active = True
 		self.dispose_on_timeout = False
@@ -189,6 +342,7 @@ class RouteMount:
 			return
 		self.state = "suspended"
 		self.queue = None
+		self.snapshot_required = False
 		self._cancel_pending_timeout()
 		if self.effect:
 			self.effect.pause()
@@ -199,6 +353,12 @@ class RouteMount:
 		if self.state == "pending":
 			if self.queue is None:
 				raise RuntimeError(f"Pending mount missing queue for {self.path!r}")
+			if self.snapshot_required:
+				return
+			if len(self.queue) >= self.render.pending_message_limit:
+				self.queue.clear()
+				self.snapshot_required = True
+				return
 			self.queue.append(message)
 			return
 		if self.state == "active":
@@ -209,6 +369,8 @@ class RouteMount:
 		# suspended: drop; the client gets a fresh init on resume
 
 	def can_replay_from(self, revision: int) -> bool:
+		if self.snapshot_required:
+			return False
 		current = revision
 		for message in self.queue or []:
 			if message["type"] != "vdom_update":
@@ -217,6 +379,19 @@ class RouteMount:
 				return False
 			current = message["revision"]
 		return current == self.revision
+
+	def renew_view_id(self) -> None:
+		self.view_id = uuid.uuid4().hex
+		self.revision = -1
+		self.callback_history.clear()
+		if self.queue is not None:
+			self.queue.clear()
+		self.snapshot_required = False
+
+	def record_callbacks(self) -> None:
+		self.callback_history.record(
+			self.revision, self.tree.callbacks, now=time.monotonic()
+		)
 
 	def ensure_effect(self, *, lazy: bool = False, flush: bool = True) -> None:
 		if self.effect is not None:
@@ -255,6 +430,8 @@ class RouteMount:
 		self._cancel_pending_timeout()
 		self.state = "closed"
 		self.queue = None
+		self.snapshot_required = False
+		self.callback_history.clear()
 		self.tree.unmount()
 		if self.effect:
 			self.effect.dispose()
@@ -271,6 +448,7 @@ class RenderSession:
 	prerender_queue_timeout: float
 	dev_strict_mode_detach_timeout: float
 	disconnect_queue_timeout: float
+	pending_message_limit: int
 	render_loop_limit: int
 	_server_address: str | None
 	_client_address: str | None
@@ -294,6 +472,7 @@ class RenderSession:
 		prerender_queue_timeout: float = 60.0,
 		dev_strict_mode_detach_timeout: float = 0.0,
 		disconnect_queue_timeout: float = 300.0,
+		pending_message_limit: int = 100,
 		render_loop_limit: int = 50,
 	) -> None:
 		from pulse.channel import ChannelsManager
@@ -320,6 +499,7 @@ class RenderSession:
 		self.prerender_queue_timeout = prerender_queue_timeout
 		self.dev_strict_mode_detach_timeout = dev_strict_mode_detach_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
+		self.pending_message_limit = pending_message_limit
 		self.render_loop_limit = render_loop_limit
 
 	@property
@@ -504,6 +684,7 @@ class RenderSession:
 		view_id: str,
 		revision: int,
 		attach_id: str,
+		instance_id: str,
 	) -> ServerAttachAckMessage | None:
 		"""
 		Client ready to receive updates for path.
@@ -524,6 +705,14 @@ class RenderSession:
 			return None
 
 		mount.update_route(route_info)
+		if mount.instance_id is None:
+			mount.instance_id = instance_id
+		elif mount.instance_id != instance_id:
+			if mount.state != "pending" or not mount.dispose_on_timeout:
+				self.send({"type": "reload"})
+				return None
+			mount.instance_id = instance_id
+			mount.renew_view_id()
 		ack = ServerAttachAckMessage(
 			type="attach_ack",
 			path=path,
@@ -602,11 +791,15 @@ class RenderSession:
 		except Exception as e:
 			self.report_error(path, "unmount", e)
 
-	def detach(self, path: str, view_id: str) -> bool:
+	def detach(self, path: str, view_id: str, instance_id: str) -> bool:
 		"""Client route unmounted. Dispose immediately outside dev StrictMode replay."""
 		path = ensure_absolute_path(path)
 		mount = self.route_mounts.get(path)
-		if mount is None or mount.view_id != view_id:
+		if (
+			mount is None
+			or mount.view_id != view_id
+			or mount.instance_id != instance_id
+		):
 			return False
 		self._ref_channels_by_route.pop(path, None)
 		if self.dev_strict_mode_detach_timeout > 0:
@@ -677,6 +870,7 @@ class RenderSession:
 			vdom = mount.tree.render()
 			mount.initialized = True
 			mount.revision += 1
+			mount.record_callbacks()
 			return ServerInitMessage(
 				type="vdom_init",
 				path=path,
@@ -697,18 +891,17 @@ class RenderSession:
 			if not mount.initialized:
 				raise RuntimeError(f"rerender called before init for {path!r}")
 			ops = mount.tree.rerender()
-			if ops:
-				base_revision = mount.revision
-				mount.revision += 1
-				return ServerUpdateMessage(
-					type="vdom_update",
-					path=path,
-					viewId=mount.view_id,
-					baseRevision=base_revision,
-					revision=mount.revision,
-					ops=ops,
-				)
-			return None
+			base_revision = mount.revision
+			mount.revision += 1
+			mount.record_callbacks()
+			return ServerUpdateMessage(
+				type="vdom_update",
+				path=path,
+				viewId=mount.view_id,
+				baseRevision=base_revision,
+				revision=mount.revision,
+				ops=ops,
+			)
 
 		return self._render_with_interrupts(
 			mount, path, session=session, render_fn=_rerender
@@ -818,6 +1011,7 @@ class RenderSession:
 		self,
 		path: str,
 		view_id: str,
+		revision: int,
 		key: str,
 		args: list[Any] | tuple[Any, ...],
 	) -> None:
@@ -826,11 +1020,22 @@ class RenderSession:
 		if mount is None or mount.state == "closed" or mount.view_id != view_id:
 			logger.warning("Dropping callback %r for missing route %r", key, path)
 			return
-		cb = mount.tree.callbacks.get(key)
-		if cb is None:
+		callback = mount.callback_history.lookup(revision, key, now=time.monotonic())
+		if callback is CALLBACK_UNAVAILABLE:
+			logger.warning(
+				"Dropping callback %r for unavailable revision %s on route %r",
+				key,
+				revision,
+				path,
+			)
+			self.send({"type": "resync_view", "path": path, "viewId": view_id})
+			return
+		if callback is None:
 			logger.warning("Dropping stale callback %r for route %r", key, path)
 			self.send({"type": "resync_view", "path": path, "viewId": view_id})
 			return
+		assert isinstance(callback, Callback)
+		cb = callback
 
 		def report(e: BaseException, is_async: bool = False):
 			self.report_error(path, "callback", e, {"callback": key, "async": is_async})

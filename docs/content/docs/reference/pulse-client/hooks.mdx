@@ -88,12 +88,18 @@ interface PulseClient {
 
   // Route management
   updateRoute(path: string, routeInfo: RouteInfo): void;
-  attach(path: string, snapshot: ViewSnapshot, view: MountedView): void;
+  attach(path: string, snapshot: ViewSnapshot, instanceId: string, view: MountedView): void;
   installSnapshot(path: string, snapshot: ViewSnapshot): void;
-  detach(path: string): void;
+  detach(path: string, instanceId: string): void;
 
   // Callbacks
-  invokeCallback(path: string, callback: string, args: any[]): void;
+  invokeCallback(
+    path: string,
+    viewId: string,
+    revision: number,
+    callback: string,
+    args: any[],
+  ): void;
 }
 ```
 

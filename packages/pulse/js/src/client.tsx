@@ -220,12 +220,12 @@ export class PulseSocketIOClient {
 				}
 
 				for (const payload of this.#messageQueue) {
-					// Already sent above
-					if (payload.type === "attach" && this.#activeViews.has(payload.path)) {
+					// Attach and route state are regenerated from the active views above.
+					if (payload.type === "attach" || payload.type === "update") {
 						continue;
 					}
-					// We're reattaching all the routes, so no need to send update
-					if (payload.type === "update") {
+					// A later attach supersedes a detach queued for the same path.
+					if (payload.type === "detach" && this.#activeViews.has(payload.path)) {
 						continue;
 					}
 					socket.emit("message", serialize(payload));

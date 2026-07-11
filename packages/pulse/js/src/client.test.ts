@@ -157,6 +157,24 @@ describe("PulseSocketIOClient attach ack", () => {
 		});
 	});
 
+	it("drops lifecycle messages superseded by the active view on connect", async () => {
+		const client = await makeClient();
+		client.attach("/", snapshot, "instance-1", view);
+		client.detach("/", "instance-1");
+		client.attach("/", snapshot, "instance-1", view);
+
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+
+		expect(sentMessages()).toHaveLength(1);
+		expect(sentMessages()[0]).toMatchObject({
+			type: "attach",
+			path: "/",
+			instanceId: "instance-1",
+		});
+	});
+
 	it("applies contiguous updates and drops duplicates", async () => {
 		const onUpdate = vi.fn();
 		const client = await makeClient();

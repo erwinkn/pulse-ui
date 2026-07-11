@@ -271,7 +271,6 @@ class App:
 	_pending_socket_messages: dict[str, list[Serialized]]
 	_socket_send_queues: dict[str, asyncio.Queue[list[Any]]]
 	_socket_send_tasks: dict[str, asyncio.Task[Any]]
-	_socket_send_current: dict[str, list[Any]]
 	_render_cleanups: dict[str, TimerHandleLike]
 	_render_message_locks: dict[str, asyncio.Lock]
 	_tasks: TaskRegistry
@@ -360,7 +359,6 @@ class App:
 		self._pending_socket_messages = {}
 		self._socket_send_queues = {}
 		self._socket_send_tasks = {}
-		self._socket_send_current = {}
 		# Map render_id -> cleanup timer handle for timeout-based expiry
 		self._render_cleanups = {}
 		self._render_message_locks = {}
@@ -952,14 +950,10 @@ class App:
 		async def _send() -> None:
 			try:
 				for payload in pending_payloads or []:
-					self._socket_send_current[sid] = payload
 					await self.sio.emit("message", payload, to=sid)
-					self._socket_send_current.pop(sid, None)
 				while True:
 					payload = await queue.get()
-					self._socket_send_current[sid] = payload
 					await self.sio.emit("message", payload, to=sid)
-					self._socket_send_current.pop(sid, None)
 			except asyncio.CancelledError:
 				raise
 			except Exception:
@@ -973,9 +967,6 @@ class App:
 
 	def _stop_socket_sender(self, sid: str) -> list[list[Any]]:
 		pending: list[list[Any]] = []
-		current = self._socket_send_current.pop(sid, None)
-		if current is not None:
-			pending.append(current)
 		queue = self._socket_send_queues.pop(sid, None)
 		if queue is not None:
 			while not queue.empty():
@@ -989,7 +980,6 @@ class App:
 		if self._socket_send_queues.get(sid) is not queue:
 			return False
 		self._socket_send_queues.pop(sid, None)
-		self._socket_send_current.pop(sid, None)
 		task = self._socket_send_tasks.pop(sid, None)
 		if task is not None and task is not asyncio.current_task() and not task.done():
 			task.cancel()

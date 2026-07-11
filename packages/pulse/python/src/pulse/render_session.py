@@ -380,14 +380,6 @@ class RouteMount:
 			current = message["revision"]
 		return current == self.revision
 
-	def renew_view_id(self) -> None:
-		self.view_id = uuid.uuid4().hex
-		self.revision = -1
-		self.callback_history.clear()
-		if self.queue is not None:
-			self.queue.clear()
-		self.snapshot_required = False
-
 	def record_callbacks(self) -> None:
 		self.callback_history.record(
 			self.revision, self.tree.callbacks, now=time.monotonic()
@@ -708,11 +700,8 @@ class RenderSession:
 		if mount.instance_id is None:
 			mount.instance_id = instance_id
 		elif mount.instance_id != instance_id:
-			if mount.state != "pending" or not mount.dispose_on_timeout:
-				self.send({"type": "reload"})
-				return None
-			mount.instance_id = instance_id
-			mount.renew_view_id()
+			self.send({"type": "reload"})
+			return None
 		ack = ServerAttachAckMessage(
 			type="attach_ack",
 			path=path,

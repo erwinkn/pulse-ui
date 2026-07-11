@@ -2335,10 +2335,11 @@ def test_dev_strict_mode_detach_replay_reuses_mount_without_reload():
 	session.close()
 
 
-def test_real_remount_during_strict_mode_grace_rotates_view_identity():
+def test_real_remount_during_strict_mode_grace_reloads():
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes, dev_strict_mode_detach_timeout=10.0)
-	session.connect(lambda _message: None)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])
@@ -2357,13 +2358,10 @@ def test_real_remount_during_strict_mode_grace_rotates_view_identity():
 			instance_id="new",
 		)
 
-	assert ack is not None
-	assert ack["viewId"] != old_view_id
-	snapshot = ack.get("snapshot")
-	assert snapshot is not None
-	assert snapshot["viewId"] == ack["viewId"]
-	assert mount.instance_id == "new"
-	assert detach_mount(session, "/a", instance_id="old") is False
+	assert ack is None
+	assert messages[-1] == {"type": "reload"}
+	assert mount.view_id == old_view_id
+	assert mount.instance_id == "old"
 
 	session.close()
 

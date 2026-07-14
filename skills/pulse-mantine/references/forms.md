@@ -185,6 +185,8 @@ form.set_values({"email": "new@example.com", "name": "John"})
 form.set_field_value("email", "updated@example.com")
 ```
 
+Both methods update visible inputs in controlled and uncontrolled modes.
+
 ### List Operations (Dynamic Forms)
 ```python
 form.insert_list_item("members", {"name": ""})  # append
@@ -339,7 +341,7 @@ Create custom inputs that integrate with forms:
 
 ```tsx
 // In JS:
-import { createConnectedField, useFieldProps } from "pulse-mantine";
+import { createConnectedField, useField } from "pulse-mantine";
 
 // HOC approach:
 const ConnectedCustomInput = createConnectedField(CustomInput, {
@@ -349,10 +351,12 @@ const ConnectedCustomInput = createConnectedField(CustomInput, {
 
 // Hook approach:
 function MyInput(props) {
-    const fieldProps = useFieldProps(props, { debounceOnChange: true });
-    return <input {...fieldProps} />;
+    const { inputProps, key } = useField(props, { debounceOnChange: true });
+    return <input key={key} {...inputProps} />;
 }
 ```
+
+The returned `key` keeps custom uncontrolled inputs in sync after programmatic form actions. `createConnectedField` applies it automatically.
 
 Options:
 - `inputType`: "input" | "checkbox"

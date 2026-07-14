@@ -144,6 +144,10 @@ export function serialize(data: Serializable): Serialized {
 		seen.set(value, idx);
 
 		if (value instanceof Date) {
+			const year = value.getUTCFullYear();
+			if (Number.isNaN(value.getTime()) || year < 1 || year > 9999) {
+				throw new Error("Cannot serialize Date outside supported year range 0001-9999");
+			}
 			dates.push(idx);
 			return value.toISOString();
 		}
@@ -159,19 +163,46 @@ export function serialize(data: Serializable): Serialized {
 
 		if (value instanceof Map) {
 			maps.push(idx);
-			const rec: Record<string, any> = {};
+			const entries: Record<string, Serializable> = Object.create(null);
 			for (const [key, entry] of value.entries()) {
-				rec[String(key)] = process(entry, String(key));
+				if (typeof key !== "string") {
+					throw new Error(`Map keys must be strings, got '${typeof key}'`);
+				}
+				entries[key] = entry;
+			}
+			const rec: Record<string, any> = Object.create(null);
+			// Metadata uses positional node indices. JSON objects enumerate integer-like
+			// keys numerically, so process that order to match deserialization.
+			for (const key of Object.keys(entries)) {
+				rec[key] = process(entries[key] ?? null, key);
 			}
 			return rec;
 		}
 
 		if (value instanceof Set) {
 			sets.push(idx);
-			const size = value.size;
+			const entries = new Set<any>();
+			for (const entry of value) {
+				if (
+					entry === undefined ||
+					typeof entry === "function" ||
+					typeof entry === "symbol" ||
+					(typeof entry === "number" && Number.isNaN(entry))
+				) {
+					entries.add(null);
+				} else {
+					entries.add(entry);
+				}
+			}
+			for (const entry of entries) {
+				if (entry !== null && typeof entry === "object" && !(entry instanceof Date)) {
+					throw new Error("Set values must be primitives or Dates");
+				}
+			}
+			const size = entries.size;
 			const result = new Array(size);
 			let i = 0;
-			for (const entry of value) {
+			for (const entry of entries) {
 				result[i] = process(entry, context);
 				i += 1;
 			}
@@ -179,11 +210,11 @@ export function serialize(data: Serializable): Serialized {
 		}
 
 		if (typeof value === "object") {
-			const rec: Record<string, any> = {};
+			const rec: Record<string, any> = Object.create(null);
 			const keys = Object.keys(value);
 			for (let i = 0; i < keys.length; i++) {
 				const key = keys[i];
-				rec[key] = process(value[key], key);
+				rec[key] = process(value[key] ?? null, key);
 			}
 			return rec;
 		}
@@ -241,7 +272,7 @@ export function deserialize<Data extends Serializable = Serializable>(
 			const literal = parseDateLiteral(value);
 			if (literal) {
 				const [y, m, d] = literal;
-				const dt = new Date(Date.UTC(y, m - 1, d));
+				const dt = createUTCDate(y, m, d);
 				objects.set(idx, dt);
 				return dt;
 			}
@@ -249,6 +280,9 @@ export function deserialize<Data extends Serializable = Serializable>(
 				throw new Error(`Invalid date literal: ${value}`);
 			}
 			const dt = new Date(value);
+			if (Number.isNaN(dt.getTime())) {
+				throw new Error(`Invalid date: ${value}`);
+			}
 			objects.set(idx, dt);
 			return dt;
 		}
@@ -301,7 +335,17 @@ export function deserialize<Data extends Serializable = Serializable>(
 			const keys = Object.keys(value);
 			for (let i = 0; i < keys.length; i++) {
 				const key = keys[i];
-				result[key] = reconstruct(value[key]);
+				const entry = reconstruct(value[key]);
+				if (key === "__proto__") {
+					Object.defineProperty(result, key, {
+						value: entry,
+						enumerable: true,
+						configurable: true,
+						writable: true,
+					});
+				} else {
+					result[key] = entry;
+				}
 			}
 			return result;
 		}
@@ -329,10 +373,10 @@ function parseDateLiteral(value: string): [number, number, number] | null {
 	if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) {
 		return null;
 	}
-	if (m < 1 || m > 12 || d < 1 || d > 31) {
+	if (y < 1 || m < 1 || m > 12 || d < 1 || d > 31) {
 		return null;
 	}
-	const dt = new Date(Date.UTC(y, m - 1, d));
+	const dt = createUTCDate(y, m, d);
 	if (
 		dt.getUTCFullYear() !== y ||
 		dt.getUTCMonth() !== m - 1 ||
@@ -341,4 +385,11 @@ function parseDateLiteral(value: string): [number, number, number] | null {
 		return null;
 	}
 	return [y, m, d];
+}
+
+function createUTCDate(year: number, month: number, day: number): Date {
+	const value = new Date(0);
+	value.setUTCHours(0, 0, 0, 0);
+	value.setUTCFullYear(year, month - 1, day);
+	return value;
 }

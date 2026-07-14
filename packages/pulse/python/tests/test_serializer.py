@@ -1,7 +1,12 @@
 import datetime as dt
+import json
 
 import pytest
 from pulse.serializer import deserialize, serialize
+
+
+def wire_roundtrip(data: object):
+	return deserialize(json.loads(json.dumps(serialize(data))))
 
 
 def test_primitives_roundtrip_v3():
@@ -147,6 +152,45 @@ def test_date_roundtrip_v4():
 
 	assert isinstance(parsed["day"], dt.date)
 	assert parsed["day"] == day
+
+
+def test_integer_like_dict_keys_use_javascript_enumeration_order():
+	when = dt.datetime(2024, 1, 1, tzinfo=dt.UTC)
+	data = {"2": when, "1": "2020-02-03T00:00:00.000Z"}
+
+	payload = serialize(data)
+	parsed = wire_roundtrip(data)
+
+	serialized_data = payload[1]
+	assert isinstance(serialized_data, dict)
+	assert list(serialized_data) == ["1", "2"]
+	assert payload[0][1] == [2]
+	assert parsed == data
+	assert isinstance(parsed["2"], dt.datetime)
+
+
+@pytest.mark.parametrize("value", [-(2**53 - 1), 2**53 - 1])
+def test_javascript_safe_integers_roundtrip(value: int):
+	assert wire_roundtrip(value) == value
+
+
+@pytest.mark.parametrize("value", [-(2**53), 2**53])
+def test_integers_outside_javascript_safe_range_raise(value: int):
+	with pytest.raises(ValueError, match="safe integer range"):
+		serialize(value)
+
+
+def test_set_values_that_collapse_to_none_are_canonicalized():
+	payload = serialize({None, float("nan")})
+	parsed = deserialize(json.loads(json.dumps(payload)))
+
+	assert parsed == {None}
+	assert serialize(parsed) == payload
+
+
+def test_set_values_that_javascript_cannot_send_back_are_rejected():
+	with pytest.raises(TypeError, match="Set values must be primitives or dates"):
+		serialize({(1, 2)})
 
 
 def test_unsupported_values_raise_v3():

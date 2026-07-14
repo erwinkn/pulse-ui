@@ -25,11 +25,14 @@ def Button(
 # Named export
 ps.Import("Button", "@mantine/core")
 
-# Default export
-ps.Import("DatePicker", "react-datepicker", kind="default")
+# Default export — single argument (name == src ⇒ default import)
+ps.Import("react-datepicker")
 
-# Local file
-ps.Import("MyComponent", "~/components/my-component", kind="default")
+# Local file, named export
+ps.Import("MyComponent", "~/components/my-component")
+
+# Local file, default export
+ps.Import("~/components/my-component")
 ```
 
 ### Lazy Loading with `@ps.react_component`
@@ -78,7 +81,7 @@ def Dashboard():
 
 ```python
 @ps.react_component(
-    ps.Import("DatePicker", "react-datepicker", kind="default"),
+    ps.Import("react-datepicker"),  # default export
     lazy=True,
 )
 def DatePicker(
@@ -111,6 +114,34 @@ def DateForm():
         ),
         ps.p(f"Selected: {state.date}"),
     )
+```
+
+## Render Props: Callables Are Server Callbacks
+
+A Python callable passed as a prop (or child) is registered as a **server callback**: the client receives a stub function that serializes its arguments, sends them over the WebSocket, and returns nothing. This is exactly right for event handlers — and exactly wrong for render props:
+
+- The stub's return value is `undefined`; whatever your Python function returns is **never rendered**.
+- Arguments are serialized event payloads; the callable cannot receive live client-side objects (functions, class instances) that render-prop APIs pass.
+
+For render-prop APIs — components that call `children(args)` and render the result — pass a **transpiled** `@ps.javascript(jsx=True)` function instead. It runs fully client-side, receives the real render args, and its return value is rendered:
+
+```python
+@ps.react_component(ps.Import("CopyButton", "@mantine/core"))
+def CopyButton(*children: ps.Node, value: str) -> ps.Element: ...
+# Mantine calls children({copied, copy}) and renders the result
+
+# BAD — server callback: returns nothing to render, args aren't live client objects
+CopyButton(lambda state: ps.button("Copy", onClick=state["copy"]), value=text)
+
+# GOOD — transpiled render prop, runs entirely in the browser
+@ps.javascript(jsx=True)
+def CopyLabel(state):
+    return ps.button(
+        "Copied" if state.copied else "Copy",
+        onClick=state.copy,
+    )
+
+CopyButton(CopyLabel, value=text)
 ```
 
 ## `@ps.javascript` — Transpile Python to JS
@@ -250,6 +281,74 @@ def create_config():
         items=[1, 2, 3],
     )
 ```
+
+## Latency-sensitive interactions
+
+Handlers bound to `ps.State` execute **on the server**: each call is a WebSocket round-trip (event up, re-render diff back). Deliberate, infrequent actions absorb that latency fine. Rapid or frequent callbacks do not — routing them through the server makes the UI feel laggy.
+
+**Keep on the server (round-trip is fine):** button clicks, form submits, changing an explicit filter/toggle, navigation, opening a modal.
+
+**Keep client-side in transpiled code:** `moveend`/pan/zoom, scroll, drag, resize, pointer-move, animation frames, and per-keystroke work beyond what `ps.debounced` smooths. Rule of thumb: *if it fires faster than a human clicks, it belongs in transpiled JS.*
+
+The shape that works: the server renders the page and passes data down as props; a client component (`@ps.javascript(jsx=True)` or a hand-written react_component) owns the hot interaction and applies the effect locally, never touching the server.
+
+### Coordinating two client components without the server
+
+A server-rendered parent can't hand a shared mutable object to two sibling client components. Bridge them with a `window` `CustomEvent` — pure browser, no round-trip. One component dispatches; the other subscribes with `useEffect` + `addEventListener`.
+
+```python
+from pulse.js import window
+from pulse.js.react import useEffect, useState
+
+VIEWPORT_EVENT = "app:viewport"  # keep in sync with the dispatcher
+
+@ps.javascript(jsx=True)
+def GallerySection(*, photos: list[dict] | None = None, filterByMap: bool = True):
+    photos = photos or []
+    state = useState(None)          # visible IDs; None = "no viewport info yet"
+    visible_ids, set_visible_ids = state[0], state[1]
+
+    def subscribe():
+        def handle(event):
+            set_visible_ids(event.detail.itemIds)
+        window.addEventListener(VIEWPORT_EVENT, handle)
+        return lambda: window.removeEventListener(VIEWPORT_EVENT, handle)
+
+    useEffect(subscribe, [])
+
+    shown = (
+        [p for p in photos if p["item_id"] in visible_ids]
+        if filterByMap and visible_ids is not None
+        else photos
+    )
+    return Gallery(photos=shown)
+```
+
+The dispatcher side (here a hand-written react_component map) computes the payload from local state and broadcasts on the rapid event:
+
+```ts
+// The payload is a pure derivation of (viewport, points): string[] when points
+// are loaded, or null = "no answer yet" (the listener shows everything). Emit on
+// BOTH the rapid event AND whenever the data changes, so the listener updates the
+// moment points load instead of waiting for a move it can't predict.
+function emitViewport() {
+  const itemIds =
+    points.length === 0
+      ? null
+      : points.filter(p => bounds.contains([p.lng, p.lat])).map(p => p.itemId);
+  window.dispatchEvent(new CustomEvent("app:viewport", { detail: { itemIds } }));
+}
+map.on("moveend", emitViewport);
+// ...and call emitViewport() again right after the point data is (re)loaded.
+```
+
+A server-owned **toggle** (clicked rarely) can still gate the client behavior — pass it as a prop (`filterByMap` above); the one round-trip per click is acceptable.
+
+**Gotchas:**
+- Give the payload an explicit **"unknown" value** (`null`) distinct from **"known-empty"** (`[]`): `null` ⇒ listener shows everything; `[]` ⇒ genuinely nothing in view. Broadcasting `[]` before the data has loaded makes the listener flash empty.
+- Treat the broadcast as a **pure function of its inputs** and re-emit when *either* input changes (viewport **or** data) — not only on the rapid event. Pushing updates "at lifecycle moments" (a one-time `load`, the first `moveend`) races async data: a late data load leaves the listener stale until the next move.
+- A **virtualized** list (`@tanstack/react-virtual`) can't be filtered by hiding DOM nodes — only the rendered window exists. Filter the **data array** you feed the virtualizer.
+- Shareable URL state (query params) can also be synced client-side with `history.replaceState` inside the component — no navigation, no server hop. (Server-synced `ps.QueryParam` is for deliberate state changes, not per-frame viewport updates; see `routing.md`.)
 
 ## `ps.require()` — Declare npm Dependencies
 
@@ -556,6 +655,38 @@ def PersistentInput():
         onChange=lambda e: save(e.target.value),
     )
 ```
+
+### Reading Clipboard on Paste
+
+Serialized paste events include only `clipboardData` **metadata** (item kinds and MIME types) — never the pasted contents, so a server-side `onPaste` handler cannot read what was pasted. Read the clipboard client-side and forward the text to a Python callback prop:
+
+```python
+from pulse.js.react import useEffect, useRef
+
+@ps.javascript(jsx=True)
+def PasteCapture(*children, onPasteText):
+    ref = useRef(None)
+
+    def attach():
+        def handle(event):
+            text = event.clipboardData.getData("text/plain")
+            if "\t" in text or "\n" in text:  # multi-cell paste → handle in Python
+                event.preventDefault()
+                onPasteText(text)
+            # single values fall through to the browser default paste
+
+        node = ref.current
+        node.addEventListener("paste", handle, True)  # capture phase
+        return lambda: node.removeEventListener("paste", handle, True)
+
+    useEffect(attach, [])
+    return ps.div(ref=ref)[children]
+
+# Server side: onPasteText is a regular server callback receiving the text
+PasteCapture(grid_inputs, onPasteText=state.apply_pasted_rows)
+```
+
+The capture-phase listener sees the paste before any nested input consumes it; only multi-value pastes are intercepted, so typing and single-value pastes keep native behavior.
 
 ## Limitations
 

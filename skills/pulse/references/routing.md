@@ -262,6 +262,48 @@ ps.Link("Page 2", to="/search?q=test&page=2")
 ps.Link("Dynamic", to=f"/dynamic/example?q1=x&q2=y")
 ```
 
+### `ps.QueryParam` — Typed Two-Way Query-Param State
+
+Bind a State field to a URL query parameter. The param name is the attribute name. At type-check time `ps.QueryParam[T]` is just `T`; at runtime the field becomes a synced property.
+
+```python
+class SearchState(ps.State):
+    q: ps.QueryParam[str] = ""
+    page: ps.QueryParam[int] = 1
+    tags: ps.QueryParam[list[str]] = []
+    since: ps.QueryParam[date | None] = None
+
+@ps.component
+def SearchPage():
+    with ps.init():
+        state = SearchState()  # must be created during a route render
+    return ps.div(f"q={state.q} page={state.page}")
+```
+
+**Sync behavior (two-way):**
+- On load / URL change (including back/forward), the param is parsed into the field; a missing param yields the default. Parse failures raise `ValueError` with the param name.
+- Assigning the field updates the URL via a `replace` navigation (no new history entry). Other query params in the URL are preserved.
+- A value equal to the default — or `None` — is **omitted** from the URL. (`None` round-trips only when the default is `None`; an empty param value parses as `None` for optional types.)
+
+**Supported types (codecs):**
+
+| Type | URL form |
+|------|----------|
+| `str` | as-is |
+| `int`, `float` | `str(value)` |
+| `bool` | `true`/`false` (parses `1`/`0` too) |
+| `date` | `YYYY-MM-DD` |
+| `datetime` | ISO 8601; naive values assumed UTC (with warning); UTC rendered with `Z` |
+| `T \| None` | empty value ⇒ `None`; `None` ⇒ param omitted |
+| `list[T]` | one param, comma-separated; `,` and `\` in items backslash-escaped; no nested lists |
+
+**Lists** are stored as reactive lists: in-place mutation (`state.tags.append(...)`) also syncs the URL. A non-default empty list serializes as an empty param value.
+
+**Constraints:**
+- Requires a route render context — creating the state outside a component render raises `RuntimeError`.
+- One binding per param name per route; a duplicate raises `ValueError`.
+- Server-synced by design: every change is a round-trip. For rapid URL updates (map viewport, scroll position), sync client-side with `history.replaceState` in transpiled code instead — see `js-interop.md` → "Latency-sensitive interactions".
+
 ## Path Parameters
 
 ### Defining Dynamic Segments

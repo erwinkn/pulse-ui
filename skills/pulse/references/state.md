@@ -34,6 +34,7 @@ class MyState(ps.State):
 - Public type-annotated attributes become reactive
 - Private attributes (underscore prefix) stay plain Python
 - Cannot add new public attributes after init (raises `AttributeError`)
+- Annotate a field as `ps.QueryParam[T]` to two-way sync it with a URL query parameter (see `routing.md`)
 
 ### Constructor Arguments
 

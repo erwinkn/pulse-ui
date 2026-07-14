@@ -1,7 +1,7 @@
 export * from "./dates";
 export * from "./combobox";
 export * from "./dropzone";
-export { createConnectedField, useFieldProps } from "./form/connect";
+export { createConnectedField, useField } from "./form/connect";
 export * from "./form/context";
 export * from "./form/fields";
 export * from "./form/form";

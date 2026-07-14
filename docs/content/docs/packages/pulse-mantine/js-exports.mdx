@@ -44,17 +44,17 @@ createConnectedField(Component, {
 - `coerceEmptyString: true` — for text inputs to prevent uncontrolled/controlled warnings
 - `debounceOnChange: true` — for text inputs to avoid server calls on every keystroke
 
-## useFieldProps
+## useField
 
 A hook that returns form-connected props. Use this when you need more control than `createConnectedField` provides.
 
 ```tsx
-import { useFieldProps } from "pulse-mantine";
+import { useField } from "pulse-mantine";
 
 function CustomInput(props) {
-  const fieldProps = useFieldProps(props, { debounceOnChange: true });
+  const { inputProps, key } = useField(props, { debounceOnChange: true });
 
-  // fieldProps now includes:
+  // inputProps now includes:
   // - value from form state
   // - onChange that updates form + triggers server validation
   // - onBlur that triggers server validation
@@ -62,8 +62,8 @@ function CustomInput(props) {
 
   return (
     <div>
-      <input {...fieldProps} />
-      {fieldProps.error && <span className="error">{fieldProps.error}</span>}
+      <input key={key} {...inputProps} />
+      {inputProps.error && <span className="error">{inputProps.error}</span>}
     </div>
   );
 }
@@ -73,9 +73,11 @@ The hook:
 1. Reads the form context (provided by `MantineForm.render()`)
 2. Merges your props with Mantine's `getInputProps()` result
 3. Wraps `onChange` and `onBlur` to trigger server validation
-4. Returns the merged props
+4. Returns the merged `inputProps` and field `key`
 
-If there's no form context or no `name` prop, it returns the original props unchanged—so your component works both inside and outside forms.
+The returned `key` keeps custom uncontrolled inputs in sync after programmatic updates such as `set_field_value`. Pass it to the input's React `key`, as shown above. `createConnectedField` does this automatically.
+
+If there's no form context or no `name` prop, `inputProps` contains the original props and `key` is undefined—so your component works both inside and outside forms.
 
 ## Full example: Currency input
 
@@ -84,7 +86,7 @@ Here's a complete example of a custom currency input that integrates with Pulse 
 ```tsx
 // components/CurrencyInput.tsx
 import { TextInput } from "@mantine/core";
-import { useFieldProps } from "pulse-mantine";
+import { useField } from "pulse-mantine";
 import type { TextInputProps } from "@mantine/core";
 
 interface CurrencyInputProps extends Omit<TextInputProps, "onChange"> {
@@ -95,14 +97,14 @@ interface CurrencyInputProps extends Omit<TextInputProps, "onChange"> {
 
 export function CurrencyInput({ currency = "USD", onChange, ...props }: CurrencyInputProps) {
   // Connect to form context
-  const fieldProps = useFieldProps(props, {
+  const { inputProps, key } = useField(props, {
     debounceOnChange: true,
     coerceEmptyString: true,
   });
 
   // Format display value
-  const displayValue = fieldProps.value != null
-    ? new Intl.NumberFormat("en-US", { minimumFractionDigits: 2 }).format(fieldProps.value)
+  const displayValue = inputProps.value != null
+    ? new Intl.NumberFormat("en-US", { minimumFractionDigits: 2 }).format(inputProps.value)
     : "";
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -110,13 +112,14 @@ export function CurrencyInput({ currency = "USD", onChange, ...props }: Currency
     const parsed = raw ? parseFloat(raw) : null;
 
     // Call the form's onChange with the numeric value
-    fieldProps.onChange?.(parsed);
+    inputProps.onChange?.(parsed);
     onChange?.(parsed);
   };
 
   return (
     <TextInput
-      {...fieldProps}
+      key={key}
+      {...inputProps}
       value={displayValue}
       onChange={handleChange}
       leftSection={currency}
@@ -151,7 +154,7 @@ When a `MantineForm` renders, it wraps its children with a React context contain
 - The Mantine `useForm` instance
 - Callbacks for server-side validation (`serverOnChange`, `serverOnBlur`)
 
-`useFieldProps` reads this context and merges:
+`useField` reads this context and returns a `key` plus input props that merge:
 1. Your component's props
 2. Mantine's `getInputProps(name)` result (value, onChange, error)
 3. Wrapped handlers that trigger server validation

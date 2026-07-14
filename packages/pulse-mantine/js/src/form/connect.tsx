@@ -23,10 +23,13 @@ function coerceControlledTextValue(props: Record<string, any>, enabled: boolean)
 
 type InputProps = Partial<GetInputPropsReturnType> & { name?: string };
 
-export function useFieldProps<P extends InputProps>(props: P, options?: ConnectedFieldOptions): P {
+export function useField<P extends InputProps>(
+	props: P,
+	options?: ConnectedFieldOptions,
+): { inputProps: P; key: string | undefined } {
 	const ctx = useFormContext();
 	if (!props.name || !ctx) {
-		return props;
+		return { inputProps: props, key: undefined };
 	}
 	const { form, serverOnChange, serverOnBlur } = ctx;
 	const mantineProps = form.getInputProps(props.name, {
@@ -44,7 +47,10 @@ export function useFieldProps<P extends InputProps>(props: P, options?: Connecte
 	};
 	coerceControlledTextValue(merged, !!options?.coerceEmptyString);
 
-	return { ...merged, onChange, onBlur } as P;
+	return {
+		inputProps: { ...merged, onChange, onBlur } as P,
+		key: form.key(name),
+	};
 }
 
 export function createConnectedField<P extends InputProps>(
@@ -52,8 +58,8 @@ export function createConnectedField<P extends InputProps>(
 	options?: ConnectedFieldOptions,
 ): FunctionComponent<P> {
 	const Connected = (props: P) => {
-		const fieldProps = useFieldProps(props, options);
-		return <Component {...fieldProps} />;
+		const { inputProps, key } = useField(props, options);
+		return <Component key={key} {...inputProps} />;
 	};
 
 	Connected.displayName = Component.displayName || Component.name || "Component";

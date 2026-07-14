@@ -50,7 +50,21 @@ pulse run app.py --address 0.0.0.0 --port 8080
 pulse run app.py --server-only --react-server-address http://localhost:5173
 ```
 
-In dev mode, before launching the web dev server `pulse run` installs web dependencies with Bun and generates the route files. Both steps are idempotent and fast on warm starts, so a fresh checkout works without a separate `pulse check --fix` or `pulse generate` first.
+In dev mode, `pulse run` watches Python files and coordinates each reload. It prepares the next backend and generated routes in isolation, confirms the Vite bridge is ready, stops the previous backend with a finite drain deadline, starts the replacement, then publishes the generated files and asks Vite for one full browser reload. Reload failures never tear down the session: failed imports or code generation keep the last good generation running, a crashed backend restarts on your next save, and if Vite briefly misses a commit the backend keeps serving—refresh the browser manually if it looks stale.
+
+Vite still owns ordinary JavaScript, TypeScript, and CSS HMR. Add the Pulse plugin in `vite.config.ts` so generated routes only update through the coordinated commit (`pulse run` adds it automatically if it's missing):
+
+```ts
+import { reactRouter } from "@react-router/dev/vite";
+import { pulseVitePlugin } from "pulse-ui-client/vite";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  plugins: [reactRouter(), pulseVitePlugin()],
+});
+```
+
+`--no-reload` bypasses the Pulse watcher and starts Uvicorn directly. Raw Uvicorn arguments currently require `--no-reload`.
 
 If another Pulse dev instance is already running for the same app, stop it first or rerun with `--interrupt`.
 

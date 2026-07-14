@@ -35,6 +35,11 @@ ENV_PULSE_PORT = "PULSE_PORT"
 ENV_PULSE_REACT_SERVER_ADDRESS = "PULSE_REACT_SERVER_ADDRESS"
 ENV_PULSE_SECRET = "PULSE_SECRET"
 ENV_PULSE_DISABLE_CODEGEN = "PULSE_DISABLE_CODEGEN"
+ENV_PULSE_CODEGEN_OUTPUT = "PULSE_CODEGEN_OUTPUT"
+# Read by the pulseVitePlugin in the Vite process (see packages/pulse/js/src/vite.ts)
+ENV_PULSE_VITE_CONTROL_SECRET = "PULSE_VITE_CONTROL_SECRET"
+ENV_PULSE_VITE_GENERATED_DIR = "PULSE_VITE_GENERATED_DIR"
+ENV_PULSE_VITE_STAGING_DIR = "PULSE_VITE_STAGING_DIR"
 
 
 class EnvVars:
@@ -142,6 +147,14 @@ class EnvVars:
 	@codegen_disabled.setter
 	def codegen_disabled(self, value: bool) -> None:
 		self._set(ENV_PULSE_DISABLE_CODEGEN, "1" if value else None)
+
+	@property
+	def codegen_output(self) -> str | None:
+		return self._get(ENV_PULSE_CODEGEN_OUTPUT)
+
+	@codegen_output.setter
+	def codegen_output(self, value: str | None) -> None:
+		self._set(ENV_PULSE_CODEGEN_OUTPUT, value)
 
 
 # Singleton

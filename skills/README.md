@@ -8,6 +8,7 @@ AI coding assistant skills for Pulse development. These files help AI tools unde
 |-------|-------------|
 | [pulse](./pulse/SKILL.md) | Complete Pulse framework reference with reactive state, components, routing, queries, channels, and JS interop |
 | [pulse-mantine](./pulse-mantine/SKILL.md) | Mantine UI components for Pulse |
+| [pulse-ag-grid](./pulse-ag-grid/SKILL.md) | AG Grid data tables for Pulse via the `AgGridReact` wrapper — JSON-only props, reactive `rowData`/`columnDefs`, pagination, and theming |
 | [pulse-railway](./pulse-railway/SKILL.md) | Railway deployment utilities for Pulse apps, including `RailwayPlugin`, `RailwaySessionStore`, and `pulse-railway scaffold` / `ensure` / `deploy` / `redeploy` |
 | [pulse-aws](./pulse-aws/SKILL.md) | AWS ECS Fargate deployment utilities for Pulse apps |
 

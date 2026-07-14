@@ -73,6 +73,8 @@ Use `RailwaySessionStore()` when the app needs server-backed sessions that survi
 
 ## CLI Workflow
 
+Many repos run `pulse-railway ensure`/`deploy` from CI (e.g. GitHub Actions) rather than locally; check the repo's deployment instructions before running deploy commands manually.
+
 Use `RAILWAY_API_TOKEN` for local user/workspace tokens. Reserve `RAILWAY_TOKEN` for Railway project tokens, especially in CI. If neither is set, `pulse-railway` falls back to the local Railway CLI login session from `~/.railway/config*.json`. CLI login tokens are allowed for local API calls, but `scaffold` and `ensure` will not write them into the long-lived router or janitor services; set `RAILWAY_TOKEN` or `RAILWAY_API_TOKEN` when initializing or repairing runtime credentials.
 
 First-time setup:

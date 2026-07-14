@@ -149,6 +149,21 @@ def UserProfile():
     )
 ```
 
+### Loading UX
+
+- **Scope loading indicators to the region that is loading.** Returning a whole-page spinner on `is_loading` blanks unrelated, already-rendered UI; render the loading state only where the data goes.
+- **Prefer skeletons/placeholders with stable layout** over swapping the page for a spinner — the surrounding layout should not jump when data arrives.
+- **Use `keep_previous_data=True` for pagination/filter changes** so the previous page stays visible instead of flashing back to a loading state:
+
+```python
+@ps.query(keep_previous_data=True)
+async def page_data(self) -> list[dict]:
+    return await api.fetch_page(self.page)
+
+# In the component: render state.page_data.data as usual;
+# dim or badge with state.page_data.is_fetching while the next page loads.
+```
+
 ## `@ps.mutation`
 
 Non-cached operations (create, update, delete). No auto-caching.

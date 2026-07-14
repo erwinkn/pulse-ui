@@ -21,7 +21,7 @@ src/
 │
 └── form/                 # Form state management
     ├── form.tsx          # MantineFormProvider
-    ├── connect.tsx       # createConnectedField, useFieldProps
+    ├── connect.tsx       # createConnectedField, useField
     ├── context.tsx       # Form context
     ├── fields.tsx        # Field components
     └── validators.ts     # Client-side validators
@@ -74,7 +74,7 @@ Client-side date handling with dayjs integration for DatesProvider, DatePicker, 
 
 **Form**:
 - `createConnectedField(Component)` - wrap input for form binding
-- `useFieldProps(name)` - get field props from form context
+- `useField(props)` - get field props and key from form context
 
 **Notifications**:
 - `notifications` - notification API

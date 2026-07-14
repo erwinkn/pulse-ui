@@ -283,6 +283,7 @@ This is difference impacts how the form works in React:
 - Uncontrolled: the form values are not kept in React state and the inputs do not receive `value=...`. Blur and change events can still be handled for validation, but this avoids React rerenders and is generally much more performant.
 
 All the features described above should work for both controlled and uncontrolled forms, including client-server synchronization.
+Programmatic form actions update visible inputs in both modes.
 
 Dynamic forms will require a little special attention, as all your dynamic form items should have unique keys. Otherwise, you may see inputs getting mixed up when you add/remove/reorder form items.
 

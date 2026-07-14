@@ -7,7 +7,9 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pulse.cli.cmd as cmd_mod
+import pulse.cli.reload as reload_mod
 import pytest
+import typer
 from pulse.cli.dependencies import (
 	DependencyPlan,
 	DependencyResolutionError,
@@ -21,6 +23,7 @@ from pulse.cli.lock import (
 	lock_path_for_web_root,
 	write_lock_info,
 )
+from pulse.cli.logging import CLILogger
 from pulse.cli.models import AppLoadResult, CommandSpec
 from pulse.cli.packages import (
 	is_alias_source,
@@ -37,6 +40,14 @@ from pulse.transpiler.imports import Import, clear_import_registry
 from typer.testing import CliRunner
 
 runner = CliRunner()
+
+VITE_CONFIG_WITHOUT_PLUGIN = """import { reactRouter } from "@react-router/dev/vite";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+	plugins: [reactRouter()],
+});
+"""
 
 
 class _GenerateAppStub:
@@ -232,6 +243,10 @@ def test_run_interrupt_stops_existing_server_before_finding_port(
 ):
 	web_root = tmp_path / "web"
 	web_root.mkdir()
+	(web_root / "vite.config.ts").write_text(
+		'import { pulseVitePlugin } from "pulse-ui-client/vite";\n'
+		+ "export default { plugins: [pulseVitePlugin()] };\n"
+	)
 	app_ctx = _make_run_app_ctx(tmp_path, web_root)
 	calls: list[tuple[str, object]] = []
 	commands: list[CommandSpec] = []
@@ -314,12 +329,14 @@ def _patch_run_basics(
 	return commands, installed
 
 
-def test_run_installs_and_generates_before_web(
+def test_run_installs_and_generates_routes_before_supervised_startup(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-	"""`run` installs web deps and generates routes before launching the web server."""
+	"""Vite receives an initial route tree before generation workers take over."""
 	web_root = tmp_path / "web"
 	web_root.mkdir()
+	vite_config = web_root / "vite.config.ts"
+	vite_config.write_text(VITE_CONFIG_WITHOUT_PLUGIN)
 	app_ctx = _make_run_app_ctx(tmp_path, web_root)
 	app = cast(Any, app_ctx.app)
 
@@ -330,11 +347,142 @@ def test_run_installs_and_generates_before_web(
 	)
 
 	assert result.exit_code == 0, result.output
-	# Install runs, then codegen with the bind address, before commands launch.
+	assert "Added pulseVitePlugin() to vite.config.ts" in result.output
+	assert "pulseVitePlugin(), " in vite_config.read_text()
 	assert installed == [["bun", "i"]]
 	assert app.codegen_calls == ["http://localhost:8000"]
 	assert (web_root / "app" / "_pulse" / "routes.ts").exists()
 	assert [c.name for c in commands] == ["web", "server"]
+	assert commands[1].args[1:3] == ["-m", "pulse.cli.reload"]
+	assert "--reload" not in commands[1].args
+	assert commands[1].args[commands[1].args.index("--vite-port") + 1] == "5173"
+	secret = commands[1].env["PULSE_VITE_CONTROL_SECRET"]
+	assert secret
+	assert commands[0].env["PULSE_VITE_CONTROL_SECRET"] == secret
+	# The secret must never appear on a command line (world-readable via ps).
+	assert all(secret not in arg for arg in commands[0].args + commands[1].args)
+	assert commands[0].env["PULSE_VITE_GENERATED_DIR"] == str(
+		web_root / "app" / "_pulse"
+	)
+	assert commands[0].env["PULSE_VITE_STAGING_DIR"] == str(
+		web_root / ".pulse" / "reload" / "_pulse"
+	)
+	assert commands[1].args[commands[1].args.index("--stage-root") + 1] == str(
+		web_root / ".pulse" / "reload" / "_pulse"
+	)
+
+
+def test_reload_command_passes_vite_secret_via_env_not_argv(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+	web_root = tmp_path / "web"
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	monkeypatch.setenv("PULSE_VITE_CONTROL_SECRET", "stale-from-shell")
+
+	spec = cmd_mod.build_reload_command(
+		app_ctx=app_ctx,
+		address="localhost",
+		port=8000,
+		dev_secret=None,
+		server_only=False,
+		web_root=web_root,
+		verbose=False,
+		vite_port=5173,
+		vite_control_secret="fresh-secret",
+		stage_root=web_root / ".pulse" / "reload" / "_pulse",
+	)
+
+	assert spec.env["PULSE_VITE_CONTROL_SECRET"] == "fresh-secret"
+	assert all("fresh-secret" not in arg for arg in spec.args)
+	monkeypatch.setattr(sys, "argv", ["pulse.cli.reload", *spec.args[3:]])
+	args = reload_mod._parse_args()  # pyright: ignore[reportPrivateUsage]
+	assert args.vite_port == 5173
+
+
+def test_ensure_vite_plugin_adds_import_and_plugin_call(tmp_path: Path):
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	config = web_root / "vite.config.ts"
+	config.write_text(VITE_CONFIG_WITHOUT_PLUGIN)
+
+	cmd_mod._ensure_vite_plugin(  # pyright: ignore[reportPrivateUsage]
+		web_root, CLILogger("dev", plain=True)
+	)
+
+	content = config.read_text()
+	assert content.startswith(
+		'import { pulseVitePlugin } from "pulse-ui-client/vite";\n'
+	)
+	assert "plugins: [pulseVitePlugin(), reactRouter()]" in content
+
+
+def test_ensure_vite_plugin_keeps_existing_registration(tmp_path: Path):
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	config = web_root / "vite.config.mts"
+	original = (
+		'import { pulseVitePlugin } from "pulse-ui-client/vite";\n'
+		+ "export default { plugins: [pulseVitePlugin()] };\n"
+	)
+	config.write_text(original)
+
+	cmd_mod._ensure_vite_plugin(  # pyright: ignore[reportPrivateUsage]
+		web_root, CLILogger("dev", plain=True)
+	)
+
+	assert config.read_text() == original
+
+
+def test_ensure_vite_plugin_fails_without_config_file(tmp_path: Path):
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+
+	with pytest.raises(typer.Exit):
+		cmd_mod._ensure_vite_plugin(  # pyright: ignore[reportPrivateUsage]
+			web_root, CLILogger("dev", plain=True)
+		)
+
+
+def test_ensure_vite_plugin_fails_when_plugins_array_is_not_found(tmp_path: Path):
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	config = web_root / "vite.config.ts"
+	original = "export default buildConfig();\n"
+	config.write_text(original)
+
+	with pytest.raises(typer.Exit):
+		cmd_mod._ensure_vite_plugin(  # pyright: ignore[reportPrivateUsage]
+			web_root, CLILogger("dev", plain=True)
+		)
+
+	assert config.read_text() == original
+
+
+def test_run_no_reload_keeps_direct_uvicorn_and_initial_codegen(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+	monkeypatch.setenv("PULSE_VITE_CONTROL_SECRET", "stale")
+	monkeypatch.setenv("PULSE_VITE_GENERATED_DIR", "stale")
+	monkeypatch.setenv("PULSE_VITE_STAGING_DIR", "stale")
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	app = cast(Any, app_ctx.app)
+	commands, installed = _patch_run_basics(monkeypatch, app_ctx)
+
+	result = runner.invoke(
+		cmd_mod.cli,
+		["run", "demo.py", "--plain", "--no-reload", "--no-find-port"],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert installed == [["bun", "i"]]
+	assert app.codegen_calls == ["http://localhost:8000"]
+	assert commands[1].args[1:3] == ["-m", "uvicorn"]
+	assert "--reload" not in commands[1].args
+	assert "PULSE_VITE_CONTROL_SECRET" not in commands[0].env
+	assert "PULSE_VITE_GENERATED_DIR" not in commands[0].env
+	assert "PULSE_VITE_STAGING_DIR" not in commands[0].env
 
 
 def test_run_skips_install_and_codegen_for_server_only(
@@ -600,6 +748,52 @@ def test_execute_commands_streams_output(
 	assert "[server]" in output
 	assert "child-line" in output
 	assert spawns == ["server"]
+
+
+def test_execute_commands_strips_terminal_controls_but_preserves_sgr(
+	tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+	spec = CommandSpec(
+		name="web",
+		args=[
+			sys.executable,
+			"-c",
+			(
+				"print('\\033]0;title update\\007\\033[1;1H\\033[0J\\033[2K\\033[2A\\0337\\0338'"
+				"'\\033[38;5;208mRoute config saved.\\033[0m')"
+			),
+		],
+		cwd=tmp_path,
+		env=os.environ.copy(),
+	)
+
+	assert execute_commands([spec], tag_mode="plain") == 0
+	assert capsys.readouterr().out == (
+		"[web] \033[38;5;208mRoute config saved.\033[0m\n"
+	)
+
+
+def test_execute_commands_can_hide_readiness_handshake(
+	tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+	ready: list[bool] = []
+	spec = CommandSpec(
+		name="server",
+		args=[
+			sys.executable,
+			"-c",
+			"print('Pulse reload ready'); print('visible output')",
+		],
+		cwd=tmp_path,
+		env=os.environ.copy(),
+		ready_pattern=r"Pulse reload ready",
+		on_ready=lambda: ready.append(True),
+		suppress_ready_output=True,
+	)
+
+	assert execute_commands([spec], tag_mode="plain") == 0
+	assert capsys.readouterr().out == "[server] visible output\n"
+	assert ready == [True]
 
 
 def test_execute_commands_stops_remaining_processes_when_one_exits(

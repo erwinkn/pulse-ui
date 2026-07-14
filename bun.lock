@@ -178,12 +178,17 @@
         "esbuild": "^0.25.10",
         "tsdown": "^0.15.7",
         "typescript": "^5",
+        "vite": "^7.3.1",
       },
       "peerDependencies": {
         "react": "^18 || ^19",
         "react-dom": "^18 || ^19",
         "react-router": "^7",
+        "vite": "^7.3.1",
       },
+      "optionalPeers": [
+        "vite",
+      ],
     },
     "tutorial/examples/web": {
       "name": "tutorial-examples",

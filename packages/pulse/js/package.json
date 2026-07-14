@@ -20,6 +20,10 @@
 			"@pulse/source": "./src/index.ts",
 			"default": "./dist/index.js"
 		},
+		"./vite": {
+			"@pulse/source": "./src/vite.ts",
+			"default": "./dist/vite.js"
+		},
 		"./package.json": "./package.json"
 	},
 	"scripts": {
@@ -43,16 +47,24 @@
 		"@testing-library/react": "^16.3.0",
 		"esbuild": "^0.25.10",
 		"tsdown": "^0.15.7",
-		"typescript": "^5"
+		"typescript": "^5",
+		"vite": "^7.3.1"
 	},
 	"peerDependencies": {
 		"react": "^18 || ^19",
 		"react-dom": "^18 || ^19",
-		"react-router": "^7"
+		"react-router": "^7",
+		"vite": "^7.3.1"
+	},
+	"peerDependenciesMeta": {
+		"vite": {
+			"optional": true
+		}
 	},
 	"publishConfig": {
 		"exports": {
 			".": "./dist/index.js",
+			"./vite": "./dist/vite.js",
 			"./package.json": "./package.json"
 		}
 	}

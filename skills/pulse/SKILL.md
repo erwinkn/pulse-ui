@@ -34,6 +34,8 @@ app = ps.App([ps.Route("/", App)])
 
 `pulse run app.py` → dev server on `:8000`
 
+Pulse owns Python development reloads. A reload prepares a disposable backend and generated route tree, confirms the Vite bridge, drains the previous backend, publishes only after replacement readiness, then asks the plugin for one full reload. Frontend-only JS/TS/CSS changes remain Vite HMR.
+
 ## Quick Reference
 
 | Task | API | Section |
@@ -514,7 +516,18 @@ app = ps.App(
 uv run pulse run app.py          # Dev server :8000
 uv run pulse run app.py --port 3000
 uv run pulse run app.py --interrupt  # Stop existing dev instance first
+uv run pulse run app.py --no-reload  # Direct Uvicorn, no Python watcher
 make all                         # Format, lint, typecheck, test
+```
+
+For custom web setups, add `pulseVitePlugin()` in `vite.config.ts`:
+
+```ts
+import { pulseVitePlugin } from "pulse-ui-client/vite";
+
+export default defineConfig({
+  plugins: [reactRouter(), pulseVitePlugin()],
+});
 ```
 
 ## Common Patterns

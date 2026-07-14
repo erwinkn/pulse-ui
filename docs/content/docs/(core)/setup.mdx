@@ -69,6 +69,20 @@ cd ..
 
 This scaffolds a server-side rendered React app that Pulse will use to display your components. You can take a look at how `examples/main.py` and `examples/web/` are set up for a working reference.
 
+Add the Pulse development bridge in `web/vite.config.ts`:
+
+```ts
+import { reactRouter } from "@react-router/dev/vite";
+import { pulseVitePlugin } from "pulse-ui-client/vite";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  plugins: [reactRouter(), pulseVitePlugin()],
+});
+```
+
+Pulse uses this bridge through Vite's existing development server for Python reloads. Vite keeps handling ordinary frontend HMR. If you forget this step, don't worry—`pulse run` checks for the plugin at startup and adds it to your Vite config automatically.
+
 ## Step 3: Run your app
 
 Now you're ready to start your Pulse app:
@@ -77,9 +91,7 @@ Now you're ready to start your Pulse app:
 uv run pulse run app.py
 ```
 
-The `pulse run` command does two things:
-1. **Generates React routes** — It reads your Python components and creates corresponding files in `web/app/pulse/`
-2. **Starts the dev server** — It launches the React Router development server
+The `pulse run` command starts the Python and React Router servers. When you save Python, Pulse prepares the new backend and routes together, then reloads the browser after both are ready.
 
 Open the URL shown in your terminal (usually `http://localhost:5173`) and you should see "Hello Pulse" displayed in your browser!
 

@@ -1278,11 +1278,10 @@ class App:
 		# Cancel any remaining app-level tasks/timers
 		self._tasks.cancel_all()
 		self._timers.cancel_all()
-		if self._proxy is not None:
-			try:
-				await self._proxy.close()
-			except Exception:
-				logger.exception("Error during ReactProxy.close()")
+		try:
+			await self.begin_drain()
+		except Exception:
+			logger.exception("Error during ReactProxy.close()")
 
 		# Update status
 		self.status = AppStatus.stopped
@@ -1292,6 +1291,11 @@ class App:
 				plugin.on_shutdown(self)
 			except Exception:
 				logger.exception("Error during plugin.on_shutdown()")
+
+	async def begin_drain(self) -> None:
+		"""Stop accepting proxy work before the ASGI server drains connections."""
+		if self._proxy is not None:
+			await self._proxy.close()
 
 	def refresh_cookies(self, sid: str):
 		# If the session is currently inside an HTTP request, we don't need to schedule

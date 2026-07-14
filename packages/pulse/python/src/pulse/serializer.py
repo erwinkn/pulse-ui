@@ -39,6 +39,7 @@ from typing import Any
 Primitive = int | float | str | bool | None
 PlainJSON = Primitive | list["PlainJSON"] | dict[str, "PlainJSON"]
 Serialized = tuple[tuple[list[int], list[int], list[int], list[int]], PlainJSON]
+_MAX_SAFE_INTEGER = 2**53 - 1
 
 __all__ = [
 	"serialize",
@@ -61,11 +62,11 @@ def serialize(data: Any) -> Serialized:
 
 	Raises:
 		TypeError: For unsupported types (functions, modules, classes).
-		ValueError: For Infinity float values.
+		ValueError: For integers outside JavaScript's safe range.
 
 	Supported types:
-		- Primitives: None, bool, int, float, str
-		- Collections: list, tuple, dict, set
+		- Primitives: None, bool, JavaScript-safe int, float, str
+		- Collections: list, tuple, dict, set of primitives or dates
 		- datetime.datetime (converted to ISO 8601 UTC)
 		- datetime.date (converted to ISO 8601 date string)
 		- Dataclasses (serialized as dict of fields)
@@ -105,7 +106,13 @@ def serialize(data: Any) -> Serialized:
 		idx = global_index
 		global_index += 1
 
-		if value is None or isinstance(value, (bool, int, str)):
+		if value is None or isinstance(value, (bool, str)):
+			return value
+		if isinstance(value, int):
+			if abs(value) > _MAX_SAFE_INTEGER:
+				raise ValueError(
+					f"Cannot serialize integer {value}: value exceeds JavaScript's safe integer range."
+				)
 			return value
 		if isinstance(value, float):
 			if math.isnan(value):
@@ -134,11 +141,16 @@ def serialize(data: Any) -> Serialized:
 
 		if isinstance(value, dict):
 			result_dict: dict[str, PlainJSON] = {}
-			for key, entry in value.items():
+			keys: list[str] = []
+			for raw_key in value:
+				key: Any = raw_key
 				if not isinstance(key, str):
 					raise TypeError(
 						f"Dict keys must be strings, got {type(key).__name__}: {key!r}"  # pyright: ignore[reportUnknownArgumentType]
 					)
+				keys.append(key)
+			for key in _js_object_key_order(keys):
+				entry = value[key]
 				result_dict[key] = process(entry)
 			return result_dict
 
@@ -151,7 +163,19 @@ def serialize(data: Any) -> Serialized:
 		if isinstance(value, set):
 			sets.append(idx)
 			items: list[PlainJSON] = []
-			for entry in value:
+			has_null = False
+			for raw_entry in value:
+				entry: Any = raw_entry
+				if entry is None or (isinstance(entry, float) and math.isnan(entry)):
+					if has_null:
+						continue
+					has_null = True
+					entry = None
+				elif not isinstance(entry, (bool, int, float, str, dt.date)):
+					raise TypeError(
+						"Set values must be primitives or dates, "
+						+ f"got {type(entry).__name__}"  # pyright: ignore[reportUnknownArgumentType]
+					)
 				items.append(process(entry))
 			return items
 
@@ -166,9 +190,13 @@ def serialize(data: Any) -> Serialized:
 
 		if hasattr(value, "__dict__"):
 			inst_obj: dict[str, PlainJSON] = {}
-			for key, entry in vars(value).items():
-				if key.startswith("_"):
-					continue
+			attributes: dict[str, Any] = {
+				key: entry
+				for key, entry in vars(value).items()
+				if not key.startswith("_")
+			}
+			for key in _js_object_key_order(list(attributes)):
+				entry = attributes[key]
 				inst_obj[key] = process(entry)
 			return inst_obj
 
@@ -276,6 +304,28 @@ def deserialize(
 		raise TypeError(f"Unsupported value in deserialization: {type(value)!r}")
 
 	return reconstruct(data)
+
+
+def _js_object_key_order(keys: list[str]) -> list[str]:
+	# Metadata uses positional node indices. Match Object.keys(), which enumerates
+	# integer-like keys numerically, so JavaScript deserializes the same node order.
+	indices: list[tuple[int, str]] = []
+	others: list[str] = []
+	for key in keys:
+		if key == "0":
+			indices.append((0, key))
+		elif (
+			key.isascii()
+			and key.isdigit()
+			and not key.startswith("0")
+			and (len(key) < 10 or (len(key) == 10 and key <= "4294967294"))
+		):
+			index = int(key)
+			indices.append((index, key))
+		else:
+			others.append(key)
+	indices.sort(key=lambda item: item[0])
+	return [key for _, key in indices] + others
 
 
 def _datetime_to_iso(value: dt.datetime) -> str:

@@ -133,7 +133,7 @@
     },
     "packages/pulse-mantine/js": {
       "name": "pulse-mantine",
-      "version": "0.1.42",
+      "version": "0.1.43",
       "devDependencies": {
         "@testing-library/dom": "^10.4.1",
         "@testing-library/react": "^16.3.0",

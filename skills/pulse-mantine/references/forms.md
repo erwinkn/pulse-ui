@@ -61,7 +61,19 @@ form.render(
 ]
 ```
 
-All inputs with `name=` participate in form state, sync, and validation — including `Autocomplete` (connected since pulse-mantine 0.1.39).
+Supported form fields with `name=` participate in form state, sync, and validation. This includes:
+
+- List-valued `MultiSelect`, `TagsInput`, and `CheckboxGroup`
+- `Autocomplete` (connected since pulse-mantine 0.1.39)
+
+Low-level composition primitives are not form fields. Examples:
+
+- `PillsInput` and `PillsInputField`
+- `ChipGroup`
+- `ComboboxSearch`
+
+Connect a custom component explicitly with `useField`/`createConnectedField`
+when needed.
 
 ## Validation
 

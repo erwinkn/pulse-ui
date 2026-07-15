@@ -11,9 +11,25 @@ Building a form requires three things:
 
 1. A `MantineForm` instance (created inside `ps.init()`)
 2. Calling `form.render()` to set up the form element
-3. Giving a `name` prop to all inputs inside the form
+3. Giving a `name` prop to each form field inside the form
 
-The `name` defines the field's path in the form data structure. Inputs automatically detect they're inside a form and register themselves.
+The `name` defines the field's path in the form data structure. Supported form
+fields automatically detect they're inside a form and register themselves.
+
+This includes list-valued fields such as:
+
+- `MultiSelect`
+- `TagsInput`
+- `CheckboxGroup`
+
+Low-level composition primitives do not define a form-field contract. Examples:
+
+- `PillsInput` and `PillsInputField`
+- `ChipGroup`
+- `ComboboxSearch`
+
+Use a supported field component or connect a custom component with the
+JavaScript `useField`/`createConnectedField` APIs.
 
 ```python
 import pulse as ps

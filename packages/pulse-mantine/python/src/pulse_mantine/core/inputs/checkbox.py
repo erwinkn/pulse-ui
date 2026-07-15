@@ -9,7 +9,7 @@ _Checkbox = ps.Import("Checkbox", "@mantine/core")
 def Checkbox(key: str | None = None, **props: Any): ...
 
 
-@ps.react_component(_Checkbox.Group)
+@ps.react_component(ps.Import("CheckboxGroup", "pulse-mantine"))
 def CheckboxGroup(*children: ps.Node, key: str | None = None, **props: Any): ...
 
 

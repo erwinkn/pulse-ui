@@ -56,8 +56,8 @@ export function useField<P extends InputProps>(
 export function createConnectedField<P extends InputProps>(
 	Component: ComponentType<P>,
 	options?: ConnectedFieldOptions,
-): FunctionComponent<P> {
-	const Connected = (props: P) => {
+) {
+	const Connected: FunctionComponent<P & { name?: string }> = (props) => {
 		const { inputProps, key } = useField(props, options);
 		return <Component key={key} {...inputProps} />;
 	};

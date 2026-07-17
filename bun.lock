@@ -133,7 +133,7 @@
     },
     "packages/pulse-mantine/js": {
       "name": "pulse-mantine",
-      "version": "0.1.43",
+      "version": "0.1.44",
       "devDependencies": {
         "@testing-library/dom": "^10.4.1",
         "@testing-library/react": "^16.3.0",
@@ -155,7 +155,7 @@
         "@mantine/hooks": "^8",
         "@mantine/notifications": "^8",
         "dayjs": "^1",
-        "pulse-ui-client": "^0.1.29",
+        "pulse-ui-client": "^0.1.105",
         "react": "^19.1.1",
         "react-dom": "^19.1.1",
         "recharts": "^3",
@@ -163,7 +163,7 @@
     },
     "packages/pulse/js": {
       "name": "pulse-ui-client",
-      "version": "0.1.104",
+      "version": "0.1.105",
       "dependencies": {
         "socket.io-client": "^4.8.1",
         "ws": "^8.18.3",

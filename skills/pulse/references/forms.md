@@ -108,7 +108,7 @@ Automatically resets to `False` after `onSubmit` handler completes or raises.
 
 ## FormData Handling
 
-`FormData` is `dict[str, FormValue | list[FormValue]]` where `FormValue = str | UploadFile`.
+`FormData` is `dict[str, FormValue]`. Native controls produce strings and uploads, with repeated names grouped into lists. Form integrations can also submit nested values.
 
 ### Accessing Fields
 
@@ -138,6 +138,12 @@ async def handle_submit(data: ps.FormData):
     if not isinstance(options, list):
         options = [options]
 ```
+
+### Structured Values
+
+Form integrations can submit nested mappings, sequences, sets, dates, numbers, booleans, null values, and uploaded files. Pulse encodes these through reserved multipart fields and reconstructs them before calling the handler.
+
+The reserved fields are `__pulse_data__`, `__pulse_files__`, and `__pulse_files__.N`. Don't construct or reuse them manually. Malformed structured payloads return HTTP 400.
 
 ### Form with State
 
@@ -407,8 +413,14 @@ See the [pulse-mantine forms documentation](/docs/packages/pulse-mantine/forms) 
 
 ```python
 # Type aliases
-FormValue = str | UploadFile
-FormData = dict[str, FormValue | list[FormValue]]
+FormScalar = str | int | float | bool | date | datetime | UploadFile | None
+FormValue = (
+    FormScalar
+    | Sequence[FormValue]
+    | Mapping[str, FormValue]
+    | AbstractSet[FormValue]
+)
+FormData = dict[str, FormValue]
 
 # Event handler type
 EventHandler1[FormData]  # (FormData) -> None | Awaitable[None]

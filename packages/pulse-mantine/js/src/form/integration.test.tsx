@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from "bun:test";
 import { MantineProvider } from "@mantine/core";
 import { fireEvent, render } from "@testing-library/react";
+import { useField } from "./connect";
 import { Checkbox, CheckboxGroup, MultiSelect, TagsInput } from "./fields";
 
 const channel = {
@@ -11,15 +12,70 @@ const client = {
 	acquireChannel: () => channel,
 	releaseChannel: () => {},
 };
-const submitForm = mock((_options: { formData: FormData }) => {});
+const submitForm = mock((_options: { values: unknown }) => {});
 
 mock.module("pulse-ui-client", () => ({
-	serialize: (value: unknown) => value,
 	submitForm,
 	usePulseClient: () => client,
 }));
 
 const { Form } = await import("./form");
+
+type Sample = {
+	sample_id: string;
+	project: {
+		name: string;
+		metadata: { kind: string };
+	};
+};
+
+type ListInputProps = {
+	name: string;
+	onChange?: (value: Sample[]) => void;
+};
+
+function CommitRows({ rows }: { rows: Sample[] }) {
+	const { inputProps, key } = useField<ListInputProps>(
+		{ name: "samples" },
+		{ debounceOnChange: true },
+	);
+
+	return (
+		<button
+			key={key}
+			type="button"
+			onClick={() => inputProps.onChange?.([...rows])}
+		>
+			Commit rows
+		</button>
+	);
+}
+
+const listCommitCases: Array<[string, Sample[]]> = [
+	["empty", []],
+	[
+		"one",
+		[
+			{
+				sample_id: "sample-1",
+				project: { name: "Project A", metadata: { kind: "single" } },
+			},
+		],
+	],
+	[
+		"two",
+		[
+			{
+				sample_id: "sample-1",
+				project: { name: "Project A", metadata: { kind: "first" } },
+			},
+			{
+				sample_id: "sample-2",
+				project: { name: "Project B", metadata: { kind: "second" } },
+			},
+		],
+	],
+];
 
 const listFields = [
 	["MultiSelect", MultiSelect],
@@ -27,11 +83,42 @@ const listFields = [
 ] as const;
 
 function submittedValues() {
-	const formData = submitForm.mock.calls.at(-1)?.[0]?.formData;
-	return JSON.parse(formData!.get("__data__") as string);
+	return submitForm.mock.calls.at(-1)?.[0]?.values as Record<string, unknown>;
 }
 
 describe("MantineForm list-valued fields", () => {
+	it.each(listCommitCases)(
+		"reproduces custom useField list commit for %s rows",
+		(_label, rows) => {
+			submitForm.mockClear();
+			channel.emit.mockClear();
+			const view = render(
+				<MantineProvider>
+					<Form
+						channelId="form-custom-list-repro"
+						mode="uncontrolled"
+						initialValues={{ samples: rows }}
+						syncMode="change"
+						debounceMs={0}
+					>
+						<CommitRows rows={rows} />
+						<button type="submit">Submit</button>
+					</Form>
+				</MantineProvider>,
+			);
+
+			fireEvent.click(view.getByRole("button", { name: "Commit rows" }));
+			const sync = channel.emit.mock.calls.find(
+				([event]) => event === "syncValues",
+			)?.[1];
+			expect(sync?.values).toEqual({ samples: rows });
+
+			fireEvent.submit(view.container.querySelector("form")!);
+			expect(submittedValues()).toEqual({ samples: rows });
+			expect(Array.isArray(submittedValues().samples)).toBe(true);
+		},
+	);
+
 	it.each(listFields)("submits %s values as a list", (_label, Field) => {
 		submitForm.mockClear();
 		channel.emit.mockClear();

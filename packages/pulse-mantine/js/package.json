@@ -1,6 +1,6 @@
 {
 	"name": "pulse-mantine",
-	"version": "0.1.43",
+	"version": "0.1.44",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/erwinkn/pulse-ui",
@@ -41,7 +41,7 @@
 		"typescript": "^5.9.2"
 	},
 	"peerDependencies": {
-		"pulse-ui-client": "^0.1.29",
+		"pulse-ui-client": "^0.1.105",
 		"react": "^19.1.1",
 		"react-dom": "^19.1.1",
 		"@mantine/charts": "^8",

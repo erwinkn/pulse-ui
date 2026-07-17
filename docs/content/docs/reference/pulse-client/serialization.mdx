@@ -291,13 +291,18 @@ Rejects with `FormSubmissionError` when the form endpoint returns a non-2xx resp
 ### Parameters
 
 ```ts
-interface SubmitFormOptions {
+interface SubmitFormBase {
   event: FormEvent<HTMLFormElement>;
   action: string;
   onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
-  formData?: FormData;
   force?: boolean;
 }
+
+type SubmitFormOptions = SubmitFormBase & (
+  | { formData: FormData; values?: never }
+  | { values: unknown; formData?: never }
+  | { formData?: never; values?: never }
+);
 ```
 
 | Option | Type | Description |
@@ -306,7 +311,10 @@ interface SubmitFormOptions {
 | `action` | `string` | Form action URL |
 | `onSubmit` | `function` | Optional submit handler |
 | `formData` | `FormData` | Optional pre-built form data |
+| `values` | `unknown` | Optional structured values encoded by Pulse |
 | `force` | `boolean` | Submit even if `defaultPrevented` |
+
+Pass either `formData` or `values`, never both. When neither is provided, Pulse reads native controls from the submitted form.
 
 ### Example
 

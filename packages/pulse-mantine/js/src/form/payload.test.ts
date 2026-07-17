@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { extractDataAndFiles, stripFilesForSync } from "./payload";
+import { stripFilesForSync } from "./payload";
 
 describe("MantineForm payload helpers", () => {
 	it("strips files from sync payloads", () => {
@@ -18,22 +18,5 @@ describe("MantineForm payload helpers", () => {
 			attachments: [],
 			nested: { docs: [], keep: true },
 		});
-	});
-
-	it("extracts files for multipart submit data", () => {
-		const file = new File(["content"], "spec.pdf", {
-			type: "application/pdf",
-		});
-
-		const { dataWithoutFiles, filesByPath } = extractDataAndFiles({
-			title: "Export queue",
-			attachments: [file],
-		});
-
-		expect(dataWithoutFiles).toEqual({
-			title: "Export queue",
-			attachments: [undefined],
-		});
-		expect(filesByPath.get("attachments.0")).toEqual([file]);
 	});
 });

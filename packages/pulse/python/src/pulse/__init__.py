@@ -1149,6 +1149,9 @@ from pulse.forms import (
 	FormData as FormData,
 )
 from pulse.forms import (
+	FormScalar as FormScalar,
+)
+from pulse.forms import (
 	FormValue as FormValue,
 )
 from pulse.forms import (

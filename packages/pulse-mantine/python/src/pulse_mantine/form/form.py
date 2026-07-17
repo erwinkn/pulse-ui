@@ -1,6 +1,4 @@
-import json
-from collections.abc import Iterator, Mapping, Sequence
-from datetime import datetime
+from collections.abc import Mapping
 from typing import (
 	Any,
 	Generic,
@@ -14,7 +12,6 @@ import pulse as ps
 from pulse.helpers import call_flexible, maybe_await
 from pulse.reactive_extensions import ReactiveDict
 from pulse.scheduling import create_task
-from pulse.serializer import deserialize
 
 from .internal import FormInternal, FormMode
 from .validators import (
@@ -25,8 +22,8 @@ from .validators import (
 	serialize_validation,
 )
 
-FieldValue = str | int | float | bool | datetime | ps.UploadFile
-FormValues = Mapping[str, "FieldValue | Sequence[FieldValue] | FormValues"]
+FieldValue = ps.FormScalar
+FormValues = Mapping[str, object]
 
 TForm = TypeVar("TForm", bound=FormValues)
 
@@ -122,20 +119,7 @@ class MantineForm(ps.State, Generic[TForm]):
 			self._create_channel()
 
 	async def _handle_form_data(self, data: ps.FormData):
-		# Expect one JSON-serialized entry under "__data__" with v3 serializer
-		# and remaining entries are files keyed by their dot/bracket paths.
-		raw = data.get("__data__")
-		base: dict[str, Any] = {}
-		if isinstance(raw, str) and raw:
-			try:
-				payload = json.loads(raw)
-				base = deserialize(payload)
-			except Exception:
-				base = {}
-
-		# Merge file entries back into the nested structure
-		files: dict[str, Any] = {k: v for k, v in data.items() if k != "__data__"}
-		result = _merge_files_into_structure(base, files)
+		result = cast(dict[str, Any], data)
 
 		# Run server-side validation for ALL rules before forwarding to user's onSubmit.
 		# This mirrors Mantine behavior where onSubmit is called only if the form is valid.
@@ -534,33 +518,6 @@ def _check_for_reserved_keys(obj: Any, path: str = "") -> None:
 			_check_for_reserved_keys(v, f"{path}[{idx}]")
 
 
-def _merge_files_into_structure(base: Any, files: dict[str, Any]) -> Any:
-	result = _deep_copy(base)
-
-	# Expand lists of files into multiple insert operations
-	def iter_entries() -> Iterator[tuple[str, Any]]:
-		for path, value in files.items():
-			if isinstance(value, list):
-				value = cast(list[Any], value)
-				for item in value:
-					yield (path, item)
-			else:
-				yield (path, value)
-
-	for path, value in iter_entries():
-		segments = _tokenize_path(path)
-		_set_deep(result, segments, value)
-	return result
-
-
-def _deep_copy(obj: Any) -> Any:
-	if isinstance(obj, dict):
-		return {k: _deep_copy(v) for k, v in obj.items()}
-	if isinstance(obj, list):
-		return [_deep_copy(v) for v in obj]
-	return obj
-
-
 def _tokenize_path(path: str) -> list[str]:
 	# Convert bracket notation to dots: a[0].b -> a.0.b
 	out: list[str] = []
@@ -620,8 +577,12 @@ def _ensure_container(parent: Any, key: str | int, next_is_index: bool) -> Any:
 		return child
 
 
-def _set_deep(root: Any, segments: list[str], value: Any) -> None:
-	# Walk creating containers as needed; set or append at leaf
+def _set_deep(
+	root: Any,
+	segments: list[str],
+	value: Any,
+) -> None:
+	# Walk creating containers as needed and replace the leaf value.
 	cur = root
 	for idx, raw_seg in enumerate(segments):
 		is_last = idx == len(segments) - 1
@@ -634,28 +595,12 @@ def _set_deep(root: Any, segments: list[str], value: Any) -> None:
 				cur = cast(list[Any], cur)
 				while len(cur) <= seg:
 					cur.append(None)
-				existing = cur[seg]
-				if existing is None:
-					cur[seg] = value
-				else:
-					if isinstance(existing, list):
-						existing = cast(list[Any], existing)
-						existing.append(value)
-					else:
-						cur[seg] = [existing, value]
+				cur[seg] = value
 			else:
 				if not isinstance(cur, dict):
 					return
 				cur = cast(dict[str, Any], cur)
-				existing = cur.get(seg)
-				if existing is None:
-					cur[seg] = value
-				else:
-					if isinstance(existing, list):
-						existing = cast(list[Any], existing)
-						existing.append(value)
-					else:
-						cur[seg] = [existing, value]
+				cur[seg] = value
 		else:
 			next_is_index = segments[idx + 1].isdigit()
 			child = _ensure_container(cur, seg, next_is_index)

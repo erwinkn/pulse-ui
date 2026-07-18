@@ -126,13 +126,9 @@ class ChannelsManager:
 
 	# ------------------------------------------------------------------
 	def handle_client_response(self, message: ClientChannelResponseMessage) -> None:
-		response_to = message.get("responseTo")
-		if not response_to:
-			return
-
-		error = message.get("error")
-		if error is not None:
-			self.resolve_pending_error(response_to, error)
+		response_to = message["responseTo"]
+		if "error" in message:
+			self.resolve_pending_error(response_to, message["error"])
 		else:
 			self._resolve_pending_success(response_to, message.get("payload"))
 
@@ -206,8 +202,9 @@ class ChannelsManager:
 					type="channel_message",
 					channel=channel.id,
 					responseTo=request_id,
-					payload=result,
 				)
+				if result is not None:
+					msg["payload"] = result
 				self.send_to_client(
 					channel=channel,
 					msg=msg,
@@ -326,7 +323,6 @@ class ChannelsManager:
 				type="channel_message",
 				channel=channel.id,
 				event="__close__",
-				payload=None,
 			)
 			self.send_to_client(
 				channel=channel,
@@ -465,8 +461,9 @@ class Channel:
 			type="channel_message",
 			channel=self.id,
 			event=event,
-			payload=payload,
 		)
+		if payload is not None:
+			msg["payload"] = payload
 		self._manager.send_to_client(
 			channel=self,
 			msg=msg,
@@ -508,9 +505,10 @@ class Channel:
 			type="channel_message",
 			channel=self.id,
 			event=event,
-			payload=payload,
 			requestId=request_id,
 		)
+		if payload is not None:
+			msg["payload"] = payload
 		self._manager.send_to_client(
 			channel=self,
 			msg=msg,

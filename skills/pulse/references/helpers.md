@@ -137,7 +137,7 @@ Numeric values for pixel properties:
 
 ### ps.serialize()
 
-Convert Python values to Pulse's version 5 JSON-compatible wire format.
+Convert Python values to Pulse's JSON-compatible wire format.
 
 ```python
 serialized = ps.serialize(data)
@@ -207,6 +207,18 @@ app = ps.App(
 Adapters are one-way projections. Decoding returns the projected value, not the
 original class. Classes that own their wire projection can subclass
 `ps.PulseSerializable` and implement `to_pulse()`.
+
+For Pandas data frames, install the optional `pulse-pandas` package and add its
+records adapter:
+
+```python
+from pulse_pandas import dataframe_records_adapter
+
+app = ps.App(
+    routes=[...],
+    serializer=ps.Serializer([dataframe_records_adapter]),
+)
+```
 
 ## Event Handler Types
 

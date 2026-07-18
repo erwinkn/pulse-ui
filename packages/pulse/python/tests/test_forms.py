@@ -1,5 +1,6 @@
 import json
 from io import BytesIO
+from typing import cast
 
 import httpx
 import pulse as ps
@@ -87,7 +88,8 @@ def test_decode_structured_form_data_uses_configured_serializer():
 			self.payloads.append(payload)
 			return {"name": "Ada"}
 
-	serializer = RecordingSerializer()
+	recording = RecordingSerializer()
+	serializer = cast(ps.Serializer, cast(object, recording))
 	data = forms.normalize_form_data(
 		StarletteFormData(
 			{
@@ -97,10 +99,10 @@ def test_decode_structured_form_data_uses_configured_serializer():
 		)
 	)
 
-	assert forms._decode_structured_form_data(  # pyright: ignore[reportPrivateUsage, reportArgumentType]
+	assert forms._decode_structured_form_data(  # pyright: ignore[reportPrivateUsage]
 		data, serializer
 	) == {"name": "Ada"}
-	assert serializer.payloads == [[5, None]]
+	assert recording.payloads == [[5, None]]
 
 
 @pytest.mark.parametrize("reserved", ["__pulse_data__", "__pulse_files__"])

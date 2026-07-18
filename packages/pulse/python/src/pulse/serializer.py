@@ -67,19 +67,15 @@ _CORE_ADAPTER_TARGETS = frozenset(
 )
 
 
-@dataclass(frozen=True, slots=True, init=False)
+@dataclass(frozen=True, slots=True, init=False, eq=False)
 class Serializer:
 	"""Immutable serializer with an ordered set of type adapters."""
 
-	adapters: tuple[SerializerAdapter[Any], ...]
-	_adapter_lookup: Mapping[type[object], SerializerAdapter[Any]] = field(
-		repr=False, compare=False
-	)
+	_adapter_lookup: Mapping[type[object], SerializerAdapter[Any]] = field(repr=False)
 
 	def __init__(self, adapters: Iterable[SerializerAdapter[Any]] = ()) -> None:
-		adapter_tuple = tuple(adapters)
 		lookup: dict[type[object], SerializerAdapter[Any]] = {}
-		for adapter in adapter_tuple:
+		for adapter in adapters:
 			target = adapter.type
 			if not isinstance(target, type):
 				raise TypeError("Serializer adapter target must be a type.")
@@ -96,33 +92,31 @@ class Serializer:
 					f"Serializer adapter for {target.__name__} must be callable."
 				)
 			lookup[target] = adapter
-		object.__setattr__(self, "adapters", adapter_tuple)
 		object.__setattr__(self, "_adapter_lookup", MappingProxyType(lookup))
 
 	def serialize(self, data: object) -> Serialized:
-		"""Serialize a Python value to the v5 wire format."""
+		"""Serialize a Python value to Pulse's wire format."""
 		return _Encoder(self._adapter_lookup).run(data)
 
 	def deserialize(self, payload: Serialized) -> Any:
-		"""Deserialize a v5 wire payload."""
+		"""Deserialize a Pulse wire payload."""
 		return _Decoder().run(payload)
 
 
-DEFAULT_SERIALIZER = Serializer()
+_DEFAULT_SERIALIZER = Serializer()
 
 
 def serialize(data: object) -> Serialized:
 	"""Serialize with the default serializer."""
-	return DEFAULT_SERIALIZER.serialize(data)
+	return _DEFAULT_SERIALIZER.serialize(data)
 
 
 def deserialize(payload: Serialized) -> Any:
 	"""Deserialize with the default serializer."""
-	return DEFAULT_SERIALIZER.deserialize(payload)
+	return _DEFAULT_SERIALIZER.deserialize(payload)
 
 
 __all__ = [
-	"DEFAULT_SERIALIZER",
 	"PulseSerializable",
 	"Serialized",
 	"Serializer",
@@ -212,7 +206,7 @@ class _Encoder:
 				projected = current.to_pulse()
 			elif is_dataclass(current) and not isinstance(current, type):
 				return current, tuple(aliases)
-			elif isinstance(current, (WireMap, dict, list, tuple, set)):
+			elif isinstance(current, (dict, list, tuple, set)):
 				return current, tuple(aliases)
 			else:
 				raise TypeError(
@@ -434,10 +428,9 @@ class _Encoder:
 				js_key = ("datetime-object", id(source))
 				python_key = ("datetime", wire)
 			else:
-				terminal, aliases = self._resolve_set_item(source)
-				sort_key = _set_sort_key(terminal)
-				js_key = _set_js_key(terminal)
-				python_key = _set_python_key(terminal)
+				terminal, aliases, sort_key, js_key, python_key = (
+					self._resolve_set_item(source)
+				)
 			if js_key in seen_js or python_key in seen_python:
 				raise ValueError(
 					f"Cannot serialize {_format_path(self.path)}: duplicate set value."
@@ -455,37 +448,70 @@ class _Encoder:
 			self.path.pop()
 		return ["$", "s", items]
 
-	def _resolve_set_item(self, value: object) -> tuple[object, tuple[object, ...]]:
-		value_type = type(value)
-		if value is None or value_type in {bool, int, float, str, dt.date, dt.datetime}:
-			terminal, aliases = value, ()
-		else:
-			terminal, aliases = self._resolve_custom(value)
+	def _resolve_set_item(
+		self, value: object
+	) -> tuple[
+		object,
+		tuple[object, ...],
+		tuple[Any, ...],
+		tuple[Any, ...],
+		tuple[Any, ...],
+	]:
+		terminal, aliases = self._resolve_custom(value)
 		terminal_type = type(terminal)
 		if terminal_type is float and math.isnan(cast(float, terminal)):
-			return None, ()
-		if terminal is None or terminal_type in {
-			bool,
-			int,
-			float,
-			str,
-			dt.date,
-			dt.datetime,
-		}:
-			if terminal_type is str:
-				_validate_portable_string(cast(str, terminal), self.path, "serialize")
-			elif terminal_type is int:
-				_validate_safe_integer(cast(int, terminal), self.path, "serialize")
-			elif terminal_type is float:
-				_validate_float(
-					cast(float, terminal),
-					self.path,
-					"serialize",
-					reject_negative_zero=True,
-				)
-			elif terminal_type in {dt.date, dt.datetime}:
-				_temporal_to_wire(terminal, self.path)
-			return terminal, aliases
+			return None, (), (0, ""), ("null",), ("null",)
+		if terminal is None:
+			return terminal, aliases, (0, ""), ("null",), ("null",)
+		if terminal_type is bool:
+			return (
+				terminal,
+				aliases,
+				(1, int(cast(bool, terminal))),
+				("bool", terminal),
+				("bool-number", int(cast(bool, terminal))),
+			)
+		if terminal_type is int:
+			_validate_safe_integer(cast(int, terminal), self.path, "serialize")
+			return (
+				terminal,
+				aliases,
+				(2, terminal),
+				("number", float(cast(int, terminal))),
+				("bool-number", float(cast(int, terminal))),
+			)
+		if terminal_type is float:
+			_validate_float(
+				cast(float, terminal),
+				self.path,
+				"serialize",
+				reject_negative_zero=True,
+			)
+			return (
+				terminal,
+				aliases,
+				(2, terminal),
+				("number", terminal),
+				("bool-number", terminal),
+			)
+		if terminal_type is str:
+			_validate_portable_string(cast(str, terminal), self.path, "serialize")
+			return (
+				terminal,
+				aliases,
+				(3, terminal),
+				("string", terminal),
+				("string", terminal),
+			)
+		if terminal_type is dt.date or terminal_type is dt.datetime:
+			wire = _temporal_to_wire(terminal, self.path)
+			return (
+				terminal,
+				aliases,
+				(4, wire),
+				("datetime-object", id(terminal)),
+				("datetime", wire),
+			)
 		raise TypeError(
 			f"Cannot serialize {_format_path(self.path)}: set values must project to "
 			+ "null, booleans, strings, finite numbers, dates, or datetimes."
@@ -679,17 +705,10 @@ class _Decoder:
 				js_key = ("bool", item)
 				python_key = ("bool-number", int(cast(bool, item)))
 			elif item_type is int:
-				_validate_safe_integer(cast(int, item), self.path, "deserialize")
 				sort_key = (2, item)
 				js_key = ("number", float(cast(int, item)))
 				python_key = ("bool-number", float(cast(int, item)))
 			elif item_type is float:
-				_validate_float(
-					cast(float, item),
-					self.path,
-					"deserialize",
-					reject_negative_zero=False,
-				)
 				sort_key = (2, item)
 				js_key = ("number", cast(float, item))
 				python_key = ("bool-number", cast(float, item))
@@ -791,52 +810,7 @@ def _datetime_from_wire(value: str, path: list[_PathSegment]) -> dt.datetime:
 		raise ValueError(
 			f"Invalid datetime literal at {_format_path(path)}: {value!r}"
 		) from exc
-	return parsed.astimezone(dt.UTC)
-
-
-def _set_sort_key(value: object) -> tuple[Any, ...]:
-	value_type = type(value)
-	if value is None:
-		return (0, "")
-	if value_type is bool:
-		return (1, int(cast(bool, value)))
-	if value_type in {int, float}:
-		return (2, cast(int | float, value))
-	if value_type is str:
-		return (3, cast(str, value))
-	if value_type in {dt.date, dt.datetime}:
-		return (4, _temporal_to_wire(value, []))
-	raise TypeError(f"Unsupported set value type: {value_type.__name__}")
-
-
-def _set_js_key(value: object) -> tuple[Any, ...]:
-	value_type = type(value)
-	if value is None:
-		return ("null",)
-	if value_type is bool:
-		return ("bool", value)
-	if value_type in {int, float}:
-		return ("number", float(cast(int | float, value)))
-	if value_type is str:
-		return ("string", value)
-	if value_type in {dt.date, dt.datetime}:
-		return ("datetime-object", id(value))
-	raise TypeError(f"Unsupported set value type: {value_type.__name__}")
-
-
-def _set_python_key(value: object) -> tuple[Any, ...]:
-	value_type = type(value)
-	if value is None:
-		return ("null",)
-	if value_type is bool:
-		return ("bool-number", int(cast(bool, value)))
-	if value_type in {int, float}:
-		return ("bool-number", float(cast(int | float, value)))
-	if value_type is str:
-		return ("string", value)
-	if value_type in {dt.date, dt.datetime}:
-		return ("datetime", _temporal_to_wire(value, []))
-	raise TypeError(f"Unsupported set value type: {value_type.__name__}")
+	return parsed
 
 
 def _decode_identity_id(value: object, path: list[_PathSegment]) -> int:

@@ -957,8 +957,7 @@ class RenderSession:
 		fut = self._pending_js_results.pop(exec_id, None)
 		if fut is None or fut.done():
 			return
-		error = data.get("error")
-		if error is not None:
-			fut.set_exception(JsExecError(error))
+		if "error" in data:
+			fut.set_exception(JsExecError(data["error"]))
 		else:
 			fut.set_result(data.get("result"))

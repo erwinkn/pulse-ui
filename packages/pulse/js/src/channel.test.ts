@@ -74,7 +74,6 @@ describe("ChannelBridge", () => {
 			type: "channel_message",
 			channel: "chan-1",
 			responseTo: "req-2",
-			payload: undefined,
 		});
 	});
 

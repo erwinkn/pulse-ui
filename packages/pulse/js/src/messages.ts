@@ -48,16 +48,15 @@ export interface ServerChannelRequestMessage {
 	payload?: any;
 	requestId?: string;
 	responseTo?: never;
-	error?: any;
 }
 
 export interface ServerChannelResponseMessage {
 	type: "channel_message";
 	channel: string;
-	event?: undefined;
+	event?: never;
 	responseTo: string;
 	payload?: any;
-	error?: any;
+	error?: string;
 	requestId?: never;
 }
 
@@ -141,16 +140,15 @@ export interface ClientChannelRequestMessage {
 	payload?: any;
 	requestId?: string;
 	responseTo?: never;
-	error?: any;
 }
 
 export interface ClientChannelResponseMessage {
 	type: "channel_message";
 	channel: string;
-	event?: undefined;
+	event?: never;
 	responseTo: string;
 	payload?: any;
-	error?: any;
+	error?: string;
 	requestId?: never;
 }
 

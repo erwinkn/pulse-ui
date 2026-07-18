@@ -1,5 +1,4 @@
 export type Primitive = number | string | boolean | null;
-export type Serializable = any;
 
 export type WireValue = Primitive | WireValue[] | { [key: string]: WireValue };
 export type Serialized = [5, WireValue];
@@ -19,29 +18,28 @@ interface CanonicalSetItem {
 	number: number;
 	text: string;
 	collisionKey: string;
-	kind: "null" | "boolean" | "number" | "string" | "datetime";
 }
 
-export function serialize(data: Serializable): Serialized {
+export function serialize(data: unknown): Serialized {
 	const seen = new Map<object, number>();
 	const path: PathSegment[] = [];
 
-	function encode(value: Serializable): WireValue {
+	function encode(value: unknown): WireValue {
 		if (value === null || value === undefined) {
 			return null;
 		}
 
-		const valueType = typeof value;
-		if (valueType === "boolean") {
+		if (typeof value === "boolean") {
 			return value;
 		}
-		if (valueType === "string") {
+		if (typeof value === "string") {
 			validateString(value, "serialize", path);
 			return value;
 		}
-		if (valueType === "number") {
+		if (typeof value === "number") {
 			return encodeNumber(value, path);
 		}
+		const valueType = typeof value;
 		if (valueType !== "object") {
 			throw new TypeError(`Cannot serialize ${valueType} at ${formatPath(path)}`);
 		}
@@ -112,7 +110,7 @@ export function serialize(data: Serializable): Serialized {
 		for (let index = 0; index < keys.length; index += 1) {
 			const key = keys[index];
 			validateString(key, "serialize", path);
-			const entry = (value as Record<string, Serializable>)[key];
+			const entry = (value as Record<string, unknown>)[key];
 			if (entry === undefined) {
 				continue;
 			}
@@ -126,7 +124,7 @@ export function serialize(data: Serializable): Serialized {
 	return [VERSION, encode(data)];
 }
 
-export function deserialize<Data extends Serializable = Serializable>(payload: Serialized): Data {
+export function deserialize<Data = unknown>(payload: Serialized): Data {
 	if (!Array.isArray(payload) || payload.length !== 2) {
 		throw new TypeError("Wire payload must be [5, value]");
 	}
@@ -372,18 +370,17 @@ function dateFromWire(value: string, path: PathSegment[]): Date {
 
 function canonicalizeSet(value: Set<unknown>, path: PathSegment[]): CanonicalSetItem[] {
 	const result: CanonicalSetItem[] = [];
-	const collisions = new Map<string, CanonicalSetItem>();
+	const collisions = new Set<string>();
 	const iterator = Set.prototype.values.call(value) as IterableIterator<unknown>;
 	let index = 0;
 	for (const entry of iterator) {
 		const item = describeSetInput(entry, path, index);
-		const previous = collisions.get(item.collisionKey);
-		if (previous !== undefined) {
+		if (collisions.has(item.collisionKey)) {
 			throw new Error(
 				`Cannot serialize cross-runtime-colliding Set value at ${formatSetPath(path, "set", index)}`,
 			);
 		}
-		collisions.set(item.collisionKey, item);
+		collisions.add(item.collisionKey);
 		result.push(item);
 		index += 1;
 	}
@@ -447,7 +444,6 @@ function describePortableSetValue(value: PortableSetValue): CanonicalSetItem {
 			number: 0,
 			text: "",
 			collisionKey: "null",
-			kind: "null",
 		};
 	}
 	if (typeof value === "boolean") {
@@ -457,7 +453,6 @@ function describePortableSetValue(value: PortableSetValue): CanonicalSetItem {
 			number: Number(value),
 			text: "",
 			collisionKey: value ? "bool-number:1" : "bool-number:0",
-			kind: "boolean",
 		};
 	}
 	if (typeof value === "number") {
@@ -468,7 +463,6 @@ function describePortableSetValue(value: PortableSetValue): CanonicalSetItem {
 			text: "",
 			collisionKey:
 				value === 0 || value === 1 ? `bool-number:${value}` : `number:${String(value)}`,
-			kind: "number",
 		};
 	}
 	if (typeof value === "string") {
@@ -478,7 +472,6 @@ function describePortableSetValue(value: PortableSetValue): CanonicalSetItem {
 			number: 0,
 			text: value,
 			collisionKey: `string:${value}`,
-			kind: "string",
 		};
 	}
 	const text = Date.prototype.toISOString.call(value);
@@ -488,7 +481,6 @@ function describePortableSetValue(value: PortableSetValue): CanonicalSetItem {
 		number: 0,
 		text,
 		collisionKey: `datetime:${text}`,
-		kind: "datetime",
 	};
 }
 

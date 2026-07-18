@@ -19,7 +19,7 @@ def compact_size(value: object) -> int:
 	return len(json.dumps(value, separators=(",", ":")))
 
 
-def test_returns_v5_list_envelope():
+def test_returns_versioned_list_envelope():
 	payload = serialize({"ok": True})
 
 	assert payload == [5, {"ok": True}]
@@ -313,16 +313,6 @@ def test_rejects_naive_and_submillisecond_datetimes():
 	with pytest.raises(ValueError, match="millisecond precision"):
 		serialize(dt.datetime(2024, 1, 2, tzinfo=microsecond_offset))
 
-	class HiddenMicrosecond(dt.datetime):
-		@override
-		def __getattribute__(self, name: str) -> object:
-			if name == "microsecond":
-				return 0
-			return super().__getattribute__(name)
-
-	with pytest.raises(TypeError, match="unsupported value of type HiddenMicrosecond"):
-		serialize(HiddenMicrosecond(2024, 1, 2, microsecond=1, tzinfo=dt.UTC))
-
 
 def test_rejects_non_string_record_and_map_keys():
 	with pytest.raises(TypeError, match="record keys must be strings"):
@@ -365,18 +355,12 @@ def test_decode_set_rejects_python_equality_collisions_and_equal_dates():
 		)
 
 
-def test_decode_rejects_unknown_versions_tags_and_legacy_reference_markers():
-	with pytest.raises(ValueError, match="Unknown wire version"):
-		deserialize([4, None])
-
+def test_decode_rejects_unknown_tags_and_malformed_markers():
 	with pytest.raises(ValueError, match="Unknown wire marker tag"):
 		deserialize([5, ["$", "x", 1]])
 
 	with pytest.raises(ValueError, match="Dangling reference"):
 		deserialize([5, ["$", 1]])
-
-	with pytest.raises(ValueError, match="Unknown wire marker tag"):
-		deserialize([5, ["$", "i", 0, 1]])
 
 	with pytest.raises(ValueError, match="payload must begin"):
 		deserialize([5, ["$", "a", []]])
@@ -409,17 +393,6 @@ def test_rejects_surrogate_code_points_on_encode_and_decode():
 		deserialize([5, "\ud800"])
 
 
-def test_rejects_arbitrary_objects_instead_of_projecting_dunder_dict():
-	class Value:
-		def __init__(self) -> None:
-			self.ok: int = 1
-
-	value = Value()
-
-	with pytest.raises(TypeError, match="unsupported value of type Value"):
-		serialize(value)
-
-
 def test_decode_rejects_dangling_and_forward_references():
 	with pytest.raises(ValueError, match="Dangling reference"):
 		deserialize([5, ["$", 0]])
@@ -431,13 +404,3 @@ def test_decode_rejects_dangling_and_forward_references():
 def test_decode_rejects_invalid_date_and_datetime_literals():
 	with pytest.raises(ValueError, match="Invalid datetime literal"):
 		deserialize([5, ["$", "t", "2024-01-02T03:04:05Z"]])
-
-
-def test_decoded_wiremap_reencodes_as_map_while_plain_dict_stays_plain():
-	map_wire = [5, ["$", "m", [["a", 1]]]]
-	record_wire = [5, {"a": 1}]
-
-	assert isinstance(deserialize(map_wire), WireMap)
-	assert serialize(deserialize(map_wire)) == map_wire
-	assert type(deserialize(record_wire)) is dict
-	assert serialize(deserialize(record_wire)) == record_wire

@@ -76,6 +76,8 @@ def measure(function: Callable[[], object]) -> tuple[float, float]:
 def main() -> None:
 	for name, value in fixtures().items():
 		median, cv = measure(lambda value=value: deserialize(serialize(value)))
+		if cv > 0.05:
+			raise RuntimeError(f"{name} benchmark remained unstable: CV {cv:.1%}")
 		size = len(json.dumps(serialize(value), separators=(",", ":")))
 		print(f"{name:20} {median * 1000:.3f} ms  {size:,} bytes  CV {cv:.1%}")
 

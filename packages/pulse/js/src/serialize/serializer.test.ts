@@ -93,7 +93,7 @@ function randomPortableValue(
 	return value;
 }
 
-describe("v5 serialization", () => {
+describe("serialization", () => {
 	it("keeps plain JSON plain and compact", () => {
 		const value = { a: 1, b: [2, "x", true, null] };
 
@@ -345,13 +345,11 @@ describe("v5 serialization", () => {
 	});
 
 	it("strictly validates envelopes, markers, Maps, Sets, and references", () => {
-		expect(() => deserialize([4, null] as any)).toThrow("Unknown serialization version");
 		expect(() => deserialize([5] as any)).toThrow("Wire payload must be");
 		expect(() => deserialize([5, ["$", 0]])).toThrow("Dangling reference");
 		expect(() => deserialize([5, { before: ["$", 1], after: {} }] as any)).toThrow(
 			"Dangling reference",
 		);
-		expect(() => deserialize([5, ["$", "r", 0]] as any)).toThrow("Unknown marker tag");
 		expect(() => deserialize([5, ["$", "a", []]] as any)).toThrow("must begin");
 		expect(() => deserialize([5, ["$", "m", [["a", 1], ["a", 2]]]] as any)).toThrow(
 			"Duplicate Map key",

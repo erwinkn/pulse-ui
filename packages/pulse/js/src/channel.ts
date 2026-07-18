@@ -67,7 +67,7 @@ export class ChannelBridge {
 			type: "channel_message",
 			channel: this.id,
 			event,
-			payload,
+			...(payload === undefined ? {} : { payload }),
 		});
 	}
 
@@ -80,7 +80,7 @@ export class ChannelBridge {
 				type: "channel_message",
 				channel: this.id,
 				event,
-				payload,
+				...(payload === undefined ? {} : { payload }),
 				requestId,
 			});
 		});
@@ -213,18 +213,18 @@ export class ChannelBridge {
 			type: "channel_message",
 			channel: this.id,
 			responseTo: message.requestId,
-			payload: response,
+			...(response === undefined ? {} : { payload: response }),
 		});
 	}
 
 	private resolvePending(message: ServerChannelResponseMessage): void {
-		const entry = message.responseTo ? this.pending.get(message.responseTo) : undefined;
+		const entry = this.pending.get(message.responseTo);
 		if (!entry) {
 			return;
 		}
-		this.pending.delete(message.responseTo!);
-		if (message.error !== undefined && message.error !== null) {
-			entry.reject(new PulseChannelResetError(String(message.error)));
+		this.pending.delete(message.responseTo);
+		if (message.error !== undefined) {
+			entry.reject(new PulseChannelResetError(message.error));
 		} else {
 			entry.resolve(message.payload);
 		}

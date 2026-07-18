@@ -7,7 +7,6 @@ from typing import override
 
 import pytest
 from pulse.serializer import (
-	DEFAULT_SERIALIZER,
 	PulseSerializable,
 	Serializer,
 	SerializerAdapter,
@@ -21,15 +20,6 @@ def wire_roundtrip(value: object):
 	return deserialize(json.loads(json.dumps(serialize(value))))
 
 
-def test_module_functions_use_default_serializer():
-	value = {"items": [1, "x", True, None]}
-
-	assert serialize(value) == DEFAULT_SERIALIZER.serialize(value)
-	assert deserialize(serialize(value)) == DEFAULT_SERIALIZER.deserialize(
-		serialize(value)
-	)
-
-
 def test_serializer_configuration_is_immutable():
 	class Value:
 		pass
@@ -37,9 +27,8 @@ def test_serializer_configuration_is_immutable():
 	adapter = SerializerAdapter(Value, lambda _: {"ok": True})
 	serializer = Serializer([adapter])
 
-	assert serializer.adapters == (adapter,)
 	with pytest.raises(FrozenInstanceError):
-		serializer.adapters = ()  # pyright: ignore[reportAttributeAccessIssue]
+		serializer._adapter_lookup = {}  # pyright: ignore[reportPrivateUsage,reportAttributeAccessIssue]
 	with pytest.raises(TypeError):
 		serializer._adapter_lookup[Value] = adapter  # pyright: ignore[reportPrivateUsage,reportIndexIssue]
 

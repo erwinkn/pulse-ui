@@ -13,7 +13,7 @@ Pulse uses one versioned format for browser-server messages. It preserves
 ```ts
 import { serialize } from "pulse-ui-client";
 
-function serialize(data: Serializable): Serialized;
+function serialize(data: unknown): Serialized;
 type Serialized = [5, WireValue];
 ```
 

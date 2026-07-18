@@ -885,11 +885,7 @@ class App:
 				# (session, render) context as initial fetches.
 				def on_message(message: ServerMessage):
 					payload = self.serializer.serialize(message)
-					# `serialize` returns a tuple, which socket.io will mistake for multiple arguments
-					payload = list(payload)
-					self._tasks.create_task(
-						self.sio.emit("message", list(payload), to=sid)
-					)
+					self._tasks.create_task(self.sio.emit("message", payload, to=sid))
 
 				render.connect(on_message)
 				# Map socket sid to renderId for message routing. If the client
@@ -1255,7 +1251,7 @@ class App:
 			self.close_session(sid)
 
 	async def reload_connected_clients(self) -> int:
-		payload = list(self.serializer.serialize({"type": "reload"}))
+		payload = self.serializer.serialize({"type": "reload"})
 		socket_ids = list(self._socket_to_render.keys())
 		for socket_id in socket_ids:
 			await self.sio.emit("message", payload, to=socket_id)

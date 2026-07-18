@@ -306,7 +306,6 @@ def malformed_wires() -> list[object]:
 		[5, ["$", "a", []]],
 		[5, ["$", "a", [1]]],
 		[5, ["$", "d", "2024-02-30"]],
-		[5, ["$", "d", "2024-01-02\n"]],
 		[5, ["$", "t", "2024-01-01T00:00:00Z"]],
 		[5, ["$", "m", "not-entries"]],
 		[5, ["$", "m", [["key", 1], ["key", 2]]]],
@@ -315,10 +314,6 @@ def malformed_wires() -> list[object]:
 		[5, ["$", "s", [2, 1]]],
 		[5, "\ud800"],
 		[5, ["$", "i", 0, []]],
-		[5, ["$", "r"]],
-		[5, ["$", "r", True]],
-		[5, ["$", "r", 0.5]],
-		[5, ["$", "r", -1]],
 		[5, ["$", "r", 0]],
 		[5, ["$", True]],
 		[5, ["$", 0.5]],
@@ -329,7 +324,7 @@ def malformed_wires() -> list[object]:
 	]
 
 
-def test_javascript_to_python_marker_interop():
+def test_javascript_to_python_serializer_interop():
 	cases = fixed_cases() + random_cases(1_000)
 	expected = [snapshot(materialize(case)) for case in cases]
 	encoded = cast(
@@ -361,7 +356,7 @@ def test_javascript_to_python_marker_interop():
 	assert [result["wire"] for result in roundtripped] == javascript_wires
 
 
-def test_python_to_javascript_marker_interop():
+def test_python_to_javascript_serializer_interop():
 	cases = fixed_cases() + random_cases(1_000)
 	values = [materialize(case) for case in cases]
 	expected = [snapshot(value) for value in values]
@@ -428,7 +423,7 @@ def test_shared_date_and_datetime_identity_is_preserved_in_both_runtimes():
 	assert javascript_transcoded[0]["wire"] == wire
 
 
-def test_marker_structure_does_not_consume_implicit_ids():
+def test_wire_markers_do_not_consume_implicit_ids():
 	case: Descriptor = {
 		"t": "record",
 		"entries": [

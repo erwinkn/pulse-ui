@@ -139,7 +139,7 @@ async def test_channel_event_dispatch():
 
 
 @pytest.mark.asyncio
-async def test_channel_response_omits_request_only_fields():
+async def test_channel_response_includes_only_populated_fields():
 	app = ps.App()
 	render = DummyRender()
 	session = SimpleNamespace(sid="session-response")
@@ -152,7 +152,8 @@ async def test_channel_response_omits_request_only_fields():
 		render=real_render,
 	):
 		channel = real_render.channels.create("response-channel")
-		channel.on("compute", lambda _payload: 42)
+		channel.on("compute", lambda _payload: None)
+		channel.on("compute-value", lambda _payload: 42)
 		real_render.channels.handle_client_event(
 			render=real_render,
 			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
@@ -163,6 +164,16 @@ async def test_channel_response_omits_request_only_fields():
 				"requestId": "request-1",
 			},
 		)
+		real_render.channels.handle_client_event(
+			render=real_render,
+			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+			message={
+				"type": "channel_message",
+				"channel": "response-channel",
+				"event": "compute-value",
+				"requestId": "request-2",
+			},
+		)
 
 	await asyncio.sleep(0)
 	assert render.sent == [
@@ -170,8 +181,13 @@ async def test_channel_response_omits_request_only_fields():
 			"type": "channel_message",
 			"channel": "response-channel",
 			"responseTo": "request-1",
+		},
+		{
+			"type": "channel_message",
+			"channel": "response-channel",
+			"responseTo": "request-2",
 			"payload": 42,
-		}
+		},
 	]
 	real_render.close()
 

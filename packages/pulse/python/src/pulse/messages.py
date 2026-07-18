@@ -80,7 +80,6 @@ class ServerChannelRequestMessage(TypedDict):
 	event: str
 	payload: NotRequired[Any]
 	requestId: NotRequired[str]
-	error: NotRequired[Any]
 
 
 class ServerChannelResponseMessage(TypedDict):
@@ -88,7 +87,7 @@ class ServerChannelResponseMessage(TypedDict):
 	channel: str
 	responseTo: str
 	payload: NotRequired[Any]
-	error: NotRequired[Any]
+	error: NotRequired[str]
 
 
 class ServerJsExecMessage(TypedDict):
@@ -143,7 +142,6 @@ class ClientChannelRequestMessage(TypedDict):
 	event: str
 	payload: NotRequired[Any]
 	requestId: NotRequired[str]
-	error: NotRequired[Any]
 
 
 class ClientChannelResponseMessage(TypedDict):
@@ -151,7 +149,7 @@ class ClientChannelResponseMessage(TypedDict):
 	channel: str
 	responseTo: str
 	payload: NotRequired[Any]
-	error: NotRequired[Any]
+	error: NotRequired[str]
 
 
 class ClientJsResultMessage(TypedDict):

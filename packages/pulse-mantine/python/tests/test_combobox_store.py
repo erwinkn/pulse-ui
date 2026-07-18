@@ -73,11 +73,11 @@ async def test_combobox_store_optional_payloads():
 	assert len(render.sent) == 2
 	open_msg = render.sent[0]
 	assert open_msg["event"] == "openDropdown"
-	assert open_msg["payload"] is None
+	assert "payload" not in open_msg
 
 	update_msg = render.sent[1]
 	assert update_msg["event"] == "updateSelectedOptionIndex"
-	assert update_msg["payload"] is None
+	assert "payload" not in update_msg
 
 
 @pytest.mark.asyncio

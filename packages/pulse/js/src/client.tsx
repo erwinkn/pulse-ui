@@ -510,22 +510,23 @@ export class PulseSocketIOClient {
 		if (!view) {
 			// View unmounted before the message arrived - send result back to unblock
 			// the server-side future (which is likely already cancelled anyway).
-			this.#sendJsResult(message.id, undefined, null);
+			this.#sendJsResult(message.id, undefined);
 			return;
 		}
 		view.onJsExec(message);
 	}
 
-	public sendJsResult(id: string, result: any, error: string | null) {
+	public sendJsResult(id: string, result: any, error?: string) {
 		this.#sendJsResult(id, result, error);
 	}
 
-	#sendJsResult(id: string, result: any, error: string | null) {
-		const msg: ClientJsResultMessage = {
-			type: "js_result",
-			id,
-			...(error === null ? { result } : { error }),
-		};
+	#sendJsResult(id: string, result: any, error?: string) {
+		const msg: ClientJsResultMessage =
+			error !== undefined
+				? { type: "js_result", id, error }
+				: result === undefined
+					? { type: "js_result", id }
+					: { type: "js_result", id, result };
 		this.sendMessage(msg);
 	}
 

@@ -5,16 +5,6 @@ import pandas as pd
 from pulse.serializer import SerializerAdapter
 
 
-def _python_scalar(value: object) -> object:
-	if isinstance(value, pd.Timestamp):
-		if value.microsecond % 1000 != 0 or value.nanosecond != 0:
-			raise ValueError("Pandas timestamps must have exact millisecond precision")
-		return value.to_pydatetime(warn=False)
-	if isinstance(value, np.generic):
-		return value.item()
-	return value
-
-
 def _serialize_dataframe(frame: pd.DataFrame) -> list[dict[str, object]]:
 	columns = list(frame.columns)
 	if not all(type(column) is str for column in columns):
@@ -28,8 +18,16 @@ def _serialize_dataframe(frame: pd.DataFrame) -> list[dict[str, object]]:
 		for column_index, column in enumerate(columns):
 			if missing.iat[row_index, column_index]:
 				row[column] = None
-			else:
-				row[column] = _python_scalar(row[column])
+				continue
+			value = row[column]
+			if isinstance(value, pd.Timestamp):
+				if value.microsecond % 1000 != 0 or value.nanosecond != 0:
+					raise ValueError(
+						"Pandas timestamps must have exact millisecond precision"
+					)
+				row[column] = value.to_pydatetime(warn=False)
+			elif isinstance(value, np.generic):
+				row[column] = value.item()
 	return rows
 
 

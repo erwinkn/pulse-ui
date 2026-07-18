@@ -59,6 +59,11 @@ function measure(fn: () => unknown): { median: number; cv: number } {
 
 for (const [name, value] of Object.entries(fixtures())) {
 	const result = measure(() => deserialize(serialize(value)));
+	if (result.cv > 0.05) {
+		throw new Error(
+			`${name} benchmark remained unstable: CV ${(result.cv * 100).toFixed(1)}%`,
+		);
+	}
 	const size = JSON.stringify(serialize(value)).length;
 	console.log(
 		`${name.padEnd(20)} ${result.median.toFixed(3)} ms  ` +

@@ -422,9 +422,11 @@ def session() -> ReactiveDict[str, Any]
 ### Example
 
 ```python
+from datetime import UTC, datetime
+
 def my_component():
     sess = ps.session()
-    sess["last_visited"] = datetime.now()
+    sess["last_visited"] = datetime.now(UTC).isoformat()
     return m.Text(f"Visits: {sess.get('visit_count', 0)}")
 ```
 

@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from pulse.marker_serializer import Serialized, WireMap, deserialize, serialize
+from pulse.serializer import Serialized, WireMap, deserialize, serialize
 
 ROOT = Path(__file__).resolve().parents[4]
-JS_HARNESS = ROOT / "packages/pulse/js/test/marker-serializer-interop.ts"
+JS_HARNESS = ROOT / "packages/pulse/js/test/serializer-interop.ts"
 
 Descriptor = dict[str, Any]
 
@@ -93,7 +93,7 @@ def snapshot(value: object, seen: dict[int, int] | None = None) -> object:
 			.replace("+00:00", "Z"),
 		]
 	if isinstance(value, dt.date):
-		return ["date", value.isoformat()]
+		return ["datetime", f"{value.isoformat()}T00:00:00.000Z"]
 
 	identity = id(value)
 	if identity in seen:
@@ -320,8 +320,12 @@ def malformed_wires() -> list[object]:
 		[5, ["$", "r", 0.5]],
 		[5, ["$", "r", -1]],
 		[5, ["$", "r", 0]],
-		[5, [["$", "r", 1], {}]],
-		[5, [1, ["$", "r", 1]]],
+		[5, ["$", True]],
+		[5, ["$", 0.5]],
+		[5, ["$", -1]],
+		[5, ["$", 0]],
+		[5, [["$", 1], {}]],
+		[5, [1, ["$", 1]]],
 	]
 
 
@@ -398,10 +402,10 @@ def test_shared_date_and_datetime_identity_is_preserved_in_both_runtimes():
 		[
 			5,
 			{
-				"day": ["$", "d", "2024-01-02"],
-				"dayAgain": ["$", "r", 1],
+				"day": ["$", "t", "2024-01-02T00:00:00.000Z"],
+				"dayAgain": ["$", 1],
 				"when": ["$", "t", "2024-01-02T03:04:05.006Z"],
-				"whenAgain": ["$", "r", 2],
+				"whenAgain": ["$", 2],
 			},
 		],
 	)
@@ -456,9 +460,9 @@ def test_marker_structure_does_not_consume_implicit_ids():
 				"map": [
 					"$",
 					"m",
-					[["day", ["$", "d", "2024-01-02"]]],
+					[["day", ["$", "t", "2024-01-02T00:00:00.000Z"]]],
 				],
-				"again": ["$", "r", 2],
+				"again": ["$", 2],
 				"escaped": ["$", "a", ["$"]],
 			},
 		],
@@ -498,7 +502,7 @@ def test_both_decoders_reject_the_shared_malformed_corpus():
 def test_both_decoders_accept_integral_json_number_reference_ids():
 	wire = cast(
 		Serialized,
-		json.loads('[5,[["$","r",0.0]]]'),
+		json.loads('[5,[["$",0.0]]]'),
 	)
 	python_value = deserialize(wire)
 	assert python_value[0] is python_value

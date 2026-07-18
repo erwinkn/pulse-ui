@@ -4,7 +4,7 @@ import math
 from typing import override
 
 import pytest
-from pulse.marker_serializer import WireMap, deserialize, serialize
+from pulse.serializer import WireMap, deserialize, serialize
 
 
 def wire_boundary(value: object):
@@ -43,7 +43,7 @@ def test_marker_shaped_source_arrays_are_escaped():
 	assert wire_roundtrip(data) == data
 
 
-def test_array_escape_decision_does_not_call_source_equality():
+def test_unsupported_values_do_not_run_source_equality():
 	class EqualsDollar:
 		equality_calls: int = 0
 
@@ -54,11 +54,12 @@ def test_array_escape_decision_does_not_call_source_equality():
 
 	value = EqualsDollar()
 
-	assert serialize([value]) == [5, [{}]]
+	with pytest.raises(TypeError, match="unsupported value of type EqualsDollar"):
+		serialize([value])
 	assert EqualsDollar.equality_calls == 0
 
 
-def test_scalar_subclasses_are_normalized_before_protocol_decisions():
+def test_scalar_subclasses_require_adapters_before_protocol_decisions():
 	class Dollar(str):
 		equality_calls: int = 0
 
@@ -68,18 +69,12 @@ def test_scalar_subclasses_are_normalized_before_protocol_decisions():
 			return False
 
 	value = Dollar("$")
-	wire = serialize([value])
-
-	assert wire == [5, ["$", "a", ["$"]]]
-	assert type(wire[1][2][0]) is str
-	assert Dollar.equality_calls == 0
-
-	with pytest.raises(ValueError, match="Malformed marker"):
-		deserialize([5, [value]])
+	with pytest.raises(TypeError, match="unsupported value of type Dollar"):
+		serialize([value])
 	assert Dollar.equality_calls == 0
 
 
-def test_date_and_datetime_use_distinct_markers():
+def test_date_and_datetime_use_one_timestamp_marker():
 	value = {
 		"day": dt.date(2024, 1, 2),
 		"when": dt.datetime(2024, 1, 2, 3, 4, 5, 6000, tzinfo=dt.UTC),
@@ -88,12 +83,12 @@ def test_date_and_datetime_use_distinct_markers():
 	assert serialize(value) == [
 		5,
 		{
-			"day": ["$", "d", "2024-01-02"],
+			"day": ["$", "t", "2024-01-02T00:00:00.000Z"],
 			"when": ["$", "t", "2024-01-02T03:04:05.006Z"],
 		},
 	]
 	parsed = wire_roundtrip(value)
-	assert parsed["day"] == value["day"]
+	assert parsed["day"] == dt.datetime(2024, 1, 2, tzinfo=dt.UTC)
 	assert parsed["when"] == value["when"]
 
 
@@ -126,7 +121,7 @@ def test_wiremap_round_trips_and_reencodes_as_map():
 			"m",
 			[
 				["second", 2],
-				["first", ["$", "d", "2024-01-02"]],
+				["first", ["$", "t", "2024-01-02T00:00:00.000Z"]],
 			],
 		],
 	]
@@ -135,7 +130,10 @@ def test_wiremap_round_trips_and_reencodes_as_map():
 
 	parsed = deserialize(wire_boundary(value))
 	assert isinstance(parsed, WireMap)
-	assert list(parsed.items()) == list(value.items())
+	assert list(parsed.items()) == [
+		("second", 2),
+		("first", dt.datetime(2024, 1, 2, tzinfo=dt.UTC)),
+	]
 	assert serialize(parsed) == wire
 
 
@@ -152,12 +150,12 @@ def test_references_only_appear_for_repeated_objects():
 	repeated = {"left": shared_child, "right": shared_child}
 
 	assert serialize(unique) == [5, {"left": {"x": 1}, "right": {"x": 1}}]
-	assert serialize(repeated) == [5, {"left": {"x": 1}, "right": ["$", "r", 1]}]
+	assert serialize(repeated) == [5, {"left": {"x": 1}, "right": ["$", 1]}]
 	assert compact_size(serialize(unique)) == len(
 		'[5,{"left":{"x":1},"right":{"x":1}}]'
 	)
 	assert compact_size(serialize(repeated)) == len(
-		'[5,{"left":{"x":1},"right":["$","r",1]}]'
+		'[5,{"left":{"x":1},"right":["$",1]}]'
 	)
 
 
@@ -165,7 +163,7 @@ def test_record_key_order_controls_implicit_identity_ids():
 	shared: list[object] = []
 	value = {"2": shared, "1": shared}
 
-	wire = [5, {"1": [], "2": ["$", "r", 1]}]
+	wire = [5, {"1": [], "2": ["$", 1]}]
 	assert serialize(value) == wire
 
 	parsed = deserialize(json.loads(json.dumps(wire)))
@@ -177,7 +175,7 @@ def test_cycles_round_trip_through_implicit_references():
 	root["self"] = root
 	root["items"] = [root]
 
-	wire = [5, {"self": ["$", "r", 0], "items": [["$", "r", 0]]}]
+	wire = [5, {"self": ["$", 0], "items": [["$", 0]]}]
 	assert serialize(root) == wire
 
 	parsed = deserialize(wire_boundary(root))
@@ -193,7 +191,7 @@ def test_repeated_datetime_identity_round_trips():
 		5,
 		{
 			"first": ["$", "t", "2024-01-02T03:04:05.006Z"],
-			"second": ["$", "r", 1],
+			"second": ["$", 1],
 		},
 	]
 	assert serialize(value) == wire
@@ -235,7 +233,7 @@ def test_set_uses_deterministic_canonical_order():
 				"b",
 				"\ue000",
 				"😀",
-				["$", "d", "2024-01-02"],
+				["$", "t", "2024-01-02T00:00:00.000Z"],
 				["$", "t", "2024-01-02T03:04:05.006Z"],
 			],
 		],
@@ -244,12 +242,16 @@ def test_set_uses_deterministic_canonical_order():
 	assert serialize(value) == wire
 
 	parsed = wire_roundtrip(value)
-	assert parsed == value
+	assert dt.datetime(2024, 1, 2, tzinfo=dt.UTC) in parsed
+	assert dt.date(2024, 1, 2) not in parsed
+	assert parsed - {dt.datetime(2024, 1, 2, tzinfo=dt.UTC)} == value - {
+		dt.date(2024, 1, 2)
+	}
 	assert serialize(parsed) == wire
 
 
 def test_set_rejects_container_entries_on_encode_and_decode():
-	with pytest.raises(TypeError, match="set values must be"):
+	with pytest.raises(TypeError, match="set values must project"):
 		serialize({(1, 2)})
 
 	with pytest.raises(ValueError, match="set values must be"):
@@ -271,9 +273,7 @@ def test_complex_graph_round_trips_across_json_boundary():
 	assert serialize(parsed) == serialize(root)
 
 
-@pytest.mark.parametrize(
-	"value", [2**53, -(2**53), float("inf"), float("-inf"), float("nan"), -0.0]
-)
+@pytest.mark.parametrize("value", [2**53, -(2**53), float("inf"), float("-inf"), -0.0])
 def test_rejects_invalid_numeric_values_on_encode(value: float | int):
 	with pytest.raises(ValueError, match="Cannot serialize"):
 		serialize({"value": value})
@@ -288,6 +288,12 @@ def test_rejects_invalid_numeric_values_on_decode(wire: list[object]):
 		deserialize(wire)
 
 
+def test_nan_normalizes_to_null():
+	assert serialize({"value": float("nan")}) == [5, {"value": None}]
+	with pytest.raises(ValueError, match="duplicate set value"):
+		serialize({None, float("nan")})
+
+
 def test_rejects_nested_unsupported_values_with_paths():
 	with pytest.raises(
 		TypeError,
@@ -297,7 +303,7 @@ def test_rejects_nested_unsupported_values_with_paths():
 
 
 def test_rejects_naive_and_submillisecond_datetimes():
-	with pytest.raises(ValueError, match="timezone-aware UTC"):
+	with pytest.raises(ValueError, match="timezone-aware"):
 		serialize(dt.datetime(2024, 1, 2, 3, 4, 5))
 
 	with pytest.raises(ValueError, match="millisecond precision"):
@@ -314,7 +320,7 @@ def test_rejects_naive_and_submillisecond_datetimes():
 				return 0
 			return super().__getattribute__(name)
 
-	with pytest.raises(ValueError, match="millisecond precision"):
+	with pytest.raises(TypeError, match="unsupported value of type HiddenMicrosecond"):
 		serialize(HiddenMicrosecond(2024, 1, 2, microsecond=1, tzinfo=dt.UTC))
 
 
@@ -351,22 +357,22 @@ def test_decode_set_rejects_python_equality_collisions_and_equal_dates():
 					"$",
 					"s",
 					[
-						["$", "d", "2024-01-02"],
-						["$", "d", "2024-01-02"],
+						["$", "t", "2024-01-02T00:00:00.000Z"],
+						["$", "t", "2024-01-02T00:00:00.000Z"],
 					],
 				],
 			]
 		)
 
 
-def test_decode_rejects_unknown_versions_tags_and_removed_identity_markers():
+def test_decode_rejects_unknown_versions_tags_and_legacy_reference_markers():
 	with pytest.raises(ValueError, match="Unknown wire version"):
 		deserialize([4, None])
 
 	with pytest.raises(ValueError, match="Unknown wire marker tag"):
 		deserialize([5, ["$", "x", 1]])
 
-	with pytest.raises(ValueError, match="Malformed marker"):
+	with pytest.raises(ValueError, match="Dangling reference"):
 		deserialize([5, ["$", 1]])
 
 	with pytest.raises(ValueError, match="Unknown wire marker tag"):
@@ -380,7 +386,7 @@ def test_decode_rejects_unknown_versions_tags_and_removed_identity_markers():
 
 
 def test_decode_accepts_integral_json_number_identity_ids():
-	wire = [5, {"self": ["$", "r", 0.0]}]
+	wire = [5, {"self": ["$", 0.0]}]
 	parsed = deserialize(json.loads(json.dumps(wire)))
 
 	assert parsed["self"] is parsed
@@ -391,7 +397,7 @@ def test_decode_normalizes_negative_zero_values_and_identity_ids():
 	assert value == 0
 	assert math.copysign(1.0, value) > 0
 
-	root = deserialize([5, [["$", "r", -0.0]]])
+	root = deserialize([5, [["$", -0.0]]])
 	assert root[0] is root
 
 
@@ -403,18 +409,26 @@ def test_rejects_surrogate_code_points_on_encode_and_decode():
 		deserialize([5, "\ud800"])
 
 
+def test_rejects_arbitrary_objects_instead_of_projecting_dunder_dict():
+	class Value:
+		def __init__(self) -> None:
+			self.ok: int = 1
+
+	value = Value()
+
+	with pytest.raises(TypeError, match="unsupported value of type Value"):
+		serialize(value)
+
+
 def test_decode_rejects_dangling_and_forward_references():
 	with pytest.raises(ValueError, match="Dangling reference"):
-		deserialize([5, ["$", "r", 0]])
+		deserialize([5, ["$", 0]])
 
 	with pytest.raises(ValueError, match="Dangling reference"):
-		deserialize([5, {"first": ["$", "r", 2], "second": {}}])
+		deserialize([5, {"first": ["$", 2], "second": {}}])
 
 
 def test_decode_rejects_invalid_date_and_datetime_literals():
-	with pytest.raises(ValueError, match="Invalid date literal"):
-		deserialize([5, ["$", "d", "2024-02-30"]])
-
 	with pytest.raises(ValueError, match="Invalid datetime literal"):
 		deserialize([5, ["$", "t", "2024-01-02T03:04:05Z"]])
 

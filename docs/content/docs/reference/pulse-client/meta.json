@@ -2,5 +2,5 @@
   "title": "pulse-client (JS)",
   "icon": "Terminal",
   "defaultOpen": false,
-  "pages": ["index", "components", "hooks", "classes", "serialization", "types"]
+  "pages": ["index", "components", "hooks", "classes", "serialization", "route-info", "form-submission", "types"]
 }

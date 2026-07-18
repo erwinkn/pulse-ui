@@ -56,15 +56,18 @@ describe("form event extraction", () => {
 		expect(Object.hasOwn(extracted.target, "accessKeyLabel")).toBe(false);
 		expect(extracted.target.accessKeyLabel).not.toBe(controlFor(form, "accessKeyLabel"));
 
-		const [, payload] = serialize(extracted) as [[number[], number[], number[], number[]], any];
-		expect(payload.target).toMatchObject({
-			id: "profile-form",
-			name: "profile",
-			method: "post",
-			target: "_blank",
-			tagName: "form",
-		});
-		expect(typeof payload.target.action).toBe("string");
+		expect(serialize(extracted)).toMatchObject([
+			5,
+			{
+				target: {
+				id: "profile-form",
+				name: "profile",
+				method: "post",
+				target: "_blank",
+				tagName: "form",
+				},
+			},
+		]);
 	});
 
 	it("does not traverse React internals on a large form", () => {
@@ -98,6 +101,26 @@ describe("form event extraction", () => {
 
 		expect(extracted.target.name).toBe("profile");
 		expect(() => serialize(extracted)).not.toThrow();
+	});
+});
+
+describe("extractEvent", () => {
+	it("omits missing event properties and normalizes non-finite numbers", () => {
+		const event = {
+			nativeEvent: {},
+			isDefaultPrevented: () => false,
+			type: "click",
+			target: document.createElement("button"),
+			relatedTarget: null,
+			timeStamp: Number.POSITIVE_INFINITY,
+			clientX: Number.NaN,
+		};
+
+		const extracted = extractEvent(event);
+
+		expect(extracted.timeStamp).toBeNull();
+		expect(extracted.clientX).toBeNull();
+		expect("screenX" in extracted).toBe(false);
 	});
 });
 

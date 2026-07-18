@@ -139,6 +139,44 @@ async def test_channel_event_dispatch():
 
 
 @pytest.mark.asyncio
+async def test_channel_response_omits_request_only_fields():
+	app = ps.App()
+	render = DummyRender()
+	session = SimpleNamespace(sid="session-response")
+	real_render = ps.RenderSession(render.id, app.routes)
+	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
+
+	with ps.PulseContext(
+		app=app,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		render=real_render,
+	):
+		channel = real_render.channels.create("response-channel")
+		channel.on("compute", lambda _payload: 42)
+		real_render.channels.handle_client_event(
+			render=real_render,
+			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+			message={
+				"type": "channel_message",
+				"channel": "response-channel",
+				"event": "compute",
+				"requestId": "request-1",
+			},
+		)
+
+	await asyncio.sleep(0)
+	assert render.sent == [
+		{
+			"type": "channel_message",
+			"channel": "response-channel",
+			"responseTo": "request-1",
+			"payload": 42,
+		}
+	]
+	real_render.close()
+
+
+@pytest.mark.asyncio
 async def test_channel_pending_cancelled_on_render_close():
 	app = ps.App()
 	render = DummyRender()

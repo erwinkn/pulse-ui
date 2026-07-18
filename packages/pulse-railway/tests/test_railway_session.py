@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 from pulse_railway.constants import PULSE_RAILWAY_REDIS_URL
@@ -40,7 +40,7 @@ async def test_railway_session_store_serializes_through_redis_client() -> None:
 
 	session = await store.get("sid-1")
 
-	assert session == {"today": date(2026, 4, 5)}
+	assert session == {"today": datetime(2026, 4, 5, tzinfo=UTC)}
 	await store.delete("sid-1")
 	assert await store.get("sid-1") is None
 	await store.close()

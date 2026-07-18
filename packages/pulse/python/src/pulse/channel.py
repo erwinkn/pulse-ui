@@ -205,7 +205,6 @@ class ChannelsManager:
 				msg = ServerChannelResponseMessage(
 					type="channel_message",
 					channel=channel.id,
-					event=None,
 					responseTo=request_id,
 					payload=result,
 				)
@@ -257,9 +256,7 @@ class ChannelsManager:
 			msg = ServerChannelResponseMessage(
 				type="channel_message",
 				channel=channel.id,
-				event=None,
 				responseTo=request_id,
-				payload=None,
 				error=message,
 			)
 			self.send_to_client(

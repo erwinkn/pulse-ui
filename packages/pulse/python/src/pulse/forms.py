@@ -28,7 +28,7 @@ from pulse.hooks.runtime import server_address
 from pulse.hooks.stable import stable
 from pulse.react_component import react_component
 from pulse.reactive import Signal
-from pulse.serializer import deserialize
+from pulse.serializer import Serializer
 from pulse.transpiler.imports import Import
 from pulse.transpiler.nodes import Node
 from pulse.types.event_handler import EventHandler1
@@ -195,7 +195,9 @@ class FormRegistry(Disposable):
 
 		raw_form = await request.form()
 		try:
-			data = _decode_structured_form_data(normalize_form_data(raw_form))
+			data = _decode_structured_form_data(
+				normalize_form_data(raw_form), self._render.serializer
+			)
 		except _InvalidFormPayload as exc:
 			raise HTTPException(
 				status_code=400,
@@ -223,7 +225,9 @@ class FormRegistry(Disposable):
 		return Response(status_code=204)
 
 
-def _decode_structured_form_data(data: FormData) -> dict[str, Any]:
+def _decode_structured_form_data(
+	data: FormData, serializer: Serializer
+) -> dict[str, Any]:
 	has_data = _PULSE_DATA_FIELD in data
 	has_files = _PULSE_FILES_FIELD in data
 	if not has_data and not has_files:
@@ -242,7 +246,7 @@ def _decode_structured_form_data(data: FormData) -> dict[str, Any]:
 		)
 
 	try:
-		deserialized = deserialize(
+		deserialized = serializer.deserialize(
 			json.loads(
 				data_value,
 				parse_float=_parse_finite_json_number,

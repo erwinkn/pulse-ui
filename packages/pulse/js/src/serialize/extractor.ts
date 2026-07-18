@@ -14,12 +14,18 @@ export function createExtractor<T extends object>() {
 		> => {
 			const out: any = {};
 			for (const key of keys) {
-				out[key as string] = (src as any)[key as string];
+				const value = (src as any)[key as string];
+				if (value === undefined) continue;
+				out[key as string] =
+					typeof value === "number" && !Number.isFinite(value) ? null : value;
 			}
 			if (computed) {
 				for (const key in computed) {
 					const fn = computed[key]!;
-					out[key] = fn(src);
+					const value = fn(src);
+					if (value === undefined) continue;
+					out[key] =
+						typeof value === "number" && !Number.isFinite(value) ? null : value;
 				}
 			}
 			return out;

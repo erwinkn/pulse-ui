@@ -78,7 +78,7 @@ class ServerChannelRequestMessage(TypedDict):
 	type: Literal["channel_message"]
 	channel: str
 	event: str
-	payload: Any
+	payload: NotRequired[Any]
 	requestId: NotRequired[str]
 	error: NotRequired[Any]
 
@@ -86,9 +86,8 @@ class ServerChannelRequestMessage(TypedDict):
 class ServerChannelResponseMessage(TypedDict):
 	type: Literal["channel_message"]
 	channel: str
-	event: None
 	responseTo: str
-	payload: Any
+	payload: NotRequired[Any]
 	error: NotRequired[Any]
 
 
@@ -142,7 +141,7 @@ class ClientChannelRequestMessage(TypedDict):
 	type: Literal["channel_message"]
 	channel: str
 	event: str
-	payload: Any
+	payload: NotRequired[Any]
 	requestId: NotRequired[str]
 	error: NotRequired[Any]
 
@@ -150,9 +149,8 @@ class ClientChannelRequestMessage(TypedDict):
 class ClientChannelResponseMessage(TypedDict):
 	type: Literal["channel_message"]
 	channel: str
-	event: None
 	responseTo: str
-	payload: Any
+	payload: NotRequired[Any]
 	error: NotRequired[Any]
 
 
@@ -161,8 +159,8 @@ class ClientJsResultMessage(TypedDict):
 
 	type: Literal["js_result"]
 	id: str
-	result: Any
-	error: str | None
+	result: NotRequired[Any]
+	error: NotRequired[str]
 
 
 ServerChannelMessage = ServerChannelRequestMessage | ServerChannelResponseMessage

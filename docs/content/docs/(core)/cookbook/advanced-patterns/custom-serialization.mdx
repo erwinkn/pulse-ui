@@ -1,0 +1,80 @@
+---
+title: "Serialize application values"
+description: "Project custom Python values into Pulse wire values"
+---
+
+Use a serializer adapter when a component needs to send an application class to
+the browser.
+
+```python
+from dataclasses import dataclass
+from decimal import Decimal
+
+import pulse as ps
+
+
+@dataclass(frozen=True)
+class Price:
+    amount: Decimal
+    currency: str
+
+
+price_adapter = ps.SerializerAdapter(
+    type=Price,
+    serialize=lambda price: {
+        "amount": str(price.amount),
+        "currency": price.currency,
+    },
+)
+
+serializer = ps.Serializer([price_adapter])
+app = ps.App(serializer=serializer)
+
+assert serializer.deserialize(
+    serializer.serialize(Price(Decimal("12.50"), "EUR"))
+) == {"amount": "12.50", "currency": "EUR"}
+```
+
+The browser receives `{ amount: "12.50", currency: "EUR" }`. If that value
+comes back to Python, it remains a dictionary. Adapters do not add type tags or
+perform reverse conversion.
+
+## Put serialization on the class
+
+Subclass `ps.PulseSerializable` when you own the class and one projection is
+always correct.
+
+```python
+import pulse as ps
+
+
+class Point(ps.PulseSerializable):
+    def __init__(self, x: float, y: float) -> None:
+        self.x = x
+        self.y = y
+
+    def to_pulse(self) -> object:
+        return {"x": self.x, "y": self.y}
+```
+
+A configured adapter for `Point` takes precedence over `to_pulse()`.
+
+## Keep adapters app-local
+
+```python
+serializer = ps.Serializer([price_adapter])
+app = ps.App(serializer=serializer)
+```
+
+Serializer configuration belongs to the app. There is no global adapter
+registry, so separate apps in the same process can use different projections.
+
+Adapters can return nested values that use other configured adapters. Returning
+the input object unchanged fails. Unsupported values in a projection report the
+path where serialization failed.
+
+## See also
+
+- [Serializer reference](/docs/reference/pulse/serializer)
+- [Pulse Pandas](/docs/packages/pulse-pandas)
+- [Components](/docs/concepts/components)

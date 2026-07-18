@@ -50,6 +50,7 @@ A tuple containing:
 | `Object` | Recursively processed |
 | Circular refs | Tracked and restored |
 | `function`, `symbol` | Coerced to null (e.g. a stray React element won't crash the payload) |
+| DOM nodes | Throws; extract the event or element data before serializing |
 | `bigint`, other | Throws a contextual error naming the type and path |
 
 ### Example
@@ -100,6 +101,10 @@ serialize({ onClick: () => {}, label: "Save" });
 // bigint (and any other genuinely unsupported type) throws a contextual error
 serialize({ amount: 10n });
 // Error: Cannot serialize value of type 'bigint' in 'amount'.
+
+// Raw DOM nodes throw instead of traversing browser or React internals
+serialize({ input: document.querySelector("input") });
+// Error: Cannot serialize a DOM node in 'input'. Extract DOM events/elements before serializing.
 ```
 
 ---

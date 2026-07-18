@@ -5,6 +5,77 @@ export type Serializable = any;
 
 export type Serialized = [[number[], number[], number[], number[]], PlainJSON];
 
+function isDomNode(value: object): boolean {
+	if (typeof Node !== "undefined" && value instanceof Node) {
+		return true;
+	}
+	for (
+		let prototype = Object.getPrototypeOf(value);
+		prototype !== null && prototype !== Object.prototype;
+		prototype = Object.getPrototypeOf(prototype)
+	) {
+		const tag = Object.getOwnPropertyDescriptor(prototype, Symbol.toStringTag);
+		if (
+			tag?.value === "Node" &&
+			typeof Object.getOwnPropertyDescriptor(prototype, "nodeType")?.get === "function" &&
+			typeof Object.getOwnPropertyDescriptor(prototype, "nodeName")?.get === "function" &&
+			typeof Object.getOwnPropertyDescriptor(prototype, "ownerDocument")?.get === "function" &&
+			typeof Object.getOwnPropertyDescriptor(prototype, "cloneNode")?.value === "function"
+		) {
+			return true;
+		}
+	}
+	return false;
+}
+
+const REACT_FIBER_KEYS = [
+	"tag",
+	"key",
+	"elementType",
+	"type",
+	"stateNode",
+	"return",
+	"child",
+	"sibling",
+	"index",
+	"ref",
+	"pendingProps",
+	"memoizedProps",
+	"updateQueue",
+	"memoizedState",
+	"dependencies",
+	"mode",
+	"flags",
+	"subtreeFlags",
+	"deletions",
+	"lanes",
+	"childLanes",
+	"alternate",
+] as const;
+
+const CHECK_REACT_FIBER =
+	import.meta.env?.DEV ??
+	(typeof process !== "undefined" && process.env.NODE_ENV !== "production");
+
+function isReactFiber(value: object): boolean {
+	const candidate = value as Record<string, unknown>;
+	if (!REACT_FIBER_KEYS.every((key) => Object.hasOwn(candidate, key))) {
+		return false;
+	}
+	if (
+		typeof candidate.tag !== "number" ||
+		typeof candidate.index !== "number" ||
+		typeof candidate.mode !== "number" ||
+		typeof candidate.flags !== "number" ||
+		typeof candidate.subtreeFlags !== "number" ||
+		typeof candidate.lanes !== "number" ||
+		typeof candidate.childLanes !== "number"
+	) {
+		return false;
+	}
+	return true;
+}
+
 export function serialize(data: Serializable): Serialized {
 	const seen = new Map<any, number>();
 	const refs: number[] = [];
@@ -44,6 +115,23 @@ export function serialize(data: Serializable): Serialized {
 		// primitive and the ref/date/set/map indices stay aligned with `deserialize`.
 		if (typeof value === "function" || typeof value === "symbol") {
 			return null;
+		}
+
+		if (typeof value === "object") {
+			const ctx = context ? ` in '${context}'` : "";
+			if (isDomNode(value)) {
+				throw new Error(
+					`Cannot serialize a DOM node${ctx}. Extract DOM events/elements before serializing.`,
+				);
+			}
+			// A raw DOM node is always invalid serializer input, including in production.
+			// Fiber has no public brand, so keep its heuristic diagnostic out of the hot
+			// production path; DOM nodes are rejected before their expandos are traversed.
+			if (CHECK_REACT_FIBER && isReactFiber(value)) {
+				throw new Error(
+					`Cannot serialize a React Fiber${ctx}. Extract DOM events/elements before serializing.`,
+				);
+			}
 		}
 
 		const prevRef = seen.get(value);

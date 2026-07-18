@@ -122,6 +122,7 @@ A Python callable passed as a prop (or child) is registered as a **server callba
 
 - The stub's return value is `undefined`; whatever your Python function returns is **never rendered**.
 - Arguments are serialized event payloads; the callable cannot receive live client-side objects (functions, class instances) that render-prop APIs pass.
+- Raw DOM nodes are rejected. React event arguments are extracted into serializable dictionaries before they cross the wire.
 
 For render-prop APIs — components that call `children(args)` and render the result — pass a **transpiled** `@ps.javascript(jsx=True)` function instead. It runs fully client-side, receives the real render args, and its return value is rendered:
 

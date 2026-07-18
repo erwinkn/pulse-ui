@@ -2,7 +2,7 @@ import { describe, expect, it, mock } from "bun:test";
 import { MantineProvider } from "@mantine/core";
 import { fireEvent, render } from "@testing-library/react";
 import { useField } from "./connect";
-import { Checkbox, CheckboxGroup, MultiSelect, TagsInput } from "./fields";
+import { Checkbox, CheckboxGroup, MultiSelect, TagsInput, TextInput } from "./fields";
 
 const channel = {
 	on: () => () => {},
@@ -195,6 +195,39 @@ describe("MantineForm list-valued fields", () => {
 		fireEvent.submit(view.container.querySelector("form")!);
 		expect(submittedValues()).toEqual({
 			privileges: ["admin", "editor"],
+		});
+	});
+});
+
+describe("MantineForm submit values", () => {
+	it("submits shadowable field names as values", () => {
+		submitForm.mockClear();
+		const view = render(
+			<MantineProvider>
+				<Form
+					channelId="form-name-field"
+					initialValues={{ name: "qgis", action: "save", method: "post", id: "record-1" }}
+					id="profile-form"
+					method="post"
+					target="_blank"
+					action="/submit"
+				>
+					<TextInput name="name" label="Name" />
+					<TextInput name="action" label="Action" />
+					<TextInput name="method" label="Method" />
+					<TextInput name="id" label="Record ID" />
+					<button type="submit">Submit</button>
+				</Form>
+			</MantineProvider>,
+		);
+
+		fireEvent.submit(view.container.querySelector("form")!);
+
+		expect(submittedValues()).toEqual({
+			name: "qgis",
+			action: "save",
+			method: "post",
+			id: "record-1",
 		});
 	});
 });

@@ -195,6 +195,133 @@ describe("v4 serialization", () => {
 		expect(fromSymbol).toEqual({ x: null, keep: 2 });
 	});
 
+	it("rejects DOM nodes before traversing their React internals", () => {
+		const input = document.createElement("input");
+		Object.defineProperty(input, "__reactFiber$test", {
+			enumerable: true,
+			get: () => {
+				throw new Error("React internals were traversed");
+			},
+		});
+
+		expect(() => serialize({ input } as any)).toThrow(
+			"Cannot serialize a DOM node in 'input'. Extract DOM events/elements before serializing.",
+		);
+	});
+
+	it("rejects cross-realm-like DOM nodes without invoking IDL getters", () => {
+		const nodePrototype = Object.create(Object.prototype);
+		Object.defineProperties(nodePrototype, {
+			[Symbol.toStringTag]: { value: "Node" },
+			nodeType: {
+				get() {
+					throw new Error("IDL getter was invoked");
+				},
+			},
+			nodeName: {
+				get() {
+					throw new Error("IDL getter was invoked");
+				},
+			},
+			ownerDocument: {
+				get() {
+					throw new Error("IDL getter was invoked");
+				},
+			},
+			cloneNode: { value() {} },
+		});
+		const form = Object.create(Object.create(nodePrototype));
+		Object.defineProperty(form, "ownerDocument", { value: {} });
+		Object.defineProperty(form, "__reactFiber$test", {
+			enumerable: true,
+			get: () => {
+				throw new Error("React internals were traversed");
+			},
+		});
+
+		expect(() => serialize({ form } as any)).toThrow(
+			"Cannot serialize a DOM node in 'form'. Extract DOM events/elements before serializing.",
+		);
+	});
+
+	it("does not mistake an inherited DOM-shaped application model for a Node", () => {
+		class DomShapedRecord {
+			payload = "keep";
+
+			get ownerDocument(): never {
+				throw new Error("application getter was invoked");
+			}
+		}
+		Object.assign(DomShapedRecord.prototype, {
+			nodeType: 1,
+			nodeName: "record",
+			addEventListener() {},
+		});
+
+		const parsed: any = deserialize(serialize({ record: new DomShapedRecord() }));
+		expect(parsed).toEqual({ record: { payload: "keep" } });
+	});
+
+	it("rejects React fiber objects before recursively walking them", () => {
+		const fiber = {
+			tag: 0,
+			key: null,
+			elementType: null,
+			type: null,
+			stateNode: null,
+			return: null,
+			child: null,
+			sibling: null,
+			index: 0,
+			ref: null,
+			pendingProps: null,
+			memoizedProps: null,
+			updateQueue: null,
+			memoizedState: null,
+			dependencies: null,
+			mode: 0,
+			flags: 0,
+			subtreeFlags: 0,
+			deletions: null,
+			lanes: 0,
+			childLanes: 0,
+			alternate: null,
+		};
+
+		expect(() => serialize({ fiber } as any)).toThrow(
+			"Cannot serialize a React Fiber in 'fiber'. Extract DOM events/elements before serializing.",
+		);
+	});
+
+	it("does not mistake Fiber-like application records for React internals", () => {
+		class ApplicationModel {
+			payload = "keep";
+
+			get tag(): never {
+				throw new Error("inherited tag getter was invoked");
+			}
+		}
+		const data = {
+			shape: {
+				tag: 0,
+				return: null,
+				child: null,
+				sibling: null,
+				stateNode: null,
+				memoizedProps: null,
+			},
+			expandoNamedData: { "__reactFiber$business": "keep" },
+			model: new ApplicationModel(),
+		};
+
+		const parsed: any = deserialize(serialize(data));
+		expect(parsed).toEqual({
+			shape: data.shape,
+			expandoNamedData: data.expandoNamedData,
+			model: { payload: "keep" },
+		});
+	});
+
 	it("keeps indices aligned when a dropped leaf sits among shared refs and Dates", () => {
 		// The serializer tracks refs/dates by positional node index, so a coerced leaf
 		// must consume an index just like the primitive it becomes. This interleaves a

@@ -1,115 +1,139 @@
 ---
 title: "Serializer"
-description: "Wire serialization helpers"
+description: "Python wire serializer API and value conventions"
 ---
 
-Serialization utilities for converting Python objects to/from wire format. Handles shared references, cycles, dates, sets, and maps.
+Pulse uses a versioned wire serializer for component props, callback arguments,
+forms, channels, and server sessions. The current envelope is `[5, value]`.
 
-## Functions
-
-### serialize
-
-```python
-def serialize(data: Any) -> Serialized
-```
-
-Serialize a Python value to wire format.
-
-**Parameters:**
-- `data` - Value to serialize.
-
-**Returns:** `Serialized` tuple containing metadata and payload.
-
-**Raises:** `TypeError` for unsupported types (functions, modules, classes).
-
-**Supported types:**
-- Primitives: `None`, `bool`, `int`, `float`, `str`
-- Collections: `list`, `tuple`, `dict`, `set`
-- `datetime.datetime` (converted to ISO 8601 UTC strings)
-- `datetime.date` (converted to ISO 8601 date strings)
-- Dataclasses (serialized as dict of fields)
-- Objects with `__dict__` (public attributes only)
-
-**Notes:**
-- `NaN` floats serialize as `None`
-- `Infinity` raises `ValueError`
-- Dict keys must be strings
-- Private attributes (starting with `_`) are excluded from object serialization
-- Shared references and cycles are preserved
+## Default serializer
 
 ```python
 import pulse as ps
-from datetime import datetime
 
-data = {
-    "name": "Alice",
-    "created": datetime.now(),
-    "tags": {"admin", "user"},
-}
-serialized = ps.serialize(data)
+payload = ps.serialize({"items": [1, 2, 3]})
+value = ps.deserialize(payload)
 ```
 
-### deserialize
+`ps.serialize()` and `ps.deserialize()` use one immutable default
+`ps.Serializer`. Use an app-owned serializer when you need adapters.
+
+## Serializer
 
 ```python
-def deserialize(payload: Serialized) -> Any
+class Serializer:
+    def __init__(
+        self,
+        adapters: Iterable[SerializerAdapter[Any]] = (),
+    ) -> None: ...
+
+    def serialize(self, value: object) -> Serialized: ...
+    def deserialize(self, payload: Serialized) -> object: ...
 ```
 
-Deserialize wire format back to Python values.
+`ps.App(serializer=...)` uses that serializer for the app's render sessions,
+callbacks, forms, and messages. Adapter registries cannot be changed after the
+serializer is created.
 
-**Parameters:**
-- `payload` - Serialized tuple from `serialize()`.
+## Supported values
 
-**Returns:** Reconstructed Python value.
+| Python value | Browser value | Notes |
+|---|---|---|
+| `None` | `null` | Round-trips exactly |
+| `bool`, `str` | Same primitive | Strings must contain valid Unicode scalar values |
+| finite `float` | `number` | Integral values must be safe; `NaN` becomes `null`; infinity and `-0` are rejected |
+| safe `int` | `number` | Range is `-(2**53 - 1)` through `2**53 - 1` |
+| `list`, `tuple` | `Array` | Tuples decode as lists |
+| `dict[str, object]` | plain object | Record keys follow JavaScript object-key order |
+| `WireMap` | `Map` | String keys, insertion order preserved |
+| `set` | `Set` | Canonically ordered; cross-runtime equality collisions fail |
+| `date`, aware `datetime` | `Date` | Normalized to UTC with exact millisecond precision |
+| dataclass instance | plain object | Field order is preserved |
 
-**Raises:** `TypeError` for malformed payloads.
+Arbitrary objects, callables, classes, modules, naive datetimes, sub-millisecond
+datetimes, infinity, unsafe integers, and invalid Unicode are rejected.
 
-**Notes:**
-- `datetime` values are reconstructed as UTC-aware
-- `date` values are reconstructed as `datetime.date`
-- `set` values are reconstructed as Python sets
-- Shared references and cycles are restored
+### Dates and datetimes
 
 ```python
-original = {"items": [1, 2, 3], "timestamp": datetime.now()}
-serialized = ps.serialize(original)
-restored = ps.deserialize(serialized)
+from datetime import date, datetime, timezone
+
+ps.serialize(date(2026, 7, 16))
+# [5, ["$", "t", "2026-07-16T00:00:00.000Z"]]
+
+ps.serialize(datetime(2026, 7, 16, 12, 30, tzinfo=timezone.utc))
+# [5, ["$", "t", "2026-07-16T12:30:00.000Z"]]
 ```
 
-## Types
+Both values become a native JavaScript `Date`. A `Date` sent back to Python
+always becomes an aware UTC `datetime`. The original `date`/`datetime`
+distinction is intentionally lost. Use an ISO string when calendar-only type
+preservation matters.
 
-### Serialized
+Python datetimes must be timezone-aware and have exact millisecond precision.
+Offsets are normalized to UTC. Years outside `0001` through `9999` fail.
+
+### Maps
 
 ```python
-Serialized = tuple[tuple[list[int], list[int], list[int], list[int]], PlainJSON]
+import pulse as ps
+
+value = ps.WireMap([("first", 1), ("second", 2)])
 ```
 
-Serialized payload structure:
-- First element: metadata tuple of `(refs, dates, sets, maps)` - lists of indices
-- Second element: JSON-compatible payload
+Normal dictionaries are records. `WireMap` explicitly requests the wire-level
+Map marker and decodes back to `WireMap` in Python.
 
-### PlainJSON
+## Adapters
 
 ```python
-PlainJSON = int | float | str | bool | None | list["PlainJSON"] | dict[str, "PlainJSON"]
+@dataclass(frozen=True, slots=True)
+class SerializerAdapter[T]:
+    type: type[T]
+    serialize: Callable[[T], object]
+
+class PulseSerializable(ABC):
+    @abstractmethod
+    def to_pulse(self) -> object: ...
 ```
 
-JSON-compatible type alias.
+An adapter is one-way: it projects an application value into supported Pulse
+values. Deserialization returns the projection, not the original class.
 
-## Wire Format
+Resolution order is:
 
-The serialized format is a tuple:
+1. Exact core wire type
+2. Nearest registered adapter in the value's MRO
+3. `PulseSerializable`
+4. Dataclass
+5. Supported container subclass
 
-```
-((refs, dates, sets, maps), payload)
-```
+Configured adapters override `PulseSerializable` and dataclass behavior.
+Duplicate targets and adapters for `object` or core wire types are rejected.
 
-- `refs` - Payload-node indices where the value is a reference to a previously visited node
-- `dates` - Payload-node indices that are `date` or `datetime` objects
-- `sets` - Payload-node indices that are `set` objects (stored as arrays)
-- `maps` - Payload-node indices that are `Map` objects (for JS interop)
+Structural projections share the source object's wire identity, so repetition
+and self-cycles survive. Scalar projections use value semantics. Returning the
+source object directly is an error.
 
-This format preserves:
-- Shared references (same object referenced multiple times)
-- Circular references
-- Type information for dates and sets
+See [Custom serialization](/docs/cookbook/advanced-patterns/custom-serialization)
+for a complete example.
+
+## Wire markers
+
+| Value | Marker |
+|---|---|
+| Escaped array beginning with `"$"` | `["$", "a", items]` |
+| UTC timestamp | `["$", "t", iso_timestamp]` |
+| Map | `["$", "m", entries]` |
+| Set | `["$", "s", items]` |
+| Back reference | `["$", id]` |
+
+Reference IDs are backward-only non-negative safe integers. The decoder rejects
+unknown and malformed markers, dangling references, duplicate Map keys,
+non-canonical Sets, and equality collisions.
+
+## See also
+
+- [Custom serialization](/docs/cookbook/advanced-patterns/custom-serialization)
+- [Pulse Pandas](/docs/packages/pulse-pandas)
+- [Client serialization](/docs/reference/pulse-client/serialization)

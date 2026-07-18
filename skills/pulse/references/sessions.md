@@ -7,9 +7,11 @@ User session management, cookies, and session stores.
 Get the current user's session data. Returns a reactive dict persisted across navigations.
 
 ```python
+from datetime import UTC, datetime
+
 def dashboard():
     sess = ps.session()
-    sess["last_visited"] = datetime.now()
+    sess["last_visited"] = datetime.now(UTC).isoformat()
     visits = sess.get("visit_count", 0)
     return m.Text(f"Visit #{visits}")
 ```
@@ -350,7 +352,7 @@ async def save_item():
 def track_visit():
     sess = ps.session()
     sess["visit_count"] = sess.get("visit_count", 0) + 1
-    sess["last_visit"] = datetime.now().isoformat()
+    sess["last_visit"] = datetime.now(UTC).isoformat()
 ```
 
 ## See Also

@@ -203,7 +203,7 @@ def SimpleDatePicker():
 ### DateTime Picker with Constraints
 
 ```python
-from datetime import datetime
+from datetime import UTC, datetime
 from pulse_mantine import MantineProvider, DateTimePicker
 
 @ps.component
@@ -212,7 +212,7 @@ def AppointmentPicker():
         DateTimePicker(
             label="Appointment",
             placeholder="Pick date and time",
-            minDate=datetime.now(),  # No past dates
+            minDate=datetime.now(UTC).replace(microsecond=0),  # No past dates
             valueFormat="DD MMM YYYY hh:mm A",
         )
     ]

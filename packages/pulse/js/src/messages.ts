@@ -159,8 +159,8 @@ export type ClientChannelMessage = ClientChannelRequestMessage | ClientChannelRe
 export interface ClientJsResultMessage {
 	type: "js_result";
 	id: string;
-	result: any;
-	error: string | null;
+	result?: any;
+	error?: string;
 }
 
 export type ClientMessage =

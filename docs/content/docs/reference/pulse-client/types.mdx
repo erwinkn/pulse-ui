@@ -658,27 +658,16 @@ type MessageListener = (message: ServerMessage) => void;
 Wire format for serialized data.
 
 ```ts
-type Serialized = [[number[], number[], number[], number[]], PlainJSON];
+type Serialized = [5, WireValue];
 ```
 
-### PlainJSON
+### WireValue
 
 JSON-compatible value.
 
 ```ts
-type JsonPrimitive = string | number | boolean | null;
-type JsonValue = JsonPrimitive | JsonValue[] | { [k: string]: JsonValue };
-type PlainJSON = JsonValue;
-```
-
-### DeserializationOptions
-
-Options for deserialization.
-
-```ts
-interface DeserializationOptions {
-  coerceNullsToUndefined?: boolean;
-}
+type Primitive = string | number | boolean | null;
+type WireValue = Primitive | WireValue[] | { [k: string]: WireValue };
 ```
 
 ---

@@ -240,7 +240,7 @@ export class PulseSocketIOClient {
 			// Wrap in an arrow function to avoid losing the `this` reference
 			socket.on("message", (data) => {
 				if (this.#socket !== socket) return;
-				this.#handleServerMessage(deserialize(data, { coerceNullsToUndefined: true }));
+				this.#handleServerMessage(deserialize(data));
 			});
 		});
 	}
@@ -524,8 +524,7 @@ export class PulseSocketIOClient {
 		const msg: ClientJsResultMessage = {
 			type: "js_result",
 			id,
-			result,
-			error,
+			...(error === null ? { result } : { error }),
 		};
 		this.sendMessage(msg);
 	}

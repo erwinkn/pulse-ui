@@ -1,4 +1,4 @@
-.PHONY: help init lint lint-fix format format-check typecheck typecheck-py typecheck-ts test all bump
+.PHONY: help init lint lint-fix format format-check typecheck typecheck-py typecheck-ts test benchmark-serializer all bump
 
 help:
 	@echo "Available commands:"
@@ -9,6 +9,7 @@ help:
 	@echo "  make format-check  - Check formatting without modifying files"
 	@echo "  make typecheck     - Run type checking (Basedpyright for Python)"
 	@echo "  make test          - Run all tests (pytest for Python, bun test for JS)"
+	@echo "  make benchmark-serializer - Benchmark the serializer in Python and JS"
 	@echo "  make all           - Run format, lint, typecheck, and test"
 	@echo "  make bump          - Bump package version (PKG=name ARGS='--patch|--alpha|...')"
 
@@ -75,6 +76,10 @@ test:
 	@uv run pytest
 	@echo "Running JS tests..."
 	@bun test
+
+benchmark-serializer:
+	@uv run packages/pulse/python/benchmarks/serializer.py
+	@bun packages/pulse/js/benchmarks/serializer.ts
 
 # Run everything
 all: format lint typecheck test

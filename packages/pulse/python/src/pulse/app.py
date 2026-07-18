@@ -77,7 +77,7 @@ from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
 from pulse.scheduling import TaskRegistry, TimerHandleLike, TimerRegistry
-from pulse.serializer import Serialized, deserialize, serialize
+from pulse.serializer import Serialized, Serializer
 from pulse.user_session import (
 	CookieSessionStore,
 	SessionStore,
@@ -275,6 +275,7 @@ class App:
 	_timers: TimerRegistry
 	_proxy: ReactProxy | None
 	proxy: Proxy
+	serializer: Serializer
 	session_timeout: float
 	connection_status: ConnectionStatusConfig
 	render_loop_limit: int
@@ -303,11 +304,13 @@ class App:
 		disconnect_queue_timeout: float = 300.0,
 		connection_status: ConnectionStatusConfig | None = None,
 		render_loop_limit: int = 50,
+		serializer: Serializer | None = None,
 	):
 		# Resolve mode from environment and expose on the app instance
 		self.env = envvars.pulse_env
 		self.mode = mode
 		self.proxy = proxy or Proxy()
+		self.serializer = serializer if serializer is not None else Serializer()
 		self.status = AppStatus.created
 		# Persist the server address for use by sessions (API calls, etc.) in ci/prod.
 		self.server_address = server_address if self.env in ("ci", "prod") else None
@@ -734,7 +737,7 @@ class App:
 
 			# Handle Ok result - serialize the payload (PrerenderResultData)
 			if isinstance(result, Ok):
-				resp = JSONResponse(serialize(result.payload))
+				resp = JSONResponse(self.serializer.serialize(result.payload))
 				await session.handle_response(resp)
 				return resp
 
@@ -881,7 +884,7 @@ class App:
 				# (and recreated interval effects) capture the same
 				# (session, render) context as initial fetches.
 				def on_message(message: ServerMessage):
-					payload = serialize(message)
+					payload = self.serializer.serialize(message)
 					# `serialize` returns a tuple, which socket.io will mistake for multiple arguments
 					payload = list(payload)
 					self._tasks.create_task(
@@ -990,7 +993,7 @@ class App:
 		rid = self._socket_to_render.get(sid)
 		if not rid:
 			return
-		msg = cast(ClientMessage, deserialize(data))
+		msg = cast(ClientMessage, self.serializer.deserialize(data))
 		lock = self._render_message_locks.setdefault(rid, asyncio.Lock())
 		async with lock:
 			render = self.render_sessions.get(rid)
@@ -1213,6 +1216,7 @@ class App:
 			dev_strict_mode_detach_timeout=0.1 if self.env == "dev" else 0.0,
 			disconnect_queue_timeout=self.disconnect_queue_timeout,
 			render_loop_limit=self.render_loop_limit,
+			serializer=self.serializer,
 		)
 		self.render_sessions[rid] = render
 		self._render_to_user[rid] = session.sid
@@ -1251,7 +1255,7 @@ class App:
 			self.close_session(sid)
 
 	async def reload_connected_clients(self) -> int:
-		payload = list(serialize({"type": "reload"}))
+		payload = list(self.serializer.serialize({"type": "reload"}))
 		socket_ids = list(self._socket_to_render.keys())
 		for socket_id in socket_ids:
 			await self.sio.emit("message", payload, to=socket_id)

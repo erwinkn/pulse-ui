@@ -204,7 +204,6 @@ export class ChannelBridge {
 			this.client.sendMessage({
 				type: "channel_message",
 				channel: this.id,
-				event: undefined,
 				responseTo: message.requestId,
 				error: formatError(error),
 			});
@@ -213,7 +212,6 @@ export class ChannelBridge {
 		this.client.sendMessage({
 			type: "channel_message",
 			channel: this.id,
-			event: undefined,
 			responseTo: message.requestId,
 			payload: response,
 		});

@@ -52,13 +52,30 @@ describe("ChannelBridge", () => {
 			payload: {},
 		});
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		expect(sendMessage).toHaveBeenCalledWith(
-			expect.objectContaining({
-				responseTo: "req-1",
-				payload: 99,
-				event: undefined,
-			}),
-		);
+		expect(sendMessage).toHaveBeenCalledWith({
+			type: "channel_message",
+			channel: "chan-1",
+			responseTo: "req-1",
+			payload: 99,
+		});
+	});
+
+	it("omits undefined response payloads", async () => {
+		const { bridge, sendMessage } = makeClient();
+		bridge.on("notify", () => undefined);
+		bridge.handleServerMessage({
+			type: "channel_message",
+			channel: "chan-1",
+			event: "notify",
+			requestId: "req-2",
+		});
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(sendMessage).toHaveBeenCalledWith({
+			type: "channel_message",
+			channel: "chan-1",
+			responseTo: "req-2",
+			payload: undefined,
+		});
 	});
 
 	it("rejects pending requests when closed", async () => {

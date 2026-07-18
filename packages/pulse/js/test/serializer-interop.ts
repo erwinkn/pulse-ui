@@ -1,9 +1,8 @@
 import {
-	DateOnly,
 	deserialize,
 	type Serialized,
 	serialize,
-} from "../src/serialize/marker-serializer";
+} from "../src/serialize/serializer";
 
 type Descriptor =
 	| { t: "null" }
@@ -35,7 +34,7 @@ function materialize(
 		case "string":
 			return descriptor.value;
 		case "date": {
-			const result = new DateOnly(descriptor.value);
+			const result = new Date(`${descriptor.value}T00:00:00.000Z`);
 			if (descriptor.id) objects.set(descriptor.id, result);
 			return result;
 		}
@@ -98,7 +97,6 @@ function snapshot(value: unknown, seen = new Map<object, number>()): unknown {
 	if (typeof value === "boolean") return ["bool", value];
 	if (typeof value === "number") return ["number", value];
 	if (typeof value === "string") return ["string", value];
-	if (value instanceof DateOnly) return ["date", String(value)];
 	if (value instanceof Date) return ["datetime", value.toISOString()];
 	if (typeof value !== "object")
 		throw new Error(`Unsupported snapshot value: ${typeof value}`);

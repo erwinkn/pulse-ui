@@ -137,26 +137,22 @@ Numeric values for pixel properties:
 
 ### ps.serialize()
 
-Convert Python values to JSON-compatible wire format.
+Convert Python values to Pulse's version 5 JSON-compatible wire format.
 
 ```python
 serialized = ps.serialize(data)
 ```
 
-**Supported types:**
-- Primitives: `None`, `bool`, `int`, `float`, `str`
-- Collections: `list`, `tuple`, `dict`, `set`
-- `datetime.datetime` (as ISO 8601 UTC strings)
-- `datetime.date` (as ISO 8601 date strings)
-- Dataclasses (as dict of fields)
-- Objects with `__dict__` (public attributes only)
+Supported values include `None`, booleans, strings, finite floats, safe integers, lists,
+tuples, string-keyed dictionaries, `ps.WireMap`, sets, dataclasses, dates, and
+aware datetimes. Arbitrary objects require an adapter.
 
 ```python
-from datetime import datetime
+from datetime import datetime, timezone
 
 data = {
     "user": "alice",
-    "created": datetime.now(),
+    "created": datetime(2026, 7, 16, 12, 30, tzinfo=timezone.utc),
     "tags": {"admin", "user"},
     "items": [1, 2, 3],
 }
@@ -165,12 +161,11 @@ wire = ps.serialize(data)
 # Ready for JSON transport
 ```
 
-**Notes:**
-- `NaN` floats become `None`
-- `Infinity` raises `ValueError`
-- Dict keys must be strings
-- Private attributes (`_name`) excluded
-- Shared references/cycles preserved
+Dates become midnight UTC timestamps. Dates and datetimes become JavaScript
+`Date`; values coming back always become aware UTC `datetime`. Datetimes must be
+aware and have exact millisecond precision. `NaN` becomes `None`; infinity,
+negative zero, unsafe integers, invalid Unicode, and non-string keys fail.
+Shared references and cycles are preserved.
 
 ### ps.deserialize()
 
@@ -181,11 +176,37 @@ data = ps.deserialize(serialized)
 ```
 
 ```python
-original = {"items": [1, 2], "timestamp": datetime.now()}
+original = {
+    "items": [1, 2],
+    "timestamp": datetime(2026, 7, 16, 12, 30, tzinfo=timezone.utc),
+}
 wire = ps.serialize(original)
 restored = ps.deserialize(wire)
 # restored["timestamp"] is datetime (UTC-aware)
 ```
+
+### Custom values
+
+Configure adapters on an app-owned serializer:
+
+```python
+from decimal import Decimal
+import pulse as ps
+
+decimal_adapter = ps.SerializerAdapter(
+    type=Decimal,
+    serialize=str,
+)
+
+app = ps.App(
+    routes=[...],
+    serializer=ps.Serializer([decimal_adapter]),
+)
+```
+
+Adapters are one-way projections. Decoding returns the projected value, not the
+original class. Classes that own their wire projection can subclass
+`ps.PulseSerializable` and implement `to_pulse()`.
 
 ## Event Handler Types
 

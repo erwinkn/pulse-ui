@@ -35,6 +35,7 @@ from pulse.scheduling import (
 	TimerRegistry,
 	create_future,
 )
+from pulse.serializer import Serializer
 from pulse.state.state import State
 from pulse.transpiler.id import next_id
 from pulse.transpiler.nodes import Expr
@@ -247,6 +248,7 @@ class RenderSession:
 	routes: RouteTree
 	channels: "ChannelsManager"
 	forms: "FormRegistry"
+	serializer: Serializer
 	query_store: QueryStore
 	route_mounts: dict[str, RouteMount]
 	connected: bool
@@ -277,12 +279,14 @@ class RenderSession:
 		dev_strict_mode_detach_timeout: float = 0.0,
 		disconnect_queue_timeout: float = 300.0,
 		render_loop_limit: int = 50,
+		serializer: Serializer | None = None,
 	) -> None:
 		from pulse.channel import ChannelsManager
 		from pulse.forms import FormRegistry
 
 		self.id = id
 		self.routes = routes
+		self.serializer = serializer if serializer is not None else Serializer()
 		self.route_mounts = {}
 		self._server_address = server_address
 		self._client_address = client_address

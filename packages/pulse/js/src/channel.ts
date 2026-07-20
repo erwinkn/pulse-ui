@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { PulseSocketIOClient } from "./client";
 import type {
+	ServerChannelEventMessage,
 	ServerChannelMessage,
 	ServerChannelRequestMessage,
 	ServerChannelResponseMessage,
@@ -32,28 +33,19 @@ function formatError(error: unknown): string {
 	if (error instanceof Error) return error.message;
 	if (typeof error === "string") return error;
 	try {
-		return JSON.stringify(error);
+		// JSON.stringify returns undefined (not a string) for undefined,
+		// functions, and symbols; the wire requires a real string.
+		const text: string | undefined = JSON.stringify(error);
+		return text ?? String(error);
 	} catch {
 		return String(error);
 	}
 }
 
-function isServerResponseMessage(
-	message: ServerChannelMessage,
-): message is ServerChannelResponseMessage {
-	return typeof (message as ServerChannelResponseMessage).responseTo === "string";
-}
-
-function isServerRequestMessage(
-	message: ServerChannelMessage,
-): message is ServerChannelRequestMessage {
-	return typeof (message as ServerChannelRequestMessage).event === "string";
-}
-
 export class ChannelBridge {
 	private handlers = new Map<string, Set<ChannelEventHandler>>();
 	private pending = new Map<string, PendingRequest>();
-	private backlog: ServerChannelRequestMessage[] = [];
+	private backlog: ServerChannelEventMessage[] = [];
 	private closed = false;
 
 	constructor(
@@ -61,27 +53,27 @@ export class ChannelBridge {
 		public readonly id: string,
 	) {}
 
-	emit(event: string, payload?: any): void {
+	emit(event: string, payload: any = null): void {
 		this.ensureOpen();
 		this.client.sendMessage({
-			type: "channel_message",
+			type: "channel_event",
 			channel: this.id,
 			event,
-			...(payload === undefined ? {} : { payload }),
+			payload: payload === undefined ? null : payload,
 		});
 	}
 
-	request(event: string, payload?: any): Promise<any> {
+	request(event: string, payload: any = null): Promise<any> {
 		this.ensureOpen();
 		const requestId = randomId();
 		return new Promise((resolve, reject) => {
 			this.pending.set(requestId, { resolve, reject });
 			this.client.sendMessage({
-				type: "channel_message",
+				type: "channel_request",
 				channel: this.id,
 				event,
-				...(payload === undefined ? {} : { payload }),
 				requestId,
+				payload: payload === undefined ? null : payload,
 			});
 		});
 	}
@@ -106,27 +98,19 @@ export class ChannelBridge {
 	}
 
 	handleServerMessage(message: ServerChannelMessage): boolean {
-		if (isServerResponseMessage(message)) {
+		if (message.type === "channel_response") {
 			this.resolvePending(message);
 			return this.closed;
 		}
 		if (this.closed) {
 			return true;
 		}
-		if (!isServerRequestMessage(message)) {
-			return this.closed;
-		}
-
-		if (message.event === "__close__") {
+		if (message.type === "channel_event" && message.event === "__close__") {
 			this.close(new PulseChannelResetError("Channel closed by server"));
 			return true;
 		}
-		if (message.requestId) {
-			void this.dispatchRequest(
-				message as ServerChannelRequestMessage & {
-					requestId: string;
-				},
-			);
+		if (message.type === "channel_request") {
+			void this.dispatchRequest(message);
 		} else {
 			this.dispatchEvent(message);
 		}
@@ -149,7 +133,7 @@ export class ChannelBridge {
 
 	private flushBacklog(event: string): void {
 		if (this.backlog.length === 0) return;
-		const remaining: ServerChannelRequestMessage[] = [];
+		const remaining: ServerChannelEventMessage[] = [];
 		for (const item of this.backlog) {
 			if (item.event === event) {
 				this.dispatchEvent(item);
@@ -160,7 +144,7 @@ export class ChannelBridge {
 		this.backlog = remaining;
 	}
 
-	private dispatchEvent(message: ServerChannelRequestMessage): void {
+	private dispatchEvent(message: ServerChannelEventMessage): void {
 		const handlers = this.handlers.get(message.event);
 		if (!handlers || handlers.size === 0) {
 			this.backlog.push(message);
@@ -180,40 +164,39 @@ export class ChannelBridge {
 		}
 	}
 
-	private async dispatchRequest(
-		message: ServerChannelRequestMessage & { requestId: string },
-	): Promise<void> {
+	private async dispatchRequest(message: ServerChannelRequestMessage): Promise<void> {
 		const handlers = this.handlers.get(message.event);
 		let response: any;
-		let error: any;
+		let error: unknown;
+		let failed = false;
 		if (handlers && handlers.size > 0) {
 			for (const handler of handlers) {
 				try {
-					const result = handler(message.payload);
-					response = await Promise.resolve(result);
-					if (response !== undefined) {
-						break;
-					}
+					response = await Promise.resolve(handler(message.payload));
+					if (response !== undefined) break;
 				} catch (err) {
 					error = err;
+					failed = true;
 					break;
 				}
 			}
 		}
-		if (error) {
+		if (failed) {
 			this.client.sendMessage({
-				type: "channel_message",
+				type: "channel_response",
 				channel: this.id,
 				responseTo: message.requestId,
+				ok: false,
 				error: formatError(error),
 			});
 			return;
 		}
 		this.client.sendMessage({
-			type: "channel_message",
+			type: "channel_response",
 			channel: this.id,
 			responseTo: message.requestId,
-			...(response === undefined ? {} : { payload: response }),
+			ok: true,
+			payload: response === undefined ? null : response,
 		});
 	}
 
@@ -223,7 +206,7 @@ export class ChannelBridge {
 			return;
 		}
 		this.pending.delete(message.responseTo);
-		if (message.error !== undefined) {
+		if (!message.ok) {
 			entry.reject(new PulseChannelResetError(message.error));
 		} else {
 			entry.resolve(message.payload);

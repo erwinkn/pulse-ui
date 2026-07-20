@@ -44,6 +44,7 @@ async def test_socket_messages_for_render_are_serialized(
 				{
 					"type": "attach",
 					"path": "/",
+					"attachId": "attach-1",
 					"routeInfo": {
 						"pathname": "/",
 						"hash": "",
@@ -193,6 +194,7 @@ async def test_socket_messages_wait_for_connect_to_finish(
 			{
 				"type": "attach",
 				"path": "/",
+				"attachId": "attach-1",
 				"routeInfo": {
 					"pathname": "/",
 					"hash": "",

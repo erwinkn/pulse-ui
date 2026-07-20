@@ -240,7 +240,7 @@ export class PulseSocketIOClient {
 			// Wrap in an arrow function to avoid losing the `this` reference
 			socket.on("message", (data) => {
 				if (this.#socket !== socket) return;
-				this.#handleServerMessage(deserialize(data));
+				this.#handleServerMessage(deserialize(data) as ServerMessage);
 			});
 		});
 	}
@@ -425,7 +425,9 @@ export class PulseSocketIOClient {
 				this.#handleAttachAck(message.path, message.attachId);
 				break;
 			}
-			case "channel_message": {
+			case "channel_event":
+			case "channel_request":
+			case "channel_response": {
 				this.#routeChannelMessage(message);
 				break;
 			}
@@ -523,10 +525,8 @@ export class PulseSocketIOClient {
 	#sendJsResult(id: string, result: any, error?: string) {
 		const msg: ClientJsResultMessage =
 			error !== undefined
-				? { type: "js_result", id, error }
-				: result === undefined
-					? { type: "js_result", id }
-					: { type: "js_result", id, result };
+				? { type: "js_result", id, ok: false, error }
+				: { type: "js_result", id, ok: true, result: result === undefined ? null : result };
 		this.sendMessage(msg);
 	}
 
@@ -545,7 +545,7 @@ export class PulseSocketIOClient {
 		if (entry.refCount === 0) {
 			entry.bridge.dispose(new PulseChannelResetError("Channel released"));
 			this.sendMessage({
-				type: "channel_message",
+				type: "channel_event",
 				channel: id,
 				event: "__close__",
 				payload: { reason: "refcount_zero" },

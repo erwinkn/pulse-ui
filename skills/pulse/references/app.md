@@ -38,6 +38,7 @@ app = ps.App(
 | `cors` | `CORSOptions` | Auto | CORS configuration |
 | `fastapi` | `dict` | `None` | FastAPI constructor options |
 | `session_timeout` | `float` | `60.0` | How long a disconnected render session stays resumable before being closed (seconds) |
+| `serializer` | `Serializer` | `None` | Serializer used for client messages and render sessions |
 
 ## Deployment Modes
 

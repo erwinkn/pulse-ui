@@ -4,24 +4,24 @@ import numpy as np
 import pandas as pd
 import pytest
 from pulse.serializer import Serializer, SerializerAdapter
-from pulse_pandas import dataframe_records_adapter
+from pulse_pandas import dataframe_adapter
 
 
 def serialize(frame: pd.DataFrame) -> object:
-	serializer = Serializer([dataframe_records_adapter])
+	serializer = Serializer([dataframe_adapter])
 	return serializer.deserialize(serializer.serialize(frame))
 
 
-def test_dataframe_becomes_ordered_records_without_index() -> None:
+def test_dataframe_becomes_split_shape_without_index() -> None:
 	frame = pd.DataFrame(
 		{"name": ["Ada", "Grace"], "score": [np.int64(4), np.float64(5.5)]},
 		index=[10, 20],
 	)
 
-	assert serialize(frame) == [
-		{"name": "Ada", "score": 4},
-		{"name": "Grace", "score": 5.5},
-	]
+	assert serialize(frame) == {
+		"columns": ["name", "score"],
+		"rows": [["Ada", 4], ["Grace", 5.5]],
+	}
 
 
 def test_dataframe_converts_numpy_boolean_and_string_scalars() -> None:
@@ -32,7 +32,10 @@ def test_dataframe_converts_numpy_boolean_and_string_scalars() -> None:
 		}
 	)
 
-	assert serialize(frame) == [{"ready": True, "label": "done"}]
+	assert serialize(frame) == {
+		"columns": ["ready", "label"],
+		"rows": [[True, "done"]],
+	}
 
 
 def test_dataframe_normalizes_all_missing_sentinels() -> None:
@@ -45,7 +48,10 @@ def test_dataframe_normalizes_all_missing_sentinels() -> None:
 		}
 	)
 
-	assert serialize(frame) == [{"none": None, "nan": None, "na": None, "nat": None}]
+	assert serialize(frame) == {
+		"columns": ["none", "nan", "na", "nat"],
+		"rows": [[None, None, None, None]],
+	}
 
 
 def test_dataframe_temporal_values_follow_core_convention() -> None:
@@ -56,12 +62,28 @@ def test_dataframe_temporal_values_follow_core_convention() -> None:
 		}
 	)
 
-	assert serialize(frame) == [
-		{
-			"timestamp": datetime(2026, 7, 16, 12, 30, tzinfo=timezone.utc),
-			"date": datetime(2026, 7, 16, tzinfo=timezone.utc),
-		}
-	]
+	assert serialize(frame) == {
+		"columns": ["timestamp", "date"],
+		"rows": [
+			[
+				datetime(2026, 7, 16, 12, 30, tzinfo=timezone.utc),
+				datetime(2026, 7, 16, tzinfo=timezone.utc),
+			]
+		],
+	}
+
+
+def test_dataframe_preserves_numeric_string_column_order() -> None:
+	frame = pd.DataFrame(
+		[["ten", "two", "Ada"]],
+		columns=["10", "2", "name"],
+	)
+
+	result = serialize(frame)
+
+	assert isinstance(result, dict)
+	assert result["columns"] == ["10", "2", "name"]
+	assert result["rows"] == [["ten", "two", "Ada"]]
 
 
 @pytest.mark.parametrize("columns", [[1], ["value", "value"]])
@@ -104,9 +126,12 @@ def test_dataframe_values_continue_through_other_adapters() -> None:
 	frame = pd.DataFrame({"label": [Label("ready")]})
 	serializer = Serializer(
 		[
-			dataframe_records_adapter,
+			dataframe_adapter,
 			SerializerAdapter(type=Label, serialize=lambda label: label.value),
 		]
 	)
 
-	assert serializer.deserialize(serializer.serialize(frame)) == [{"label": "ready"}]
+	assert serializer.deserialize(serializer.serialize(frame)) == {
+		"columns": ["label"],
+		"rows": [["ready"]],
+	}

@@ -20,9 +20,17 @@ export interface ServerUpdateMessage {
 
 export interface ServerError {
 	message: string;
-	stack?: string;
-	phase: "render" | "callback" | "mount" | "unmount" | "navigate" | "server";
-	details?: Record<string, any>;
+	stack: string;
+	phase:
+		| "render"
+		| "callback"
+		| "mount"
+		| "unmount"
+		| "navigate"
+		| "server"
+		| "effect"
+		| "connect";
+	details: Record<string, any>;
 }
 
 export interface ServerErrorMessage {
@@ -41,26 +49,44 @@ export interface ServerApiCallMessage {
 	credentials: "include" | "omit";
 }
 
-export interface ServerChannelRequestMessage {
-	type: "channel_message";
+export interface ServerChannelEventMessage {
+	type: "channel_event";
 	channel: string;
 	event: string;
-	payload?: any;
-	requestId?: string;
-	responseTo?: never;
+	payload: any;
 }
 
-export interface ServerChannelResponseMessage {
-	type: "channel_message";
+export interface ServerChannelRequestMessage {
+	type: "channel_request";
 	channel: string;
-	event?: never;
-	responseTo: string;
-	payload?: any;
-	error?: string;
-	requestId?: never;
+	event: string;
+	requestId: string;
+	payload: any;
 }
 
-export type ServerChannelMessage = ServerChannelRequestMessage | ServerChannelResponseMessage;
+export interface ServerChannelSuccessMessage {
+	type: "channel_response";
+	channel: string;
+	responseTo: string;
+	ok: true;
+	payload: any;
+}
+
+export interface ServerChannelErrorMessage {
+	type: "channel_response";
+	channel: string;
+	responseTo: string;
+	ok: false;
+	error: string;
+}
+
+export type ServerChannelResponseMessage =
+	| ServerChannelSuccessMessage
+	| ServerChannelErrorMessage;
+export type ServerChannelMessage =
+	| ServerChannelEventMessage
+	| ServerChannelRequestMessage
+	| ServerChannelResponseMessage;
 
 export interface ServerNavigateToMessage {
 	type: "navigate_to";
@@ -97,6 +123,7 @@ export type ServerMessage =
 	| ServerNavigateToMessage
 	| ServerReloadMessage
 	| ServerAttachAckMessage
+	| ServerChannelEventMessage
 	| ServerChannelRequestMessage
 	| ServerChannelResponseMessage
 	| ServerJsExecMessage;
@@ -133,33 +160,62 @@ export interface ClientApiResultMessage {
 	body: any | null;
 }
 
-export interface ClientChannelRequestMessage {
-	type: "channel_message";
+export interface ClientChannelEventMessage {
+	type: "channel_event";
 	channel: string;
 	event: string;
-	payload?: any;
-	requestId?: string;
-	responseTo?: never;
+	payload: any;
 }
 
-export interface ClientChannelResponseMessage {
-	type: "channel_message";
+export interface ClientChannelRequestMessage {
+	type: "channel_request";
 	channel: string;
-	event?: never;
-	responseTo: string;
-	payload?: any;
-	error?: string;
-	requestId?: never;
+	event: string;
+	requestId: string;
+	payload: any;
 }
 
-export type ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage;
+export interface ClientChannelSuccessMessage {
+	type: "channel_response";
+	channel: string;
+	responseTo: string;
+	ok: true;
+	payload: any;
+}
 
-export interface ClientJsResultMessage {
+export interface ClientChannelErrorMessage {
+	type: "channel_response";
+	channel: string;
+	responseTo: string;
+	ok: false;
+	error: string;
+}
+
+export type ClientChannelResponseMessage =
+	| ClientChannelSuccessMessage
+	| ClientChannelErrorMessage;
+export type ClientChannelMessage =
+	| ClientChannelEventMessage
+	| ClientChannelRequestMessage
+	| ClientChannelResponseMessage;
+
+export interface ClientJsResultSuccessMessage {
 	type: "js_result";
 	id: string;
-	result?: any;
-	error?: string;
+	ok: true;
+	result: any;
 }
+
+export interface ClientJsResultErrorMessage {
+	type: "js_result";
+	id: string;
+	ok: false;
+	error: string;
+}
+
+export type ClientJsResultMessage =
+	| ClientJsResultSuccessMessage
+	| ClientJsResultErrorMessage;
 
 export type ClientMessage =
 	| ClientAttachMessage
@@ -167,6 +223,7 @@ export type ClientMessage =
 	| ClientUpdateMessage
 	| ClientDetachMessage
 	| ClientApiResultMessage
+	| ClientChannelEventMessage
 	| ClientChannelRequestMessage
 	| ClientChannelResponseMessage
 	| ClientJsResultMessage;

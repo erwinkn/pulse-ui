@@ -143,6 +143,10 @@ def fixed_cases() -> list[Descriptor]:
 		{"t": "null"},
 		{"t": "bool", "value": True},
 		{"t": "number", "value": 42},
+		{"t": "number", "value": -0.0},
+		{"t": "number", "value": 1e300},
+		{"t": "number", "value": float(2**53)},
+		{"t": "set", "items": [{"t": "number", "value": 1e300}]},
 		{"t": "string", "value": "text"},
 		{"t": "date", "value": "0001-01-02"},
 		{"t": "datetime", "value": "2024-01-02T03:04:05.006Z"},
@@ -214,6 +218,10 @@ def fixed_cases() -> list[Descriptor]:
 				{"t": "string", "value": "a"},
 				{"t": "date", "value": "2024-01-01"},
 			],
+		},
+		{
+			"t": "set",
+			"items": [{"t": "number", "value": -0.0}],
 		},
 		{
 			"t": "set",
@@ -313,6 +321,11 @@ def malformed_wires() -> list[object]:
 		[5, ["$", "s", [True, 1]]],
 		[5, ["$", "s", [2, 1]]],
 		[5, "\ud800"],
+		[5, ["$", "f", 5]],
+		[5, ["$", "f", "1e300"]],
+		[5, ["$", "f", 1e300, None]],
+		[5, 1e300],
+		[5, 2**53],
 		[5, ["$", "i", 0, []]],
 		[5, ["$", "r", 0]],
 		[5, ["$", True]],
@@ -499,7 +512,7 @@ def test_both_decoders_accept_integral_json_number_reference_ids():
 		Serialized,
 		json.loads('[5,[["$",0.0]]]'),
 	)
-	python_value = deserialize(wire)
+	python_value = cast(list[object], deserialize(wire))
 	assert python_value[0] is python_value
 
 	javascript = cast(

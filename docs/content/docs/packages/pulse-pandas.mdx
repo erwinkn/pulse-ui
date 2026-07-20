@@ -3,8 +3,8 @@ title: "Pulse Pandas"
 icon: Table
 ---
 
-`pulse-pandas` sends Pandas DataFrames to Pulse components as ordered row
-records without adding Pandas to the core framework.
+`pulse-pandas` sends Pandas DataFrames to Pulse components as ordered columns
+and row arrays without adding Pandas to the core framework.
 
 ## Installation
 
@@ -17,7 +17,7 @@ uv add pulse-pandas
 ```python
 import pandas as pd
 import pulse as ps
-from pulse_pandas import dataframe_records_adapter
+from pulse_pandas import dataframe_adapter
 
 
 frame = pd.DataFrame(
@@ -27,22 +27,23 @@ frame = pd.DataFrame(
     }
 )
 
-serializer = ps.Serializer([dataframe_records_adapter])
+serializer = ps.Serializer([dataframe_adapter])
 app = ps.App(serializer=serializer)
 
-rows = serializer.deserialize(serializer.serialize(frame))
+data = serializer.deserialize(serializer.serialize(frame))
 ```
 
-`rows`—and any component prop containing the DataFrame—becomes:
+`data`—and any component prop containing the DataFrame—becomes:
 
 ```json
-[
-  { "product": "Keyboard", "revenue": 1200 },
-  { "product": "Mouse", "revenue": 850 }
-]
+{
+  "columns": ["product", "revenue"],
+  "rows": [["Keyboard", 1200], ["Mouse", 850]]
+}
 ```
 
-The index is intentionally omitted. Column order and row order are preserved.
+The index is intentionally omitted. The `columns` list preserves column order,
+and each inner `rows` array uses that same order. Row order is also preserved.
 Column names must be unique strings.
 
 `None`, `NaN`, `pd.NA`, and `NaT` become `null`. NumPy scalars become Python

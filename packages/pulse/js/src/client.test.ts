@@ -75,7 +75,7 @@ async function makeClient(
 function sentMessages(target: FakeSocket = socket): ClientMessage[] {
 	return target.emitted
 		.filter(([event]) => event === "message")
-		.map(([, payload]) => deserialize<ClientMessage>(payload as any));
+		.map(([, payload]) => deserialize(payload) as ClientMessage);
 }
 
 function waitForEffects() {
@@ -162,7 +162,7 @@ describe("PulseSocketIOClient attach ack", () => {
 		socket.trigger(
 			"message",
 			serialize({
-				type: "channel_message",
+				type: "channel_event",
 				channel: "channel-1",
 				event: "value",
 				payload: null,
@@ -172,7 +172,7 @@ describe("PulseSocketIOClient attach ack", () => {
 		expect(handler).toHaveBeenCalledWith(null);
 	});
 
-	it("omits undefined successful JS results on the wire", async () => {
+	it("normalizes undefined successful JS results to null", async () => {
 		const client = await makeClient();
 		const connected = client.connect();
 		socket.trigger("connect");
@@ -180,7 +180,9 @@ describe("PulseSocketIOClient attach ack", () => {
 
 		client.sendJsResult("exec-1", undefined);
 
-		expect(sentMessages()).toEqual([{ type: "js_result", id: "exec-1" }]);
+		expect(sentMessages()).toEqual([
+			{ type: "js_result", id: "exec-1", ok: true, result: null },
+		]);
 	});
 
 	it("suspends hidden tabs without clearing active views and reattaches on resume", async () => {

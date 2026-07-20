@@ -1,7 +1,7 @@
 import base64
 import hmac
 import json
-import logging
+import math
 import secrets
 import uuid
 import zlib
@@ -21,7 +21,68 @@ if TYPE_CHECKING:
 
 Session = ReactiveDict[str, Any]
 
-logger = logging.getLogger(__name__)
+
+def encode_session_json(session: object) -> str:
+	"""Encode persistent session data without lossy Python-to-JSON coercions."""
+	if type(session) is not dict:
+		raise TypeError("Session data must be a JSON object")
+	_validate_session_value(cast(object, session), "$", set())
+	return json.dumps(session, separators=(",", ":"), allow_nan=False)
+
+
+def decode_session_json(payload: str) -> dict[str, Any]:
+	"""Decode and validate a persistent JSON session object."""
+	value: object = json.loads(
+		payload,
+		parse_float=_parse_session_float,
+		parse_constant=_reject_session_constant,
+	)
+	if type(value) is not dict:
+		raise TypeError("Session data must be a JSON object")
+	_validate_session_value(cast(object, value), "$", set())
+	return cast(dict[str, Any], value)
+
+
+def _validate_session_value(value: object, path: str, active: set[int]) -> None:
+	value_type = type(value)
+	if value is None or value_type in {bool, int, str}:
+		return
+	if value_type is float:
+		if not math.isfinite(cast(float, value)):
+			raise TypeError(f"Session data at {path} must contain a finite number")
+		return
+	if value_type not in {list, dict}:
+		raise TypeError(
+			f"Session data at {path} must contain only JSON-compatible values, "
+			+ f"got {value_type.__name__}"
+		)
+
+	identity = id(value)
+	if identity in active:
+		raise TypeError(f"Session data at {path} cannot contain a cycle")
+	active.add(identity)
+	try:
+		if value_type is list:
+			for index, entry in enumerate(cast(list[object], value)):
+				_validate_session_value(entry, f"{path}[{index}]", active)
+			return
+		for key, entry in cast(dict[object, object], value).items():
+			if type(key) is not str:
+				raise TypeError(f"Session data at {path} must use string object keys")
+			_validate_session_value(entry, f"{path}.{key}", active)
+	finally:
+		active.remove(identity)
+
+
+def _parse_session_float(value: str) -> float:
+	parsed = float(value)
+	if not math.isfinite(parsed):
+		raise ValueError("Session JSON numbers must be finite")
+	return parsed
+
+
+def _reject_session_constant(value: str) -> None:
+	raise ValueError(f"Session JSON cannot contain {value}")
 
 
 class UserSession(Disposable):
@@ -252,7 +313,8 @@ class CookieSessionStore:
 	"""Store sessions in signed cookies. Default session store.
 
 	The cookie stores a compact JSON of the session signed with HMAC-SHA256
-	to prevent tampering. Keep session data small (<4KB).
+	to prevent tampering. Session values must be JSON-compatible and remain under
+	the configured cookie-size limit.
 
 	Args:
 		secret: Signing secret. Uses PULSE_SECRET env var if not provided.
@@ -315,21 +377,16 @@ class CookieSessionStore:
 		Returns:
 			Signed cookie value string.
 		"""
-		# Encode the entire session into the cookie (compressed v1)
-		try:
-			data = SessionCookiePayload(sid=sid, data=dict(session))
-			payload_json = json.dumps(data, separators=(",", ":")).encode("utf-8")
-			compressed = zlib.compress(payload_json, level=6)
-			signed = self._sign(compressed)
-			if len(signed) > self.max_cookie_bytes:
-				logging.warning("Session cookie too large, truncating")
-				session.clear()
-				return self.encode(sid, session)
-			return signed
-		except Exception:
-			logging.warning("Error encoding session cookie, truncating")
-			session.clear()
-			return self.encode(sid, session)
+		data = SessionCookiePayload(sid=sid, data=dict(session))
+		payload_json = encode_session_json(data).encode("utf-8")
+		compressed = zlib.compress(payload_json, level=6)
+		signed = self._sign(compressed)
+		if len(signed) > self.max_cookie_bytes:
+			raise ValueError(
+				f"Session cookie is too large: {len(signed)} bytes exceeds "
+				+ f"the {self.max_cookie_bytes}-byte limit"
+			)
+		return signed
 
 	def decode(self, cookie: str) -> tuple[str, Session] | None:
 		"""Decode and verify signed cookie.
@@ -349,8 +406,12 @@ class CookieSessionStore:
 
 		try:
 			payload_json = zlib.decompress(raw).decode("utf-8")
-			data = cast(SessionCookiePayload, json.loads(payload_json))
-			return data["sid"], ReactiveDict(data["data"])
+			data = decode_session_json(payload_json)
+			sid = data.get("sid")
+			session = data.get("data")
+			if type(sid) is not str or type(session) is not dict:
+				return None
+			return sid, ReactiveDict(cast(dict[str, Any], session))
 		except Exception:
 			return None
 

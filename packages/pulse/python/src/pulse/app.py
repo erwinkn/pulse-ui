@@ -50,8 +50,6 @@ from pulse.helpers import (
 from pulse.hooks.core import hooks
 from pulse.messages import (
 	ClientChannelMessage,
-	ClientChannelRequestMessage,
-	ClientChannelResponseMessage,
 	ClientMessage,
 	ClientPulseMessage,
 	Prerender,
@@ -77,7 +75,7 @@ from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
 from pulse.scheduling import TaskRegistry, TimerHandleLike, TimerRegistry
-from pulse.serializer import Serialized, Serializer
+from pulse.serializer import Serializer
 from pulse.user_session import (
 	CookieSessionStore,
 	SessionStore,
@@ -268,7 +266,7 @@ class App:
 	_socket_to_render: dict[str, str]
 	_render_to_socket: dict[str, str]
 	_connecting_sockets: set[str]
-	_pending_socket_messages: dict[str, list[Serialized]]
+	_pending_socket_messages: dict[str, list[object]]
 	_render_cleanups: dict[str, TimerHandleLike]
 	_render_message_locks: dict[str, asyncio.Lock]
 	_tasks: TaskRegistry
@@ -921,7 +919,7 @@ class App:
 					self._schedule_render_cleanup(rid)
 
 		@self.sio.event
-		async def message(sid: str, data: Serialized):  # pyright: ignore[reportUnusedFunction]
+		async def message(sid: str, data: object):  # pyright: ignore[reportUnusedFunction]
 			await self._handle_socket_message(sid, data)
 
 		self.status = AppStatus.initialized
@@ -961,13 +959,13 @@ class App:
 		handle = self._timers.later(self.session_timeout, _cleanup)
 		self._render_cleanups[rid] = handle
 
-	async def _handle_socket_message(self, sid: str, data: Serialized) -> None:
+	async def _handle_socket_message(self, sid: str, data: object) -> None:
 		if sid in self._connecting_sockets:
 			self._queue_pending_socket_message(sid, data)
 			return
 		await self._process_socket_message(sid, data)
 
-	def _queue_pending_socket_message(self, sid: str, data: Serialized) -> None:
+	def _queue_pending_socket_message(self, sid: str, data: object) -> None:
 		queue = self._pending_socket_messages.setdefault(sid, [])
 		if len(queue) >= MAX_PENDING_SOCKET_MESSAGES:
 			logger.warning(
@@ -985,7 +983,7 @@ class App:
 		finally:
 			self._connecting_sockets.discard(sid)
 
-	async def _process_socket_message(self, sid: str, data: Serialized) -> None:
+	async def _process_socket_message(self, sid: str, data: object) -> None:
 		rid = self._socket_to_render.get(sid)
 		if not rid:
 			return
@@ -1007,7 +1005,11 @@ class App:
 			if render.connected:
 				self._cancel_render_cleanup(rid)
 			try:
-				if msg["type"] == "channel_message":
+				if msg["type"] == "channel_event":
+					await self._handle_channel_message(render, session, msg)
+				elif msg["type"] == "channel_request":
+					await self._handle_channel_message(render, session, msg)
+				elif msg["type"] == "channel_response":
 					await self._handle_channel_message(render, session, msg)
 				else:
 					await self._handle_pulse_message(render, session, msg)
@@ -1021,13 +1023,12 @@ class App:
 		async def _next() -> Ok[None]:
 			if msg["type"] == "attach":
 				attached = render.attach(msg["path"], msg["routeInfo"])
-				attach_id = msg.get("attachId")
-				if attached and isinstance(attach_id, str):
+				if attached:
 					render.send(
 						{
 							"type": "attach_ack",
 							"path": msg["path"],
-							"attachId": attach_id,
+							"attachId": msg["attachId"],
 						}
 					)
 			elif msg["type"] == "update":
@@ -1040,7 +1041,7 @@ class App:
 			elif msg["type"] == "api_result":
 				render.handle_api_result(dict(msg))
 			elif msg["type"] == "js_result":
-				render.handle_js_result(dict(msg))
+				render.handle_js_result(msg)
 			else:
 				logger.warning("Unknown message type received: %s", msg)
 			return Ok()
@@ -1075,12 +1076,10 @@ class App:
 	async def _handle_channel_message(
 		self, render: RenderSession, session: UserSession, msg: ClientChannelMessage
 	) -> None:
-		if msg.get("responseTo"):
-			msg = cast(ClientChannelResponseMessage, msg)
+		if msg["type"] == "channel_response":
 			render.channels.handle_client_response(msg)
 		else:
-			channel_id = str(msg.get("channel", ""))
-			msg = cast(ClientChannelRequestMessage, msg)
+			channel_id = msg["channel"]
 
 			async def _next() -> Ok[None]:
 				render.channels.handle_client_event(
@@ -1097,16 +1096,19 @@ class App:
 			with PulseContext.update(session=session, render=render):
 				res = await self.middleware.channel(
 					channel_id=channel_id,
-					event=msg.get("event", ""),
-					payload=msg.get("payload"),
-					request_id=msg.get("requestId"),
+					event=msg["event"],
+					payload=msg["payload"],
+					request_id=(
+						msg["requestId"] if msg["type"] == "channel_request" else None
+					),
 					session=session.data,
 					next=_next,
 				)
 				res = _normalize_message_response(res)
 
 			if isinstance(res, Deny):
-				if req_id := msg.get("requestId"):
+				if msg["type"] == "channel_request":
+					req_id = msg["requestId"]
 					render.channels.send_error(channel_id, req_id, "Denied")
 
 	def get_route(self, path: str):

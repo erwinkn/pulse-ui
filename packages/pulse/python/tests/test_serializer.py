@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 from dataclasses import FrozenInstanceError, dataclass
-from typing import override
+from typing import Any, cast, override
 
 import pytest
 from pulse.serializer import (
@@ -16,7 +16,7 @@ from pulse.serializer import (
 )
 
 
-def wire_roundtrip(value: object):
+def wire_roundtrip(value: object) -> Any:
 	return deserialize(json.loads(json.dumps(serialize(value))))
 
 
@@ -158,9 +158,23 @@ def test_structural_adapter_projection_reuses_source_identity():
 			"second": ["$", 1],
 		},
 	]
-	decoded = serializer.deserialize(json.loads(json.dumps(wire)))
+	decoded = cast(dict[str, Any], serializer.deserialize(json.loads(json.dumps(wire))))
 	assert decoded["first"] is decoded["second"]
 	assert decoded["first"]["child"] is decoded["first"]
+
+
+def test_fresh_adapter_projections_never_alias_via_id_reuse():
+	class Point:
+		def __init__(self, n: int) -> None:
+			self.n: int = n
+
+	serializer = Serializer([SerializerAdapter(Point, lambda point: {"n": point.n})])
+
+	# Each projection is a temporary; if the encoder tracks identities by id()
+	# without keeping the object alive, CPython reuses the freed address and
+	# later points collapse into back references to the first one.
+	wire = serializer.serialize([Point(n) for n in range(50)])
+	assert wire == [5, [{"n": n} for n in range(50)]]
 
 
 def test_adapter_projection_root_aliases_existing_container_identity():
@@ -174,7 +188,7 @@ def test_adapter_projection_root_aliases_existing_container_identity():
 
 	wire = serializer.serialize({"shared": shared, "wrapped": wrapped})
 	assert wire == [5, {"shared": {"ok": True}, "wrapped": ["$", 1]}]
-	decoded = serializer.deserialize(wire)
+	decoded = cast(dict[str, Any], serializer.deserialize(wire))
 	assert decoded["shared"] is decoded["wrapped"]
 
 
@@ -207,6 +221,28 @@ def test_adapter_output_recursively_uses_other_adapters():
 	assert serializer.serialize(Outer(Inner(3))) == [5, {"value": 3}]
 
 
+def test_adapter_can_project_through_finite_chain_of_same_type():
+	class Box:
+		def __init__(self, value: object) -> None:
+			self.value: object = value
+
+	serializer = Serializer([SerializerAdapter(Box, lambda box: box.value)])
+
+	assert serializer.serialize(Box(Box(Box(3)))) == [5, 3]
+
+
+def test_to_pulse_can_project_through_finite_chain_of_same_type():
+	class Box(PulseSerializable):
+		def __init__(self, value: object) -> None:
+			self.value: object = value
+
+		@override
+		def to_pulse(self) -> object:
+			return self.value
+
+	assert serialize(Box(Box(Box(3)))) == [5, 3]
+
+
 def test_adapter_direct_return_and_projection_cycles_fail():
 	class Left:
 		pass
@@ -228,6 +264,24 @@ def test_adapter_direct_return_and_projection_cycles_fail():
 		direct.serialize(left)
 	with pytest.raises(ValueError, match="projection cycle"):
 		cycle.serialize(left)
+
+
+def test_adapter_fresh_object_non_convergence_is_bounded():
+	class Left:
+		pass
+
+	class Right:
+		pass
+
+	serializer = Serializer(
+		[
+			SerializerAdapter(Left, lambda _: Right()),
+			SerializerAdapter(Right, lambda _: Left()),
+		]
+	)
+
+	with pytest.raises(ValueError, match="projection exceeded 64 steps"):
+		serializer.serialize(Left())
 
 
 def test_container_subclasses_use_builtin_storage_after_adapter_resolution():

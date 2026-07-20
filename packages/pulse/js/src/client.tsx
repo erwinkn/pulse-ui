@@ -27,7 +27,6 @@ function browserIsOnline(): boolean {
 }
 
 export interface SocketIODirectives {
-	headers?: Record<string, string>;
 	auth?: Record<string, string>;
 	query?: Record<string, string>;
 }
@@ -71,7 +70,6 @@ export class PulseSocketIOClient {
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
 	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
-	#url: string;
 	#frameworkNavigate: NavigateFunction;
 	#directives: Directives;
 	#connectionStatusConfig: {
@@ -88,7 +86,6 @@ export class PulseSocketIOClient {
 	#reloadOnReconnectTimeout = false;
 
 	constructor(
-		url: string,
 		directives: Directives,
 		frameworkNavigate: NavigateFunction,
 		connectionStatusConfig: {
@@ -97,7 +94,6 @@ export class PulseSocketIOClient {
 			reconnectErrorDelay: number;
 		},
 	) {
-		this.#url = url;
 		this.#directives = directives;
 		this.#frameworkNavigate = frameworkNavigate;
 		this.#socket = null;
@@ -191,8 +187,9 @@ export class PulseSocketIOClient {
 			this.#handleDisconnected();
 		}
 		return new Promise((resolve, reject) => {
-			const socket = io(this.#url, {
+			const socket = io({
 				transports: ["websocket", "webtransport"],
+				path: "/_pulse/socket.io",
 				auth: this.#directives.socketio?.auth,
 				query: this.#directives.socketio?.query,
 			});
@@ -455,7 +452,7 @@ export class PulseSocketIOClient {
 							? msg.body
 							: JSON.stringify(msg.body)
 						: undefined,
-				credentials: msg.credentials || "include",
+				credentials: msg.credentials || "same-origin",
 			});
 			const headersObj: Record<string, string> = {};
 			res.headers.forEach((v, k) => {

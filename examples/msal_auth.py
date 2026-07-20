@@ -2,8 +2,7 @@
 Example: Microsoft Entra ID (Azure AD) auth using MSAL with token caching.
 
 Dev assumptions:
-- Node and Python run on same host in dev (localhost) so cookies work for both
-- In prod, serve under the same origin or set Domain=.example.com on cookies
+- Node and Python are served through the same origin
 
 Highlights:
 - Middleware sets `ctx["auth"]` from MSAL ID token claims
@@ -40,7 +39,7 @@ def LoginPage():
 		ps.p("You will be redirected to Microsoft to sign in."),
 		ps.a(
 			"Sign in with Microsoft",
-			href=f"{ps.server_address()}/auth/login?next={next_path}",
+			href=f"/auth/login?next={next_path}",
 			className="btn-primary inline-block mt-4",
 		),
 		className="max-w-md mx-auto p-6",

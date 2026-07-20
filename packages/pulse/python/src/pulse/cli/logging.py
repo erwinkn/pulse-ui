@@ -85,18 +85,16 @@ class CLILogger:
 		"""Return tag mode for process output: colored in dev, plain in ci/prod."""
 		return "plain" if self.is_plain else "colored"
 
-	def write_ready_announcement(
-		self, address: str, port: int, server_url: str
-	) -> None:
+	def write_ready_announcement(self, url: str) -> None:
 		"""Write the 'Pulse is ready' announcement."""
 		if self._console:
 			self._console.print("")
 			self._console.print(
-				f"[bold green]Ready:[/bold green] [bold cyan][link={server_url}]{server_url}[/link][/bold cyan]"
+				f"[bold green]Ready:[/bold green] [bold cyan][link={url}]{url}[/link][/bold cyan]"
 			)
 			self._console.print("")
 		else:
 			print("")
-			print(f"Ready: {server_url}")
+			print(f"Ready: {url}")
 			print("")
 		sys.stdout.flush()

@@ -24,7 +24,7 @@ from pulse_railway.constants import (
 from pulse_railway.errors import DeploymentError
 
 PULSE_APP_FILE = "PULSE_APP_FILE"
-PULSE_SERVER_ADDRESS = "PULSE_SERVER_ADDRESS"
+PULSE_PUBLIC_ORIGIN = "PULSE_PUBLIC_ORIGIN"
 PULSE_WEB_ROOT = "PULSE_WEB_ROOT"
 PORT = "PORT"
 RAILWAY_DOCKERFILE_PATH = "RAILWAY_DOCKERFILE_PATH"
@@ -37,7 +37,7 @@ RESERVED_BACKEND_ENV_VARS: frozenset[str] = frozenset(
 		PULSE_INTERNAL_TOKEN,
 		PULSE_RAILWAY_REDIS_URL,
 		PULSE_APP_FILE,
-		PULSE_SERVER_ADDRESS,
+		PULSE_PUBLIC_ORIGIN,
 		PORT,
 	}
 )
@@ -145,7 +145,7 @@ def backend_env(
 	deployment_id: str,
 	internal_token: str,
 	app_file: str,
-	server_address: str,
+	public_origin: str,
 	session_env: dict[str, str],
 	user_env: dict[str, str],
 ) -> dict[str, str]:
@@ -153,7 +153,7 @@ def backend_env(
 		PULSE_DEPLOYMENT_ID: deployment_id,
 		PULSE_INTERNAL_TOKEN: internal_token,
 		PULSE_APP_FILE: app_file,
-		PULSE_SERVER_ADDRESS: server_address,
+		PULSE_PUBLIC_ORIGIN: public_origin,
 		PORT: str(DEFAULT_BACKEND_PORT),
 		**session_env,
 		**user_env,
@@ -165,14 +165,12 @@ def backend_build_env(
 	build_args: dict[str, str],
 	app_file: str,
 	web_root: str,
-	server_address: str,
 	dockerfile_path: Path,
 	context_path: Path,
 ) -> dict[str, str]:
 	env = dict(build_args)
 	env.setdefault(PULSE_APP_FILE, app_file)
 	env.setdefault(PULSE_WEB_ROOT, web_root)
-	env.setdefault(PULSE_SERVER_ADDRESS, server_address)
 	try:
 		dockerfile_relative = dockerfile_path.relative_to(context_path)
 	except ValueError as exc:
@@ -186,7 +184,7 @@ def backend_build_env(
 
 __all__ = [
 	"PULSE_APP_FILE",
-	"PULSE_SERVER_ADDRESS",
+	"PULSE_PUBLIC_ORIGIN",
 	"PULSE_WEB_ROOT",
 	"PORT",
 	"RAILWAY_DOCKERFILE_PATH",

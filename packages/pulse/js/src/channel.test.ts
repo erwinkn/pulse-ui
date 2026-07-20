@@ -74,7 +74,6 @@ describe("ChannelBridge", () => {
 
 	it("reacquires a fresh bridge after release closes a channel", () => {
 		const client = new PulseSocketIOClient(
-			"http://pulse.test",
 			{},
 			vi.fn() as any,
 			{

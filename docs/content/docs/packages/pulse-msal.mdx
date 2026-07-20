@@ -67,6 +67,14 @@ app = ps.App(
 )
 ```
 
+In production, set the canonical same-origin callback base at runtime:
+
+```bash
+PULSE_PUBLIC_ORIGIN=https://app.example.com
+```
+
+Register `https://app.example.com/auth/callback` with Microsoft Entra ID. The plugin requires the public origin in production, builds callback URLs from it, and accepts only same-origin relative `next` paths such as `/dashboard`. Use `App(public_origin=...)` only for a programmatic override.
+
 ## Configuration Options
 
 ### MSALPlugin Parameters

@@ -15,9 +15,8 @@ from pulse.user_session import CookieSessionStore
 
 
 def make_app(monkeypatch: pytest.MonkeyPatch) -> ps.App:
-	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[])
-	app.setup("http://example.com")
+	app.setup()
 	return app
 
 
@@ -80,10 +79,9 @@ class TogglableDenyMiddleware(ps.PulseMiddleware):
 async def test_denied_reconnect_does_not_destroy_existing_render(
 	monkeypatch: pytest.MonkeyPatch,
 ):
-	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	mw = TogglableDenyMiddleware()
 	app = ps.App(routes=[], middleware=mw)
-	app.setup("http://example.com")
+	app.setup()
 	environ = make_environ(app, "user-1")
 	auth = {"render_id": "render-1"}
 	connect = app.sio.handlers["/"]["connect"]
@@ -112,11 +110,10 @@ async def test_denied_reconnect_does_not_destroy_existing_render(
 async def test_denied_fresh_connection_disposes_created_render(
 	monkeypatch: pytest.MonkeyPatch,
 ):
-	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	mw = TogglableDenyMiddleware()
 	mw.deny = True
 	app = ps.App(routes=[], middleware=mw)
-	app.setup("http://example.com")
+	app.setup()
 	environ = make_environ(app, "user-1")
 	connect = app.sio.handlers["/"]["connect"]
 
@@ -143,9 +140,8 @@ async def test_connect_middleware_exception_is_surfaced_after_bind(
 ):
 	"""A connect-middleware exception is treated as allow, and the error is
 	delivered to the now-bound client (not dropped pre-bind)."""
-	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[], middleware=RaisingConnectMiddleware())
-	app.setup("http://example.com")
+	app.setup()
 	environ = make_environ(app, "user-1")
 	connect = app.sio.handlers["/"]["connect"]
 

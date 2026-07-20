@@ -33,6 +33,7 @@ from pulse_railway.deployment import (
 	resolve_deployment_id_by_name,
 )
 from pulse_railway.env import (
+	PULSE_PUBLIC_ORIGIN,
 	check_reserved_source_build_args,
 	validate_backend_env_vars,
 )
@@ -585,7 +586,7 @@ async def test_redeploy_deployment_defaults_to_active_deployment(
 			redis=_service_record("svc-redis", "pulse-redis"),
 			internal_token="secret-token",
 			redis_url="redis://pulse-redis.railway.internal:6379",
-			server_address="https://test.pulse.sc",
+			public_origin="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
@@ -691,7 +692,7 @@ async def test_delete_deployment_rejects_active_before_service_delete(
 			redis=_service_record("svc-redis", "pulse-redis"),
 			internal_token="secret-token",
 			redis_url="redis://pulse-redis.railway.internal:6379",
-			server_address="https://test.pulse.sc",
+			public_origin="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
@@ -762,7 +763,7 @@ async def test_delete_deployment_clears_router_state_then_deletes_inactive_servi
 			redis=_service_record("svc-redis", "pulse-redis"),
 			internal_token="secret-token",
 			redis_url="redis://pulse-redis.railway.internal:6379",
-			server_address="https://test.pulse.sc",
+			public_origin="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
@@ -821,7 +822,7 @@ async def test_delete_deployment_keeps_service_when_router_state_delete_fails(
 			redis=_service_record("svc-redis", "pulse-redis"),
 			internal_token="secret-token",
 			redis_url="redis://pulse-redis.railway.internal:6379",
-			server_address="https://test.pulse.sc",
+			public_origin="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
@@ -1022,7 +1023,7 @@ async def test_deploy_happy_path_on_ready_stack(
 			),
 			internal_token="secret-token",
 			redis_url="redis://pulse-router-redis.railway.internal:6379",
-			server_address="https://test.pulse.sc",
+			public_origin="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
@@ -1043,7 +1044,7 @@ async def test_deploy_happy_path_on_ready_stack(
 	async def fake_build_and_push_image(*, docker: DockerBuild, image_ref: str) -> str:
 		assert "APP_FILE" not in docker.build_args
 		assert "WEB_ROOT" not in docker.build_args
-		assert docker.build_args["PULSE_SERVER_ADDRESS"] == "https://test.pulse.sc"
+		assert PULSE_PUBLIC_ORIGIN not in docker.build_args
 		return image_ref
 
 	monkeypatch.setattr(
@@ -1076,19 +1077,19 @@ async def test_deploy_happy_path_on_ready_stack(
 	assert result.router_deployment_id is None
 	assert result.router_status is None
 	assert result.janitor_deployment_id is None
-	assert result.server_address == "https://test.pulse.sc"
+	assert result.public_origin == "https://test.pulse.sc"
 	assert group_updates == [("env", result.backend_service_id, "group-baseline")]
 	assert router_control_calls[-1]["router_service_name"] == "pulse-router"
 	assert router_control_calls[-1]["cli_token_env_name"] is None
 	assert router_control_calls[-1]["control_args"][0] == "promote"
 	assert routed_health_checks == [
 		{
-			"server_address": "https://test.pulse.sc",
+			"public_origin": "https://test.pulse.sc",
 			"deployment_id": "prod-260402-120000",
 			"use_affinity": True,
 		},
 		{
-			"server_address": "https://test.pulse.sc",
+			"public_origin": "https://test.pulse.sc",
 			"deployment_id": "prod-260402-120000",
 			"use_affinity": False,
 		},
@@ -1296,7 +1297,7 @@ async def test_deploy_source_happy_path_on_ready_stack(
 			),
 			internal_token="secret-token",
 			redis_url="redis://pulse-router-redis.railway.internal:6379",
-			server_address="https://test.pulse.sc",
+			public_origin="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
@@ -1345,7 +1346,7 @@ async def test_deploy_source_happy_path_on_ready_stack(
 	assert result.backend_service_name == "prod-260402-120000"
 	assert result.router_service_name == "pulse-router"
 	assert result.janitor_service_name == "pulse-janitor"
-	assert result.server_address == "https://test.pulse.sc"
+	assert result.public_origin == "https://test.pulse.sc"
 	assert result.backend_deployment_id == "dep-svc-1"
 	assert group_updates == [("env", result.backend_service_id, "group-baseline")]
 	assert run_command_calls == [
@@ -1372,7 +1373,7 @@ async def test_deploy_source_happy_path_on_ready_stack(
 			"PULSE_DEPLOYMENT_ID": "prod-260402-120000",
 			PULSE_INTERNAL_TOKEN: "secret-token",
 			"PULSE_APP_FILE": "examples/aws-ecs/main.py",
-			"PULSE_SERVER_ADDRESS": "https://test.pulse.sc",
+			PULSE_PUBLIC_ORIGIN: "https://test.pulse.sc",
 			"PORT": "8000",
 			"PULSE_RAILWAY_REDIS_URL": (
 				"redis://pulse-router-redis.railway.internal:6379"
@@ -1389,12 +1390,12 @@ async def test_deploy_source_happy_path_on_ready_stack(
 	assert router_control_calls[-1]["control_args"][0] == "promote"
 	assert routed_health_checks == [
 		{
-			"server_address": "https://test.pulse.sc",
+			"public_origin": "https://test.pulse.sc",
 			"deployment_id": "prod-260402-120000",
 			"use_affinity": True,
 		},
 		{
-			"server_address": "https://test.pulse.sc",
+			"public_origin": "https://test.pulse.sc",
 			"deployment_id": "prod-260402-120000",
 			"use_affinity": False,
 		},
@@ -1430,7 +1431,7 @@ async def test_deploy_source_happy_path_on_ready_stack(
 		"${{pulse-env.EXTERNAL_KEY}}"
 	)
 	assert service_variables[result.backend_service_id]["FEATURE_FLAG"] == "enabled"
-	assert service_variables[result.backend_service_id]["PULSE_SERVER_ADDRESS"] == (
+	assert service_variables[result.backend_service_id][PULSE_PUBLIC_ORIGIN] == (
 		"https://test.pulse.sc"
 	)
 	assert service_variables[result.backend_service_id][PULSE_RAILWAY_REDIS_URL] == (
@@ -1527,7 +1528,7 @@ async def test_deploy_source_uses_railway_api_token_for_cli_when_present(
 			),
 			internal_token="secret-token",
 			redis_url="redis://pulse-router-redis.railway.internal:6379",
-			server_address="https://test.pulse.sc",
+			public_origin="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
@@ -1653,7 +1654,7 @@ async def test_deploy_source_uses_bearer_env_for_unmatched_explicit_account_toke
 			),
 			internal_token="secret-token",
 			redis_url="redis://pulse-router-redis.railway.internal:6379",
-			server_address="https://test.pulse.sc",
+			public_origin="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
@@ -1778,7 +1779,7 @@ async def test_deploy_source_uses_project_token_env_for_explicit_token_override(
 			),
 			internal_token="secret-token",
 			redis_url="redis://pulse-router-redis.railway.internal:6379",
-			server_address="https://test.pulse.sc",
+			public_origin="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
@@ -1882,7 +1883,7 @@ async def test_deploy_source_cleans_up_failed_source_service(
 			),
 			internal_token="secret-token",
 			redis_url="redis://pulse-router-redis.railway.internal:6379",
-			server_address="https://test.pulse.sc",
+			public_origin="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
@@ -1985,7 +1986,7 @@ async def test_deploy_source_keeps_service_when_post_build_polling_fails(
 			),
 			internal_token="secret-token",
 			redis_url="redis://pulse-router-redis.railway.internal:6379",
-			server_address="https://test.pulse.sc",
+			public_origin="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
@@ -2124,7 +2125,7 @@ async def test_deploy_source_waits_through_transient_stopped_build_state(
 			),
 			internal_token="secret-token",
 			redis_url="redis://pulse-router-redis.railway.internal:6379",
-			server_address="https://test.pulse.sc",
+			public_origin="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
@@ -2268,7 +2269,7 @@ async def test_deploy_ignores_ambient_redis_url_for_managed_session_store(
 			redis=_service_record("svc-redis", "pulse-redis"),
 			internal_token="secret-token",
 			redis_url="redis://railway-internal:6379/0",
-			server_address="https://test.pulse.sc",
+			public_origin="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
@@ -2338,7 +2339,7 @@ async def test_deploy_rejects_duplicate_deployment(monkeypatch, tmp_path) -> Non
 			redis=_service_record("svc-redis", "pulse-redis"),
 			internal_token="secret-token",
 			redis_url="redis://pulse-router-redis.railway.internal:6379",
-			server_address="https://test.pulse.sc",
+			public_origin="https://test.pulse.sc",
 		),
 	)
 
@@ -2505,7 +2506,7 @@ async def test_deploy_always_injects_managed_railway_redis_url(
 			redis=_service_record("svc-redis", "pulse-redis"),
 			internal_token="secret-token",
 			redis_url="redis://project-public:6379",
-			server_address="https://test.pulse.sc",
+			public_origin="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(
@@ -2514,7 +2515,7 @@ async def test_deploy_always_injects_managed_railway_redis_url(
 	)
 
 	async def fake_build_and_push_image(*, docker: DockerBuild, image_ref: str) -> str:
-		assert docker.build_args["PULSE_SERVER_ADDRESS"] == "https://test.pulse.sc"
+		assert PULSE_PUBLIC_ORIGIN not in docker.build_args
 		return image_ref
 
 	monkeypatch.setattr(

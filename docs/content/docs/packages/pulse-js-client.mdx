@@ -35,21 +35,30 @@ When you build a Pulse application, the Python server generates a virtual DOM (V
 The client is automatically included when you create a Pulse app. You don't need to install it manually unless you're building custom integrations.
 
 ```bash
-bun add pulse-client
+bun add pulse-ui-client
 ```
 
 ## Key Components
 
 ### PulseProvider
 
-The root provider that establishes the WebSocket connection to your server.
+The root provider that establishes the WebSocket connection to the current origin at `/_pulse/socket.io`.
 
 ```tsx
-import { PulseProvider } from "pulse-client";
+import { PulseProvider } from "pulse-ui-client";
 
 function App() {
   return (
-    <PulseProvider config={{ serverUrl: "http://localhost:8000" }}>
+    <PulseProvider
+      config={{
+        connectionStatus: {
+          initialConnectingDelay: 500,
+          initialErrorDelay: 5000,
+          reconnectErrorDelay: 3000,
+        },
+      }}
+      prerender={{ views: {}, directives: {} }}
+    >
       <Routes />
     </PulseProvider>
   );
@@ -61,7 +70,7 @@ function App() {
 Renders a server-driven view for a specific route.
 
 ```tsx
-import { PulseView } from "pulse-client";
+import { PulseView } from "pulse-ui-client";
 
 function Dashboard() {
   return <PulseView path="/dashboard" registry={registry} />;
@@ -73,7 +82,7 @@ function Dashboard() {
 Hook to access the client instance for advanced use cases.
 
 ```tsx
-import { usePulseClient } from "pulse-client";
+import { usePulseClient } from "pulse-ui-client";
 
 function MyComponent() {
   const client = usePulseClient();
@@ -86,7 +95,7 @@ function MyComponent() {
 Hook for real-time bidirectional messaging between client and server.
 
 ```tsx
-import { usePulseChannel } from "pulse-client";
+import { usePulseChannel } from "pulse-ui-client";
 
 function Chat() {
   const channel = usePulseChannel("chat");
@@ -108,11 +117,11 @@ function Chat() {
 A form component that handles submission and serialization.
 
 ```tsx
-import { PulseForm, submitForm } from "pulse-client";
+import { PulseForm } from "pulse-ui-client";
 
 function MyForm() {
   return (
-    <PulseForm onSubmit={(data) => console.log(data)}>
+    <PulseForm action="/api/profile">
       <input name="email" />
       <button type="submit">Submit</button>
     </PulseForm>
@@ -125,7 +134,7 @@ function MyForm() {
 The client provides utilities for serializing and deserializing data between Python and JavaScript.
 
 ```tsx
-import { serialize, deserialize } from "pulse-client";
+import { serialize, deserialize } from "pulse-ui-client";
 
 // Serialize data for sending to server
 const wire = serialize({ date: new Date() });

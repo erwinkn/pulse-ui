@@ -163,7 +163,6 @@ def create_app(
 		routes=[ps.Route("/", home)],
 		plugins=[RailwayPlugin(dockerfile="examples/railway/Dockerfile")],
 		session_store=session_store or RailwaySessionStore(prefix=SESSION_PREFIX),
-		server_address=os.environ.get("PULSE_SERVER_ADDRESS"),
 	)
 	register_probe_routes(app)
 	return app

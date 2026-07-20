@@ -38,7 +38,7 @@ export interface ServerApiCallMessage {
 	method: string;
 	headers: Record<string, string>;
 	body: any | null;
-	credentials: "include" | "omit";
+	credentials: RequestCredentials;
 }
 
 export interface ServerChannelRequestMessage {

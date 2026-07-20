@@ -175,12 +175,10 @@ export async function submitForm(options: SubmitForm) {
 	} else if (!formData) {
 		formData = new FormData(form, nativeEvent.submitter);
 	}
-	const url = new URL(action, window.location.href);
 	try {
-		const response = await fetch(url, {
+		const response = await fetch(action, {
 			method: "POST",
-			// Required for our hosting scenarios of same host + different ports or 2 subdomains
-			credentials: "include",
+			credentials: "same-origin",
 			body: formData,
 		});
 		if (!response.ok) {

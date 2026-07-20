@@ -17,14 +17,10 @@ class App:
         plugins: Sequence[Plugin] | None = None,
         cookie: Cookie | None = None,
         session_store: SessionStore | None = None,
-        server_address: str | None = None,
-        dev_server_address: str = "http://localhost:8000",
-        internal_server_address: str | None = None,
+        public_origin: str | None = None,
         not_found: str = "/not-found",
-        mode: PulseMode = "single-server",
-        proxy: Proxy | None = None,
-        cors: CORSOptions | None = None,
-        fastapi: dict[str, Any] | None = None,
+        proxy: WebProxyConfig | None = None,
+        socketio_options: dict[str, Any] | None = None,
         session_timeout: float = 60.0,
         prerender_queue_timeout: float = 60.0,
         disconnect_queue_timeout: float = 300.0,
@@ -43,14 +39,10 @@ class App:
 | `plugins` | `Sequence[Plugin]` | `None` | App plugins |
 | `cookie` | `Cookie` | `None` | Session cookie config |
 | `session_store` | `SessionStore` | `None` | Session storage backend |
-| `server_address` | `str` | `None` | Public server URL (required in prod) |
-| `dev_server_address` | `str` | `"http://localhost:8000"` | Dev server URL |
-| `internal_server_address` | `str` | `None` | Internal URL for server-side fetches |
+| `public_origin` | `str` | `None` | Optional canonical browser origin for absolute server-side URLs; `PULSE_PUBLIC_ORIGIN` is the fallback |
 | `not_found` | `str` | `"/not-found"` | Path for 404 page |
-| `mode` | `PulseMode` | `"single-server"` | Deployment mode |
-| `proxy` | `Proxy` | `None` | Single-server proxy tuning |
-| `cors` | `CORSOptions` | `None` | CORS configuration |
-| `fastapi` | `dict` | `None` | Additional FastAPI options |
+| `proxy` | `WebProxyConfig` | `None` | Optional internal React Router proxy tuning |
+| `socketio_options` | `dict[str, Any]` | `None` | Extra options for the Socket.IO server, e.g. `cors_allowed_origins` when a fronting proxy cannot forward `Host`/`X-Forwarded-Proto` |
 | `session_timeout` | `float` | `60.0` | How long a disconnected render session stays resumable before being closed (seconds) |
 | `prerender_queue_timeout` | `float` | `60.0` | How long a prerendered route waits for the client to attach before its render tree is released (seconds) |
 | `disconnect_queue_timeout` | `float` | `300.0` | How long updates are queued for a disconnected client before the route suspends — rendering pauses but state is kept; reconnecting within `session_timeout` resumes without a reload (seconds) |
@@ -64,7 +56,7 @@ Framework routes live under the reserved `/_pulse/*` namespace and are not confi
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `env` | `PulseEnv` | Current environment (`dev`, `ci`, `prod`) |
-| `mode` | `PulseMode` | Deployment mode |
+| `public_origin` | `str \| None` | Optional canonical browser-visible origin |
 | `status` | `AppStatus` | Current app lifecycle status |
 | `routes` | `RouteTree` | Parsed route tree |
 | `fastapi` | `FastAPI` | Underlying FastAPI instance |
@@ -97,11 +89,7 @@ ASGI factory for production deployment. Called on each reload.
 #### run_codegen
 
 ```python
-def run_codegen(
-    self,
-    address: str | None = None,
-    internal_address: str | None = None,
-) -> None
+def run_codegen(self) -> None
 ```
 
 Generate React Router code for all routes.
@@ -109,10 +97,10 @@ Generate React Router code for all routes.
 #### setup
 
 ```python
-def setup(self, server_address: str) -> None
+def setup(self) -> None
 ```
 
-Initialize the app with a server address. Called automatically by `asgi_factory`.
+Initialize framework routes, middleware, sessions, Socket.IO, and the optional web proxy. Called automatically by `asgi_factory`.
 
 ### Example
 
@@ -133,28 +121,13 @@ if __name__ == "__main__":
 
 ---
 
-## PulseMode
+## WebProxyConfig
 
-```python
-PulseMode = Literal["subdomains", "single-server"]
-```
-
-Deployment mode for the application.
-
-| Value | Description |
-|-------|-------------|
-| `"single-server"` | Python and React on same origin (default) |
-| `"subdomains"` | Python API on subdomain (e.g., `api.example.com`) |
-
----
-
-## Proxy
-
-Configuration for the single-server React proxy.
+Configuration for the optional internal React Router proxy.
 
 ```python
 @dataclass
-class Proxy:
+class WebProxyConfig:
     max_concurrency: int = 100
     incoming_streaming_threshold: int = 512 * 1024
     outgoing_streaming_threshold: int = 5 * 1024 * 1024
@@ -165,7 +138,9 @@ class Proxy:
     disconnect_watch_base_sleep: float = 0.001
 ```
 
-Pass it to `App(proxy=ps.Proxy(...))`. Used only in `"single-server"` mode.
+Pass it to `App(proxy=ps.WebProxyConfig(...))`. Pulse constructs `WebProxy` when `PULSE_WEB_UPSTREAM` is set. If no upstream is configured, Pulse serves only framework and FastAPI endpoints.
+
+`WebProxy` preserves the browser-visible host while forwarding HTTP and development WebSocket traffic. Redirects that point at the internal upstream are rewritten to origin-relative locations.
 
 ---
 

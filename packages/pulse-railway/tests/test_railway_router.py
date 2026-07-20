@@ -14,7 +14,6 @@ from aiohttp import web
 from httpx import ASGITransport, AsyncClient
 from pulse_railway.constants import (
 	CLIENT_LOADER_HEADER,
-	CLIENT_LOADER_LOCATION_HEADER,
 	PULSE_KV_KIND,
 	PULSE_KV_PATH,
 	PULSE_KV_URL,
@@ -59,8 +58,23 @@ async def backend_servers(
 					)
 			return ws
 
+		async def request_headers(request: web.Request) -> web.Response:
+			return web.json_response(
+				{
+					"host": request.headers.get("host"),
+					"origin": request.headers.get("origin"),
+					"forwarded_host": request.headers.get("x-forwarded-host"),
+					"forwarded_proto": request.headers.get("x-forwarded-proto"),
+				}
+			)
+
+		async def duplicate_request_headers(request: web.Request) -> web.Response:
+			return web.json_response(request.headers.getall("x-duplicate", []))
+
 		app.router.add_get("/", root)
 		app.router.add_get("/ws", websocket_handler)
+		app.router.add_get("/request-headers", request_headers)
+		app.router.add_get("/duplicate-request-headers", duplicate_request_headers)
 		runner = web.AppRunner(app)
 		await runner.setup()
 		port = unused_tcp_port_factory()
@@ -91,6 +105,52 @@ async def test_router_uses_active_backend(backend_servers: dict[str, str]) -> No
 	assert response.status_code == 200
 	assert response.json() == {"deployment": "v2"}
 	assert response.headers["x-pulse-selected-deployment"] == "v2"
+
+
+@pytest.mark.asyncio
+async def test_router_preserves_public_origin_headers(
+	backend_servers: dict[str, str],
+) -> None:
+	app = build_app(StaticResolver(backends=backend_servers, active_deployment="v2"))
+	async with AsyncClient(
+		transport=ASGITransport(app=app),
+		base_url="http://app.example.com",
+	) as client:
+		response = await client.get(
+			"/request-headers",
+			headers={
+				"Origin": "https://app.example.com",
+				"X-Forwarded-Host": "spoofed.example.com",
+				"X-Forwarded-Proto": "https",
+			},
+		)
+	await app.state.router.close()
+
+	assert response.status_code == 200
+	assert response.json() == {
+		"host": "app.example.com",
+		"origin": "https://app.example.com",
+		"forwarded_host": "app.example.com",
+		"forwarded_proto": "https",
+	}
+
+
+@pytest.mark.asyncio
+async def test_router_preserves_duplicate_request_headers(
+	backend_servers: dict[str, str],
+) -> None:
+	app = build_app(StaticResolver(backends=backend_servers, active_deployment="v2"))
+	async with AsyncClient(
+		transport=ASGITransport(app=app),
+		base_url="https://app.example.com",
+	) as client:
+		response = await client.get(
+			"/duplicate-request-headers",
+			headers=[("x-duplicate", "one"), ("x-duplicate", "two")],
+		)
+	await app.state.router.close()
+
+	assert response.json() == ["one", "two"]
 
 
 @pytest.mark.asyncio
@@ -249,7 +309,7 @@ async def test_router_session_rejects_invalid_connection_limit(
 
 
 @pytest.mark.asyncio
-async def test_router_returns_404_for_unknown_backend(
+async def test_router_signals_stale_affinity_for_plain_requests(
 	backend_servers: dict[str, str],
 ) -> None:
 	app = build_app(StaticResolver(backends=backend_servers, active_deployment="v2"))
@@ -265,7 +325,7 @@ async def test_router_returns_404_for_unknown_backend(
 
 
 @pytest.mark.asyncio
-async def test_router_redirects_client_loader_for_stale_http_affinity(
+async def test_router_signals_stale_client_loader_affinity(
 	backend_servers: dict[str, str],
 ) -> None:
 	app = build_app(StaticResolver(backends=backend_servers, active_deployment="v2"))
@@ -277,15 +337,12 @@ async def test_router_redirects_client_loader_for_stale_http_affinity(
 		response = await client.get(
 			"/",
 			params={"pulse_deployment": "missing"},
-			headers={
-				CLIENT_LOADER_HEADER: "1",
-				CLIENT_LOADER_LOCATION_HEADER: "http://app.example.com/users?tab=active",
-			},
+			headers={CLIENT_LOADER_HEADER: "1"},
 		)
 	await app.state.router.close()
 
-	assert response.status_code == 302
-	assert response.headers["location"] == "http://app.example.com/users?tab=active"
+	assert response.status_code == 409
+	assert response.json() == {"detail": "stale affinity"}
 
 
 @pytest.mark.asyncio
@@ -363,11 +420,10 @@ async def test_router_proxies_socketio_websocket_without_store(
 ) -> None:
 	sio = socketio.AsyncServer(
 		async_mode="aiohttp",
-		cors_allowed_origins="*",
 		reconnection=False,
 	)
 	backend = web.Application()
-	sio.attach(backend)
+	sio.attach(backend, socketio_path="_pulse/socket.io")
 	backend_port = unused_tcp_port_factory()
 	router_port = unused_tcp_port_factory()
 	received: dict[str, str | None] = {}
@@ -408,9 +464,14 @@ async def test_router_proxies_socketio_websocket_without_store(
 		await client.connect(
 			f"http://127.0.0.1:{router_port}",
 			transports=["websocket"],
-			headers={"Cookie": "pulse.sid=abc123"},
+			headers={
+				"Cookie": "pulse.sid=abc123",
+				"Host": "app.example.com",
+				"Origin": "https://app.example.com",
+				"X-Forwarded-Proto": "https",
+			},
 			auth={"render_id": "render-1"},
-			socketio_path="socket.io",
+			socketio_path="_pulse/socket.io",
 			wait_timeout=5,
 		)
 		assert client.connected is True
@@ -446,9 +507,9 @@ async def test_router_closes_backend_websocket_when_client_accept_fails(
 			return self.websocket
 
 	class RejectingWebSocket:
-		headers: dict[str, str] = {}
+		headers: dict[str, str] = {"host": "app.example.com"}
 		query_params: dict[str, str] = {}
-		url: SimpleNamespace = SimpleNamespace(query="")
+		url: SimpleNamespace = SimpleNamespace(query="", scheme="ws")
 		closed: bool = False
 
 		async def accept(self, *_args: Any, **_kwargs: Any) -> None:
@@ -469,7 +530,7 @@ async def test_router_closes_backend_websocket_when_client_accept_fails(
 	try:
 		with pytest.raises(RuntimeError, match="client disconnected"):
 			await router.proxy_websocket(
-				cast(WebSocket, cast(object, websocket)), "socket.io/"
+				cast(WebSocket, cast(object, websocket)), "_pulse/socket.io/"
 			)
 	finally:
 		await router.close()
@@ -484,11 +545,10 @@ async def test_router_falls_back_to_active_backend_for_stale_socket_affinity(
 ) -> None:
 	sio = socketio.AsyncServer(
 		async_mode="aiohttp",
-		cors_allowed_origins="*",
 		reconnection=False,
 	)
 	backend = web.Application()
-	sio.attach(backend)
+	sio.attach(backend, socketio_path="_pulse/socket.io")
 	backend_port = unused_tcp_port_factory()
 	router_port = unused_tcp_port_factory()
 	received: dict[str, str | None] = {}
@@ -523,9 +583,14 @@ async def test_router_falls_back_to_active_backend_for_stale_socket_affinity(
 		await client.connect(
 			f"http://127.0.0.1:{router_port}?pulse_deployment=missing&{STALE_AFFINITY_RELOAD_QUERY_PARAM}=1",
 			transports=["websocket"],
-			headers={"Cookie": "pulse.sid=abc123"},
+			headers={
+				"Cookie": "pulse.sid=abc123",
+				"Host": "app.example.com",
+				"Origin": "https://app.example.com",
+				"X-Forwarded-Proto": "https",
+			},
 			auth={"render_id": "render-1"},
-			socketio_path="socket.io",
+			socketio_path="_pulse/socket.io",
 			wait_timeout=5,
 		)
 		assert client.connected is True
@@ -548,11 +613,10 @@ async def test_router_rejects_stale_socket_affinity_without_reload_opt_in(
 ) -> None:
 	sio = socketio.AsyncServer(
 		async_mode="aiohttp",
-		cors_allowed_origins="*",
 		reconnection=False,
 	)
 	backend = web.Application()
-	sio.attach(backend)
+	sio.attach(backend, socketio_path="_pulse/socket.io")
 	backend_port = unused_tcp_port_factory()
 	router_port = unused_tcp_port_factory()
 
@@ -579,9 +643,14 @@ async def test_router_rejects_stale_socket_affinity_without_reload_opt_in(
 			await client.connect(
 				f"http://127.0.0.1:{router_port}?pulse_deployment=missing",
 				transports=["websocket"],
-				headers={"Cookie": "pulse.sid=abc123"},
+				headers={
+					"Cookie": "pulse.sid=abc123",
+					"Host": "app.example.com",
+					"Origin": "https://app.example.com",
+					"X-Forwarded-Proto": "https",
+				},
 				auth={"render_id": "render-1"},
-				socketio_path="socket.io",
+				socketio_path="_pulse/socket.io",
 				wait_timeout=5,
 			)
 		assert client.connected is False

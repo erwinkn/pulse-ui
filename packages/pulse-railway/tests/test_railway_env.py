@@ -17,7 +17,7 @@ from pulse_railway.constants import (
 from pulse_railway.env import (
 	PORT,
 	PULSE_APP_FILE,
-	PULSE_SERVER_ADDRESS,
+	PULSE_PUBLIC_ORIGIN,
 	PULSE_WEB_ROOT,
 	RAILWAY_DOCKERFILE_PATH,
 	backend_build_env,
@@ -75,7 +75,7 @@ def test_backend_env_sets_direct_token_and_no_active_deployment() -> None:
 		deployment_id="prod",
 		internal_token="secret",
 		app_file="main.py",
-		server_address="https://example.com",
+		public_origin="https://example.com",
 		session_env=backend_session_env(True, redis_url="redis://internal"),
 		user_env={"FEATURE_FLAG": "on"},
 	)
@@ -84,7 +84,7 @@ def test_backend_env_sets_direct_token_and_no_active_deployment() -> None:
 		"PULSE_DEPLOYMENT_ID": "prod",
 		PULSE_INTERNAL_TOKEN: "secret",
 		PULSE_APP_FILE: "main.py",
-		PULSE_SERVER_ADDRESS: "https://example.com",
+		PULSE_PUBLIC_ORIGIN: "https://example.com",
 		PORT: "8000",
 		PULSE_RAILWAY_REDIS_URL: "redis://internal",
 		"FEATURE_FLAG": "on",
@@ -101,14 +101,12 @@ def test_backend_build_env_uses_prefixed_names(tmp_path: Path) -> None:
 		build_args={"FEATURE_BUILD": "on"},
 		app_file="examples/main.py",
 		web_root="examples/web",
-		server_address="https://example.com",
 		dockerfile_path=dockerfile,
 		context_path=tmp_path,
 	) == {
 		"FEATURE_BUILD": "on",
 		PULSE_APP_FILE: "examples/main.py",
 		PULSE_WEB_ROOT: "examples/web",
-		PULSE_SERVER_ADDRESS: "https://example.com",
 		RAILWAY_DOCKERFILE_PATH: "examples/Dockerfile",
 	}
 

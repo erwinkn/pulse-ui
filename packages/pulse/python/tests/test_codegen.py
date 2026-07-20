@@ -18,8 +18,6 @@ from pulse.components.react_router import Outlet
 from pulse.routing import Route, RouteTree
 from pulse.transpiler import Import, Jsx, clear_function_cache
 
-SERVER_ADDRESS = "http://localhost:8000"
-
 
 class TestCodegen:
 	"""Test the Codegen class."""
@@ -33,7 +31,7 @@ class TestCodegen:
 		route = Route("/simple", ps.component(lambda: div()["Simple route"]))
 		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_route(route, server_address=SERVER_ADDRESS)
+		codegen.generate_route(route)
 
 		route_page_path = codegen.output_folder / "routes" / "simple.jsx"
 		assert route_page_path.exists()
@@ -62,7 +60,7 @@ class TestCodegen:
 		)
 		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_route(route, server_address=SERVER_ADDRESS)
+		codegen.generate_route(route)
 
 		route_page_path = codegen.output_folder / "routes" / "with-components.jsx"
 		assert route_page_path.exists()
@@ -86,7 +84,7 @@ class TestCodegen:
 		)
 		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_route(route, server_address=SERVER_ADDRESS)
+		codegen.generate_route(route)
 
 		route_page_path = codegen.output_folder / "routes" / "default-export.jsx"
 		assert route_page_path.exists()
@@ -113,7 +111,7 @@ class TestCodegen:
 		)
 		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_route(route, server_address=SERVER_ADDRESS)
+		codegen.generate_route(route)
 
 		route_page_path = codegen.output_folder / "routes" / "app-shell.jsx"
 		assert route_page_path.exists()
@@ -139,7 +137,7 @@ class TestCodegen:
 		)
 		codegen_config = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_route(route, server_address=SERVER_ADDRESS)
+		codegen.generate_route(route)
 
 		route_page_path = codegen.output_folder / "routes" / "duplicate-imports.jsx"
 		assert route_page_path.exists()
@@ -228,7 +226,7 @@ class TestCodegen:
 			pulse_dir="test_pulse_app",
 		)
 		codegen = Codegen(app.routes, codegen_config)
-		codegen.generate_all(server_address=SERVER_ADDRESS)
+		codegen.generate_all()
 
 		pulse_app_dir = Path(codegen.output_folder)
 		routes_dir = pulse_app_dir / "routes"
@@ -246,38 +244,26 @@ class TestCodegen:
 
 		layout_content = (pulse_app_dir / "_layout.tsx").read_text()
 		assert (
-			'import { deserialize, extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";'
-			in layout_content
-		)
-		assert 'serverAddress: "http://localhost:8000"' in layout_content
-		assert "internalServerAddress:" not in layout_content
-		assert (
-			"// Internal server address for server-side loader requests."
+			'import { deserialize, extractServerRouteInfo, PulseProvider, type Directives, type PulseConfig, type PulsePrerender } from "pulse-ui-client";'
 			in layout_content
 		)
 		assert (
-			'const internalServerAddress = "http://localhost:8000";' in layout_content
-		)
-		assert (
-			"const prerenderUrl = new URL(`${config.serverAddress}${config.apiPrefix}/prerender`);"
+			"const internalServerAddress = process.env.PULSE_SSR_BACKEND_URL;"
 			in layout_content
 		)
+		assert "new URL(PULSE_PRERENDER_PATH, internalServerAddress)" in layout_content
+		assert 'const PULSE_PRERENDER_PATH = "/_pulse/prerender";' in layout_content
+		assert "const prerenderUrl = `${PULSE_PRERENDER_PATH}" in layout_content
 		assert (
 			'const headers = new Headers({ "content-type": "application/json" });'
 			in layout_content
 		)
 		assert 'headers.set("x-pulse-client-loader", "1");' in layout_content
-		assert (
-			'headers.set("x-pulse-client-loader-location", args.request.url);'
-			in layout_content
-		)
 		assert "if (directives?.query) {" in layout_content
-		assert "prerenderUrl.searchParams.set(key, value as string);" in layout_content
+		assert "query.set(key, value as string);" in layout_content
+		assert 'credentials: "same-origin",' in layout_content
 		assert 'redirect: "manual",' in layout_content
-		assert (
-			'if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400)) {'
-			in layout_content
-		)
+		assert "if (res.status === 409) {" in layout_content
 		assert "window.location.assign(args.request.url);" in layout_content
 
 		routes_ts_content = (pulse_app_dir / "routes.ts").read_text()
@@ -327,7 +313,7 @@ class TestCodegen:
 
 		cfg = CodegenConfig(web_dir=str(tmp_path), pulse_dir="pulse")
 		codegen = Codegen(app.routes, cfg)
-		codegen.generate_all(server_address=SERVER_ADDRESS)
+		codegen.generate_all()
 
 		# Expect two sibling layout directories: layout/ and layout2/
 		layout1 = codegen.output_folder / "layouts" / "layout" / "_layout.jsx"
@@ -430,7 +416,7 @@ class TestLocalFileImports:
 		route = Route("/test", Component(lambda: div()))
 		codegen_config = CodegenConfig(web_dir=str(tmp_path / "web"), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_all(server_address=SERVER_ADDRESS)
+		codegen.generate_all()
 
 		# Check assets folder exists and contains the file
 		assets_dir = codegen.assets_folder
@@ -458,7 +444,7 @@ class TestLocalFileImports:
 		route = Route("/test", Component(lambda: div()))
 		codegen_config = CodegenConfig(web_dir=str(tmp_path / "web"), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_all(server_address=SERVER_ADDRESS)
+		codegen.generate_all()
 
 		# Find the copied TS file
 		assets_dir = codegen.assets_folder
@@ -484,7 +470,7 @@ class TestLocalFileImports:
 		route = Route("/test", Component(lambda: div()))
 		codegen_config = CodegenConfig(web_dir=str(tmp_path / "web"), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_all(server_address=SERVER_ADDRESS)
+		codegen.generate_all()
 
 		# Read the generated route
 		route_file = codegen.output_folder / "routes" / "test.jsx"
@@ -518,7 +504,7 @@ class TestLocalFileImports:
 		)
 		codegen_config = CodegenConfig(web_dir=str(tmp_path / "web"), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([parent_route]), codegen_config)
-		codegen.generate_all(server_address=SERVER_ADDRESS)
+		codegen.generate_all()
 
 		# Check parent route import
 		parent_file = codegen.output_folder / "routes" / "users.jsx"
@@ -556,7 +542,7 @@ class TestLocalFileImports:
 		route = Route("/test", Component(lambda: div()))
 		codegen_config = CodegenConfig(web_dir=str(tmp_path / "web"), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_all(server_address=SERVER_ADDRESS)
+		codegen.generate_all()
 
 		# Check all files copied
 		assets_dir = codegen.assets_folder
@@ -578,7 +564,7 @@ class TestLocalFileImports:
 		route = Route("/test", Component(lambda: div()))
 		codegen_config = CodegenConfig(web_dir=str(tmp_path / "web"), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([route]), codegen_config)
-		codegen.generate_all(server_address=SERVER_ADDRESS)
+		codegen.generate_all()
 
 		# Assets folder should either not exist or be empty
 		assets_dir = codegen.assets_folder
@@ -614,7 +600,7 @@ class TestLocalFileImports:
 		)
 		codegen_config = CodegenConfig(web_dir=str(tmp_path / "web"), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([layout]), codegen_config)
-		codegen.generate_all(server_address=SERVER_ADDRESS)
+		codegen.generate_all()
 
 		# Check layout file import - layouts are in layouts/ folder
 		layout_files = list((codegen.output_folder / "layouts").rglob("_layout.jsx"))
@@ -669,7 +655,7 @@ class TestLocalFileImports:
 		)
 		codegen_config = CodegenConfig(web_dir=str(tmp_path / "web"), pulse_dir="pulse")
 		codegen = Codegen(RouteTree([org_route]), codegen_config)
-		codegen.generate_all(server_address=SERVER_ADDRESS)
+		codegen.generate_all()
 
 		# Find the deepest route file (settings.jsx somewhere in the tree)
 		settings_files = list(codegen.output_folder.rglob("settings.jsx"))

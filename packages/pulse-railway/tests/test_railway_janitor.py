@@ -104,7 +104,7 @@ def _install_internals(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> 
 			env=_service_record("svc-env", project.env_service_name),
 			internal_token=internals.internal_token,
 			redis_url=internals.redis_url or "redis://test",
-			server_address="https://test.pulse.sc",
+			public_origin="https://test.pulse.sc",
 		)
 
 	monkeypatch.setattr(

@@ -48,10 +48,11 @@ from pulse_aws import AWSECSPlugin
 
 app = ps.App(
     routes=[...],
-    server_address="https://app.example.com",
     plugins=[AWSECSPlugin()],
 )
 ```
+
+`pulse-aws deploy --domain app.example.com` injects `PULSE_PUBLIC_ORIGIN=https://app.example.com` at runtime. Generated frontend files remain origin-neutral, and browser traffic stays on the ALB origin. Socket.IO uses `/_pulse/socket.io`.
 
 `AWSECSPlugin` provides:
 
@@ -103,7 +104,7 @@ Common flags:
 - `--context`: Docker build context, resolved from invocation cwd
 - `--cdk-bin`: alternate CDK executable or wrapper path
 - `--cdk-workdir`: alternate CDK app directory
-- `--task-env KEY=VALUE`: repeatable task env injection
+- `--task-env KEY=VALUE`: repeatable task env injection; do not set the deployment-managed `PULSE_PUBLIC_ORIGIN`
 - `--task-cpu`, `--task-memory`, `--desired-count`: ECS sizing
 - `--health-check-path`, `--min-healthy-targets`: rollout and health tuning
 
@@ -162,7 +163,7 @@ uv run pulse-aws deploy \
 
 ## Operational Gotchas
 
-- `server_address` on the Pulse app should match the deployed public hostname
+- `--domain` determines the runtime `PULSE_PUBLIC_ORIGIN`; use `App(public_origin=...)` only when explicitly overriding it outside the CLI
 - if you use `AWSECSPlugin`, verify deployment behavior through `/_pulse/meta`
 - if `cdk` is not globally installed, keep a wrapper such as `scripts/cdk` and pass it via `--cdk-bin`
 - if preview environments intentionally run with `desired-count=1`, validate auth/session behavior under single-task operation
@@ -180,7 +181,7 @@ Useful checks after deploy:
 
 If the app behaves oddly across deploys, check:
 
-1. `server_address`
+1. `PULSE_PUBLIC_ORIGIN` matches the public HTTPS origin
 2. `AWSECSPlugin()` presence in `ps.App`
 3. Docker build context vs `app.py` / `web/` paths
 4. `cdk` executable availability

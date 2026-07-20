@@ -454,7 +454,7 @@ async def test_create_stack_creates_fresh_managed_baseline(monkeypatch) -> None:
 	assert result.redis.created is True
 	assert result.internal_token_created is True
 	assert result.redis_url == "redis://pulse-redis.railway.internal:6379"
-	assert result.server_address == "https://test.pulse.sc"
+	assert result.public_origin == "https://test.pulse.sc"
 	assert set(harness.services) == {
 		"pulse-router",
 		"pulse-janitor",
@@ -584,7 +584,7 @@ async def test_inspect_stack_returns_complete_managed_baseline_without_mutating(
 	assert stack.redis_mode == "managed"
 	assert stack.internal_token == "secret-token"
 	assert stack.redis_url == "redis://pulse-redis:6379"
-	assert stack.server_address == "https://test.pulse.sc"
+	assert stack.public_origin == "https://test.pulse.sc"
 	assert harness.created_services == []
 	assert harness.domain_creations == []
 	assert harness.updates == []

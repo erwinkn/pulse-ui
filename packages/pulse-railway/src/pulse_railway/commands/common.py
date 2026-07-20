@@ -24,7 +24,7 @@ class RailwayProjectOverrides(TypedDict):
 	backend_replicas: NotRequired[int]
 	router_port: NotRequired[int]
 	router_replicas: NotRequired[int]
-	server_address: NotRequired[str | None]
+	public_origin: NotRequired[str | None]
 	redis_template_code: NotRequired[str]
 	janitor_replicas: NotRequired[int]
 	janitor_cron_schedule: NotRequired[str]

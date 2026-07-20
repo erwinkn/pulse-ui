@@ -48,7 +48,6 @@ uv run pulse-railway redeploy
 Add `RailwayPlugin(...)` to the app. It injects `pulse_deployment` into prerender and Socket.IO directives and exposes `/_pulse/meta`. Set `dockerfile=...` there.
 
 ```python
-import os
 import pulse as ps
 from pulse_railway import RailwayPlugin, RailwaySessionStore
 
@@ -65,9 +64,10 @@ app = ps.App(
         )
     ],
     session_store=RailwaySessionStore(),
-    server_address=os.environ.get("PULSE_SERVER_ADDRESS"),
 )
 ```
+
+Pulse stays single-origin through the stable Railway router. It forwards public `Host`/scheme information for HTTP and WebSocket requests, including `/_pulse/socket.io`. Deploy injects `PULSE_PUBLIC_ORIGIN` into each backend.
 
 Use `RailwaySessionStore()` when the app needs server-backed sessions that survive redeploys. Do not read `REDIS_URL` directly for app sessions and do not hand-roll a Railway fallback. `pulse-railway deploy` injects `PULSE_RAILWAY_REDIS_URL` when it detects `RailwaySessionStore()`.
 
@@ -134,7 +134,7 @@ Use either the name or ID form for each target, not both.
 
 - deployment name: `--deployment-name`, then `RailwayPlugin(deployment_name=...)`, then `prod`
 - image repository: `--image-repository`, then `RailwayPlugin(image_repository=...)`; absent means source deploy
-- server address: `--server-address`, then `App(server_address=...)`, then the initialized router service address
+- public origin: `--public-origin`, then `App(public_origin=...)`, then the initialized router service origin; explicit values must be HTTPS origins
 - Dockerfile: `RailwayPlugin(dockerfile=...)`; one is required for deploy
 - web root: `--web-root`, then `App(..., codegen=CodegenConfig(web_dir=...))`
 

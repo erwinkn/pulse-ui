@@ -37,7 +37,6 @@ def CounterRow(title: str, counter: GlobalCounter):
 
 @ps.component
 def GlobalStateDemo():
-	server = ps.server_address()
 	room = ps.route()["pathParams"].get("room")
 
 	# Per-session singleton
@@ -52,10 +51,6 @@ def GlobalStateDemo():
 		ps.p(
 			"Session-local counters are isolated per browser session. Shared counters are keyed by id.",
 			className="text-sm text-gray-600 mb-4",
-		),
-		ps.div(
-			ps.span(f"server: {server}", className="mr-3"),
-			className="text-xs text-gray-500 mb-4",
 		),
 		ps.div(
 			CounterRow("Session Counter (isolated)", a),

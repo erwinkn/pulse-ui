@@ -125,10 +125,9 @@ async def test_example_initial_snapshot_records_session_start(
 		prefix=module.SESSION_PREFIX,
 	)
 
-	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	monkeypatch.setenv("PULSE_DEPLOYMENT_ID", "blue")
 	blue_app = module.create_app(session_store=shared_session_store)
-	blue_app.setup("http://testserver")
+	blue_app.setup()
 	async with blue_app.fastapi_lifespan(blue_app.fastapi):
 		blue_transport = httpx.ASGITransport(app=blue_app.fastapi)
 		async with httpx.AsyncClient(
@@ -148,7 +147,7 @@ async def test_example_initial_snapshot_records_session_start(
 
 	monkeypatch.setenv("PULSE_DEPLOYMENT_ID", "green")
 	green_app = module.create_app(session_store=shared_session_store)
-	green_app.setup("http://testserver")
+	green_app.setup()
 	async with green_app.fastapi_lifespan(green_app.fastapi):
 		green_transport = httpx.ASGITransport(app=green_app.fastapi)
 		async with httpx.AsyncClient(
@@ -176,10 +175,9 @@ async def test_example_preserves_session_across_app_instances(
 		prefix=module.SESSION_PREFIX,
 	)
 
-	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	monkeypatch.setenv("PULSE_DEPLOYMENT_ID", "blue")
 	blue_app = module.create_app(session_store=shared_session_store)
-	blue_app.setup("http://testserver")
+	blue_app.setup()
 	async with blue_app.fastapi_lifespan(blue_app.fastapi):
 		blue_transport = httpx.ASGITransport(app=blue_app.fastapi)
 		async with httpx.AsyncClient(
@@ -203,7 +201,7 @@ async def test_example_preserves_session_across_app_instances(
 
 	monkeypatch.setenv("PULSE_DEPLOYMENT_ID", "green")
 	green_app = module.create_app(session_store=shared_session_store)
-	green_app.setup("http://testserver")
+	green_app.setup()
 	async with green_app.fastapi_lifespan(green_app.fastapi):
 		green_transport = httpx.ASGITransport(app=green_app.fastapi)
 		async with httpx.AsyncClient(
@@ -231,7 +229,7 @@ def test_railway_example_prod_smoke() -> None:
 	port = _free_port()
 	server_address = f"http://127.0.0.1:{port}"
 	base_env = os.environ.copy()
-	base_env["PULSE_SERVER_ADDRESS"] = server_address
+	base_env.pop("PULSE_PUBLIC_ORIGIN", None)
 	base_env["PULSE_DEPLOYMENT_ID"] = "smoke"
 	base_env[PULSE_RAILWAY_REDIS_URL] = redis_url
 

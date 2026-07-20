@@ -153,7 +153,7 @@ async def call_api(
 	method: str = "POST",
 	headers: Mapping[str, str] | None = None,
 	body: Any | None = None,
-	credentials: str = "include",
+	credentials: Literal["omit", "same-origin", "include"] = "same-origin",
 ) -> dict[str, Any]:
 	"""Make an API call through the client browser.
 
@@ -166,7 +166,7 @@ async def call_api(
 		method: HTTP method (default: "POST").
 		headers: Optional HTTP headers to include in the request.
 		body: Optional request body (will be JSON serialized).
-		credentials: Credential mode for the request (default: "include").
+		credentials: Fetch credential mode (default: "same-origin").
 
 	Returns:
 		dict[str, Any]: The JSON response from the API.
@@ -190,7 +190,6 @@ async def call_api(
 async def set_cookie(
 	name: str,
 	value: str,
-	domain: str | None = None,
 	secure: bool = True,
 	samesite: Literal["lax", "strict", "none"] = "lax",
 	max_age_seconds: int = 7 * 24 * 3600,
@@ -200,7 +199,6 @@ async def set_cookie(
 	Args:
 		name: The cookie name.
 		value: The cookie value.
-		domain: Optional domain for the cookie.
 		secure: Whether the cookie should only be sent over HTTPS (default: True).
 		samesite: SameSite attribute ("lax", "strict", or "none"; default: "lax").
 		max_age_seconds: Cookie lifetime in seconds (default: 7 days).
@@ -214,7 +212,6 @@ async def set_cookie(
 	ctx.session.set_cookie(
 		name=name,
 		value=value,
-		domain=domain,
 		secure=secure,
 		samesite=samesite,
 		max_age_seconds=max_age_seconds,
@@ -326,50 +323,6 @@ def not_found() -> NoReturn:
 	if not ctx:
 		raise RuntimeError("not_found() must be invoked during component render")
 	raise NotFoundInterrupt()
-
-
-def server_address() -> str:
-	"""Get the server's public address.
-
-	Returns:
-		str: The server's public address (e.g., "https://example.com").
-
-	Raises:
-		RuntimeError: If called outside of a Pulse render/callback context
-			or if the server address is not configured.
-	"""
-	ctx = PulseContext.get()
-	if ctx.render is None:
-		raise RuntimeError(
-			"server_address() must be called inside a Pulse render/callback context"
-		)
-	if not ctx.render.server_address:
-		raise RuntimeError(
-			"Server address unavailable. Ensure App.run_codegen/asgi_factory configured server_address."
-		)
-	return ctx.render.server_address
-
-
-def client_address() -> str:
-	"""Get the client's IP address.
-
-	Returns:
-		str: The client's IP address.
-
-	Raises:
-		RuntimeError: If called outside of a Pulse render/callback context
-			or if the client address is not available.
-	"""
-	ctx = PulseContext.get()
-	if ctx.render is None:
-		raise RuntimeError(
-			"client_address() must be called inside a Pulse render/callback context"
-		)
-	if not ctx.render.client_address:
-		raise RuntimeError(
-			"Client address unavailable. It is set during prerender or socket connect."
-		)
-	return ctx.render.client_address
 
 
 P = ParamSpec("P")
@@ -488,8 +441,6 @@ __all__ = [
 	"navigate",
 	"redirect",
 	"not_found",
-	"server_address",
-	"client_address",
 	"global_state",
 	"GLOBAL_STATES",
 	"GlobalStateAccessor",

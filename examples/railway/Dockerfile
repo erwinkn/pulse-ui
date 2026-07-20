@@ -24,7 +24,6 @@ WORKDIR /app
 COPY . .
 COPY --from=python-deps /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
-ARG PULSE_SERVER_ADDRESS
 RUN pulse generate ${PULSE_APP_FILE} --ci
 
 FROM oven/bun:latest AS js-dev-deps

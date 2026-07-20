@@ -3,7 +3,6 @@
 AFFINITY_QUERY_PARAM = "pulse_deployment"
 AFFINITY_HEADER = "x-pulse-deployment"
 CLIENT_LOADER_HEADER = "x-pulse-client-loader"
-CLIENT_LOADER_LOCATION_HEADER = "x-pulse-client-loader-location"
 STALE_AFFINITY_RELOAD_QUERY_PARAM = "pulse_reload_on_stale_affinity"
 DEPLOYMENT_STATE_ACTIVE = "active"
 DEPLOYMENT_STATE_DRAINING = "draining"

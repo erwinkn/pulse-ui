@@ -63,12 +63,7 @@ async function makeClient(
 	},
 ) {
 	const { PulseSocketIOClient } = await import("./client");
-	return new PulseSocketIOClient(
-		"http://pulse.test",
-		{},
-		vi.fn() as any,
-		connectionStatus,
-	);
+	return new PulseSocketIOClient({}, vi.fn() as any, connectionStatus);
 }
 
 function sentMessages(target: FakeSocket = socket) {
@@ -94,6 +89,68 @@ describe("PulseSocketIOClient attach ack", () => {
 			configurable: true,
 			value: true,
 		});
+	});
+
+	it("connects to the current origin under the reserved Pulse path", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+
+		expect(io).toHaveBeenCalledWith({
+			transports: ["websocket", "webtransport"],
+			path: "/_pulse/socket.io",
+		});
+
+		socket.trigger("connect");
+		await connected;
+	});
+
+	it("defaults API calls to same-origin credentials and preserves explicit modes", async () => {
+		const originalFetch = globalThis.fetch;
+		const fetchMock = vi.fn(
+			async (_input: RequestInfo | URL, _init?: RequestInit) =>
+				new Response(null, { status: 204 }),
+		);
+		globalThis.fetch = fetchMock as any;
+		try {
+			const client = await makeClient();
+			const connected = client.connect();
+			socket.trigger("connect");
+			await connected;
+
+			socket.trigger(
+				"message",
+				serialize({
+					type: "api_call",
+					id: "default",
+					url: "/api/default",
+					method: "GET",
+					headers: {},
+					body: null,
+				}),
+			);
+			socket.trigger(
+				"message",
+				serialize({
+					type: "api_call",
+					id: "external",
+					url: "https://api.example.com/data",
+					method: "GET",
+					headers: {},
+					body: null,
+					credentials: "include",
+				}),
+			);
+			await waitForEffects();
+
+			expect(fetchMock.mock.calls[0]![1]).toMatchObject({
+				credentials: "same-origin",
+			});
+			expect(fetchMock.mock.calls[1]![1]).toMatchObject({
+				credentials: "include",
+			});
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
 	});
 
 	it("queues callbacks until the active attach is acknowledged", async () => {
@@ -311,8 +368,6 @@ describe("PulseProvider connection handling", () => {
 					PulseProvider,
 					{
 						config: {
-							serverAddress: "http://pulse.test",
-							apiPrefix: "/_pulse",
 							connectionStatus: {
 								initialConnectingDelay: 0,
 								initialErrorDelay: 0,

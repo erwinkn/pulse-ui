@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import { FormSubmissionError, submitForm } from "./form";
+import React from "react";
+import { cleanup, render } from "@testing-library/react";
+import { FormSubmissionError, PulseForm, submitForm } from "./form";
 import { deserialize } from "./serialize/serializer";
 
 const originalFetch = globalThis.fetch;
@@ -26,9 +28,17 @@ describe("submitForm", () => {
 	});
 
 	afterEach(() => {
+		cleanup();
 		globalThis.fetch = originalFetch;
 		process.env.NODE_ENV = originalNodeEnv;
 		vi.restoreAllMocks();
+	});
+
+	it("preserves the form action", () => {
+		const action = "/submit?source=form#done";
+		const view = render(React.createElement(PulseForm, { action }));
+
+		expect(view.container.querySelector("form")?.getAttribute("action")).toBe(action);
 	});
 
 	it("submits form data with fetch", async () => {
@@ -38,14 +48,14 @@ describe("submitForm", () => {
 		const formData = new FormData();
 		formData.set("name", "Ada");
 
-		await submitForm({ event, action: "http://pulse.test/submit", formData });
+		await submitForm({ event, action: "/submit", formData });
 
 		expect(event.preventDefault).toHaveBeenCalled();
 		expect(fetchMock).toHaveBeenCalledWith(
-			new URL("http://pulse.test/submit", window.location.href),
+			"/submit",
 			expect.objectContaining({
 				method: "POST",
-				credentials: "include",
+				credentials: "same-origin",
 				body: formData,
 			}),
 		);

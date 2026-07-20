@@ -503,16 +503,16 @@ async def call_api(
     method: str = "POST",
     headers: Mapping[str, str] | None = None,
     body: Any | None = None,
-    credentials: str = "include",
+    credentials: Literal["omit", "same-origin", "include"] = "same-origin",
 ) -> dict[str, Any]:
     """Make an API call through the client browser.
 
     Args:
-        path: URL path or full URL. Relative paths are resolved against server address.
+        path: URL path or full URL. Relative paths target the current origin.
         method: HTTP method (default: "POST").
         headers: Optional HTTP headers.
         body: Optional request body (JSON serialized).
-        credentials: Credential mode - "include" (default) or "omit".
+        credentials: Fetch credential mode; defaults to "same-origin".
 
     Returns:
         dict with: ok (bool), status (int), headers (dict), body (parsed JSON)
@@ -544,12 +544,13 @@ else:
 await ps.set_cookie(
     "auth_token",
     token_value,
-    domain=".example.com",
     secure=True,
     samesite="strict",
     max_age_seconds=3600,
 )
 ```
+
+Pulse cookies are host-only. There is no cookie-domain option.
 
 ## Type Annotations
 

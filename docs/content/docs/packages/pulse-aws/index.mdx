@@ -90,8 +90,6 @@ COPY src ./src
 COPY --from=python-deps /app/.venv /app/.venv
 COPY ${WEB_ROOT} ./${WEB_ROOT}
 ENV PATH="/app/.venv/bin:$PATH"
-ARG PULSE_SERVER_ADDRESS
-ENV PULSE_SERVER_ADDRESS=${PULSE_SERVER_ADDRESS}
 RUN pulse generate ${APP_FILE} --ci
 
 # Stage 4: JS dev deps
@@ -144,9 +142,8 @@ CMD ["sh", "-c", "pulse run \"$PULSE_APP_FILE\" --prod --address 0.0.0.0"]
 Key options:
 - `APP_FILE`: relative path to your Pulse entry file.
 - `WEB_ROOT`: relative path to your React Router app.
-- `PULSE_SERVER_ADDRESS`: build arg used during `pulse generate`.
 
-At runtime, `PULSE_SERVER_ADDRESS` must be set. `pulse-aws deploy` sets it on the ECS task.
+Generated files are origin-neutral. At runtime, `pulse-aws deploy` sets `PULSE_PUBLIC_ORIGIN=https://<domain>` on the ECS task; the combined Pulse process configures its internal React Router upstream itself.
 
 ## Step 3: deploy
 

@@ -2,8 +2,8 @@
 Example: Microsoft Entra ID (Azure AD) auth using MSAL with token caching.
 
 Dev assumptions:
-- Node and Python run on same host in dev (localhost) so cookies work for both
-- In prod, serve under the same origin or set Domain=.example.com on cookies
+- Node and Python run on the same public origin
+- Production configures the canonical public origin explicitly
 
 Highlights:
 - Middleware sets `ctx["auth"]` from MSAL ID token claims
@@ -18,13 +18,13 @@ import secrets
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, override
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import msal
 import pulse as ps
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from pulse.helpers import get_client_address
+from pulse.origins import normalize_http_origin
 
 if TYPE_CHECKING:
 	# The dynamic redis import happens in RedisTokenCacheStore
@@ -38,6 +38,35 @@ def _default_authority(tenant_id: str) -> str:
 
 
 ClaimsMapper = Callable[[dict[str, Any]], dict[str, Any]]
+
+
+def _relative_path(path: object) -> str:
+	if not isinstance(path, str):
+		raise ValueError("next must be a same-origin relative path")
+	parsed = urlsplit(path)
+	if (
+		not path.startswith("/")
+		or path.startswith("//")
+		or "\\" in path
+		or parsed.scheme
+		or parsed.netloc
+		or any(ord(char) < 0x20 or ord(char) == 0x7F for char in path)
+	):
+		raise ValueError("next must be a same-origin relative path")
+	return path
+
+
+def _callback_uri(app: ps.App, request: Request, callback_path: str) -> str:
+	if app.public_origin is not None:
+		origin = app.public_origin
+	elif app.env == "prod":
+		raise RuntimeError("MSALPlugin requires App.public_origin in production")
+	else:
+		origin = normalize_http_origin(
+			f"{request.url.scheme}://{request.url.netloc}",
+			name="request origin",
+		)
+	return f"{origin}{callback_path}"
 
 
 class TokenCacheStore(Protocol):
@@ -79,7 +108,7 @@ def login(next: str | None = None, route_prefix: str = ""):
 		prefix = f"/{prefix}"
 	url = f"{prefix}/auth/login" if prefix else "/auth/login"
 	if next:
-		url += f"?next={quote(next)}"
+		url += f"?next={quote(_relative_path(next))}"
 	ps.navigate(url)
 
 
@@ -133,6 +162,9 @@ class MSALPlugin(ps.Plugin):
 
 	@override
 	def on_setup(self, app: "ps.App") -> None:
+		if app.env == "prod" and app.public_origin is None:
+			raise RuntimeError("MSALPlugin requires App.public_origin in production")
+
 		# Default selection:
 		# - If using CookieSessionStore (cookie-backed), we cannot store MSAL cache in the cookie.
 		#   In dev: default to file store under <web_root>/.pulse/msal_cache.
@@ -161,6 +193,12 @@ class MSALPlugin(ps.Plugin):
 		def auth_login(request: Request):  # pyright: ignore[reportUnusedFunction]
 			sess = ps.session()
 			ctx = sess.setdefault(self.session_key, {})
+			try:
+				next_path = _relative_path(
+					request.query_params.get("next") or "/secret"
+				)
+			except ValueError as exc:
+				raise HTTPException(status_code=400, detail=str(exc)) from exc
 			if self.token_cache_store:
 				cache = self.token_cache_store.load(request, ctx)
 			else:
@@ -172,23 +210,25 @@ class MSALPlugin(ps.Plugin):
 						pass
 
 			cca = self.cca(cache)
-			redirect_uri = f"{app.server_address}{callback_path}"
+			redirect_uri = _callback_uri(app, request, callback_path)
 
 			flow: dict[str, Any] = cca.initiate_auth_code_flow(
 				scopes=self.scopes,
 				redirect_uri=redirect_uri,
 				prompt="select_account",
 			)
-			next_path = request.query_params.get("next") or "/secret"
 			ctx["flow"] = flow
 			ctx["next"] = next_path
-			ctx["client_address"] = get_client_address(request)
 			return RedirectResponse(url=flow["auth_uri"])  # type: ignore[index]
 
 		@app.fastapi.get(callback_path)
 		def auth_callback(request: Request):  # pyright: ignore[reportUnusedFunction]
 			sess = ps.session()
 			ctx: dict[str, Any] = sess.setdefault(self.session_key, {})
+			try:
+				next_path = _relative_path(ctx.get("next", "/"))
+			except ValueError as exc:
+				raise HTTPException(status_code=400, detail=str(exc)) from exc
 			if self.token_cache_store:
 				cache = self.token_cache_store.load(request, ctx)
 			else:
@@ -220,8 +260,7 @@ class MSALPlugin(ps.Plugin):
 			user = _json_clean(user)
 
 			ctx.pop("flow", None)
-			origin = ctx.pop("client_address", None)
-			next_path = ctx.pop("next", "/")
+			ctx.pop("next", None)
 			ctx["auth"] = user
 			if getattr(cache, "has_state_changed", False):
 				if self.token_cache_store:
@@ -233,7 +272,7 @@ class MSALPlugin(ps.Plugin):
 						ctx["token_cache"] = cache.serialize()  # type: ignore[attr-defined]
 					except Exception:
 						pass
-			return RedirectResponse(url=f"{origin}{next_path}")
+			return RedirectResponse(url=next_path)
 
 
 class FileTokenCacheStore:

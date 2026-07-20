@@ -123,8 +123,8 @@ class RailwayPlugin(ps.Plugin):
 		return f"{self.service_prefix}{name}"
 
 	@property
-	def server_address(self) -> str | None:
-		return self._require_app().server_address
+	def public_origin(self) -> str | None:
+		return self._require_app().public_origin
 
 	@property
 	def web_root(self) -> Path:
@@ -161,7 +161,7 @@ class RailwayPlugin(ps.Plugin):
 			return {
 				"status": "ok",
 				"deployment_id": self.deployment_id,
-				"api_prefix": app.api_prefix,
+				"api_prefix": "/_pulse",
 			}
 
 		@app.fastapi.get(INTERNAL_SESSIONS_PATH)

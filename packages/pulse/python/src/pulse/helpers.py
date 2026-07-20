@@ -14,9 +14,6 @@ from typing import (
 	overload,
 	override,
 )
-from urllib.parse import urlsplit
-
-from fastapi import Request
 
 from pulse.env import env
 
@@ -163,98 +160,6 @@ class Disposable(ABC):
 			cls.dispose = wrapped_dispose
 
 
-def get_client_address(request: Request) -> str | None:
-	"""Best-effort client origin/address from an HTTP request.
-
-	Preference order:
-	  1) Origin header (full scheme://host:port)
-	  1b) Referer header (full URL) when Origin missing
-	  2) Forwarded header (proto + for)
-	  3) X-Forwarded-* headers
-	  4) Host header (server address the client connected to)
-	"""
-	try:
-		origin = request.headers.get("origin")
-		if origin:
-			return origin
-		referer = request.headers.get("referer")
-		if referer:
-			parts = urlsplit(referer)
-			if parts.scheme and parts.netloc:
-				return f"{parts.scheme}://{parts.netloc}"
-
-		fwd = request.headers.get("forwarded")
-		proto = request.headers.get("x-forwarded-proto") or (
-			[p.split("proto=")[-1] for p in fwd.split(";") if "proto=" in p][0]
-			.strip()
-			.strip('"')
-			if fwd and "proto=" in fwd
-			else request.url.scheme
-		)
-		if fwd and "for=" in fwd:
-			part = [p for p in fwd.split(";") if "for=" in p]
-			hostport = part[0].split("for=")[-1].strip().strip('"') if part else ""
-			if hostport:
-				return f"{proto}://{hostport}"
-
-		xff = request.headers.get("x-forwarded-for")
-		xfp = request.headers.get("x-forwarded-port")
-		if xff:
-			host = xff.split(",")[0].strip()
-			if host in ("127.0.0.1", "::1"):
-				host = "localhost"
-			return f"{proto}://{host}:{xfp}" if xfp else f"{proto}://{host}"
-
-		# Fallback: use Host header which contains the server address the client connected to
-		host_header = request.headers.get("host")
-		if host_header:
-			return f"{proto}://{host_header}"
-		return None
-	except Exception:
-		return None
-
-
-def get_client_address_socketio(environ: dict[str, Any]) -> str | None:
-	"""Best-effort client origin/address from a WS environ mapping.
-
-	Preference order mirrors HTTP variant using environ keys.
-	"""
-	try:
-		origin = environ.get("HTTP_ORIGIN")
-		if origin:
-			return origin
-
-		fwd = environ.get("HTTP_FORWARDED")
-		proto = environ.get("HTTP_X_FORWARDED_PROTO") or (
-			[p.split("proto=")[-1] for p in str(fwd).split(";") if "proto=" in p][0]
-			.strip()
-			.strip('"')
-			if fwd and "proto=" in str(fwd)
-			else environ.get("wsgi.url_scheme", "http")
-		)
-		if fwd and "for=" in str(fwd):
-			part = [p for p in str(fwd).split(";") if "for=" in p]
-			hostport = part[0].split("for=")[-1].strip().strip('"') if part else ""
-			if hostport:
-				return f"{proto}://{hostport}"
-
-		xff = environ.get("HTTP_X_FORWARDED_FOR")
-		xfp = environ.get("HTTP_X_FORWARDED_PORT")
-		if xff:
-			host = str(xff).split(",")[0].strip()
-			if host in ("127.0.0.1", "::1"):
-				host = "localhost"
-			return f"{proto}://{host}:{xfp}" if xfp else f"{proto}://{host}"
-
-		# Fallback: use HTTP_HOST which contains the server address the client connected to
-		host_header = environ.get("HTTP_HOST")
-		if host_header:
-			return f"{proto}://{host_header}"
-		return None
-	except Exception:
-		return None
-
-
 # --- Runtime lock helpers moved to pulse.cli.web_lock ---
 # Use WebLock context manager for idempotent lock management
 
@@ -306,7 +211,7 @@ def local_server_url(host: str, port: int | str) -> str:
 	"""Build the URL for a locally launched ``pulse run`` server.
 
 	``pulse run`` starts uvicorn over plain HTTP, so the URL is always http;
-	production TLS endpoints are configured explicitly via ``App(server_address=...)``
+	production TLS endpoints are configured explicitly via ``App(public_origin=...)``
 	and never flow through here. Wildcard bind hosts (``0.0.0.0``, ``::``) are
 	normalized to localhost — a wildcard bind is not a connectable address, and
 	localhost is what a browser on the dev machine can reach. Other hosts (e.g. a

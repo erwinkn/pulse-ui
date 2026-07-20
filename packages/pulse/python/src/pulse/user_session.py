@@ -68,7 +68,6 @@ class UserSession(Disposable):
 		self.set_cookie(
 			name=app.cookie.name,
 			value=signed_cookie,
-			domain=app.cookie.domain,
 			secure=app.cookie.secure,
 			samesite=app.cookie.samesite,
 			max_age_seconds=app.cookie.max_age_seconds,
@@ -101,7 +100,6 @@ class UserSession(Disposable):
 		self,
 		name: str,
 		value: str,
-		domain: str | None = None,
 		secure: bool = True,
 		samesite: Literal["lax", "strict", "none"] = "lax",
 		max_age_seconds: int = 7 * 24 * 3600,
@@ -109,7 +107,6 @@ class UserSession(Disposable):
 		cookie = SetCookie(
 			name=name,
 			value=value,
-			domain=domain,
 			secure=secure,
 			samesite=samesite,
 			max_age_seconds=max_age_seconds,

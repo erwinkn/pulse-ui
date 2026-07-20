@@ -102,30 +102,6 @@ def route_def():
 
 **Returns:** `Route` or `Layout` for the active route.
 
-## Address Functions
-
-### `ps.client_address()`
-
-Get client's IP address.
-
-```python
-def show_ip():
-    ip = ps.client_address()
-    return m.Text(f"Your IP: {ip}")
-```
-
-### `ps.server_address()`
-
-Get server's public address.
-
-```python
-def build_link():
-    base = ps.server_address()  # e.g., "https://example.com"
-    return m.Anchor(href=f"{base}/share/123")
-```
-
-**Note:** Requires `server_address` configured in `App.run_codegen` or `asgi_factory`.
-
 ## Query Client
 
 ### `ps.queries`

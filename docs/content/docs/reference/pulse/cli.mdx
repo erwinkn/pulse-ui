@@ -26,9 +26,9 @@ pulse run <app_file> [options]
 | `--dev` | flag | - | Run in development mode (default) |
 | `--prod` | flag | - | Run in production mode |
 | `--plain` | flag | - | Plain output without colors or emojis |
-| `--server-only` | flag | - | Run only the Python server |
-| `--web-only` | flag | - | Run only the web dev server |
-| `--react-server-address` | `str` | - | React server URL (required for single-server + server-only) |
+| `--backend-only` | flag | - | Run only Pulse and FastAPI; do not start or proxy React Router |
+| `--web-only` | flag | - | Run only React Router; requires `--ssr-backend-url` |
+| `--ssr-backend-url` | `str` | - | Internal Pulse URL used by React Router server-side loaders |
 | `--reload/--no-reload` | flag | auto | Enable/disable hot reload (auto-enabled in dev) |
 | `--find-port/--no-find-port` | flag | `True` | Auto-find available port if specified is busy |
 | `--interrupt` | flag | - | Stop an existing Pulse dev instance for this app before starting |
@@ -46,8 +46,12 @@ pulse run app.py --prod --port 3000
 # Development with specific address
 pulse run app.py --address 0.0.0.0 --port 8080
 
-# Run only backend (for separate frontend deployment)
-pulse run app.py --server-only --react-server-address http://localhost:5173
+# Run only the backend
+pulse run app.py --prod --backend-only
+
+# Run only React Router against a separately scaled backend
+pulse run app.py --prod --web-only \
+  --ssr-backend-url http://pulse-backend:8000
 ```
 
 In dev mode, before launching the web dev server `pulse run` installs web dependencies with Bun and generates the route files. Both steps are idempotent and fast on warm starts, so a fresh checkout works without a separate `pulse check --fix` or `pulse generate` first.
@@ -85,11 +89,11 @@ pulse generate <app_file> [options]
 # Generate routes for development
 pulse generate app.py
 
-# Generate for production (requires server_address)
+# Generate for production
 pulse generate app.py --prod
 ```
 
-In CI or production mode, `server_address` must be configured in the App constructor or via `PULSE_SERVER_ADDRESS` environment variable.
+Code generation is origin-neutral. React Router reads its internal backend URL at runtime.
 
 ---
 
@@ -177,21 +181,29 @@ PULSE_PORT=8000
 
 Port for the uvicorn server. Set automatically by `pulse run`.
 
-### PULSE_SERVER_ADDRESS
+### PULSE_PUBLIC_ORIGIN
 
 ```bash
-PULSE_SERVER_ADDRESS=https://api.example.com
+PULSE_PUBLIC_ORIGIN=https://app.example.com
 ```
 
-Public server address for WebSocket connections. Required in production mode.
+Optional canonical browser-visible origin for integrations that need absolute URLs. `App(public_origin=...)` takes precedence. Production and CI require HTTPS when it is set.
 
-### PULSE_REACT_SERVER_ADDRESS
+### PULSE_WEB_UPSTREAM
 
 ```bash
-PULSE_REACT_SERVER_ADDRESS=http://localhost:5173
+PULSE_WEB_UPSTREAM=http://react-router:3000
 ```
 
-React dev server address. Used in single-server mode with `--server-only`.
+Optional internal React Router URL. When set on the Pulse process, unmatched requests are proxied to this upstream. Omit it for backend-only operation.
+
+### PULSE_SSR_BACKEND_URL
+
+```bash
+PULSE_SSR_BACKEND_URL=http://pulse-backend:8000
+```
+
+Internal Pulse URL used by React Router server-side loaders. `pulse run` sets it automatically when running both processes; `--web-only` requires `--ssr-backend-url`.
 
 ### PULSE_SECRET
 

@@ -254,8 +254,6 @@ class RenderSession:
 	dev_strict_mode_detach_timeout: float
 	disconnect_queue_timeout: float
 	render_loop_limit: int
-	_server_address: str | None
-	_client_address: str | None
 	_send_message: Callable[[ServerMessage], Any] | None
 	_pending_api: dict[str, asyncio.Future[dict[str, Any]]]
 	_pending_js_results: dict[str, asyncio.Future[Any]]
@@ -271,8 +269,6 @@ class RenderSession:
 		id: str,
 		routes: RouteTree,
 		*,
-		server_address: str | None = None,
-		client_address: str | None = None,
 		prerender_queue_timeout: float = 60.0,
 		dev_strict_mode_detach_timeout: float = 0.0,
 		disconnect_queue_timeout: float = 300.0,
@@ -284,8 +280,6 @@ class RenderSession:
 		self.id = id
 		self.routes = routes
 		self.route_mounts = {}
-		self._server_address = server_address
-		self._client_address = client_address
 		self._send_message = None
 		self._global_states = {}
 		self._global_queue = []
@@ -303,18 +297,6 @@ class RenderSession:
 		self.dev_strict_mode_detach_timeout = dev_strict_mode_detach_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
 		self.render_loop_limit = render_loop_limit
-
-	@property
-	def server_address(self) -> str:
-		if self._server_address is None:
-			raise RuntimeError("Server address not set")
-		return self._server_address
-
-	@property
-	def client_address(self) -> str:
-		if self._client_address is None:
-			raise RuntimeError("Client address not set")
-		return self._client_address
 
 	def _on_effect_error(self, effect: Effect, exc: Exception):
 		details = {"effect": effect.name or "<unnamed>"}
@@ -805,20 +787,15 @@ class RenderSession:
 		method: str = "POST",
 		headers: dict[str, str] | None = None,
 		body: Any | None = None,
-		credentials: str = "include",
+		credentials: Literal["omit", "same-origin", "include"] = "same-origin",
 		timeout: float = 30.0,
 	) -> dict[str, Any]:
 		"""Request the client to perform a fetch and await the result."""
-		if url_or_path.startswith("http://") or url_or_path.startswith("https://"):
-			url = url_or_path
-		else:
-			base = self.server_address
-			if not base:
-				raise RuntimeError(
-					"Server address unavailable. Ensure App.run_codegen/asgi_factory set server_address."
-				)
-			api_path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
-			url = f"{base}{api_path}"
+		url = (
+			url_or_path
+			if url_or_path.startswith(("http://", "https://"))
+			else "/" + url_or_path.lstrip("/")
+		)
 		corr_id = uuid.uuid4().hex
 		fut = create_future()
 		self._pending_api[corr_id] = fut
@@ -832,7 +809,7 @@ class RenderSession:
 				method=method,
 				headers=headers,
 				body=body,
-				credentials="include" if credentials == "include" else "omit",
+				credentials=credentials,
 			)
 		)
 		try:

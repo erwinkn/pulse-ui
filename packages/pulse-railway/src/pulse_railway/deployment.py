@@ -94,7 +94,7 @@ class DeployResult:
 	router_service_name: str
 	router_image: str | None
 	router_domain: str
-	server_address: str
+	public_origin: str
 	backend_deployment_id: str
 	backend_status: str
 	router_deployment_id: str | None = None
@@ -401,10 +401,10 @@ async def _register_deployment(
 async def _fetch_deployment_meta(
 	session: aiohttp.ClientSession,
 	*,
-	server_address: str,
+	public_origin: str,
 	deployment_id: str | None,
 ) -> tuple[int | None, dict[str, object] | None]:
-	url = f"{server_address.rstrip('/')}{DEPLOYMENT_META_PATH}"
+	url = f"{public_origin.rstrip('/')}{DEPLOYMENT_META_PATH}"
 	if deployment_id is not None:
 		url += "?" + urlencode({"pulse_deployment": deployment_id})
 	try:
@@ -417,7 +417,7 @@ async def _fetch_deployment_meta(
 
 async def _wait_for_routed_deployment(
 	*,
-	server_address: str,
+	public_origin: str,
 	deployment_id: str,
 	use_affinity: bool,
 	timeout: float = ROUTED_DEPLOYMENT_TIMEOUT_SECONDS,
@@ -432,7 +432,7 @@ async def _wait_for_routed_deployment(
 		while True:
 			last_status, last_payload = await _fetch_deployment_meta(
 				session,
-				server_address=server_address,
+				public_origin=public_origin,
 				deployment_id=deployment_id if use_affinity else None,
 			)
 			if (
@@ -639,7 +639,7 @@ async def deploy(
 			error_message=f"service already exists for deployment {deployment_id}",
 		)
 		stack_state = await inspect_stack(project=project)
-		server_address = project.server_address or stack_state.server_address
+		public_origin = project.public_origin or stack_state.public_origin
 		reference_env_vars = await pulse_env_reference_variables(
 			client,
 			project=project,
@@ -651,7 +651,6 @@ async def deploy(
 			build_args=build_args,
 			app_file=app_file,
 			web_root=web_root,
-			server_address=server_address,
 			dockerfile_path=docker.dockerfile_path,
 			context_path=docker.context_path,
 		)
@@ -680,7 +679,7 @@ async def deploy(
 				deployment_id=deployment_id,
 				internal_token=stack_state.internal_token,
 				app_file=app_file,
-				server_address=server_address,
+				public_origin=public_origin,
 				session_env=session_env,
 				user_env={**reference_env_vars, **project.env_vars},
 			),
@@ -700,7 +699,7 @@ async def deploy(
 			deployment_id=deployment_id,
 		)
 		await _wait_for_routed_deployment(
-			server_address=stack_state.server_address,
+			public_origin=stack_state.public_origin,
 			deployment_id=deployment_id,
 			use_affinity=True,
 		)
@@ -713,13 +712,13 @@ async def deploy(
 			deployment_id=deployment_id,
 		)
 		await _wait_for_routed_deployment(
-			server_address=stack_state.server_address,
+			public_origin=stack_state.public_origin,
 			deployment_id=deployment_id,
 			use_affinity=False,
 		)
-		if server_address != stack_state.server_address:
+		if public_origin != stack_state.public_origin:
 			await _wait_for_routed_deployment(
-				server_address=server_address,
+				public_origin=public_origin,
 				deployment_id=deployment_id,
 				use_affinity=False,
 			)
@@ -732,7 +731,7 @@ async def deploy(
 			router_service_name=stack_state.router.service_name,
 			router_image=stack_state.router.image,
 			router_domain=stack_state.router.domain or "",
-			server_address=server_address,
+			public_origin=public_origin,
 			backend_deployment_id=backend_deployment_id,
 			backend_status=backend_status,
 			janitor_service_id=stack_state.janitor.service_id,
@@ -784,7 +783,7 @@ async def _deploy_source(
 				error_message=f"service already exists for deployment {deployment_id}",
 			)
 			stack_state = await inspect_stack(project=project)
-			server_address = project.server_address or stack_state.server_address
+			public_origin = project.public_origin or stack_state.public_origin
 			session_env = backend_session_env(
 				resolved_uses_railway_session_store,
 				redis_url=stack_state.redis_url,
@@ -800,7 +799,7 @@ async def _deploy_source(
 				deployment_id=deployment_id,
 				internal_token=stack_state.internal_token,
 				app_file=app_file,
-				server_address=server_address,
+				public_origin=public_origin,
 				session_env=session_env,
 				user_env={**reference_env_vars, **project.env_vars},
 			)
@@ -808,7 +807,6 @@ async def _deploy_source(
 				build_args=dict(docker.build_args),
 				app_file=app_file,
 				web_root=web_root,
-				server_address=server_address,
 				dockerfile_path=docker.dockerfile_path,
 				context_path=docker.context_path,
 			)
@@ -871,7 +869,7 @@ async def _deploy_source(
 				deployment_id=deployment_id,
 			)
 			await _wait_for_routed_deployment(
-				server_address=stack_state.server_address,
+				public_origin=stack_state.public_origin,
 				deployment_id=deployment_id,
 				use_affinity=True,
 			)
@@ -885,13 +883,13 @@ async def _deploy_source(
 			)
 			promoted = True
 			await _wait_for_routed_deployment(
-				server_address=stack_state.server_address,
+				public_origin=stack_state.public_origin,
 				deployment_id=deployment_id,
 				use_affinity=False,
 			)
-			if server_address != stack_state.server_address:
+			if public_origin != stack_state.public_origin:
 				await _wait_for_routed_deployment(
-					server_address=server_address,
+					public_origin=public_origin,
 					deployment_id=deployment_id,
 					use_affinity=False,
 				)
@@ -904,7 +902,7 @@ async def _deploy_source(
 				router_service_name=stack_state.router.service_name,
 				router_image=stack_state.router.image,
 				router_domain=stack_state.router.domain or "",
-				server_address=server_address,
+				public_origin=public_origin,
 				backend_status=build_deployment["status"],
 				source_context=str(docker.context_path),
 				dockerfile_path=str(docker.dockerfile_path),

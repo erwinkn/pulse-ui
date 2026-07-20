@@ -22,7 +22,6 @@ def _make_deploy_args(**overrides: Any) -> argparse.Namespace:
 	values: dict[str, Any] = {
 		"deployment_name": "prod",
 		"domain": "app.example.com",
-		"server_address": None,
 		"app_file": "main.py",
 		"web_root": "web",
 		"dockerfile": "Dockerfile",
@@ -174,7 +173,7 @@ async def test_run_deploy_passes_cdk_overrides(monkeypatch, tmp_path):
 	deploy_call = _install_fake_deploy(monkeypatch)
 	monkeypatch.chdir(project_root)
 
-	args = _make_deploy_args()
+	args = _make_deploy_args(task_env=["FEATURE_FLAG=enabled"])
 
 	result = await _run_deploy(args)
 
@@ -183,6 +182,32 @@ async def test_run_deploy_passes_cdk_overrides(monkeypatch, tmp_path):
 	assert deploy_call["cdk_workdir"] == (project_root / "infra" / "cdk").resolve()
 	assert deploy_call["domain"] == "app.example.com"
 	assert deploy_call["deployment_name"] == "prod"
+	assert deploy_call["docker"].build_args == {
+		"APP_FILE": "main.py",
+		"WEB_ROOT": "web",
+	}
+	assert deploy_call["task"].env_vars == {
+		"FEATURE_FLAG": "enabled",
+		"PULSE_PUBLIC_ORIGIN": "https://app.example.com",
+	}
+
+
+@pytest.mark.asyncio
+async def test_run_deploy_rejects_public_origin_task_env(monkeypatch, tmp_path):
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	deploy_call = _install_fake_deploy(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	with pytest.raises(ValueError, match="PULSE_PUBLIC_ORIGIN"):
+		await _run_deploy(
+			_make_deploy_args(
+				task_env=["PULSE_PUBLIC_ORIGIN=https://wrong.example.com"]
+			)
+		)
+
+	assert deploy_call == {}
 
 
 @pytest.mark.asyncio

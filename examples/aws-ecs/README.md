@@ -31,4 +31,4 @@ AWS_PROFILE=brimstone-production AWS_REGION=us-east-2 uv run pulse-aws deploy \
   --context .
 ```
 
-The deploy command sets `PULSE_SERVER_ADDRESS` for the ECS task automatically.
+The deploy command configures the app's public origin and internal service URLs.

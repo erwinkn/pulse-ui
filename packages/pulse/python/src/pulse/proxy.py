@@ -1,5 +1,5 @@
 """
-ASGI proxy for forwarding requests to the React Router server in single-server mode.
+ASGI proxy for forwarding requests to an internal web server.
 
 Design goals:
 - ASGI-only surface area.
@@ -13,6 +13,7 @@ from collections.abc import AsyncGenerator, Iterable
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, cast
+from urllib.parse import urlsplit
 
 import aiohttp
 from starlette.datastructures import URL
@@ -21,6 +22,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from pulse.context import PulseContext
 from pulse.cookies import parse_cookie_header
+from pulse.origins import normalize_http_origin
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +36,8 @@ _DISCONNECT_WATCH_MAX_SLEEP = 1.0
 
 
 @dataclass
-class Proxy:
-	"""Configuration for the React proxy in single-server mode."""
+class WebProxyConfig:
+	"""Configuration for the internal web proxy."""
 
 	max_concurrency: int = _MAX_CONCURRENCY
 	incoming_streaming_threshold: int = _INCOMING_STREAMING_THRESHOLD
@@ -107,12 +109,11 @@ def _encode_header(value: str) -> bytes:
 	return value.encode("latin-1")
 
 
-class ReactProxy:
-	"""ASGI-level proxy for React Router HTTP/WebSocket requests."""
+class WebProxy:
+	"""ASGI-level proxy for web HTTP/WebSocket requests."""
 
-	react_server_address: str
-	server_address: str
-	config: Proxy
+	web_upstream: str
+	config: WebProxyConfig
 	_session: aiohttp.ClientSession | None
 	_active_responses: set[aiohttp.ClientResponse]
 	_active_websockets: set[aiohttp.ClientWebSocketResponse]
@@ -121,20 +122,20 @@ class ReactProxy:
 
 	def __init__(
 		self,
-		react_server_address: str,
-		server_address: str,
+		web_upstream: str,
 		*,
-		config: Proxy | None = None,
+		config: WebProxyConfig | None = None,
 	) -> None:
 		"""
 		Args:
-		    react_server_address: Internal React Router server URL (e.g., http://localhost:5173)
-		    server_address: External server URL exposed to clients (e.g., http://localhost:8000)
+		    web_upstream: Internal web server URL (e.g., http://localhost:5173).
 		    config: Proxy configuration (uses defaults if not provided).
 		"""
-		self.react_server_address = react_server_address
-		self.server_address = server_address
-		self.config = config or Proxy()
+		self.web_upstream = normalize_http_origin(
+			web_upstream,
+			name="web_upstream",
+		)
+		self.config = config or WebProxyConfig()
 		self._session = None
 		self._active_responses = set()
 		self._active_websockets = set()
@@ -146,9 +147,16 @@ class ReactProxy:
 		task.add_done_callback(self._tasks.discard)
 
 	def rewrite_url(self, url: str) -> str:
-		"""Rewrite internal React server URLs to external server address."""
-		if self.react_server_address in url:
-			return url.replace(self.react_server_address, self.server_address)
+		"""Rewrite an exact upstream URL to an origin-relative URL."""
+		parsed = urlsplit(url)
+		upstream = urlsplit(self.web_upstream)
+		if (parsed.scheme, parsed.netloc) == (upstream.scheme, upstream.netloc):
+			result = parsed.path or "/"
+			if parsed.query:
+				result += f"?{parsed.query}"
+			if parsed.fragment:
+				result += f"#{parsed.fragment}"
+			return result
 		return url
 
 	@property
@@ -219,12 +227,12 @@ class ReactProxy:
 		return "; ".join(f"{key}={value}" for key, value in existing.items())
 
 	async def proxy_websocket(self, websocket: WebSocket) -> None:
-		"""Proxy a WebSocket connection to the React Router server."""
+		"""Proxy a WebSocket connection to the web upstream."""
 		if self._closing.is_set():
 			await websocket.close(code=1012, reason="Proxy shutting down")
 			return
 
-		ws_url = _http_to_ws_url(self.react_server_address)
+		ws_url = _http_to_ws_url(self.web_upstream)
 		target_url = ws_url.rstrip("/") + websocket.url.path
 		if websocket.url.query:
 			target_url += "?" + websocket.url.query
@@ -247,10 +255,21 @@ class ReactProxy:
 				continue
 			if key_lower in _HOP_BY_HOP_HEADERS:
 				continue
+			if key_lower in ("x-forwarded-host", "x-forwarded-proto"):
+				continue
 			if key_lower == "cookie":
 				cookie_header = value
 				continue
 			headers.append((key, value))
+		forwarded_host = websocket.headers.get(
+			"x-forwarded-host"
+		) or websocket.headers.get("host")
+		if forwarded_host:
+			headers.append(("x-forwarded-host", forwarded_host))
+		forwarded_proto = websocket.headers.get("x-forwarded-proto") or (
+			"https" if websocket.url.scheme == "wss" else "http"
+		)
+		headers.append(("x-forwarded-proto", forwarded_proto))
 
 		ctx = PulseContext.get()
 		session = ctx.session
@@ -345,7 +364,7 @@ class ReactProxy:
 			with suppress(asyncio.CancelledError, Exception):
 				await websocket.close(
 					code=1014,
-					reason="Bad Gateway: Could not connect to React Router server",
+					reason="Bad Gateway: Could not connect to web upstream",
 				)
 		except Exception as exc:
 			logger.error("WebSocket proxy error: %s", exc)
@@ -424,7 +443,7 @@ class ReactProxy:
 		path = request_url.path
 		if root_path and not path.startswith(root_path):
 			path = root_path.rstrip("/") + path
-		url = self.react_server_address.rstrip("/") + path
+		url = self.web_upstream + path
 		if request_url.query:
 			url += "?" + request_url.query
 
@@ -432,14 +451,28 @@ class ReactProxy:
 		headers: list[tuple[str, str]] = []
 		cookie_header: str | None = None
 		content_length: int | None = None
+		# The upstream sees its own host (aiohttp sets Host from the target URL)
+		# so dev servers with host checks (e.g. Vite allowedHosts) accept proxied
+		# requests from tunnels/remote hostnames; the browser-facing host and
+		# scheme travel in X-Forwarded-Host/Proto instead.
+		host_header: str | None = None
+		forwarded_host: str | None = None
+		forwarded_proto: str | None = None
 		for key_bytes, value_bytes in raw_headers:
 			key = _decode_header(key_bytes)
 			key_lower = key.lower()
-			if key_lower == "host":
-				continue
 			if key_lower in _HOP_BY_HOP_HEADERS:
 				continue
 			value = _decode_header(value_bytes)
+			if key_lower == "host":
+				host_header = value
+				continue
+			if key_lower == "x-forwarded-host":
+				forwarded_host = value
+				continue
+			if key_lower == "x-forwarded-proto":
+				forwarded_proto = value
+				continue
 			if key_lower == "cookie":
 				cookie_header = value
 				continue
@@ -449,6 +482,12 @@ class ReactProxy:
 				except Exception:
 					content_length = None
 			headers.append((key, value))
+		forwarded_host = forwarded_host or host_header
+		if forwarded_host:
+			headers.append(("x-forwarded-host", forwarded_host))
+		headers.append(
+			("x-forwarded-proto", forwarded_proto or scope.get("scheme", "http"))
+		)
 
 		ctx = PulseContext.get()
 		session = ctx.session
@@ -649,7 +688,7 @@ class ReactProxy:
 			await send(
 				{
 					"type": "http.response.body",
-					"body": b"Gateway Timeout: React Router server took too long to respond",
+					"body": b"Gateway Timeout: web upstream took too long to respond",
 					"more_body": False,
 				}
 			)
@@ -675,7 +714,7 @@ class ReactProxy:
 			await send(
 				{
 					"type": "http.response.body",
-					"body": b"Bad Gateway: Could not reach React Router server",
+					"body": b"Bad Gateway: Could not reach web upstream",
 					"more_body": False,
 				}
 			)
@@ -828,8 +867,3 @@ class ReactProxy:
 				await watch_task
 			proxy_response.close()
 			self._active_responses.discard(proxy_response)
-
-
-# Backwards-friendly alias inside the repo; ASGI-only implementation.
-class ReactAsgiProxy(ReactProxy):
-	pass

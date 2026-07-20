@@ -42,12 +42,11 @@ runner = CliRunner()
 class _GenerateAppStub:
 	def __init__(self, web_root: Path):
 		self.codegen: Any = SimpleNamespace(cfg=SimpleNamespace(web_root=web_root))
-		self.server_address: str | None = None
 		self.routes: Any = SimpleNamespace(flat_tree=["/"])
-		self.codegen_calls: list[str] = []
+		self.codegen_calls: int = 0
 
-	def run_codegen(self, address: str) -> None:
-		self.codegen_calls.append(address)
+	def run_codegen(self) -> None:
+		self.codegen_calls += 1
 
 
 class _RunAppStub:
@@ -59,12 +58,11 @@ class _RunAppStub:
 				web_root=web_root, pulse_dir=pulse_dir, pulse_path=pulse_path
 			)
 		)
-		self.mode: str = "multi-server"
 		self.env: str = "dev"
-		self.codegen_calls: list[str] = []
+		self.codegen_calls: int = 0
 
-	def run_codegen(self, address: str) -> None:
-		self.codegen_calls.append(address)
+	def run_codegen(self) -> None:
+		self.codegen_calls += 1
 		routes_entry = self.codegen.cfg.pulse_path / "routes.ts"
 		routes_entry.parent.mkdir(parents=True, exist_ok=True)
 		routes_entry.write_text("export const routes = [];\n")
@@ -187,7 +185,7 @@ def test_generate_fails_when_dev_server_lock_is_live(
 		"Cannot run 'pulse generate' while a Pulse dev server is running at "
 		"http://localhost:8123"
 	) in result.output
-	assert app.codegen_calls == []
+	assert app.codegen_calls == 0
 
 
 def test_generate_ignores_stale_dev_server_lock(
@@ -224,7 +222,7 @@ def test_generate_ignores_stale_dev_server_lock(
 
 	assert result.exit_code == 0, result.output
 	assert "Generated 1 route" in result.output
-	assert app.codegen_calls == ["http://localhost:8000"]
+	assert app.codegen_calls == 1
 
 
 def test_run_interrupt_stops_existing_server_before_finding_port(
@@ -314,6 +312,50 @@ def _patch_run_basics(
 	return commands, installed
 
 
+@pytest.mark.parametrize(
+	(
+		"backend_only",
+		"web_only",
+		"start_server",
+		"start_web",
+		"server_args",
+		"web_args",
+	),
+	[
+		(False, False, True, True, ("--workers", "2"), ()),
+		(True, False, True, False, ("--workers", "2"), ()),
+		(False, True, False, True, (), ("--workers", "2")),
+	],
+)
+def test_run_plan_resolves_topology_and_extra_args(
+	backend_only: bool,
+	web_only: bool,
+	start_server: bool,
+	start_web: bool,
+	server_args: tuple[str, ...],
+	web_args: tuple[str, ...],
+):
+	plan = cmd_mod.RunPlan.resolve(
+		backend_only=backend_only,
+		web_only=web_only,
+		extra_args=("--workers", "2"),
+	)
+
+	assert plan.start_server is start_server
+	assert plan.start_web is start_web
+	assert plan.server_args == server_args
+	assert plan.web_args == web_args
+
+
+def test_run_plan_rejects_conflicting_topology():
+	with pytest.raises(ValueError, match="Cannot use --backend-only and --web-only"):
+		cmd_mod.RunPlan.resolve(
+			backend_only=True,
+			web_only=True,
+			extra_args=(),
+		)
+
+
 def test_run_installs_and_generates_before_web(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -322,6 +364,7 @@ def test_run_installs_and_generates_before_web(
 	web_root.mkdir()
 	app_ctx = _make_run_app_ctx(tmp_path, web_root)
 	app = cast(Any, app_ctx.app)
+	monkeypatch.delenv("PULSE_WEB_UPSTREAM", raising=False)
 
 	commands, installed = _patch_run_basics(monkeypatch, app_ctx)
 
@@ -332,19 +375,22 @@ def test_run_installs_and_generates_before_web(
 	assert result.exit_code == 0, result.output
 	# Install runs, then codegen with the bind address, before commands launch.
 	assert installed == [["bun", "i"]]
-	assert app.codegen_calls == ["http://localhost:8000"]
+	assert app.codegen_calls == 1
 	assert (web_root / "app" / "_pulse" / "routes.ts").exists()
 	assert [c.name for c in commands] == ["web", "server"]
+	assert commands[0].env["PULSE_SSR_BACKEND_URL"] == "http://localhost:8000"
+	assert commands[1].env["PULSE_WEB_UPSTREAM"] == "http://localhost:5173"
+	assert "PULSE_WEB_UPSTREAM" not in os.environ
 
 
-def test_run_skips_install_and_codegen_for_server_only(
+def test_run_skips_install_and_codegen_for_backend_only(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-	"""--server-only launches no web server, so deps/codegen are skipped."""
+	"""--backend-only launches no web server, so deps/codegen are skipped."""
 	web_root = tmp_path / "web"
-	web_root.mkdir()
 	app_ctx = _make_run_app_ctx(tmp_path, web_root)
 	app = cast(Any, app_ctx.app)
+	monkeypatch.setenv("PULSE_WEB_UPSTREAM", "http://web:3000")
 
 	commands, installed = _patch_run_basics(monkeypatch, app_ctx)
 
@@ -354,7 +400,7 @@ def test_run_skips_install_and_codegen_for_server_only(
 			"run",
 			"demo.py",
 			"--plain",
-			"--server-only",
+			"--backend-only",
 			"--no-find-port",
 			"--port",
 			"8000",
@@ -363,8 +409,76 @@ def test_run_skips_install_and_codegen_for_server_only(
 
 	assert result.exit_code == 0, result.output
 	assert installed == []
-	assert app.codegen_calls == []
+	assert app.codegen_calls == 0
 	assert [c.name for c in commands] == ["server"]
+	assert "PULSE_WEB_UPSTREAM" not in commands[0].env
+	assert commands[0].env["PULSE_DISABLE_CODEGEN"] == "1"
+	assert not web_root.exists()
+
+
+def test_run_web_only_requires_ssr_backend_url(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+	monkeypatch.delenv("PULSE_SSR_BACKEND_URL", raising=False)
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+
+	def load_app(target: str, logger: object) -> AppLoadResult:
+		return app_ctx
+
+	monkeypatch.setattr(cmd_mod, "load_app_from_target", load_app)
+
+	result = runner.invoke(cmd_mod.cli, ["run", "demo.py", "--web-only", "--plain"])
+
+	assert result.exit_code == 1
+	assert "--ssr-backend-url or PULSE_SSR_BACKEND_URL is required" in result.output
+
+
+def test_run_web_only_uses_ssr_backend_url_from_environment(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	monkeypatch.setenv("PULSE_SSR_BACKEND_URL", "HTTP://PULSE:8000/")
+	commands, _ = _patch_run_basics(monkeypatch, app_ctx)
+
+	result = runner.invoke(
+		cmd_mod.cli,
+		["run", "demo.py", "--web-only", "--plain", "--no-find-port"],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert [command.name for command in commands] == ["web"]
+	assert commands[0].env["PULSE_SSR_BACKEND_URL"] == "http://pulse:8000"
+
+
+def test_run_web_only_rejects_invalid_ssr_backend_url(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+
+	def load_app(target: str, logger: object) -> AppLoadResult:
+		return app_ctx
+
+	monkeypatch.setattr(cmd_mod, "load_app_from_target", load_app)
+	result = runner.invoke(
+		cmd_mod.cli,
+		[
+			"run",
+			"demo.py",
+			"--web-only",
+			"--plain",
+			"--ssr-backend-url",
+			"http://pulse:8000/path",
+		],
+	)
+
+	assert result.exit_code == 1
+	assert "SSR backend URL must be an HTTP(S) origin" in result.output
 
 
 def test_run_fails_on_dependency_conflict(
@@ -411,7 +525,7 @@ def test_run_existing_lock_suggests_interrupt(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
 	web_root = tmp_path / "web"
-	create_lock(lock_path_for_web_root(web_root), address="localhost", port=8123)
+	create_lock(lock_path_for_web_root(tmp_path), address="localhost", port=8123)
 	app_ctx = _make_run_app_ctx(tmp_path, web_root)
 
 	def load_app(target: str, logger: object) -> AppLoadResult:
@@ -424,8 +538,9 @@ def test_run_existing_lock_suggests_interrupt(
 		[
 			"run",
 			"demo.py",
-			"--server-only",
+			"--backend-only",
 			"--no-reload",
+			"--no-find-port",
 			"--plain",
 			"--port",
 			"8123",
@@ -532,6 +647,20 @@ def test_build_web_command_sets_node_env_in_prod(tmp_path: Path) -> None:
 	spec = cmd_mod.build_web_command(web_root=web_root, extra_args=[], mode="prod")
 
 	assert spec.env["NODE_ENV"] == "production"
+
+
+def test_build_web_command_sets_ssr_backend_url(tmp_path: Path) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+
+	spec = cmd_mod.build_web_command(
+		web_root=web_root,
+		extra_args=[],
+		mode="prod",
+		ssr_backend_url="http://pulse:8000",
+	)
+
+	assert spec.env["PULSE_SSR_BACKEND_URL"] == "http://pulse:8000"
 
 
 def test_web_workspaces_using_pulse_ui_client_declare_ws() -> None:

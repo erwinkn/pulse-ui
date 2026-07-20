@@ -113,6 +113,36 @@ def test_railway_project_omits_redis_service_for_external_redis() -> None:
 	assert project.redis_service_name is None
 
 
+def test_railway_project_normalizes_public_origin() -> None:
+	project = RailwayProject(
+		project_id="project",
+		environment_id="env",
+		token="token",
+		public_origin="HTTPS://APP.EXAMPLE.COM:443/",
+	)
+
+	assert project.public_origin == "https://app.example.com"
+
+
+@pytest.mark.parametrize(
+	"public_origin",
+	[
+		"http://app.example.com",
+		"app.example.com",
+		"https://app.example.com/path",
+		"https://app.example.com?preview=true",
+	],
+)
+def test_railway_project_rejects_invalid_public_origin(public_origin: str) -> None:
+	with pytest.raises(ValueError, match="public_origin"):
+		RailwayProject(
+			project_id="project",
+			environment_id="env",
+			token="token",
+			public_origin=public_origin,
+		)
+
+
 def test_railway_plugin_exposes_plugin_deployment_name() -> None:
 	plugin = RailwayPlugin(dockerfile="Dockerfile", deployment_name="staging")
 	ps.App(routes=[], plugins=[plugin])
@@ -129,18 +159,18 @@ def test_railway_plugin_exposes_plugin_image_repository() -> None:
 	assert plugin.image_repository == "ghcr.io/acme/stoneware-v3"
 
 
-def test_railway_plugin_exposes_app_server_address(monkeypatch) -> None:
+def test_railway_plugin_exposes_app_public_origin(monkeypatch) -> None:
 	monkeypatch.setenv("PULSE_ENV", "ci")
 	plugin = RailwayPlugin(dockerfile="Dockerfile")
 	app = ps.App(
 		routes=[],
 		plugins=[plugin],
-		server_address="https://app.example.com",
+		public_origin="https://app.example.com",
 	)
 
 	RailwayPlugin.from_app(app)
 
-	assert plugin.server_address == "https://app.example.com"
+	assert plugin.public_origin == "https://app.example.com"
 
 
 def test_railway_plugin_allows_cli_dockerfile_override() -> None:
@@ -174,7 +204,7 @@ def test_railway_plugin_app_properties_require_app() -> None:
 	plugin = RailwayPlugin()
 
 	with pytest.raises(RailwayPluginError, match="not attached"):
-		_ = plugin.server_address
+		_ = plugin.public_origin
 	with pytest.raises(RailwayPluginError, match="not attached"):
 		_ = plugin.web_root
 	with pytest.raises(RailwayPluginError, match="not attached"):

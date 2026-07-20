@@ -18,8 +18,8 @@ from pulse_railway.stack.common import (
 	CLI_RUNTIME_TOKEN_ERROR,
 	StackInspection,
 	list_baseline_services,
+	public_origin_from_runtime,
 	raise_missing_service,
-	server_address_from_runtime,
 )
 
 
@@ -134,11 +134,11 @@ async def inspect_stack_with_client(
 			+ "rerun `pulse-railway scaffold` to change Redis mode"
 		)
 	domain = services.router.domains[0].domain if services.router.domains else None
-	server_address = server_address_from_runtime(
+	public_origin = public_origin_from_runtime(
 		domain=domain,
 		variables=router_variables,
 	)
-	if server_address is None:
+	if public_origin is None:
 		raise DeploymentError(
 			f"could not resolve a public address for {services.router.name}; "
 			+ f"run `pulse-railway {command}`"
@@ -155,7 +155,7 @@ async def inspect_stack_with_client(
 		redis_mode=redis_mode,
 		internal_token=internal_token,
 		redis_url=redis_url,
-		server_address=server_address,
+		public_origin=public_origin,
 		router_variables=router_variables,
 		janitor_variables=janitor_variables,
 		router_config_variables=router_config_variables or router_variables,

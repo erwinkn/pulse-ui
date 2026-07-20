@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
@@ -15,8 +15,6 @@ from starlette.websockets import WebSocketDisconnect
 from pulse_railway.constants import (
 	AFFINITY_HEADER,
 	AFFINITY_QUERY_PARAM,
-	CLIENT_LOADER_HEADER,
-	CLIENT_LOADER_LOCATION_HEADER,
 	DEFAULT_BACKEND_PORT,
 	DEFAULT_REDIS_PREFIX,
 	DEFAULT_ROUTER_CONNECTION_LIMIT,
@@ -48,7 +46,6 @@ _HOP_BY_HOP_HEADERS = {
 	"upgrade",
 }
 _WEBSOCKET_EXCLUDED_HEADERS = {
-	"host",
 	"upgrade",
 	"connection",
 	"sec-websocket-key",
@@ -56,6 +53,31 @@ _WEBSOCKET_EXCLUDED_HEADERS = {
 	"sec-websocket-protocol",
 	"sec-websocket-extensions",
 }
+
+
+def _public_forwarding_headers(
+	headers: list[tuple[str, str]], *, host: str, scheme: str
+) -> list[tuple[str, str]]:
+	forwarded = [
+		(key, value)
+		for key, value in headers
+		if key.lower() not in {"host", "x-forwarded-host", "x-forwarded-proto"}
+	]
+	forwarded.extend(
+		[
+			("host", host),
+			("x-forwarded-host", host),
+			("x-forwarded-proto", scheme),
+		]
+	)
+	return forwarded
+
+
+def _public_http_scheme(headers: Mapping[str, str], scope_scheme: str) -> str:
+	forwarded = headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+	if forwarded in {"http", "https"}:
+		return forwarded
+	return "https" if scope_scheme in {"https", "wss"} else "http"
 
 
 def _http_to_ws_url(http_url: str) -> str:
@@ -163,12 +185,6 @@ class AffinityRouter:
 			raise HTTPException(status_code=404, detail="deployment not found")
 		return target
 
-	async def _resolve_from_http(self, request: Request) -> RouteTarget:
-		deployment_id = request.query_params.get(AFFINITY_QUERY_PARAM)
-		if not deployment_id:
-			deployment_id = request.headers.get(AFFINITY_HEADER)
-		return await self._resolve_target(deployment_id)
-
 	async def _resolve_from_websocket(self, websocket: WebSocket) -> RouteTarget:
 		deployment_id = websocket.query_params.get(AFFINITY_QUERY_PARAM)
 		if not deployment_id:
@@ -199,17 +215,10 @@ class AffinityRouter:
 		deployment_id = request.query_params.get(AFFINITY_QUERY_PARAM)
 		if not deployment_id:
 			deployment_id = request.headers.get(AFFINITY_HEADER)
-		client_loader = request.headers.get(CLIENT_LOADER_HEADER) == "1"
-		client_loader_location = request.headers.get(CLIENT_LOADER_LOCATION_HEADER)
 		try:
 			target = await self._resolve_target(deployment_id)
 		except HTTPException:
 			if deployment_id and await self.resolver.resolve_active() is not None:
-				if client_loader and client_loader_location:
-					return Response(
-						status_code=302,
-						headers={"location": client_loader_location},
-					)
 				return JSONResponse(
 					{"detail": "stale affinity"},
 					status_code=409,
@@ -224,14 +233,15 @@ class AffinityRouter:
 		headers: list[tuple[str, str]] = []
 		for key, value in request.headers.items():
 			key_lower = key.lower()
-			if (
-				key_lower == "host"
-				or key_lower == "accept-encoding"
-				or key_lower in _HOP_BY_HOP_HEADERS
-			):
+			if key_lower == "accept-encoding" or key_lower in _HOP_BY_HOP_HEADERS:
 				continue
 			headers.append((key, value))
 		headers.append(("accept-encoding", "identity"))
+		headers = _public_forwarding_headers(
+			headers,
+			host=request.headers["host"],
+			scheme=_public_http_scheme(request.headers, request.url.scheme),
+		)
 
 		async with self.session.request(
 			request.method,
@@ -263,11 +273,16 @@ class AffinityRouter:
 		if websocket.url.query:
 			backend_url += "?" + websocket.url.query
 
-		headers: dict[str, str] = {}
+		headers: list[tuple[str, str]] = []
 		for key, value in websocket.headers.items():
 			if key.lower() in _WEBSOCKET_EXCLUDED_HEADERS:
 				continue
-			headers[key] = value
+			headers.append((key, value))
+		headers = _public_forwarding_headers(
+			headers,
+			host=websocket.headers["host"],
+			scheme=_public_http_scheme(websocket.headers, websocket.url.scheme),
+		)
 
 		requested_protocols = [
 			value.strip()

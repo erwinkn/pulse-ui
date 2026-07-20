@@ -9,7 +9,7 @@ that updates from one session do not leak into the other.
 import asyncio
 import gc
 from collections.abc import Callable, Iterator
-from typing import Any, cast, override
+from typing import Any, Literal, cast, override
 
 import pulse as ps
 import pytest
@@ -1123,7 +1123,7 @@ async def test_suspend_resume_preserves_state():
 async def test_call_api_timeout():
 	"""Test that call_api raises TimeoutError when no response arrives."""
 	routes = RouteTree([Route("a", simple_component)])
-	session = RenderSession("test-id", routes, server_address="http://localhost:8000")
+	session = RenderSession("test-id", routes)
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
@@ -1143,10 +1143,19 @@ async def test_call_api_timeout():
 
 
 @pytest.mark.asyncio
-async def test_call_api_success_before_timeout():
+@pytest.mark.parametrize(
+	("url", "credentials"),
+	[
+		("/test", "same-origin"),
+		("https://api.example.com/test", "include"),
+	],
+)
+async def test_call_api_success_before_timeout(
+	url: str, credentials: Literal["same-origin", "include"]
+):
 	"""Test that call_api succeeds when response arrives before timeout."""
 	routes = RouteTree([Route("a", simple_component)])
-	session = RenderSession("test-id", routes, server_address="http://localhost:8000")
+	session = RenderSession("test-id", routes)
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
@@ -1156,7 +1165,9 @@ async def test_call_api_success_before_timeout():
 		session.attach("/a", make_route_info("/a"))
 
 	# Start the API call
-	api_task = asyncio.create_task(session.call_api("/test", timeout=1.0))
+	api_task = asyncio.create_task(
+		session.call_api(url, credentials=credentials, timeout=1.0)
+	)
 
 	# Give it a moment to send the message
 	assert await wait_for(
@@ -1166,6 +1177,9 @@ async def test_call_api_success_before_timeout():
 	# Find the api_call message and get its ID
 	api_msgs = [m for m in messages if m.get("type") == "api_call"]
 	assert len(api_msgs) == 1
+	api_msg = cast(Any, api_msgs[0])
+	assert api_msg["url"] == url
+	assert api_msg["credentials"] == credentials
 	api_id = cast(Any, api_msgs[0])["id"]
 
 	# Simulate client response
@@ -1254,7 +1268,7 @@ async def test_run_js_success_before_timeout():
 async def test_session_close_cancels_pending_api():
 	"""Test that session.close() cancels pending API futures."""
 	routes = RouteTree([Route("a", simple_component)])
-	session = RenderSession("test-id", routes, server_address="http://localhost:8000")
+	session = RenderSession("test-id", routes)
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))

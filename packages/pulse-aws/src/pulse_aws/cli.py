@@ -88,11 +88,6 @@ def _add_deploy_args(parser: argparse.ArgumentParser) -> None:
 		help="Public domain for the deployment (env: PULSE_AWS_DOMAIN)",
 	)
 	parser.add_argument(
-		"--server-address",
-		default=_env("PULSE_SERVER_ADDRESS"),
-		help="Server address for Pulse (env: PULSE_SERVER_ADDRESS)",
-	)
-	parser.add_argument(
 		"--app-file",
 		default=_env("PULSE_AWS_APP_FILE") or "main.py",
 		help="App entry file for Dockerfile build args (env: PULSE_AWS_APP_FILE)",
@@ -299,15 +294,18 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 	if not web_root_path.exists():
 		raise ValueError(f"Web root not found: {web_root_path}")
 
-	server_address = args.server_address or f"https://{args.domain}"
+	public_origin = f"https://{args.domain}"
 
 	build_args = _parse_kv_items(args.build_arg, "--build-arg")
 	build_args.setdefault("APP_FILE", args.app_file)
 	build_args.setdefault("WEB_ROOT", args.web_root)
-	build_args.setdefault("PULSE_SERVER_ADDRESS", server_address)
 
 	task_env = _parse_kv_items(args.task_env, "--task-env")
-	task_env.setdefault("PULSE_SERVER_ADDRESS", server_address)
+	if "PULSE_PUBLIC_ORIGIN" in task_env:
+		raise ValueError(
+			"--task-env cannot override pulse-aws managed variable: PULSE_PUBLIC_ORIGIN"
+		)
+	task_env["PULSE_PUBLIC_ORIGIN"] = public_origin
 
 	docker = DockerBuild(
 		dockerfile_path=dockerfile_path,
@@ -339,7 +337,7 @@ async def _run_deploy(args: argparse.Namespace) -> int:
 	print(f"   CDK bin: {cdk_bin}")
 	if cdk_workdir is not None:
 		print(f"   CDK workdir: {cdk_workdir}")
-	print(f"   Server address: {server_address}")
+	print(f"   Public origin: {public_origin}")
 	print()
 
 	result = await deploy(

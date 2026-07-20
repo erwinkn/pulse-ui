@@ -25,7 +25,7 @@ from pulse.env import (
 	ENV_PULSE_ENV,
 	ENV_PULSE_HOST,
 	ENV_PULSE_PORT,
-	ENV_PULSE_REACT_SERVER_ADDRESS,
+	ENV_PULSE_WEB_UPSTREAM,
 )
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -265,7 +265,7 @@ async def _run(args: argparse.Namespace) -> int:
 	upstream_host = "127.0.0.1"
 	upstream_base = f"http://{upstream_host}:{args.upstream_port}"
 
-	os.environ[ENV_PULSE_REACT_SERVER_ADDRESS] = upstream_base
+	os.environ[ENV_PULSE_WEB_UPSTREAM] = upstream_base
 	os.environ[ENV_PULSE_HOST] = args.host
 	os.environ[ENV_PULSE_PORT] = str(args.port)
 	os.environ[ENV_PULSE_ENV] = args.env
@@ -273,11 +273,6 @@ async def _run(args: argparse.Namespace) -> int:
 		os.environ[ENV_PULSE_DISABLE_CODEGEN] = "1"
 
 	app_ctx = load_app_from_target(str(example_path))
-	if args.env in ("prod", "ci") and not app_ctx.app.server_address:
-		server_address = f"https://{args.host}:{args.port}"
-		app_ctx.app.server_address = server_address
-		if not app_ctx.app.internal_server_address:
-			app_ctx.app.internal_server_address = server_address
 	pulse_app = app_ctx.app.asgi_factory()
 
 	upstream_server, upstream_task = await _serve(

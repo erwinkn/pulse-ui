@@ -2,220 +2,138 @@
 title: "Deployment"
 ---
 
-Ready to share your Pulse app with the world? This guide walks you through building and deploying your application to production.
+Pulse always uses one browser-visible origin. You can still scale the Python backend and React Router server independently behind a proxy or ingress.
 
-Pulse apps are Python backends that communicate with React frontends over WebSockets. When deploying, you need to generate the frontend code and decide how to host these two pieces.
+## The request boundary
+
+The browser only sees your public origin:
+
+```text
+Browser -> https://app.example.com -> proxy / ingress
+                                      |-> Pulse backend
+                                      |-> React Router server
+```
+
+Route these paths to the Pulse backend:
+
+- `/_pulse/*`, including `/_pulse/socket.io`
+- your FastAPI routes, such as `/api/*` and `/auth/*`
+
+Route page and asset requests to React Router. Keep the `/_pulse` rule ahead of any frontend catch-all. Pulse's framework prefix is fixed and reserved.
+
+The browser uses relative URLs and same-origin credentials. Pulse does not configure CORS for its framework transport; the Socket.IO server only accepts connections whose `Origin` matches the request host. A proxy or ingress in front of Pulse must therefore forward the original `Host` header (or set `X-Forwarded-Host`) and set `X-Forwarded-Proto` when it terminates TLS — standard behavior for most proxies. If yours cannot, override the check with `App(socketio_options={"cors_allowed_origins": ...})`.
+
+## Run both servers together
+
+```bash
+pulse run app.py --prod --address 0.0.0.0
+```
+
+This starts both processes. Pulse receives browser traffic and proxies unmatched HTTP and WebSocket requests to the internal React Router server (in development, that includes Vite's HMR socket). The upstream sees its own internal host; the browser-visible host and scheme are forwarded as `X-Forwarded-Host` and `X-Forwarded-Proto`, so remote access through tunnels like Tailscale or ngrok works without extra Vite configuration.
+
+The CLI sets the internal addresses automatically. `WebProxyConfig` controls the optional web proxy:
+
+```python
+import pulse as ps
+
+app = ps.App(
+    routes=[...],
+    proxy=ps.WebProxyConfig(max_concurrency=200),
+)
+```
+
+Pulse constructs the internal `WebProxy` only when `PULSE_WEB_UPSTREAM` is set. Without that variable, the server is backend-only.
+
+## Scale the processes separately
+
+Run the Pulse backend without a web proxy:
+
+```bash
+pulse run app.py --prod --backend-only --address 0.0.0.0
+```
+
+Run React Router separately and give its server-side loaders an internal backend URL:
+
+```bash
+pulse run app.py --prod --web-only \
+  --ssr-backend-url http://pulse-backend:8000
+```
+
+`PULSE_SSR_BACKEND_URL` is private server-to-server configuration. It is read by React Router at runtime, so generated files and frontend builds remain origin-neutral.
+
+If you run the ASGI app outside the Pulse CLI, configure process composition directly:
+
+```bash
+PULSE_ENV=prod \
+PULSE_WEB_UPSTREAM=http://react-router:3000 \
+uvicorn app:app.asgi_factory --factory --host 0.0.0.0 --port 8000
+```
+
+Omit `PULSE_WEB_UPSTREAM` for a backend-only process.
+
+## Public origin
+
+Most Pulse apps do not need a configured public origin. Set one only when server-side code must create an absolute callback URL, such as an OAuth redirect:
+
+```python
+import pulse as ps
+
+app = ps.App(
+    routes=[...],
+    public_origin="https://app.example.com",
+)
+```
+
+`PULSE_PUBLIC_ORIGIN` provides the same runtime setting. An explicit `App(public_origin=...)` takes precedence. The value must be an HTTP or HTTPS origin with no path, query, credentials, or fragment; production and CI require HTTPS.
+
+Do not use the public origin for browser fetches. Use relative paths such as `/api/users`.
+
+## Cookies
+
+Pulse session cookies are host-only: Pulse never sets a `Domain` attribute. This matches the single-origin boundary and prevents sibling hosts from receiving session cookies.
+
+The default cookie is `Secure` in production and CI. Pulse rejects an explicitly insecure cookie in those environments. Development resolves `secure` from `public_origin` when one is configured.
+
+```python
+app = ps.App(
+    routes=[...],
+    cookie=ps.Cookie(
+        "pulse.sid",
+        secure=True,
+        samesite="lax",
+        max_age_seconds=30 * 24 * 3600,
+    ),
+)
+```
+
+## Environment variables
+
+| Variable | Purpose | Example |
+| --- | --- | --- |
+| `PULSE_ENV` | Runtime environment | `prod` |
+| `PULSE_PUBLIC_ORIGIN` | Optional canonical browser origin | `https://app.example.com` |
+| `PULSE_WEB_UPSTREAM` | Optional internal React Router URL for Pulse's web proxy | `http://react-router:3000` |
+| `PULSE_SSR_BACKEND_URL` | Internal Pulse URL used by React Router SSR | `http://pulse-backend:8000` |
+| `PULSE_HOST` | Pulse bind host, set by the CLI | `0.0.0.0` |
+| `PULSE_PORT` | Pulse bind port, set by the CLI | `8000` |
 
 ## Code generation
 
-Pulse generates React Router files that connect your Python routes to the React frontend. This happens automatically during development and can be triggered manually for production builds.
-
-### How it works
-
-When you run `pulse run app.py`, Pulse:
-
-1. Reads your route definitions from the `App` object
-2. Generates React Router configuration files in your web directory
-3. Creates route components that connect to the Pulse server
-4. Copies any local assets referenced by `Import` or `DynamicImport`
-
-The generated files are placed in a `pulse/` directory inside your web app folder (by default `web/app/pulse/`).
-
-### Configuration
-
-Configure code generation with `CodegenConfig`:
-
-```python
-from pathlib import Path
-import pulse as ps
-
-app = ps.App(
-    routes=[...],
-    codegen=ps.CodegenConfig(
-        web_dir=Path(__file__).parent / "web",  # Where your React app lives
-        pulse_dir="pulse",                       # Subdirectory for generated files
-    ),
-)
-```
-
-### Manual generation for production
-
-For production builds or CI, call `run_codegen()` directly:
-
-```python
-app = ps.App(routes=[...], codegen=ps.CodegenConfig(...))
-
-# Generate files for a specific server address
-app.run_codegen(address="https://api.example.com")
-```
-
-Pulse automatically adds the generated directory to `.gitignore`.
-
----
-
-## Deployment modes
-
-You need to decide how to host the API and frontend—together on one server, or separately.
-
-**If you're just getting started, use single-server mode.** It's simpler to set up and works great for most applications.
-
-| | Single-server | Subdomains |
-|---|---|---|
-| **Setup complexity** | Simple | More involved |
-| **Best for** | Most apps, getting started | Large-scale apps, separate teams |
-| **Scaling** | Scale everything together | Scale API and frontend independently |
-| **Infrastructure** | One server/container | Separate API server + CDN |
-
-### Single-server mode (recommended)
-
-Your Pulse server handles everything: the API, WebSocket connections, and serving the React frontend.
-
-```python
-import pulse as ps
-
-app = ps.App(
-    routes=[...],
-    mode="single-server",  # This is the default
-    server_address="https://myapp.example.com",
-)
-```
-
-Why this mode is simpler:
-- **One thing to deploy** - Your Pulse server handles both the API and frontend
-- **No CORS headaches** - Everything runs on the same origin
-- **Cookies just work** - Session cookies are automatically configured
-
-### Subdomains mode
-
-Host the API and frontend separately (e.g., `api.example.com` and `app.example.com`):
-
-```python
-app = ps.App(
-    routes=[...],
-    mode="subdomains",
-    server_address="https://api.example.com",
-)
-```
-
-This mode requires more configuration:
-- **CORS must be configured** - The browser needs permission to make cross-origin requests
-- **Cookies need domain settings** - Session cookies must work across subdomains
-- **Separate deployments** - Deploy frontend (often to a CDN) and API server separately
-
----
-
-## Server address configuration
-
-The `server_address` tells Pulse where your API will be accessible. Pulse uses this to:
-- Generate the correct WebSocket URL for the React client
-- Set up CORS policies
-- Configure cookie domains
-
-```python
-# Development
-app = ps.App(
-    routes=[...],
-    dev_server_address="http://localhost:8000",
-)
-
-# Production
-app = ps.App(
-    routes=[...],
-    server_address="https://api.myapp.com",
-)
-```
-
----
-
-## Cookie configuration
-
-Pulse uses cookies to manage user sessions. The defaults work well for most apps. For subdomains mode or specific security requirements:
-
-```python
-from pulse import Cookie
-
-app = ps.App(
-    routes=[...],
-    cookie=Cookie(
-        name="pulse_session",
-        domain=".example.com",       # Leading dot for subdomain sharing
-        secure=True,                 # Only send over HTTPS
-        samesite="lax",              # CSRF protection
-        max_age_seconds=86400 * 30,  # 30 days
-    ),
-)
-```
-
-## CORS configuration
-
-Pulse configures CORS automatically based on your deployment mode. For custom settings:
-
-```python
-app = ps.App(
-    routes=[...],
-    cors={
-        "allow_origins": ["https://app.example.com"],
-        "allow_credentials": True,
-        "allow_methods": ["*"],
-        "allow_headers": ["*"],
-    },
-)
-```
-
----
-
-## Running in production
-
-Run your app with a production-grade ASGI server like Uvicorn:
+Code generation does not take public or internal addresses:
 
 ```bash
-uvicorn app:app.asgi --host 0.0.0.0 --port 8000
+pulse generate app.py --prod
 ```
-
-For more control over initialization, use the factory pattern:
 
 ```python
-# app.py
-def create_app():
-    app = ps.App(routes=[...], server_address="https://api.example.com")
-    app.run_codegen(address="https://api.example.com")
-    return app.asgi
+app.run_codegen()
 ```
 
-```bash
-uvicorn app:create_app --factory --host 0.0.0.0 --port 8000
-```
+Generated browser requests target the current origin. The React Router server reads `PULSE_SSR_BACKEND_URL` when it handles a request.
 
-### Environment variables
+## See also
 
-| Variable | Purpose | Example |
-|----------|---------|---------|
-| `PULSE_ENV` | Set to `prod` for production mode | `prod` |
-| `PULSE_HOST` | Server host to bind to | `0.0.0.0` |
-| `PULSE_PORT` | Server port | `8000` |
-
-Setting `PULSE_ENV=prod` enables production optimizations and disables hot reloading.
-
----
-
-## AWS deployment
-
-`pulse-aws` is the current official example, not the only way to deploy Pulse. You can run Pulse anywhere you can host a long-lived Python server + WebSocket connections.
-
-Why people use it:
-- Keeps old servers alive while users are connected, so deploys don't drop sessions.
-- Runs multiple versions at once with affinity routing, so you can balance users across them.
-
-<Callout type="warn">
-Unverified example. Not run in this update.
-</Callout>
-
-```bash
-uv run pulse-aws deploy \
-  --deployment-name prod \
-  --domain app.example.com \
-  --app-file src/app/main.py \
-  --web-root web
-```
-
-See the [Pulse AWS package documentation](/docs/packages/pulse-aws) for detailed guides.
+- [App reference](/docs/reference/pulse/app) — application configuration
+- [CLI reference](/docs/reference/pulse/cli) — process options and environment variables
+- [Codegen reference](/docs/reference/pulse/codegen) — generated files
+- [Pulse AWS](/docs/packages/pulse-aws) — ECS deployment

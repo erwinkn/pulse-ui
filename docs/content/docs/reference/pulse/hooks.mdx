@@ -458,7 +458,6 @@ Set a cookie on the client.
 async def set_cookie(
     name: str,
     value: str,
-    domain: str | None = None,
     secure: bool = True,
     samesite: Literal["lax", "strict", "none"] = "lax",
     max_age_seconds: int = 7 * 24 * 3600,
@@ -478,31 +477,11 @@ async def call_api(
     method: str = "POST",
     headers: Mapping[str, str] | None = None,
     body: Any | None = None,
-    credentials: str = "include",
+    credentials: Literal["omit", "same-origin", "include"] = "same-origin",
 ) -> dict[str, Any]
 ```
 
-Useful for calling third-party APIs that require browser cookies/credentials.
-
----
-
-## server_address
-
-Get the server's public address.
-
-```python
-def server_address() -> str
-```
-
----
-
-## client_address
-
-Get the client's IP address.
-
-```python
-def client_address() -> str
-```
+Relative paths target the current origin. Absolute HTTP(S) URLs remain available for intentional third-party requests.
 
 ---
 

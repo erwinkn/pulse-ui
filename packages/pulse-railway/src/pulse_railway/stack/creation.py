@@ -25,7 +25,7 @@ from pulse_railway.stack.common import (
 	ensure_router_domain,
 	list_baseline_services,
 	raise_for_existing_baseline,
-	resolve_router_server_address,
+	resolve_router_public_origin,
 	runtime_railway_token_variable,
 	stack_internals,
 )
@@ -151,7 +151,7 @@ async def create_stack_with_client(
 		name=project.service_name,
 	)
 	router_domain = await ensure_router_domain(client, project=project, service=router)
-	server_address = await resolve_router_server_address(
+	public_origin = await resolve_router_public_origin(
 		client,
 		project_id=project.project_id,
 		environment_id=project.environment_id,
@@ -179,7 +179,7 @@ async def create_stack_with_client(
 		),
 		internal_token_created=True,
 		redis_url=redis_url,
-		server_address=server_address,
+		public_origin=public_origin,
 	)
 
 

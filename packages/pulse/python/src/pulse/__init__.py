@@ -20,7 +20,6 @@ from starlette.datastructures import UploadFile as UploadFile
 
 # Core app/session
 from pulse.app import App as App
-from pulse.app import PulseMode as PulseMode
 from pulse.channel import (
 	Channel as Channel,
 )
@@ -1235,9 +1234,6 @@ from pulse.hooks.runtime import (
 	call_api as call_api,
 )
 from pulse.hooks.runtime import (
-	client_address as client_address,
-)
-from pulse.hooks.runtime import (
 	global_state as global_state,
 )
 from pulse.hooks.runtime import (
@@ -1254,9 +1250,6 @@ from pulse.hooks.runtime import (
 )
 from pulse.hooks.runtime import (
 	route as route,
-)
-from pulse.hooks.runtime import (
-	server_address as server_address,
 )
 from pulse.hooks.runtime import (
 	session as session,
@@ -1338,7 +1331,7 @@ from pulse.middleware import (
 from pulse.plugin import Plugin as Plugin
 
 # Proxy
-from pulse.proxy import Proxy as Proxy
+from pulse.proxy import WebProxyConfig as WebProxyConfig
 from pulse.queries.client import QueryClient as QueryClient
 from pulse.queries.client import QueryFilter as QueryFilter
 from pulse.queries.client import queries as queries

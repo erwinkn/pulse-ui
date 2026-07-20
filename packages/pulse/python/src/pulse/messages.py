@@ -70,8 +70,7 @@ class ServerApiCallMessage(TypedDict):
 	headers: dict[str, str]
 	# Body can be JSON-serializable or None
 	body: Any | None
-	# Whether to include credentials (cookies)
-	credentials: Literal["include", "omit"]
+	credentials: Literal["omit", "same-origin", "include"]
 
 
 class ServerChannelRequestMessage(TypedDict):
@@ -199,7 +198,6 @@ class PrerenderPayload(TypedDict):
 
 
 class SocketIODirectives(TypedDict):
-	headers: dict[str, str]
 	auth: dict[str, str]
 	query: dict[str, str]
 

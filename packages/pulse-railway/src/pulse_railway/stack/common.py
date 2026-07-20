@@ -39,7 +39,7 @@ class StackInspection:
 	redis: ServiceRecord | None
 	internal_token: str
 	redis_url: str
-	server_address: str
+	public_origin: str
 	router_variables: dict[str, str] = field(default_factory=dict)
 	janitor_variables: dict[str, str] = field(default_factory=dict)
 	router_config_variables: dict[str, str] = field(default_factory=dict)
@@ -67,7 +67,7 @@ class StackChange:
 	redis: StackServiceChange | None
 	internal_token_created: bool
 	redis_url: str
-	server_address: str
+	public_origin: str
 
 
 @dataclass(slots=True)
@@ -159,7 +159,7 @@ async def ensure_router_domain(
 	)
 
 
-def server_address_from_runtime(
+def public_origin_from_runtime(
 	*,
 	domain: str | None,
 	variables: dict[str, str],
@@ -174,7 +174,7 @@ def server_address_from_runtime(
 	return None
 
 
-async def resolve_router_server_address(
+async def resolve_router_public_origin(
 	client: RailwayGraphQLClient,
 	*,
 	project_id: str,
@@ -192,12 +192,12 @@ async def resolve_router_server_address(
 			environment_id=environment_id,
 			service_id=service_id,
 		)
-		server_address = server_address_from_runtime(
+		public_origin = public_origin_from_runtime(
 			domain=fallback_domain,
 			variables=variables,
 		)
-		if server_address is not None:
-			return server_address
+		if public_origin is not None:
+			return public_origin
 		if loop.time() >= deadline:
 			return f"https://{fallback_domain}"
 		await asyncio.sleep(poll_interval)

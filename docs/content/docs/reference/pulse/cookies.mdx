@@ -17,7 +17,6 @@ from pulse import Cookie
 @dataclass
 class Cookie:
     name: str
-    domain: str | None = None
     secure: bool | None = None
     samesite: Literal["lax", "strict", "none"] = "lax"
     max_age_seconds: int = 7 * 24 * 3600  # 7 days
@@ -28,8 +27,7 @@ class Cookie:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `name` | `str` | required | Cookie name |
-| `domain` | `str \| None` | `None` | Cookie domain. Set automatically in subdomain mode |
-| `secure` | `bool \| None` | `None` | HTTPS-only flag. Auto-resolved from server address |
+| `secure` | `bool \| None` | `None` | HTTPS-only flag. Always resolves to `True` in production and CI; follows HTTPS `public_origin` in development |
 | `samesite` | `Literal["lax", "strict", "none"]` | `"lax"` | SameSite attribute |
 | `max_age_seconds` | `int` | `604800` | Cookie lifetime in seconds (default 7 days) |
 
@@ -69,6 +67,8 @@ def set_on_fastapi(self, response: Response, value: str) -> None
 
 Set the cookie on a FastAPI Response object. Configured with `httponly=True` and `path="/"`.
 
+Pulse cookies are always host-only: no `Domain` attribute is emitted. Production and CI reject `Cookie(secure=False)`.
+
 ---
 
 ## SetCookie
@@ -105,27 +105,6 @@ def from_cookie(cls, cookie: Cookie, value: str) -> SetCookie
 Create a `SetCookie` from an existing `Cookie` configuration with a specific value.
 
 Raises `RuntimeError` if `cookie.secure` is not resolved.
-
----
-
-## CORSOptions
-
-TypedDict for CORS middleware configuration.
-
-```python
-from pulse.cookies import CORSOptions
-```
-
-```python
-class CORSOptions(TypedDict, total=False):
-    allow_origins: Sequence[str]       # Default: ()
-    allow_methods: Sequence[str]       # Default: ("GET",)
-    allow_headers: Sequence[str]       # Default: ()
-    allow_credentials: bool            # Default: False
-    allow_origin_regex: str | None     # Default: None
-    expose_headers: Sequence[str]      # Default: ()
-    max_age: int                       # Default: 600
-```
 
 ---
 

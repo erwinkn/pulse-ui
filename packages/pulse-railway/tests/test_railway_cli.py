@@ -62,7 +62,7 @@ def _make_deploy_args(**overrides: Any) -> argparse.Namespace:
 		"environment_id": None,
 		"token": "token",
 		"service_prefix": None,
-		"server_address": None,
+		"public_origin": None,
 		"app_file": "main.py",
 		"web_root": None,
 		"context": ".",
@@ -106,7 +106,7 @@ def _baseline_result(*, created: bool) -> StackChange:
 			if created
 			else "redis://pulse-redis.railway.internal:6379"
 		),
-		server_address="https://pulse-router-production.up.railway.app",
+		public_origin="https://pulse-router-production.up.railway.app",
 	)
 
 
@@ -180,7 +180,7 @@ def _install_fake_deploy(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 			router_service_name="pulse-router",
 			router_image="ghcr.io/acme/router:24h",
 			router_domain="pulse-router-production.up.railway.app",
-			server_address="https://pulse-router-production.up.railway.app",
+			public_origin="https://pulse-router-production.up.railway.app",
 			backend_deployment_id="deploy-svc-2",
 			backend_status="SUCCESS",
 			janitor_service_id="svc-3",
@@ -218,7 +218,7 @@ def _install_fake_deploy_source(monkeypatch: pytest.MonkeyPatch) -> dict[str, An
 			router_service_name="pulse-router",
 			router_image="ghcr.io/acme/router:24h",
 			router_domain="pulse-router-production.up.railway.app",
-			server_address="https://pulse-router-production.up.railway.app",
+			public_origin="https://pulse-router-production.up.railway.app",
 			backend_status="SUCCESS",
 			source_context="/tmp/project",
 			dockerfile_path="/tmp/project/Dockerfile",
@@ -1288,7 +1288,7 @@ async def test_run_deploy_reads_target_from_railway_plugin(
 
 
 @pytest.mark.asyncio
-async def test_run_deploy_reads_server_address_from_app_file(
+async def test_run_deploy_reads_public_origin_from_app_file(
 	monkeypatch, tmp_path
 ) -> None:
 	project_root = tmp_path / "project"
@@ -1300,22 +1300,22 @@ async def test_run_deploy_reads_server_address_from_app_file(
 		"app = ps.App(\n"
 		"    routes=[],\n"
 		'    plugins=[RailwayPlugin(dockerfile="Dockerfile")],\n'
-		'    server_address="https://app.example.com",\n'
+		'    public_origin="https://app.example.com",\n'
 		")\n"
 	)
 	deploy_call = _install_fake_deploy(monkeypatch)
 	monkeypatch.setenv("PULSE_ENV", "dev")
 	monkeypatch.chdir(project_root)
 
-	result = await _run_deploy(_make_deploy_args(server_address=None))
+	result = await _run_deploy(_make_deploy_args(public_origin=None))
 
 	assert result == 0
-	assert deploy_call["project"].server_address == "https://app.example.com"
+	assert deploy_call["project"].public_origin == "https://app.example.com"
 	assert os.environ["PULSE_ENV"] == "dev"
 
 
 @pytest.mark.asyncio
-async def test_run_deploy_reads_env_server_address_from_app_file(
+async def test_run_deploy_reads_env_public_origin_from_app_file(
 	monkeypatch, tmp_path
 ) -> None:
 	project_root = tmp_path / "project"
@@ -1328,23 +1328,23 @@ async def test_run_deploy_reads_env_server_address_from_app_file(
 		"app = ps.App(\n"
 		"    routes=[],\n"
 		'    plugins=[RailwayPlugin(dockerfile="Dockerfile")],\n'
-		'    server_address=os.environ.get("PULSE_SERVER_ADDRESS"),\n'
+		'    public_origin=os.environ.get("PULSE_PUBLIC_ORIGIN"),\n'
 		")\n"
 	)
 	deploy_call = _install_fake_deploy(monkeypatch)
-	monkeypatch.setenv("PULSE_SERVER_ADDRESS", "https://env.example.com")
+	monkeypatch.setenv("PULSE_PUBLIC_ORIGIN", "https://env.example.com")
 	monkeypatch.delenv("PULSE_ENV", raising=False)
 	monkeypatch.chdir(project_root)
 
-	result = await _run_deploy(_make_deploy_args(server_address=None))
+	result = await _run_deploy(_make_deploy_args(public_origin=None))
 
 	assert result == 0
-	assert deploy_call["project"].server_address == "https://env.example.com"
+	assert deploy_call["project"].public_origin == "https://env.example.com"
 	assert "PULSE_ENV" not in os.environ
 
 
 @pytest.mark.asyncio
-async def test_run_deploy_server_address_flag_overrides_app_file(
+async def test_run_deploy_public_origin_flag_overrides_app_file(
 	monkeypatch, tmp_path
 ) -> None:
 	project_root = tmp_path / "project"
@@ -1356,18 +1356,34 @@ async def test_run_deploy_server_address_flag_overrides_app_file(
 		"app = ps.App(\n"
 		"    routes=[],\n"
 		'    plugins=[RailwayPlugin(dockerfile="Dockerfile")],\n'
-		'    server_address="https://app.example.com",\n'
+		'    public_origin="https://app.example.com",\n'
 		")\n"
 	)
 	deploy_call = _install_fake_deploy(monkeypatch)
 	monkeypatch.chdir(project_root)
 
 	result = await _run_deploy(
-		_make_deploy_args(server_address="https://override.example.com")
+		_make_deploy_args(public_origin="https://override.example.com")
 	)
 
 	assert result == 0
-	assert deploy_call["project"].server_address == "https://override.example.com"
+	assert deploy_call["project"].public_origin == "https://override.example.com"
+
+
+@pytest.mark.asyncio
+async def test_run_deploy_rejects_insecure_public_origin_before_deploy(
+	monkeypatch, tmp_path
+) -> None:
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	_write_deploy_fixture(project_root)
+	deploy_call = _install_fake_deploy(monkeypatch)
+	monkeypatch.chdir(project_root)
+
+	with pytest.raises(ValueError, match="public_origin must use HTTPS"):
+		await _run_deploy(_make_deploy_args(public_origin="http://app.example.com"))
+
+	assert "project" not in deploy_call
 
 
 @pytest.mark.asyncio

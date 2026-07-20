@@ -10,7 +10,7 @@ Client receives VDOM updates via Socket.IO and renders using React. Events are s
 ┌─────────────────────────────────────────────────────────────────┐
 │  Browser                                                        │
 │  ┌──────────────┐  ┌────────────┐  ┌─────────────────────────┐  │
-│  │ PulseProvider│──│ PulseClient│──│ Transport (Socket.IO)   │  │
+│  │ PulseProvider│──│ PulseClient│──│ Socket.IO               │  │
 │  └──────────────┘  └────────────┘  └─────────────────────────┘  │
 │         │                │                                      │
 │         ▼                ▼                                      │
@@ -36,7 +36,6 @@ src/
 ├── client.tsx          # PulseClient - manages connection & views
 ├── renderer.tsx        # VDOM-to-React rendering
 ├── channel.ts          # Channel bridge for real-time messaging
-├── transport.ts        # Socket.IO transport layer
 ├── messages.ts         # Client<->server message types
 ├── form.tsx            # PulseForm component
 ├── helpers.ts          # Route info extraction utilities
@@ -55,14 +54,15 @@ src/
 
 ### PulseProvider
 
-Root provider establishing server connection:
+Root provider establishing the same-origin server connection. Pulse codegen supplies
+the config and prerender data:
 
 ```tsx
 import { PulseProvider } from "pulse-client";
 
-function App() {
+function App({ config, prerender }) {
   return (
-    <PulseProvider config={{ serverUrl: "http://localhost:8000" }}>
+    <PulseProvider config={config} prerender={prerender}>
       <Routes />
     </PulseProvider>
   );
@@ -93,10 +93,6 @@ Converts VDOM to React:
 - Binds event handlers to server
 - Manages refs and lazy loading
 
-### Transport
-
-Socket.IO transport with automatic reconnection, message queuing, connection status.
-
 ### Channels
 
 Real-time messaging:
@@ -119,4 +115,4 @@ function Chat() {
 
 **Functions**: `serialize`, `deserialize`, `extractServerRouteInfo`, `submitForm`
 
-**Types**: `VDOM`, `VDOMNode`, `VDOMElement`, `PulseClient`, `Transport`, `ComponentRegistry`
+**Types**: `VDOM`, `VDOMNode`, `VDOMElement`, `PulseClient`, `Directives`, `ComponentRegistry`

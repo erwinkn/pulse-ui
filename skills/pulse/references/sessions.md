@@ -86,14 +86,14 @@ app = ps.App(
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `name` | `str` | `"pulse.sid"` | Cookie name |
-| `domain` | `str \| None` | `None` | Cookie domain (auto-set in subdomain mode) |
-| `secure` | `bool \| None` | `None` | HTTPS-only (auto-resolved from server address) |
+| `secure` | `bool \| None` | `None` | HTTPS-only; always true in production and CI |
 | `samesite` | `"lax" \| "strict" \| "none"` | `"lax"` | SameSite attribute |
 | `max_age_seconds` | `int` | `604800` | Cookie lifetime (7 days) |
 
 **Security notes:**
-- `secure=None` auto-resolves from `server_address` scheme
-- Production requires HTTPS (`secure=True`)
+- Cookies are host-only; Pulse never emits a `Domain` attribute
+- `secure=None` resolves from HTTPS `public_origin` in development
+- Production and CI require `secure=True` and reject an explicit false value
 - Cookies are always `httponly=True` and `path="/"`
 
 ## `ps.set_cookie()`
@@ -115,7 +115,6 @@ async def set_preferences():
 async def set_cookie(
     name: str,
     value: str,
-    domain: str | None = None,
     secure: bool = True,
     samesite: Literal["lax", "strict", "none"] = "lax",
     max_age_seconds: int = 7 * 24 * 3600,
@@ -180,7 +179,7 @@ app = ps.App(
 **Characteristics:**
 - Sessions lost on server restart
 - No size limit (unlike cookies)
-- Single-server only (no horizontal scaling)
+- Process-local only (use a shared store before scaling backend replicas)
 - Good for development and testing
 
 ### Custom Session Store

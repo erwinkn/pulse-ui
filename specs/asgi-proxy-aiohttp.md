@@ -1,7 +1,8 @@
-# ASGI-Only React Proxy (aiohttp)
+# Optional ASGI Web Proxy (aiohttp)
 
 ## Goal
-Replace FastAPI-style `ReactProxy` with a single ASGI proxy that:
+Provide one ASGI proxy for deployments where the Pulse backend also fronts the
+web server. Backend-only deployments do not instantiate it. The proxy:
 - stops leaking upstream streams/connections
 - shuts down cleanly with open dev connections (uvicorn reloads)
 - stays in one file, no config system
@@ -15,7 +16,7 @@ Target files:
 ## Key Decisions
 - Use `aiohttp` for upstream HTTP + WebSocket.
 - Disable cookie persistence upstream: `aiohttp.DummyCookieJar()`.
-- Keep a single proxy class (ASGI-level). Remove mode switching.
+- Keep a single proxy class at the ASGI level.
 - Keep explicit, local helpers in `proxy.py` (no config layer).
 
 ## Design (apply asgiproxy learnings)
@@ -57,12 +58,11 @@ Target files:
 - Treat normal close as non-error.
 - Ensure shutdown closes upstream and cancels loops.
 
-## Wiring Changes
-- In `app.py` single-server mode:
-  - always instantiate ASGI proxy
-  - always register ASGI catch-all
-  - dev websocket catch-all uses same proxy instance
-- Remove `PULSE_PROXY_MODE`.
+## Wiring
+
+- Instantiate the proxy only when a web upstream is configured.
+- Register the HTTP and development WebSocket catch-alls on that instance.
+- Without a web upstream, serve only the app's API routes and `/_pulse/*`.
 
 ## Tests to Add/Update
 - HTTP:

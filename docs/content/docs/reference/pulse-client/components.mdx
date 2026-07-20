@@ -39,8 +39,6 @@ interface PulseProviderProps {
 
 ```ts
 interface PulseConfig {
-  serverAddress: string;
-  apiPrefix: string;
   connectionStatus: ConnectionStatusConfig;
 }
 
@@ -57,10 +55,7 @@ The connection status configuration controls when status messages appear:
 - **initialErrorDelay** - How long to wait before showing an error if initial connection fails.
 - **reconnectErrorDelay** - How long to wait before showing an error when reconnecting after disconnect.
 
-Other config fields:
-
-- **serverAddress** - Public base URL for WebSocket and client-side requests.
-- **apiPrefix** - Prefix for Pulse API endpoints (usually `/_pulse`).
+Pulse always connects to the current origin. Framework HTTP endpoints use the fixed `/_pulse` prefix and Socket.IO uses `/_pulse/socket.io`.
 
 ### PulsePrerender
 
@@ -76,12 +71,13 @@ interface PulsePrerenderView {
 
 interface Directives {
   headers?: Record<string, string>;
+  query?: Record<string, string>;
   socketio?: SocketIODirectives;
 }
 
 interface SocketIODirectives {
-  headers?: Record<string, string>;
   auth?: Record<string, string>;
+  query?: Record<string, string>;
 }
 ```
 
@@ -98,8 +94,6 @@ function App() {
     <BrowserRouter>
       <PulseProvider
         config={{
-          serverAddress: "http://localhost:8000",
-          apiPrefix: "/_pulse",
           connectionStatus: {
             initialConnectingDelay: 500,
             initialErrorDelay: 5000,
@@ -244,7 +238,7 @@ function LoginForm() {
 1. User submits the form
 2. PulseForm intercepts the submit event
 3. Calls your `onSubmit` handler if provided
-4. If not `event.defaultPrevented`, sends form data via `fetch` with `credentials: "include"`
+4. If not `event.defaultPrevented`, sends form data to the same-origin action
 5. Server processes the form and updates state
 6. Reactive updates flow back through the WebSocket
 

@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, cast
 
@@ -33,12 +34,14 @@ from pulse.env import (
 	ENV_PULSE_DISABLE_CODEGEN,
 	ENV_PULSE_HOST,
 	ENV_PULSE_PORT,
-	ENV_PULSE_REACT_SERVER_ADDRESS,
 	ENV_PULSE_SECRET,
+	ENV_PULSE_SSR_BACKEND_URL,
+	ENV_PULSE_WEB_UPSTREAM,
 	PulseEnv,
 	env,
 )
 from pulse.helpers import find_available_port, local_server_url
+from pulse.origins import normalize_http_origin
 from pulse.version import __version__ as PULSE_PY_VERSION
 
 cli = typer.Typer(
@@ -46,6 +49,34 @@ cli = typer.Typer(
 	help="Pulse UI - Python to TypeScript bridge with server-side callbacks",
 	no_args_is_help=True,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class RunPlan:
+	start_server: bool
+	start_web: bool
+	server_args: tuple[str, ...]
+	web_args: tuple[str, ...]
+
+	@classmethod
+	def resolve(
+		cls,
+		*,
+		backend_only: bool,
+		web_only: bool,
+		extra_args: Sequence[str],
+	) -> RunPlan:
+		if backend_only and web_only:
+			raise ValueError(
+				"Cannot use --backend-only and --web-only at the same time."
+			)
+		args = tuple(extra_args)
+		return cls(
+			start_server=not web_only,
+			start_web=not backend_only,
+			server_args=args if not web_only else (),
+			web_args=args if web_only else (),
+		)
 
 
 @cli.command(
@@ -69,12 +100,16 @@ def run(
 	plain: bool = typer.Option(
 		False, "--plain", help="Use plain output without colors or emojis"
 	),
-	server_only: bool = typer.Option(False, "--server-only", "--backend-only"),
+	backend_only: bool = typer.Option(
+		False,
+		"--backend-only",
+		help="Run only the Pulse backend; do not start or proxy the web server",
+	),
 	web_only: bool = typer.Option(False, "--web-only"),
-	react_server_address: str | None = typer.Option(
+	ssr_backend_url: str | None = typer.Option(
 		None,
-		"--react-server-address",
-		help="Full URL of React server (required for single-server + --server-only)",
+		"--ssr-backend-url",
+		help="Internal Pulse backend URL used by a web-only process",
 	),
 	reload: bool | None = typer.Option(None, "--reload/--no-reload"),
 	find_port: bool = typer.Option(True, "--find-port/--no-find-port"),
@@ -105,36 +140,52 @@ def run(
 	if reload is None:
 		reload = env.pulse_env == "dev"
 
-	if server_only and web_only:
-		logger.error("Cannot use --server-only and --web-only at the same time.")
-		raise typer.Exit(1)
+	try:
+		plan = RunPlan.resolve(
+			backend_only=backend_only,
+			web_only=web_only,
+			extra_args=extra_flags,
+		)
+	except ValueError as exc:
+		logger.error(str(exc))
+		raise typer.Exit(1) from None
 
 	logger.print(f"Loading app from {app_file}")
 	app_ctx = load_app_from_target(app_file, logger)
 	_apply_app_context_to_env(app_ctx)
 	app_instance = app_ctx.app
 
-	is_single_server = app_instance.mode == "single-server"
-	if is_single_server:
-		logger.print("Single-server mode")
-
-	# In single-server + server-only mode, require explicit React server address
-	if is_single_server and server_only:
-		if not react_server_address:
+	resolved_ssr_backend_url: str | None = None
+	if not plan.start_server:
+		configured_ssr_backend_url = ssr_backend_url or env.ssr_backend_url
+		if configured_ssr_backend_url is None:
 			logger.error(
-				"--react-server-address is required when using single-server mode with --server-only."
+				"--ssr-backend-url or PULSE_SSR_BACKEND_URL is required with --web-only."
 			)
 			raise typer.Exit(1)
-		os.environ[ENV_PULSE_REACT_SERVER_ADDRESS] = react_server_address
+		try:
+			resolved_ssr_backend_url = normalize_http_origin(
+				configured_ssr_backend_url,
+				name="SSR backend URL",
+			)
+		except ValueError as exc:
+			logger.error(str(exc))
+			raise typer.Exit(1) from None
 
 	web_root = app_instance.codegen.cfg.web_root
-	if not web_root.exists() and not server_only:
+	if not web_root.exists() and plan.start_web:
 		logger.error(f"Directory not found: {web_root.absolute()}")
 		raise typer.Exit(1)
+	backend_lock_root = (
+		app_ctx.app_file.parent
+		if app_ctx.app_file is not None
+		else (app_ctx.app_dir or Path.cwd())
+	)
+	lock_root = web_root if plan.start_web else backend_lock_root
 
 	if interrupt:
 		try:
-			stopped = interrupt_active_dev_server(web_root)
+			stopped = interrupt_active_dev_server(lock_root)
 		except RuntimeError as exc:
 			logger.error(str(exc))
 			raise typer.Exit(1) from None
@@ -152,14 +203,12 @@ def run(
 			web_root if web_root.exists() else app_ctx.app_file
 		)
 
-	server_args = extra_flags if not web_only else []
-	web_args = extra_flags if web_only else []
-
 	commands: list[CommandSpec] = []
 
 	# Track readiness for announcement
 	server_ready = {"server": False, "web": False}
 	announced = False
+	ready_url = local_server_url(address, port)
 
 	def mark_web_ready() -> None:
 		server_ready["web"] = True
@@ -175,44 +224,49 @@ def run(
 		if announced:
 			return
 
-		needs_server = not web_only
-		needs_web = not server_only
-
-		if needs_server and not server_ready["server"]:
+		if plan.start_server and not server_ready["server"]:
 			return
-		if needs_web and not server_ready["web"]:
+		if plan.start_web and not server_ready["web"]:
 			return
 
 		# All required servers are ready, show announcement
 		announced = True
-		logger.write_ready_announcement(address, port, local_server_url(address, port))
+		logger.write_ready_announcement(ready_url)
 
-	# Build web command first (when needed) so we can set PULSE_REACT_SERVER_ADDRESS
-	# before building the uvicorn command, which needs that env var
-	if not server_only:
+	# Build the web command first so the combined server can proxy its port.
+	web_upstream: str | None = None
+	if plan.start_web:
 		web_port = find_available_port(5173)
+		if not plan.start_server:
+			ready_url = f"http://localhost:{web_port}"
 		web_cmd = build_web_command(
 			web_root=web_root,
-			extra_args=web_args,
+			extra_args=plan.web_args,
 			port=web_port,
 			mode=app_instance.env,
+			ssr_backend_url=(
+				resolved_ssr_backend_url
+				if not plan.start_server
+				else local_server_url(address, port)
+			),
 			ready_pattern=r"localhost:\d+",
 			on_ready=mark_web_ready,
 			plain=plain,
 		)
 		commands.append(web_cmd)
-		# Set env var so app can read the React server address (only used in single-server mode)
-		env.react_server_address = f"http://localhost:{web_port}"
+		if plan.start_server:
+			web_upstream = f"http://localhost:{web_port}"
 
-	if not web_only:
+	if plan.start_server:
 		server_cmd = build_uvicorn_command(
 			app_ctx=app_ctx,
 			address=address,
 			port=port,
 			reload_enabled=reload,
-			extra_args=server_args,
+			extra_args=plan.server_args,
 			dev_secret=dev_secret,
-			server_only=server_only,
+			web_upstream=web_upstream,
+			disable_codegen=not plan.start_web,
 			web_root=web_root,
 			verbose=verbose,
 			ready_pattern=r"Application startup complete",
@@ -223,7 +277,7 @@ def run(
 
 	exit_code = 1
 	try:
-		with FolderLock(web_root, address=address, port=port):
+		with FolderLock(lock_root, address=address, port=port):
 			# Install web dependencies and generate route files before launching
 			# the web dev server. Without the install, a fresh checkout's web
 			# process dies with "react-router: command not found"; without codegen,
@@ -231,7 +285,7 @@ def run(
 			# and dies with "Cannot find module './pulse/routes'". Both steps are
 			# idempotent and cheap on warm starts, and run under the lock so a
 			# rejected concurrent run never rewrites a live instance's files.
-			if env.pulse_env == "dev" and not server_only:
+			if env.pulse_env == "dev" and plan.start_web:
 				try:
 					dep_plan = prepare_web_dependencies(
 						web_root,
@@ -247,7 +301,7 @@ def run(
 					raise typer.Exit(1) from None
 				logger.print("Generating routes")
 				try:
-					app_instance.run_codegen(local_server_url(address, port))
+					app_instance.run_codegen()
 				except Exception:
 					logger.error("Failed to generate routes")
 					logger.print_exception()
@@ -313,17 +367,8 @@ def generate(
 		)
 		raise typer.Exit(1)
 
-	# In CI or prod mode, server_address must be provided
-	if (ci or prod) and not app.server_address:
-		logger.error(
-			"server_address must be provided when generating in CI or production mode. "
-			+ "Set it in your App constructor or via the PULSE_SERVER_ADDRESS environment variable."
-		)
-		raise typer.Exit(1)
-
-	addr = app.server_address or "http://localhost:8000"
 	try:
-		app.run_codegen(addr)
+		app.run_codegen()
 	except Exception:
 		logger.error("Failed to generate routes")
 		logger.print_exception()
@@ -421,7 +466,8 @@ def build_uvicorn_command(
 	reload_enabled: bool,
 	extra_args: Sequence[str],
 	dev_secret: str | None,
-	server_only: bool,
+	web_upstream: str | None,
+	disable_codegen: bool,
 	web_root: Path,
 	verbose: bool = False,
 	ready_pattern: str | None = None,
@@ -477,12 +523,10 @@ def build_uvicorn_command(
 		command_env["FORCE_COLOR"] = "0"
 	else:
 		command_env["FORCE_COLOR"] = "1"
-	# Pass React server address to uvicorn process if set
-	if ENV_PULSE_REACT_SERVER_ADDRESS in os.environ:
-		command_env[ENV_PULSE_REACT_SERVER_ADDRESS] = os.environ[
-			ENV_PULSE_REACT_SERVER_ADDRESS
-		]
-	if app_ctx.app.env == "prod" and server_only:
+	command_env.pop(ENV_PULSE_WEB_UPSTREAM, None)
+	if web_upstream is not None:
+		command_env[ENV_PULSE_WEB_UPSTREAM] = web_upstream
+	if disable_codegen:
 		command_env[ENV_PULSE_DISABLE_CODEGEN] = "1"
 	if dev_secret:
 		command_env[ENV_PULSE_SECRET] = dev_secret
@@ -513,6 +557,7 @@ def build_web_command(
 	extra_args: Sequence[str],
 	port: int | None = None,
 	mode: PulseEnv = "dev",
+	ssr_backend_url: str | None = None,
 	ready_pattern: str | None = None,
 	on_ready: Callable[[], None] | None = None,
 	plain: bool = False,
@@ -545,6 +590,11 @@ def build_web_command(
 			"PYTHONUNBUFFERED": "1",
 		}
 	)
+	if ssr_backend_url is not None:
+		command_env[ENV_PULSE_SSR_BACKEND_URL] = normalize_http_origin(
+			ssr_backend_url,
+			name="ssr_backend_url",
+		)
 	if plain:
 		command_env["NO_COLOR"] = "1"
 		command_env["FORCE_COLOR"] = "0"

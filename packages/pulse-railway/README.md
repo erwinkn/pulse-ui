@@ -4,7 +4,7 @@ Railway deployment utilities for Pulse applications.
 
 `pulse-railway` uses one stable public router service plus one Railway service per deployment. The router keeps older deployments alive and forwards HTTP and websocket traffic to the selected deployment based on `pulse_deployment`.
 
-For local CLI usage, prefer `RAILWAY_API_TOKEN` when you are using a user/account/workspace token. Reserve `RAILWAY_TOKEN` for Railway project tokens, especially in CI. If neither is set, `pulse-railway` falls back to the local Railway CLI login session from `~/.railway/config*.json`. CLI login tokens are allowed for local API calls, but `scaffold` and `ensure` will not write them into the long-lived router or janitor services; set `RAILWAY_TOKEN` or `RAILWAY_API_TOKEN` when initializing or repairing runtime credentials.
+For local CLI usage, prefer `RAILWAY_API_TOKEN` when you are using a user/account/workspace token. Reserve `RAILWAY_TOKEN` for Railway project tokens, especially in CI. If neither is set, `pulse-railway` falls back to the local Railway CLI login session from `~/.railway/config*.json`. CLI login tokens are allowed for local API calls, but `scaffold` and `ensure` will not write them into the long-lived janitor service; set `RAILWAY_TOKEN` or `RAILWAY_API_TOKEN` when initializing or repairing its runtime credentials. The router receives no Railway API token.
 
 ## Quick Start
 
@@ -65,7 +65,7 @@ You can also set `deployment_name` on `RailwayPlugin` to provide the default dep
 
 You can also set `image_repository` on `RailwayPlugin` to provide the default backend image registry from app config. Precedence is: `--image-repository`, then `RailwayPlugin(image_repository=...)`. If none is set, deploy uses source mode.
 
-`pulse-railway deploy <app-file>` reads `server_address` and web root from the target `ps.App`, and the Dockerfile path from `RailwayPlugin(dockerfile=...)`. The deploy context is the invocation directory unless `--context` is provided. Dockerfile and web root paths are resolved from that context. `--server-address` and `--web-root` can override app config; Dockerfile is only configured on the plugin.
+`pulse-railway deploy <app-file>` reads the public origin and web root from the target `ps.App`, and the Dockerfile path from `RailwayPlugin(dockerfile=...)`. The deploy context is the invocation directory unless `--context` is provided. Dockerfile and web root paths are resolved from that context. `--public-origin` and `--web-root` can override app config; Dockerfile is only configured on the plugin. An explicit public origin must be an HTTPS origin without a path, query, credentials, or fragment.
 
 If `--redis-url` is omitted, `pulse-railway scaffold` and an empty-project `pulse-railway ensure` create the stable Redis service in the Railway project. Redis mode is baseline topology; `ensure` does not switch an existing stack between managed and external Redis.
 

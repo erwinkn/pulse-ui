@@ -72,9 +72,9 @@ def add_shared_deploy_args(parser: argparse.ArgumentParser) -> None:
 		help="Backend Railway service prefix. Defaults to the RailwayPlugin service prefix.",
 	)
 	parser.add_argument(
-		"--server-address",
+		"--public-origin",
 		default=None,
-		help="Public server address override. Defaults to App.server_address, then the existing router service address.",
+		help="Public origin override. Defaults to App.public_origin, then the existing router service origin.",
 	)
 	parser.add_argument(
 		"--web-root",
@@ -181,7 +181,7 @@ async def resolve_deploy_command(args: argparse.Namespace) -> ResolvedDeployComm
 		token_source=resolved_token.source,
 		env_vars=env_vars,
 		backend_replicas=args.backend_replicas,
-		server_address=args.server_address or plugin.server_address,
+		public_origin=args.public_origin or plugin.public_origin,
 	)
 	docker = DockerBuild(
 		dockerfile_path=dockerfile_path,

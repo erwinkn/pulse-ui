@@ -191,6 +191,23 @@ A unique identifier linking a browser to server-side session data. Usually store
 **Render Session**
 In Pulse, an isolated execution context per browser tab. Each tab has its own component instances and state—refreshing a tab resets its render session.
 
+## Deployment
+
+**Origin**
+The URL scheme, host, and port that define a browser security boundary, such as `https://app.example.com`. Pulse's browser transport always uses the page's current origin.
+
+**Public Origin**
+The optional canonical origin configured with `PULSE_PUBLIC_ORIGIN` or `App(public_origin=...)`. Server-side integrations use it only when they must create an absolute callback URL.
+
+**Web Upstream**
+The private React Router server URL configured with `PULSE_WEB_UPSTREAM`. When set, Pulse proxies unmatched browser requests to it.
+
+**SSR Backend URL**
+The private Pulse backend URL configured with `PULSE_SSR_BACKEND_URL`. React Router loaders use it for server-to-server prerender requests.
+
+**Backend-only**
+A Pulse process that serves framework and FastAPI endpoints without starting or proxying React Router. An ingress can combine it with a separately scaled web process under one public origin.
+
 ## Real-time Communication
 
 **WebSocket**

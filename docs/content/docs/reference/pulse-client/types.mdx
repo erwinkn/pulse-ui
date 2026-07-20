@@ -17,8 +17,6 @@ Configuration for the Pulse client.
 
 ```ts
 interface PulseConfig {
-  serverAddress: string;
-  apiPrefix: string;
   connectionStatus: ConnectionStatusConfig;
 }
 ```
@@ -64,17 +62,20 @@ interface PulsePrerenderView {
 
 ### Directives
 
-Connection directives for authentication and headers.
+Per-render connection directives. `query` is carried by client prerenders and
+same-origin `PulseForm` submissions. Socket.IO uses its nested authentication and
+query values.
 
 ```ts
 interface Directives {
   headers?: Record<string, string>;
+  query?: Record<string, string>;
   socketio?: SocketIODirectives;
 }
 
 interface SocketIODirectives {
-  headers?: Record<string, string>;
   auth?: Record<string, string>;
+  query?: Record<string, string>;
 }
 ```
 
@@ -523,7 +524,7 @@ interface ServerApiCallMessage {
   method: string;
   headers: Record<string, string>;
   body: any | null;
-  credentials: "include" | "omit";
+  credentials: RequestCredentials;
 }
 ```
 
@@ -621,32 +622,6 @@ interface MountedView {
   onJsExec: (msg: ServerJsExecMessage) => void;
   onServerError: (error: ServerError) => void;
 }
-```
-
----
-
-## Transport Types
-
-### Transport
-
-Interface for message transport.
-
-```ts
-interface Transport {
-  connect(listener: MessageListener): Promise<void>;
-  disconnect(): void;
-  sendMessage(payload: ClientMessage): Promise<void>;
-  isConnected(): boolean;
-  onConnectionChange(listener: ConnectionStatusListener): () => void;
-}
-```
-
-### MessageListener
-
-Callback for server messages.
-
-```ts
-type MessageListener = (message: ServerMessage) => void;
 ```
 
 ---

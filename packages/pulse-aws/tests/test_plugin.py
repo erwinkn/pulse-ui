@@ -54,8 +54,8 @@ async def test_plugin_exposes_deployment_metadata_endpoint():
 	plugin.deployment_name = "prod"
 	plugin.deployment_id = "prod-20260306-150000Z"
 
-	app = ps.App(routes=[], plugins=[plugin], mode="subdomains")
-	app.setup("https://app.example.com")
+	app = ps.App(routes=[], plugins=[plugin], public_origin="https://app.example.com")
+	app.setup()
 
 	transport = httpx.ASGITransport(app=app.fastapi)
 	async with httpx.AsyncClient(

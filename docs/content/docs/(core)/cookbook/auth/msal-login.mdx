@@ -69,7 +69,7 @@ def LoginPage():
         ps.h2("Sign in"),
         ps.a(
             "Sign in with Microsoft",
-            href=f"{ps.server_address()}/auth/login?next={next_path}",
+            href=f"/auth/login?next={next_path}",
         ),
     ]
 ```
@@ -96,7 +96,7 @@ def Login():
     next_path = route["queryParams"].get("next") or "/"
     return ps.a(
         "Sign in with Microsoft",
-        href=f"{ps.server_address()}/auth/login?next={next_path}",
+        href=f"/auth/login?next={next_path}",
     )
 
 
@@ -128,6 +128,8 @@ app = ps.App(
     ],
 )
 ```
+
+The login link stays relative to the current origin. In production, set `PULSE_PUBLIC_ORIGIN` so MSAL can construct the absolute callback URI. Use `App(public_origin=...)` only for a programmatic override. The plugin only accepts same-origin relative `next` paths.
 
 ## Token Cache
 

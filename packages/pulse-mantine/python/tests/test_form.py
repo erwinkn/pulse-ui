@@ -45,9 +45,7 @@ def build_context():
 	dummy_render = DummyRender()
 	session = SimpleNamespace(sid="session-1")
 
-	real_render = ps.RenderSession(
-		dummy_render.id, routes, server_address="http://localhost"
-	)
+	real_render = ps.RenderSession(dummy_render.id, routes)
 	real_render.send = dummy_render.send  # pyright: ignore[reportAttributeAccessIssue]
 	with ps.PulseContext(app=app):
 		real_render.prerender(

@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from pulse.origins import normalize_http_origin
+
 from pulse_railway.constants import (
 	DEFAULT_BACKEND_HEALTH_PATH,
 	DEFAULT_DRAIN_TTL_SECONDS,
@@ -60,7 +62,7 @@ class RailwayProject:
 	backend_replicas: int = 1
 	router_port: int = DEFAULT_ROUTER_PORT
 	router_replicas: int = 1
-	server_address: str | None = None
+	public_origin: str | None = None
 	redis_url: str | None = None
 	redis_prefix: str = DEFAULT_REDIS_PREFIX
 	redis_service_name: str | None = ""
@@ -73,6 +75,12 @@ class RailwayProject:
 	env_vars: dict[str, str] = field(default_factory=dict)
 
 	def __post_init__(self) -> None:
+		if self.public_origin is not None:
+			self.public_origin = normalize_http_origin(
+				self.public_origin,
+				name="public_origin",
+				require_https=True,
+			)
 		self.service_name = normalize_service_name(self.service_name or "pulse-router")
 		self.service_prefix = (
 			normalize_service_prefix(self.service_prefix)

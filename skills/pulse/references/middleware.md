@@ -374,19 +374,11 @@ class RBACMiddleware(ps.PulseMiddleware):
         return await kwargs["next"]()
 ```
 
-### CORS Headers
+### CORS for user FastAPI routes
 
-Usually handled by FastAPI, but custom headers:
+Pulse's own transport is same-origin and does not install CORS. If a user-owned FastAPI endpoint intentionally serves another origin, configure FastAPI's CORS middleware around that endpoint instead of adding headers in Pulse render middleware.
 
-```python
-class CORSMiddleware(ps.PulseMiddleware):
-    @override
-    async def prerender_route(self, *, request, **kwargs):
-        result = await kwargs["next"]()
-        if isinstance(result, Ok):
-            result.response.headers["Access-Control-Allow-Origin"] = "*"
-        return result
-```
+Do not enable wildcard credentialed CORS for `/_pulse/*`.
 
 ## Session Stores
 
@@ -403,7 +395,7 @@ app = ps.App(
 app = ps.App(
     routes=[...],
     session_store=ps.CookieSessionStore(
-        secret_key="your-secret-key-min-32-chars",
+        secret="your-secret-key-min-32-chars",
     ),
 )
 ```
@@ -415,17 +407,15 @@ app = ps.App(
     routes=[...],
     cookie=ps.Cookie(
         name="pulse_session",
-        domain=".example.com",
         secure=True,        # HTTPS only
         samesite="lax",     # or "strict", "none"
-        http_only=True,
-        max_age=7*24*3600,  # 7 days
+        max_age_seconds=7*24*3600,  # 7 days
     ),
 )
+```
 
 ## See Also
 
 - `sessions.md` - Session stores and cookie configuration
 - `queries.md` - QueryClient session cache
 - `app.md` - Middleware configuration in App
-```

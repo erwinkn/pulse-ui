@@ -170,7 +170,7 @@ class AWSECSPlugin(ps.Plugin):
 				"status": "ok",
 				"deployment_name": self.deployment_name,
 				"deployment_id": self.deployment_id,
-				"api_prefix": app.api_prefix,
+				"api_prefix": "/_pulse",
 			}
 
 	def _discover_task_id(self) -> str:

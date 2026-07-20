@@ -24,7 +24,6 @@ from pulse.context import PulseContext
 from pulse.dom.props import HTMLFormProps
 from pulse.helpers import Disposable, call_flexible, maybe_await
 from pulse.hooks.core import HOOK_CONTEXT, HookMetadata, HookState, hooks
-from pulse.hooks.runtime import server_address
 from pulse.hooks.stable import stable
 from pulse.react_component import react_component
 from pulse.reactive import Signal
@@ -612,9 +611,8 @@ class ManualForm(Disposable):
 		Returns:
 			Dict with action, method, encType, and onSubmit props.
 		"""
-		prefix = PulseContext.get().app.api_prefix
 		return {
-			"action": f"{server_address()}{prefix}/forms/{self._render.id}/{self.registration.id}",
+			"action": f"/_pulse/forms/{self._render.id}/{self.registration.id}",
 			"method": "POST",
 			"encType": "multipart/form-data",
 			"onSubmit": self._start_submit,

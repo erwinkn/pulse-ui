@@ -1,4 +1,4 @@
-"""Tests for ReactProxy URL rewriting, header handling, and cleanup."""
+"""Tests for WebProxy URL rewriting, header handling, and cleanup."""
 
 import asyncio
 from types import SimpleNamespace
@@ -8,10 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 import aiohttp
 import pytest
 from pulse.context import PULSE_CONTEXT, PulseContext
-from pulse.helpers import get_client_address, get_client_address_socketio
-from pulse.proxy import Proxy, ReactProxy
+from pulse.proxy import WebProxy, WebProxyConfig
 from starlette.datastructures import URL, Headers
-from starlette.requests import Request
 from starlette.types import Message
 
 
@@ -102,7 +100,7 @@ def _make_session(response: _StubResponse) -> MagicMock:
 
 
 async def _run_proxy(
-	proxy: ReactProxy,
+	proxy: WebProxy,
 	scope: dict[str, Any],
 	*,
 	messages: list[Message] | None = None,
@@ -181,55 +179,57 @@ class _StubWebSocket:
 		return {"type": "websocket.disconnect"}
 
 
-class TestReactProxyUrlRewrite:
-	def test_rewrites_react_server_url(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+class TestWebProxyUrlRewrite:
+	@pytest.mark.parametrize(
+		"web_upstream",
+		[
+			"localhost:5173",
+			"ftp://localhost:5173",
+			"http://user@localhost:5173",
+			"http://localhost:5173/web",
+		],
+	)
+	def test_rejects_invalid_web_upstream(self, web_upstream: str):
+		with pytest.raises(ValueError, match="web_upstream"):
+			WebProxy(web_upstream)
+
+	def test_rewrites_web_upstream_url(self):
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
-		assert (
-			proxy.rewrite_url("http://localhost:5173/foo")
-			== "http://localhost:8000/foo"
-		)
+		assert proxy.rewrite_url("http://localhost:5173/foo") == "/foo"
 
 	def test_rewrites_with_query_string(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
-		assert (
-			proxy.rewrite_url("http://localhost:5173/path?a=1")
-			== "http://localhost:8000/path?a=1"
-		)
+		assert proxy.rewrite_url("http://localhost:5173/path?a=1") == "/path?a=1"
 
 	def test_does_not_rewrite_other_urls(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		assert proxy.rewrite_url("http://example.com/foo") == "http://example.com/foo"
 
 	def test_does_not_rewrite_relative_paths(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		assert proxy.rewrite_url("/foo/bar") == "/foo/bar"
 
 
-class TestReactProxySessionLimits:
+class TestWebProxySessionLimits:
 	def test_proxy_rejects_invalid_numeric_config(self):
 		with pytest.raises(ValueError, match="max_concurrency"):
-			Proxy(max_concurrency=0)
+			WebProxyConfig(max_concurrency=0)
 		with pytest.raises(ValueError, match="disconnect_watch_timeout"):
-			Proxy(disconnect_watch_timeout=0)
+			WebProxyConfig(disconnect_watch_timeout=0)
 
 	@pytest.mark.asyncio
 	async def test_session_uses_connector_limits(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
-			config=Proxy(max_concurrency=7),
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
+			config=WebProxyConfig(max_concurrency=7),
 		)
 		session = proxy.session
 		connector = session.connector
@@ -241,21 +241,19 @@ class TestReactProxySessionLimits:
 
 	@pytest.mark.asyncio
 	async def test_session_uses_configured_connect_timeout(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
-			config=Proxy(connect_timeout=3.5),
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
+			config=WebProxyConfig(connect_timeout=3.5),
 		)
 		assert proxy.session.timeout.sock_connect == 3.5
 		await proxy.close()
 
 
-class TestReactProxyRequestURL:
+class TestWebProxyRequestURL:
 	@pytest.mark.asyncio
 	async def test_preserves_root_path(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		response = _StubResponse(
 			status=200,
@@ -273,91 +271,68 @@ class TestReactProxyRequestURL:
 			request_args.kwargs["url"] == "http://localhost:5173/root/assets/app.js?x=1"
 		)
 
+	@pytest.mark.asyncio
+	async def test_forwards_public_host_via_forwarding_headers(self):
+		"""The upstream sees its own host; the public host travels in X-Forwarded-*.
 
-class TestGetClientAddressFallback:
-	def _make_request(self, headers: dict[str, str]) -> Request:
-		scope = {
-			"type": "http",
-			"method": "GET",
-			"path": "/",
-			"query_string": b"",
-			"headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
-			"server": ("localhost", 8000),
-		}
-		return Request(scope)
-
-	def test_uses_origin_header_first(self):
-		request = self._make_request(
-			{"Origin": "http://localhost:8000", "Host": "localhost:9999"}
+		Dev servers with host checks (Vite allowedHosts) must accept proxied
+		requests that arrive via tunnels or remote hostnames.
+		"""
+		proxy = WebProxy(web_upstream="http://localhost:5173")
+		response = _StubResponse(
+			status=200,
+			raw_headers=[(b"content-type", b"text/plain")],
+			read_body=b"ok",
+			content_length=2,
 		)
-		assert get_client_address(request) == "http://localhost:8000"
+		proxy._session = _make_session(response)  # pyright: ignore[reportPrivateUsage]
 
-	def test_uses_referer_when_no_origin(self):
-		request = self._make_request(
-			{"Referer": "http://localhost:8000/page", "Host": "localhost:9999"}
+		await _run_proxy(
+			proxy,
+			_make_asgi_scope("/", headers={"host": "app.example.com"}),
 		)
-		assert get_client_address(request) == "http://localhost:8000"
 
-	def test_falls_back_to_host_header(self):
-		request = self._make_request({"Host": "localhost:8000"})
-		result = get_client_address(request)
-		assert result == "http://localhost:8000"
+		request_args = proxy._session.request.await_args  # pyright: ignore[reportPrivateUsage]
+		headers = request_args.kwargs["headers"]
+		assert ("host", "app.example.com") not in headers
+		assert ("x-forwarded-host", "app.example.com") in headers
+		assert ("x-forwarded-proto", "http") in headers
 
-	def test_falls_back_to_host_header_with_https(self):
-		scope = {
-			"type": "http",
-			"method": "GET",
-			"path": "/",
-			"query_string": b"",
-			"headers": [(b"host", b"example.com")],
-			"server": ("example.com", 443),
-			"scheme": "https",
-		}
-		request = Request(scope)
-		result = get_client_address(request)
-		assert result == "https://example.com"
+	@pytest.mark.asyncio
+	async def test_preserves_upstream_forwarding_headers(self):
+		proxy = WebProxy(web_upstream="http://localhost:5173")
+		response = _StubResponse(
+			status=200,
+			raw_headers=[(b"content-type", b"text/plain")],
+			read_body=b"ok",
+			content_length=2,
+		)
+		proxy._session = _make_session(response)  # pyright: ignore[reportPrivateUsage]
 
-	def test_returns_none_when_no_headers(self):
-		scope: dict[str, Any] = {
-			"type": "http",
-			"method": "GET",
-			"path": "/",
-			"query_string": b"",
-			"headers": [],
-			"server": ("localhost", 8000),
-		}
-		request = Request(scope)
-		result = get_client_address(request)
-		assert result is None
+		await _run_proxy(
+			proxy,
+			_make_asgi_scope(
+				"/",
+				headers={
+					"host": "internal:8000",
+					"x-forwarded-host": "app.example.com",
+					"x-forwarded-proto": "https",
+				},
+			),
+		)
 
-
-class TestGetClientAddressSocketioFallback:
-	def test_uses_origin_first(self):
-		environ = {
-			"HTTP_ORIGIN": "http://localhost:8000",
-			"HTTP_HOST": "localhost:9999",
-		}
-		assert get_client_address_socketio(environ) == "http://localhost:8000"
-
-	def test_falls_back_to_http_host(self):
-		environ = {"HTTP_HOST": "localhost:8000", "wsgi.url_scheme": "http"}
-		assert get_client_address_socketio(environ) == "http://localhost:8000"
-
-	def test_falls_back_to_http_host_with_https(self):
-		environ = {"HTTP_HOST": "example.com", "wsgi.url_scheme": "https"}
-		assert get_client_address_socketio(environ) == "https://example.com"
-
-	def test_returns_none_when_no_host(self):
-		environ = {"wsgi.url_scheme": "http"}
-		assert get_client_address_socketio(environ) is None
+		request_args = proxy._session.request.await_args  # pyright: ignore[reportPrivateUsage]
+		headers = request_args.kwargs["headers"]
+		assert ("x-forwarded-host", "app.example.com") in headers
+		assert ("x-forwarded-proto", "https") in headers
+		assert ("host", "internal:8000") not in headers
 
 
-class TestReactProxyHeaders:
+class TestWebProxyHeaders:
 	@pytest.mark.asyncio
 	async def test_rewrites_location_header(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		response = _StubResponse(
 			status=302,
@@ -372,14 +347,13 @@ class TestReactProxyHeaders:
 		sent = await _run_proxy(proxy, _make_asgi_scope("/"))
 		start = next(msg for msg in sent if msg["type"] == "http.response.start")
 		headers = {k.decode(): v.decode() for k, v in start["headers"]}
-		assert headers["location"] == "http://localhost:8000/login"
+		assert headers["location"] == "/login"
 		assert response.close.call_count >= 1
 
 	@pytest.mark.asyncio
 	async def test_rewrites_content_location_header(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		response = _StubResponse(
 			status=200,
@@ -395,14 +369,13 @@ class TestReactProxyHeaders:
 		sent = await _run_proxy(proxy, _make_asgi_scope("/api"))
 		start = next(msg for msg in sent if msg["type"] == "http.response.start")
 		headers = {k.decode(): v.decode() for k, v in start["headers"]}
-		assert headers["content-location"] == "http://localhost:8000/resource"
+		assert headers["content-location"] == "/resource"
 		assert response.close.call_count >= 1
 
 	@pytest.mark.asyncio
 	async def test_preserves_other_headers(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		response = _StubResponse(
 			status=200,
@@ -424,9 +397,8 @@ class TestReactProxyHeaders:
 
 	@pytest.mark.asyncio
 	async def test_preserves_duplicate_set_cookie(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		response = _StubResponse(
 			status=200,
@@ -451,12 +423,11 @@ class TestReactProxyHeaders:
 		assert response.close.call_count >= 1
 
 
-class TestReactProxyIncomingStreaming:
+class TestWebProxyIncomingStreaming:
 	@pytest.mark.asyncio
 	async def test_streaming_body_not_read_ahead(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		response = _StubResponse(
 			status=200,
@@ -484,9 +455,8 @@ class TestReactProxyIncomingStreaming:
 
 	@pytest.mark.asyncio
 	async def test_streaming_body_drops_content_length(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		response = _StubResponse(
 			status=200,
@@ -524,9 +494,8 @@ class TestReactProxyIncomingStreaming:
 
 	@pytest.mark.asyncio
 	async def test_disconnect_cancels_upstream_request(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		request_cancelled = asyncio.Event()
 		request_started = asyncio.Event()
@@ -575,12 +544,11 @@ class TestReactProxyIncomingStreaming:
 		assert sent == []
 
 
-class TestReactProxyStreaming:
+class TestWebProxyStreaming:
 	@pytest.mark.asyncio
 	async def test_closes_upstream_on_stream_end(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		response = _StubResponse(
 			status=200,
@@ -596,10 +564,9 @@ class TestReactProxyStreaming:
 
 	@pytest.mark.asyncio
 	async def test_terminal_empty_request_does_not_spin_disconnect_watcher(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
-			config=Proxy(
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
+			config=WebProxyConfig(
 				disconnect_watch_base_sleep=0.05,
 				disconnect_watch_max_sleep=0.05,
 			),
@@ -635,9 +602,8 @@ class TestReactProxyStreaming:
 
 	@pytest.mark.asyncio
 	async def test_disconnect_stops_stream_and_closes_upstream(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		response = _StubResponse(
 			status=200,
@@ -665,9 +631,8 @@ class TestReactProxyStreaming:
 
 	@pytest.mark.asyncio
 	async def test_disconnect_while_idle_stops_stream(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		blocker = asyncio.Event()
 		response = _StubResponse(
@@ -698,9 +663,8 @@ class TestReactProxyStreaming:
 
 	@pytest.mark.asyncio
 	async def test_disconnect_race_with_stream_end_retrieves_task_exception(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		response = _StubResponse(
 			status=200,
@@ -750,9 +714,8 @@ class TestReactProxyStreaming:
 
 	@pytest.mark.asyncio
 	async def test_send_start_failure_closes_response(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		response = _StubResponse(
 			status=200,
@@ -778,9 +741,8 @@ class TestReactProxyStreaming:
 
 	@pytest.mark.asyncio
 	async def test_close_closes_active_responses(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		blocker = asyncio.Event()
 		response = _StubResponse(
@@ -818,12 +780,11 @@ class TestReactProxyStreaming:
 		assert response.close.call_count >= 1
 
 
-class TestReactProxyErrors:
+class TestWebProxyErrors:
 	@pytest.mark.asyncio
 	async def test_timeout_returns_gateway_timeout(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		session = MagicMock()
 		session.request = AsyncMock(side_effect=asyncio.TimeoutError())
@@ -837,9 +798,8 @@ class TestReactProxyErrors:
 
 	@pytest.mark.asyncio
 	async def test_shutdown_returns_service_unavailable(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		request_started = asyncio.Event()
 		wait_forever = asyncio.Event()
@@ -883,9 +843,8 @@ class TestReactProxyErrors:
 
 	@pytest.mark.asyncio
 	async def test_shutdown_after_response_ready_returns_service_unavailable(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 
 		async def _request(**_: Any) -> _StubResponse:
@@ -908,12 +867,11 @@ class TestReactProxyErrors:
 		assert sent[-1]["type"] == "http.response.body"
 
 
-class TestReactProxyCleanup:
+class TestWebProxyCleanup:
 	@pytest.mark.asyncio
 	async def test_request_clears_tracking_sets(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		response = _StubResponse(
 			status=200,
@@ -930,12 +888,11 @@ class TestReactProxyCleanup:
 		assert proxy._tasks == set()  # pyright: ignore[reportPrivateUsage]
 
 
-class TestReactProxyWebSocket:
+class TestWebProxyWebSocket:
 	@pytest.mark.asyncio
 	async def test_call_dispatches_websocket_scope(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		proxy.proxy_websocket = AsyncMock()
 		headers: list[tuple[bytes, bytes]] = []
@@ -960,9 +917,8 @@ class TestReactProxyWebSocket:
 
 	@pytest.mark.asyncio
 	async def test_websocket_forwards_text_and_cleans_up(self):
-		proxy = ReactProxy(
-			react_server_address="http://localhost:5173",
-			server_address="http://localhost:8000",
+		proxy = WebProxy(
+			web_upstream="http://localhost:5173",
 		)
 		ready = asyncio.Event()
 		upstream_ws = _StubUpstreamWebSocket(ready)
@@ -988,6 +944,9 @@ class TestReactProxyWebSocket:
 		session.ws_connect.assert_awaited()
 		ws_args = session.ws_connect.await_args
 		assert ws_args.args[0] == "ws://localhost:5173/socket?x=1"
+		assert ("host", "client.local") not in ws_args.kwargs["headers"]
+		assert ("x-forwarded-host", "client.local") in ws_args.kwargs["headers"]
+		assert ("x-forwarded-proto", "http") in ws_args.kwargs["headers"]
 		assert ws_args.kwargs["protocols"] == ["proto1", "proto2"]
 		assert websocket.accept_subprotocol == "proto2"
 		upstream_ws.send_str.assert_awaited_once_with("ping")

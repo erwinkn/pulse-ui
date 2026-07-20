@@ -523,11 +523,12 @@ def Header():
 app = ps.App(
     routes=[...],
     middleware=[LoggingMiddleware()],
-    session_store=ps.CookieSessionStore(secret_key="..."),  # Production
-    server_address="https://app.example.com",  # Required in prod
-    mode="single-server",  # or "subdomains"
+    session_store=ps.CookieSessionStore(secret="..."),  # Production
+    public_origin="https://app.example.com",  # Only if absolute callbacks need it
 )
 ```
+
+Browser requests always stay on the current origin. Framework endpoints use `/_pulse/*`; Socket.IO uses `/_pulse/socket.io`. For separate scaling, run `--backend-only` and `--web-only --ssr-backend-url http://pulse-backend:8000` behind one ingress origin.
 
 ## Commands
 
@@ -706,12 +707,12 @@ Key `ps.App` parameters for production:
 ```python
 app = ps.App(
     routes=[...],
-    mode="single-server",  # or "subdomains" for multi-tenant
-    server_address="https://myapp.com",  # Required for production
-    codegen=ps.CodegenConfig(router="@tanstack/react-router"),  # Optional
-    session_store=ps.CookieSessionStore(secret_key="..."),  # Production sessions
+    public_origin="https://myapp.com",  # Optional absolute callback origin
+    session_store=ps.CookieSessionStore(secret="..."),  # Production sessions
 )
 ```
+
+Generated files contain no deployment address. `PULSE_WEB_UPSTREAM` controls the optional Pulse-to-React proxy; `PULSE_SSR_BACKEND_URL` controls private React-SSR-to-Pulse requests. Production cookies are host-only and secure.
 
 See `references/middleware.md` for session store options.
 

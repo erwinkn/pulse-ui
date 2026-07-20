@@ -5,9 +5,41 @@ import httpx
 import pulse as ps
 import pytest
 from pulse import forms
+from pulse.context import PulseContext
+from pulse.routing import RouteContext
 from pulse.serializer import serialize
+from pulse.user_session import UserSession
 from starlette.datastructures import FormData as StarletteFormData
 from starlette.datastructures import UploadFile
+
+
+def test_manual_form_action_is_origin_relative():
+	@ps.component
+	def home():
+		return ps.div()
+
+	route = ps.Route("a", home)
+	app = ps.App(
+		routes=[route],
+		session_store=ps.CookieSessionStore(secret="test-secret"),
+	)
+	session = UserSession("session", {}, app)
+	render = app.create_render("render", session)
+	route_context = RouteContext(route.default_route_info(), route, render)
+
+	with PulseContext(
+		app=app,
+		session=session,
+		render=render,
+		route=route_context,
+	):
+		manual = forms.ManualForm()
+		action = manual.props()["action"]
+
+	assert action == f"/_pulse/forms/render/{manual.registration.id}"
+	manual.dispose()
+	render.close()
+	session.dispose()
 
 
 def test_normalize_form_data_groups_repeated_multipart_fields():
@@ -120,7 +152,6 @@ async def test_invalid_structured_form_payload_returns_400(
 	monkeypatch: pytest.MonkeyPatch,
 	data_value: str,
 ):
-	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	submitted = False
 
 	@ps.component
@@ -132,7 +163,7 @@ async def test_invalid_structured_form_payload_returns_400(
 		submitted = True
 
 	app = ps.App(routes=[ps.Route("a", home)])
-	app.setup("http://example.com")
+	app.setup()
 	try:
 		transport = httpx.ASGITransport(app=app.fastapi)
 		async with httpx.AsyncClient(

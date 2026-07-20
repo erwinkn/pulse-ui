@@ -92,7 +92,7 @@ async def _reconcile_stack_with_client(
 		),
 		internal_token_created=False,
 		redis_url=stack.redis_url,
-		server_address=stack.server_address,
+		public_origin=stack.public_origin,
 	)
 
 

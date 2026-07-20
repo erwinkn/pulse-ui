@@ -43,7 +43,6 @@ app = ps.App(
             client_id="your-client-id",
             client_secret="your-client-secret",
             tenant_id="your-tenant-id",
-            redirect_uri="http://localhost:8000/auth/callback",
             scopes=["User.Read"],
             token_cache_store=FileTokenCacheStore(".token_cache"),
         ),
@@ -51,6 +50,10 @@ app = ps.App(
     routes=[...],
 )
 ```
+
+Development derives the callback origin from the request. In production, set
+`PULSE_PUBLIC_ORIGIN=https://app.example.com` and register
+`https://app.example.com/auth/callback` with Microsoft Entra ID.
 
 ### Authentication Functions
 

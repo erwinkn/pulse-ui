@@ -1,16 +1,14 @@
 from mako.template import Template
 
 LAYOUT_TEMPLATE = Template(
-	"""import { deserialize, extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";
+	"""import { useEffect } from "react";
+import { deserialize, extractServerRouteInfo, PulseProvider, type Directives, type PulseConfig, type PulsePrerender } from "pulse-ui-client";
 import { Outlet, data, type LoaderFunctionArgs, type ClientLoaderFunctionArgs } from "react-router";
 import { matchRoutes } from "react-router";
 import { rrPulseRouteTree } from "./routes.runtime";
 import { useLoaderData } from "react-router";
 
-// This config is used to initialize the client
 export const config: PulseConfig = {
-  serverAddress: "${server_address}",
-  apiPrefix: "${api_prefix}",
   connectionStatus: {
     initialConnectingDelay: ${int(connection_status.initial_connecting_delay * 1000)},
     initialErrorDelay: ${int(connection_status.initial_error_delay * 1000)},
@@ -18,13 +16,28 @@ export const config: PulseConfig = {
   },
 };
 
+const PULSE_PRERENDER_PATH = "/_pulse/prerender";
+const PULSE_DIRECTIVES_KEY = "__PULSE_DIRECTIVES";
+
+function loadDirectives(): Directives {
+  if (typeof sessionStorage === "undefined") return {};
+  const value = sessionStorage.getItem(PULSE_DIRECTIVES_KEY);
+  if (!value) return {};
+  try {
+    return JSON.parse(value) as Directives;
+  } catch {
+    sessionStorage.removeItem(PULSE_DIRECTIVES_KEY);
+    return {};
+  }
+}
+
 
 // Server loader: perform initial prerender, abort on first redirect/not-found
 export async function loader(args: LoaderFunctionArgs) {
   const url = new URL(args.request.url);
   const matches = matchRoutes(rrPulseRouteTree, url.pathname) ?? [];
   const paths = matches.map(m => m.route.uniquePath);
-  // Build minimal, safe headers for cross-origin API call
+  // Build minimal, safe headers for the private backend request.
   const incoming = args.request.headers;
   const fwd = new Headers();
   const cookie = incoming.get("cookie");
@@ -32,9 +45,11 @@ export async function loader(args: LoaderFunctionArgs) {
   if (cookie) fwd.set("cookie", cookie);
   if (authorization) fwd.set("authorization", authorization);
   fwd.set("content-type", "application/json");
-  // Internal server address for server-side loader requests.
-  const internalServerAddress = "${internal_server_address}";
-  const res = await fetch(`$${"{"}internalServerAddress}$${"{"}config.apiPrefix}/prerender`, {
+  const internalServerAddress = process.env.PULSE_SSR_BACKEND_URL;
+  if (!internalServerAddress) {
+    throw new Error("PULSE_SSR_BACKEND_URL is required for Pulse server rendering");
+  }
+  const res = await fetch(new URL(PULSE_PRERENDER_PATH, internalServerAddress), {
     method: "POST",
     headers: fwd,
     body: JSON.stringify({ paths, routeInfo: extractServerRouteInfo(args) }),
@@ -60,10 +75,7 @@ export async function clientLoader(args: ClientLoaderFunctionArgs) {
   const url = new URL(args.request.url);
   const matches = matchRoutes(rrPulseRouteTree, url.pathname) ?? [];
   const paths = matches.map(m => m.route.uniquePath);
-  const directives = 
-    typeof window !== "undefined" && typeof sessionStorage !== "undefined"
-      ? (JSON.parse(sessionStorage.getItem("__PULSE_DIRECTIVES") ?? "{}"))
-      : {};
+  const directives = loadDirectives();
   const headers = new Headers({ "content-type": "application/json" });
   if (directives?.headers) {
     for (const [key, value] of Object.entries(directives.headers)) {
@@ -71,21 +83,22 @@ export async function clientLoader(args: ClientLoaderFunctionArgs) {
     }
   }
   headers.set("x-pulse-client-loader", "1");
-  headers.set("x-pulse-client-loader-location", args.request.url);
-  const prerenderUrl = new URL(`$${"{"}config.serverAddress}$${"{"}config.apiPrefix}/prerender`);
+  const query = new URLSearchParams();
   if (directives?.query) {
     for (const [key, value] of Object.entries(directives.query)) {
-      prerenderUrl.searchParams.set(key, value as string);
+      query.set(key, value as string);
     }
   }
+  const queryString = query.toString();
+  const prerenderUrl = `$${"{"}PULSE_PRERENDER_PATH}$${"{"}queryString ? `?$${"{"}queryString}` : ""}`;
   const res = await fetch(prerenderUrl, {
     method: "POST",
     headers,
-    credentials: "include",
+    credentials: "same-origin",
     redirect: "manual",
     body: JSON.stringify({ paths, routeInfo: extractServerRouteInfo(args) }),
   });
-  if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400)) {
+  if (res.status === 409) {
     window.location.assign(args.request.url);
     throw new Error("Reloading due to stale Pulse deployment affinity.");
   }
@@ -95,22 +108,21 @@ export async function clientLoader(args: ClientLoaderFunctionArgs) {
   if (body.notFound) throw new Response("Not Found", { status: 404 });
   const prerenderData = deserialize(body) as PulsePrerender;
   if (typeof window !== "undefined" && typeof sessionStorage !== "undefined" && prerenderData.directives) {
-    sessionStorage.setItem("__PULSE_DIRECTIVES", JSON.stringify(prerenderData.directives));
+    sessionStorage.setItem(PULSE_DIRECTIVES_KEY, JSON.stringify(prerenderData.directives));
   }
   return prerenderData as PulsePrerender;
 }
 
 export default function PulseLayout() {
   const data = useLoaderData<typeof loader>();
-  if (typeof window !== "undefined" && typeof sessionStorage !== "undefined") {
-    sessionStorage.setItem("__PULSE_DIRECTIVES", JSON.stringify(data.directives));
-  }
+  useEffect(() => {
+    sessionStorage.setItem(PULSE_DIRECTIVES_KEY, JSON.stringify(data.directives));
+  }, [data.directives]);
   return (
     <PulseProvider config={config} prerender={data}>
       <Outlet />
     </PulseProvider>
   );
 }
-// Persist directives in sessionStorage for reuse in clientLoader is handled within the component
 """
 )

@@ -71,9 +71,9 @@ async def test_plugin_exposes_deployment_metadata_endpoint(monkeypatch) -> None:
 	monkeypatch.setenv(PULSE_DEPLOYMENT_ID, "prod-260402-120000")
 	plugin = RailwayPlugin(dockerfile="Dockerfile")
 
-	app = ps.App(routes=[], plugins=[plugin], mode="subdomains")
+	app = ps.App(routes=[], plugins=[plugin], public_origin="https://app.example.com")
 	plugin.on_startup(app)
-	app.setup("https://app.example.com")
+	app.setup()
 
 	transport = httpx.ASGITransport(app=app.fastapi)
 	async with httpx.AsyncClient(
@@ -95,9 +95,9 @@ async def test_plugin_exposes_internal_session_endpoint(monkeypatch) -> None:
 	monkeypatch.setenv(PULSE_INTERNAL_TOKEN, "secret-token")
 	plugin = RailwayPlugin(dockerfile="Dockerfile")
 
-	app = ps.App(routes=[], plugins=[plugin], mode="subdomains")
+	app = ps.App(routes=[], plugins=[plugin], public_origin="https://app.example.com")
 	plugin.on_startup(app)
-	app.setup("https://app.example.com")
+	app.setup()
 	session = await app.get_or_create_session(None)
 	connected = app.create_render("connected", session)
 	connected.connect(lambda _message: None)
@@ -134,9 +134,9 @@ async def test_plugin_exposes_internal_reload_endpoint(monkeypatch) -> None:
 	monkeypatch.setenv(PULSE_INTERNAL_TOKEN, "secret-token")
 	plugin = RailwayPlugin(dockerfile="Dockerfile")
 
-	app = ps.App(routes=[], plugins=[plugin], mode="subdomains")
+	app = ps.App(routes=[], plugins=[plugin], public_origin="https://app.example.com")
 	plugin.on_startup(app)
-	app.setup("https://app.example.com")
+	app.setup()
 	session = await app.get_or_create_session(None)
 	connected = app.create_render("connected", session)
 	connected.connect(lambda _message: None)

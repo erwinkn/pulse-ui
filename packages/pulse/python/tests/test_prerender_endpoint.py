@@ -12,9 +12,8 @@ def prerender_home():
 
 @pytest.mark.asyncio
 async def test_prerender_normalizes_paths(monkeypatch: pytest.MonkeyPatch):
-	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[Route("a", prerender_home)])
-	app.setup("http://example.com")
+	app.setup()
 
 	transport = httpx.ASGITransport(app=app.fastapi)
 	async with httpx.AsyncClient(

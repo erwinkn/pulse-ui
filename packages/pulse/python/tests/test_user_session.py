@@ -44,7 +44,6 @@ class BlockingSessionStore(ps.SessionStore):
 async def test_server_session_save_blocks_http_response_until_persisted(
 	monkeypatch: pytest.MonkeyPatch,
 ):
-	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	store = BlockingSessionStore()
 	app = ps.App(routes=[], session_store=store)
 
@@ -53,7 +52,7 @@ async def test_server_session_save_blocks_http_response_until_persisted(
 		ps.session()["auth"] = "ok"
 		return RedirectResponse("/destination")
 
-	app.setup("http://example.com")
+	app.setup()
 
 	with PulseContext(app=app):
 		transport = httpx.ASGITransport(app=app.fastapi)
@@ -79,10 +78,9 @@ async def test_server_session_save_blocks_http_response_until_persisted(
 async def test_server_session_response_wait_survives_superseded_save(
 	monkeypatch: pytest.MonkeyPatch,
 ):
-	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	store = BlockingSessionStore()
 	app = ps.App(routes=[], session_store=store)
-	app.setup("http://example.com")
+	app.setup()
 
 	session = await app.get_or_create_session(None)
 	await session.handle_response(Response())
@@ -118,9 +116,8 @@ async def test_http_request_without_render_does_not_retain_user_session(
 	monkeypatch: pytest.MonkeyPatch,
 ):
 	"""Cookie-less requests (bots, health checks) must not accumulate sessions."""
-	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[])
-	app.setup("http://example.com")
+	app.setup()
 
 	transport = httpx.ASGITransport(app=app.fastapi)
 	async with httpx.AsyncClient(
@@ -138,14 +135,13 @@ async def test_prerender_request_retains_user_session(
 	monkeypatch: pytest.MonkeyPatch,
 ):
 	"""Sessions that own a render session stay alive after the request."""
-	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 
 	@ps.component
 	def home():
 		return ps.div("ok")
 
 	app = ps.App(routes=[ps.Route("a", home)])
-	app.setup("http://example.com")
+	app.setup()
 
 	transport = httpx.ASGITransport(app=app.fastapi)
 	async with httpx.AsyncClient(

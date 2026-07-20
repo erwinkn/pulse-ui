@@ -5,6 +5,7 @@ export { PulseChannelResetError, usePulseChannel } from "./channel";
 // Client implementation (types only - implementation is internal)
 export type {
 	ConnectionStatusListener,
+	Directives,
 	MountedView,
 	PulseClient,
 } from "./client";
@@ -50,8 +51,6 @@ export { VDOMRenderer } from "./renderer";
 //   cleanForSerialization,
 // } from "./serialize/clean";
 export { deserialize, serialize } from "./serialize/serializer";
-// Transports (types only - implementation is internal)
-export type { MessageListener, Transport } from "./transport";
 // VDOM types and helpers
 export type {
 	ComponentRegistry,

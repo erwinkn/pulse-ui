@@ -26,9 +26,7 @@ export interface ConnectionStatusConfig {
 }
 
 export interface PulseConfig {
-	serverAddress: string;
 	connectionStatus: ConnectionStatusConfig;
-	apiPrefix: string;
 }
 
 export type PulsePrerenderView = {
@@ -92,12 +90,11 @@ export function PulseProvider({ children, config, prerender }: PulseProviderProp
 	// biome-ignore lint/correctness/useExhaustiveDependencies: another useEffect syncs the directives without recreating the client
 	const client = useMemo(() => {
 		return new PulseSocketIOClient(
-			config.serverAddress,
 			directives,
 			rrNavigate,
 			config.connectionStatus,
 		);
-	}, [config.serverAddress, rrNavigate, config.connectionStatus]);
+	}, [rrNavigate, config.connectionStatus]);
 	useEffect(() => client.setDirectives(directives), [client, directives]);
 
 	useEffect(() => {

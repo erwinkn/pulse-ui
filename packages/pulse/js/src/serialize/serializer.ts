@@ -124,7 +124,7 @@ export function serialize(data: unknown): Serialized {
 	return [VERSION, encode(data)];
 }
 
-export function deserialize<Data = unknown>(payload: Serialized): Data {
+export function deserialize(payload: unknown): unknown {
 	if (!Array.isArray(payload) || payload.length !== 2) {
 		throw new TypeError("Wire payload must be [5, value]");
 	}
@@ -228,6 +228,20 @@ export function deserialize<Data = unknown>(payload: Serialized): Data {
 			return register(dateFromWire(marker[2], path));
 		}
 
+		if (tag === "f") {
+			assertMarkerLength(marker, 3, path);
+			const raw = marker[2];
+			// Value semantics: numbers never claim identities, so no register.
+			if (
+				typeof raw !== "number" ||
+				!Number.isFinite(raw) ||
+				Math.abs(raw) <= MAX_SAFE_INTEGER
+			) {
+				throw new Error(`Malformed big-float marker at ${formatPath(path)}`);
+			}
+			return raw;
+		}
+
 		if (tag === "m") {
 			assertMarkerLength(marker, 3, path);
 			const rawEntries = marker[2];
@@ -296,36 +310,34 @@ export function deserialize<Data = unknown>(payload: Serialized): Data {
 		throw new Error(`Unknown marker tag ${JSON.stringify(tag)} at ${formatPath(path)}`);
 	}
 
-	return decode(payload[1]) as Data;
+	return decode(payload[1]);
 }
 
-function encodeNumber(value: number, path: PathSegment[]): number | null {
+function encodeNumber(value: number, path: PathSegment[]): WireValue {
 	if (Number.isNaN(value)) {
 		return null;
 	}
-	validateFiniteNumber(value, "serialize", path);
-	if (Object.is(value, -0)) {
-		throw new Error(`Cannot serialize negative zero at ${formatPath(path)}`);
+	if (!Number.isFinite(value)) {
+		throw new Error(`Cannot serialize non-finite number at ${formatPath(path)}`);
 	}
-	return value;
+	if (Object.is(value, -0)) {
+		return 0;
+	}
+	// JSON.stringify emits large integral doubles as integer literals, which
+	// Python would decode as int; the "f" marker pins them as doubles.
+	return Math.abs(value) > MAX_SAFE_INTEGER ? ["$", "f", value] : value;
 }
 
 function decodeNumber(value: number, path: PathSegment[]): number {
-	validateFiniteNumber(value, "deserialize", path);
-	return Object.is(value, -0) ? 0 : value;
-}
-
-function validateFiniteNumber(
-	value: number,
-	verb: "serialize" | "deserialize",
-	path: PathSegment[],
-): void {
 	if (!Number.isFinite(value)) {
-		throw new Error(`Cannot ${verb} non-finite number at ${formatPath(path)}`);
+		throw new Error(`Cannot deserialize non-finite number at ${formatPath(path)}`);
 	}
-	if (Number.isInteger(value) && Math.abs(value) > MAX_SAFE_INTEGER) {
-		throw new Error(`Cannot ${verb} unsafe integer at ${formatPath(path)}`);
+	if (Math.abs(value) > MAX_SAFE_INTEGER) {
+		throw new Error(
+			`Cannot deserialize number beyond the safe integer range outside a big-float marker at ${formatPath(path)}`,
+		);
 	}
+	return Object.is(value, -0) ? 0 : value;
 }
 
 function validateString(
@@ -368,6 +380,11 @@ function dateFromWire(value: string, path: PathSegment[]): Date {
 	return result;
 }
 
+// Wire order is sorted, not insertion order: Python set iteration varies per
+// process (string hash randomization), so canonical order is the only way both
+// runtimes emit identical wire bytes for identical sets. collisionKey mirrors
+// Python's dual-equality check — members must stay distinct under both JS
+// SameValueZero and Python __eq__ (where true == 1 == 1.0 collapse).
 function canonicalizeSet(value: Set<unknown>, path: PathSegment[]): CanonicalSetItem[] {
 	const result: CanonicalSetItem[] = [];
 	const collisions = new Set<string>();
@@ -397,7 +414,11 @@ function describeSetInput(
 		return describePortableSetValue(null);
 	}
 	if (typeof value === "number") {
-		validateFiniteNumber(value, "serialize", path);
+		if (!Number.isFinite(value)) {
+			throw new Error(
+				`Cannot serialize non-finite number at ${formatSetPath(path, "set", index)}`,
+			);
+		}
 		return describePortableSetValue(Object.is(value, -0) ? 0 : value);
 	}
 	if (typeof value === "string") {

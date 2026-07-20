@@ -53,7 +53,6 @@ describe("form event extraction", () => {
 		expect(extracted.target.target).not.toBe(controlFor(form, "target"));
 		expect(extracted.target.tagName).not.toBe(controlFor(form, "tagName"));
 		expect(extracted.target.accessKeyLabel).toBeUndefined();
-		expect(Object.hasOwn(extracted.target, "accessKeyLabel")).toBe(false);
 		expect(extracted.target.accessKeyLabel).not.toBe(controlFor(form, "accessKeyLabel"));
 
 		expect(serialize(extracted)).toMatchObject([
@@ -105,22 +104,28 @@ describe("form event extraction", () => {
 });
 
 describe("extractEvent", () => {
-	it("omits missing event properties and normalizes non-finite numbers", () => {
+	it("normalizes non-finite DOM values at extraction", () => {
 		const event = {
 			nativeEvent: {},
 			isDefaultPrevented: () => false,
 			type: "click",
 			target: document.createElement("button"),
 			relatedTarget: null,
+			// The DOM legitimately produces non-finite numbers (e.g. a live
+			// stream's media duration is Infinity); the serializer rejects
+			// Infinity, so the extractor must normalize them to null.
 			timeStamp: Number.POSITIVE_INFINITY,
 			clientX: Number.NaN,
 		};
 
 		const extracted = extractEvent(event);
+		const wire = serialize(extracted);
 
-		expect(extracted.timeStamp).toBeNull();
 		expect(extracted.clientX).toBeNull();
-		expect("screenX" in extracted).toBe(false);
+		expect(extracted.timeStamp).toBeNull();
+		expect(Object.hasOwn(extracted, "screenX")).toBe(false);
+		expect(wire).toMatchObject([5, { clientX: null, timeStamp: null }]);
+		expect("screenX" in (wire[1] as object)).toBe(false);
 	});
 });
 

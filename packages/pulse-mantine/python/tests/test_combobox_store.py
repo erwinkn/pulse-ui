@@ -73,11 +73,11 @@ async def test_combobox_store_optional_payloads():
 	assert len(render.sent) == 2
 	open_msg = render.sent[0]
 	assert open_msg["event"] == "openDropdown"
-	assert "payload" not in open_msg
+	assert open_msg["payload"] is None
 
 	update_msg = render.sent[1]
 	assert update_msg["event"] == "updateSelectedOptionIndex"
-	assert "payload" not in update_msg
+	assert update_msg["payload"] is None
 
 
 @pytest.mark.asyncio
@@ -104,9 +104,10 @@ async def test_combobox_store_request_roundtrip():
 			cast(
 				object,
 				{
-					"type": "channel_message",
+					"type": "channel_response",
 					"channel": request_message["channel"],
 					"responseTo": request_id,
+					"ok": True,
 					"payload": True,
 				},
 			),
@@ -144,7 +145,7 @@ async def test_combobox_store_callbacks():
 			render=real_render,
 			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 			message={
-				"type": "channel_message",
+				"type": "channel_event",
 				"channel": store._channel.id,
 				"event": "openedChange",
 				"payload": {"opened": True},
@@ -154,7 +155,7 @@ async def test_combobox_store_callbacks():
 			render=real_render,
 			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 			message={
-				"type": "channel_message",
+				"type": "channel_event",
 				"channel": store._channel.id,
 				"event": "dropdownOpen",
 				"payload": {"eventSource": "mouse"},
@@ -164,7 +165,7 @@ async def test_combobox_store_callbacks():
 			render=real_render,
 			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 			message={
-				"type": "channel_message",
+				"type": "channel_event",
 				"channel": store._channel.id,
 				"event": "dropdownClose",
 				"payload": {"eventSource": "keyboard"},

@@ -30,6 +30,7 @@ class App:
         disconnect_queue_timeout: float = 300.0,
         connection_status: ConnectionStatusConfig | None = None,
         render_loop_limit: int = 50,
+        serializer: Serializer | None = None,
     ): ...
 ```
 
@@ -56,6 +57,7 @@ class App:
 | `disconnect_queue_timeout` | `float` | `300.0` | How long updates are queued for a disconnected client before the route suspends — rendering pauses but state is kept; reconnecting within `session_timeout` resumes without a reload (seconds) |
 | `connection_status` | `ConnectionStatusConfig` | `None` | Connection status UI timing |
 | `render_loop_limit` | `int` | `50` | Maximum render loops before failing |
+| `serializer` | `Serializer` | `None` | Serializer used for client messages and render sessions |
 
 Framework routes live under the reserved `/_pulse/*` namespace and are not configurable.
 
@@ -67,6 +69,7 @@ Framework routes live under the reserved `/_pulse/*` namespace and are not confi
 | `mode` | `PulseMode` | Deployment mode |
 | `status` | `AppStatus` | Current app lifecycle status |
 | `routes` | `RouteTree` | Parsed route tree |
+| `serializer` | `Serializer` | Client-message and render-session serializer |
 | `fastapi` | `FastAPI` | Underlying FastAPI instance |
 | `asgi` | `ASGIApp` | ASGI application (includes Socket.IO) |
 

@@ -10,7 +10,7 @@ function wireSerialize(value: unknown): Serialized {
 }
 
 function wireRoundTrip(value: unknown): any {
-	return deserialize(wireSerialize(value));
+	return deserialize(wireSerialize(value)) as any;
 }
 
 function seededRandom(seed: number): () => number {
@@ -102,6 +102,12 @@ describe("serialization", () => {
 		expect(wireRoundTrip(value)).toEqual(value);
 	});
 
+	it("accepts unknown input at the deserialize boundary", () => {
+		const payload: unknown = JSON.parse('[5,{"value":1}]');
+
+		expect(deserialize(payload)).toEqual({ value: 1 });
+	});
+
 	it("normalizes undefined by structural position and preserves null", () => {
 		const sparse = new Array(3);
 		sparse[1] = undefined;
@@ -124,17 +130,37 @@ describe("serialization", () => {
 		expect(deserialize([5, null])).toBeNull();
 	});
 
-	it("normalizes NaN to null but rejects other non-portable numbers", () => {
+	it("normalizes NaN and -0 but rejects non-finite numbers", () => {
 		expect(serialize({ root: Number.NaN, nested: [Number.NaN] })).toEqual([
 			5,
 			{ root: null, nested: [null] },
 		]);
 		expect(() => serialize(Infinity)).toThrow("non-finite number");
 		expect(() => serialize(-Infinity)).toThrow("non-finite number");
-		expect(() => serialize(-0)).toThrow("negative zero");
-		expect(() => serialize(2 ** 53)).toThrow("unsafe integer");
+		expect(serialize(-0)).toEqual([5, 0]);
+		expect(Object.is((serialize(-0) as unknown[])[1], -0)).toBeFalse();
 		expect(() => deserialize([5, Number.NaN] as Serialized)).toThrow("non-finite number");
 		expect(Object.is(deserialize([5, -0]), -0)).toBeFalse();
+	});
+
+	it("round-trips doubles beyond the safe integer range via the big-float marker", () => {
+		expect(serialize(2 ** 53)).toEqual([5, ["$", "f", 2 ** 53]]);
+		expect(serialize(1e300)).toEqual([5, ["$", "f", 1e300]]);
+		expect(serialize(new Set([1e300]))).toEqual([5, ["$", "s", [["$", "f", 1e300]]]]);
+		expect(deserialize([5, ["$", "f", 1e300]] as Serialized)).toBe(1e300);
+		expect(deserialize([5, ["$", "s", [["$", "f", 1e300]]]] as Serialized)).toEqual(
+			new Set([1e300]),
+		);
+		expect(() => deserialize([5, 2 ** 53] as Serialized)).toThrow("big-float marker");
+		expect(() => deserialize([5, 1e300] as Serialized)).toThrow("big-float marker");
+		for (const payload of [5, 2 ** 53 - 1, "1e300", Infinity, Number.NaN]) {
+			expect(() => deserialize([5, ["$", "f", payload]] as Serialized)).toThrow(
+				"Malformed big-float marker",
+			);
+		}
+		expect(() => deserialize([5, ["$", "f", 1e300, null]] as Serialized)).toThrow(
+			"Malformed",
+		);
 	});
 
 	it("uses exact temporal, Map, Set, and compact reference markers", () => {

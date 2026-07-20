@@ -1,7 +1,7 @@
 import datetime as dt
 import json
 import math
-from typing import override
+from typing import Any, cast, override
 
 import pytest
 from pulse.serializer import WireMap, deserialize, serialize
@@ -11,7 +11,7 @@ def wire_boundary(value: object):
 	return json.loads(json.dumps(serialize(value)))
 
 
-def wire_roundtrip(value: object):
+def wire_roundtrip(value: object) -> Any:
 	return deserialize(wire_boundary(value))
 
 
@@ -166,8 +166,15 @@ def test_record_key_order_controls_implicit_identity_ids():
 	wire = [5, {"1": [], "2": ["$", 1]}]
 	assert serialize(value) == wire
 
-	parsed = deserialize(json.loads(json.dumps(wire)))
+	parsed = cast(dict[str, Any], deserialize(json.loads(json.dumps(wire))))
 	assert parsed["1"] is parsed["2"]
+
+
+def test_record_key_order_does_not_treat_unicode_digits_as_array_indices():
+	shared: list[object] = []
+	value = {"1٢": shared, "1": shared}
+
+	assert serialize(value) == [5, {"1": [], "1٢": ["$", 1]}]
 
 
 def test_cycles_round_trip_through_implicit_references():
@@ -178,7 +185,7 @@ def test_cycles_round_trip_through_implicit_references():
 	wire = [5, {"self": ["$", 0], "items": [["$", 0]]}]
 	assert serialize(root) == wire
 
-	parsed = deserialize(wire_boundary(root))
+	parsed = cast(dict[str, Any], deserialize(wire_boundary(root)))
 	assert parsed["self"] is parsed
 	assert parsed["items"][0] is parsed
 
@@ -196,7 +203,7 @@ def test_repeated_datetime_identity_round_trips():
 	]
 	assert serialize(value) == wire
 
-	parsed = deserialize(wire_boundary(value))
+	parsed = cast(dict[str, Any], deserialize(wire_boundary(value)))
 	assert parsed["first"] is parsed["second"]
 	assert parsed["first"] == when
 
@@ -273,15 +280,72 @@ def test_complex_graph_round_trips_across_json_boundary():
 	assert serialize(parsed) == serialize(root)
 
 
-@pytest.mark.parametrize("value", [2**53, -(2**53), float("inf"), float("-inf"), -0.0])
+@pytest.mark.parametrize("value", [2**53, -(2**53), float("inf"), float("-inf")])
 def test_rejects_invalid_numeric_values_on_encode(value: float | int):
 	with pytest.raises(ValueError, match="Cannot serialize"):
 		serialize({"value": value})
 
 
+def test_normalizes_negative_zero_to_positive_zero():
+	root = serialize(-0.0)
+	assert root == [5, 0.0]
+	assert math.copysign(1.0, cast(float, root[1])) > 0
+
+	wire = serialize({-0.0})
+
+	assert wire == [5, ["$", "s", [0.0]]]
+	encoded_zero = cast(list[Any], cast(list[Any], wire[1])[2])[0]
+	assert math.copysign(1.0, cast(float, encoded_zero)) > 0
+	assert math.copysign(1.0, next(iter(cast(set[float], deserialize(wire))))) > 0
+
+
+def test_big_floats_round_trip_through_the_float_marker():
+	edge = float(2**53)
+	wire = serialize({"big": 1e300, "edge": edge, "set": {1e300}})
+	assert wire == [
+		5,
+		{
+			"big": ["$", "f", 1e300],
+			"edge": ["$", "f", edge],
+			"set": ["$", "s", [["$", "f", 1e300]]],
+		},
+	]
+	assert deserialize(json.loads(json.dumps(wire))) == {
+		"big": 1e300,
+		"edge": edge,
+		"set": {1e300},
+	}
+	# JS encoders emit large integral doubles as integer literals.
+	assert deserialize([5, ["$", "f", 2**53]]) == edge
+
+
+@pytest.mark.parametrize(
+	"marker",
+	[
+		["$", "f", 5],
+		["$", "f", 2**53 - 1],
+		["$", "f", "1e300"],
+		["$", "f", float("inf")],
+		["$", "f", float("nan")],
+		["$", "f", 1e300, None],
+		["$", "f"],
+	],
+)
+def test_rejects_malformed_big_float_markers(marker: list[object]):
+	with pytest.raises(ValueError, match="big-float marker"):
+		deserialize([5, marker])
+
+
 @pytest.mark.parametrize(
 	"wire",
-	[[5, 2**53], [5, -(2**53)], [5, float("inf")], [5, float("nan")]],
+	[
+		[5, 2**53],
+		[5, -(2**53)],
+		[5, float(2**53)],
+		[5, 1e300],
+		[5, float("inf")],
+		[5, float("nan")],
+	],
 )
 def test_rejects_invalid_numeric_values_on_decode(wire: list[object]):
 	with pytest.raises(ValueError, match="Cannot deserialize"):
@@ -356,6 +420,8 @@ def test_decode_set_rejects_python_equality_collisions_and_equal_dates():
 
 
 def test_decode_rejects_unknown_tags_and_malformed_markers():
+	empty_escaped_array: object = json.loads('[5,["$","a",[]]]')
+
 	with pytest.raises(ValueError, match="Unknown wire marker tag"):
 		deserialize([5, ["$", "x", 1]])
 
@@ -363,7 +429,7 @@ def test_decode_rejects_unknown_tags_and_malformed_markers():
 		deserialize([5, ["$", 1]])
 
 	with pytest.raises(ValueError, match="payload must begin"):
-		deserialize([5, ["$", "a", []]])
+		deserialize(empty_escaped_array)
 
 	with pytest.raises(ValueError, match="payload must begin"):
 		deserialize([5, ["$", "a", [1]]])
@@ -371,17 +437,23 @@ def test_decode_rejects_unknown_tags_and_malformed_markers():
 
 def test_decode_accepts_integral_json_number_identity_ids():
 	wire = [5, {"self": ["$", 0.0]}]
-	parsed = deserialize(json.loads(json.dumps(wire)))
+	parsed = cast(dict[str, Any], deserialize(json.loads(json.dumps(wire))))
 
 	assert parsed["self"] is parsed
 
 
+def test_deserialize_accepts_untyped_boundary_input():
+	payload: object = json.loads('[5,{"value":1}]')
+
+	assert deserialize(payload) == {"value": 1}
+
+
 def test_decode_normalizes_negative_zero_values_and_identity_ids():
-	value = deserialize([5, -0.0])
+	value = cast(float, deserialize([5, -0.0]))
 	assert value == 0
 	assert math.copysign(1.0, value) > 0
 
-	root = deserialize([5, [["$", -0.0]]])
+	root = cast(list[Any], deserialize([5, [["$", -0.0]]]))
 	assert root[0] is root
 
 
@@ -394,11 +466,13 @@ def test_rejects_surrogate_code_points_on_encode_and_decode():
 
 
 def test_decode_rejects_dangling_and_forward_references():
+	forward_reference: object = json.loads('[5,{"first":["$",2],"second":{}}]')
+
 	with pytest.raises(ValueError, match="Dangling reference"):
 		deserialize([5, ["$", 0]])
 
 	with pytest.raises(ValueError, match="Dangling reference"):
-		deserialize([5, {"first": ["$", 2], "second": {}}])
+		deserialize(forward_reference)
 
 
 def test_decode_rejects_invalid_date_and_datetime_literals():

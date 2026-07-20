@@ -41,6 +41,11 @@ PACKAGE_CONFIG: list[tuple[str, str, list[str]]] = [
 		"packages/pulse-railway/pyproject.toml",
 		["packages/pulse-railway"],
 	),
+	(
+		"pulse-pandas",
+		"packages/pulse-pandas/pyproject.toml",
+		["packages/pulse-pandas"],
+	),
 ]
 
 

@@ -33,6 +33,7 @@ PACKAGE_PATHS = {
 	"pulse-aws": "packages/pulse-aws/pyproject.toml",
 	"pulse-railway": "packages/pulse-railway/pyproject.toml",
 	"pulse-ag-grid": "packages/pulse-ag-grid/pyproject.toml",
+	"pulse-pandas": "packages/pulse-pandas/pyproject.toml",
 }
 
 # Packages that have corresponding JS packages

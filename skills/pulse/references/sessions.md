@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 
 def dashboard():
     sess = ps.session()
-    sess["last_visited"] = datetime.now(UTC)
+    sess["last_visited"] = datetime.now(UTC).isoformat()
     visits = sess.get("visit_count", 0)
     return m.Text(f"Visit #{visits}")
 ```
@@ -20,6 +20,7 @@ def dashboard():
 
 **Storage:**
 - Keep data lightweight (<4KB for cookie sessions)
+- Store JSON-compatible values; encode dates and datetimes as ISO strings
 - Store IDs/references, not large objects
 - Session data persists across page navigations and reconnects
 
@@ -156,7 +157,7 @@ app = ps.App(
 | `secret` | `str \| None` | `None` | HMAC signing secret (uses `PULSE_SECRET` env if not provided) |
 | `salt` | `str` | `"pulse.session"` | HMAC salt |
 | `digestmod` | `str` | `"sha256"` | Hash algorithm |
-| `max_cookie_bytes` | `int` | `3800` | Max cookie size (truncates if exceeded) |
+| `max_cookie_bytes` | `int` | `3800` | Max cookie size (raises if exceeded) |
 
 **Environment:**
 - `PULSE_SECRET` — required in production
@@ -352,7 +353,7 @@ async def save_item():
 def track_visit():
     sess = ps.session()
     sess["visit_count"] = sess.get("visit_count", 0) + 1
-    sess["last_visit"] = datetime.now(UTC)
+    sess["last_visit"] = datetime.now(UTC).isoformat()
 ```
 
 ## See Also

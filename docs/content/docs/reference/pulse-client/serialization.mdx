@@ -37,7 +37,7 @@ serialize(value);
 | JavaScript value | Wire behavior |
 |---|---|
 | `null`, boolean, string | Preserved |
-| finite number | Preserved; integral values must be safe and hostile decoded `-0` becomes `0` |
+| finite number | Preserved; `-0` becomes `0`; magnitudes beyond 2^53 use the big-float marker |
 | `NaN` | Becomes `null` |
 | `Date` | UTC timestamp marker |
 | `Array` | Preserved, including shared identity and cycles |
@@ -46,9 +46,11 @@ serialize(value);
 | `Set` | Canonically ordered |
 
 Strings and record keys must contain valid Unicode scalar values. Infinity,
-`-0`, unsafe integers, invalid Dates, functions, symbols, BigInt, class
-instances, DOM objects, File/Blob, buffers, typed arrays, RegExp, and URL are
-rejected.
+invalid Dates, functions, symbols, BigInt, class instances, DOM objects,
+File/Blob, buffers, typed arrays, RegExp, and URL are rejected. Doubles with
+magnitude beyond 2^53 travel as `["$", "f", value]` so Python decodes them as
+`float` rather than `int`; plain wire numbers outside the safe integer range
+are rejected.
 
 Array holes and `undefined` array entries become `null`. Extra, symbol, and
 non-enumerable array properties are ignored. Plain-record getters can execute
@@ -78,7 +80,7 @@ Set containing both `undefined` and `null`, or both `NaN` and `null`, fails.
 ```ts
 import { deserialize } from "pulse-ui-client";
 
-function deserialize<T>(payload: Serialized): T;
+function deserialize(payload: unknown): unknown;
 ```
 
 `null` always remains `null`; there is no null-to-undefined option. Timestamp
@@ -95,6 +97,7 @@ an own data property without changing the output object's prototype.
 |---|---|
 | Escaped array beginning with `"$"` | `["$", "a", items]` |
 | UTC timestamp | `["$", "t", isoTimestamp]` |
+| Double beyond 2^53 | `["$", "f", value]` |
 | Map | `["$", "m", entries]` |
 | Set | `["$", "s", items]` |
 | Back reference | `["$", id]` |

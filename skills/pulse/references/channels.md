@@ -29,6 +29,10 @@ class ChatState(ps.State):
 self.channel.emit("server:notify", {"type": "update", "data": {...}})
 ```
 
+Omitting the second argument sends JSON `null`. Handlers receive it as `None`
+in Python or `null` in JavaScript. A handler without a return value responds
+with JSON `null` too.
+
 ### Request (with response)
 
 ```python

@@ -1,9 +1,8 @@
 interface DataTableProps {
-	rows: Record<string, unknown>[];
+	data: { columns: string[]; rows: unknown[][] };
 }
 
-export default function DataTable({ rows }: DataTableProps) {
-	const columns = Object.keys(rows[0] ?? {});
+export default function DataTable({ data: { columns, rows } }: DataTableProps) {
 	return (
 		<table>
 			<thead>
@@ -15,9 +14,9 @@ export default function DataTable({ rows }: DataTableProps) {
 			</thead>
 			<tbody>
 				{rows.map((row) => (
-					<tr key={String(row.product)}>
-						{columns.map((column) => (
-							<td key={column}>{String(row[column] ?? "")}</td>
+					<tr key={String(row[0])}>
+						{row.map((cell, columnIndex) => (
+							<td key={columns[columnIndex]}>{String(cell ?? "")}</td>
 						))}
 					</tr>
 				))}

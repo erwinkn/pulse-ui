@@ -10,6 +10,8 @@ from pulse.channel import Channel
 from pulse.context import PulseContext
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import (
+	ClientJsResultErrorMessage,
+	ClientJsResultSuccessMessage,
 	ServerApiCallMessage,
 	ServerErrorPhase,
 	ServerInitMessage,
@@ -948,16 +950,15 @@ class RenderSession:
 
 		return None
 
-	def handle_js_result(self, data: dict[str, Any]) -> None:
+	def handle_js_result(
+		self, data: ClientJsResultSuccessMessage | ClientJsResultErrorMessage
+	) -> None:
 		"""Handle js_result message from client."""
-		exec_id = data.get("id")
-		if exec_id is None:
-			return
-		exec_id = str(exec_id)
+		exec_id = data["id"]
 		fut = self._pending_js_results.pop(exec_id, None)
 		if fut is None or fut.done():
 			return
-		if "error" in data:
+		if data["ok"] is False:
 			fut.set_exception(JsExecError(data["error"]))
 		else:
-			fut.set_result(data.get("result"))
+			fut.set_result(data["result"])

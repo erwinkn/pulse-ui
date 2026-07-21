@@ -1107,7 +1107,64 @@ class Untrack(Scope):
 	```
 	"""
 
-	...
+	_suspended_scope: Scope | None
+	_active: bool
+
+	def __init__(self):
+		super().__init__()
+		self._suspended_scope = None
+		self._active = False
+
+	@override
+	def __enter__(self):
+		if self._active:
+			raise RuntimeError("Untrack context is already active")
+		self._suspended_scope = REACTIVE_CONTEXT.get().scope
+		self._active = True
+		return super().__enter__()
+
+	@override
+	def __exit__(
+		self,
+		exc_type: type[BaseException] | None,
+		exc_value: BaseException | None,
+		exc_traceback: Any,
+	) -> Literal[False]:
+		try:
+			return super().__exit__(exc_type, exc_value, exc_traceback)
+		finally:
+			self._active = False
+			self._suspended_scope = None
+
+	@contextmanager
+	def resume(self, *, replace: bool = False):
+		"""Temporarily restore the tracking scope suspended by this context.
+
+		When ``replace`` is true, discard dependencies previously
+		collected by the suspended scope before resuming it.
+		"""
+		if not self._active:
+			raise RuntimeError(
+				"Cannot resume tracking outside an active Untrack context"
+			)
+		if self._suspended_scope is None:
+			raise RuntimeError("Cannot resume tracking without a suspended scope")
+		if replace:
+			self._suspended_scope.deps.clear()
+
+		rc = REACTIVE_CONTEXT.get()
+		token = REACTIVE_CONTEXT.set(
+			ReactiveContext(
+				rc.epoch,
+				rc.batch,
+				self._suspended_scope,
+				rc.on_effect_error,
+			)
+		)
+		try:
+			yield
+		finally:
+			REACTIVE_CONTEXT.reset(token)
 
 
 class ReactiveContext:

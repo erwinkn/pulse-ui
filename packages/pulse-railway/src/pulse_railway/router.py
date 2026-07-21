@@ -26,6 +26,7 @@ from pulse_railway.constants import (
 	PULSE_REDIS_PREFIX,
 	PULSE_ROUTER_CONNECTION_LIMIT,
 	PULSE_SERVICE_PREFIX,
+	STALE_AFFINITY_HEADER,
 	STALE_AFFINITY_RELOAD_QUERY_PARAM,
 )
 from pulse_railway.railway.client import (
@@ -56,6 +57,21 @@ _WEBSOCKET_EXCLUDED_HEADERS = {
 	"sec-websocket-protocol",
 	"sec-websocket-extensions",
 }
+
+
+def _stale_affinity_headers(request: Request) -> dict[str, str]:
+	headers = {STALE_AFFINITY_HEADER: "1"}
+	origin = request.headers.get("origin")
+	if origin:
+		headers.update(
+			{
+				"access-control-allow-origin": origin,
+				"access-control-allow-credentials": "true",
+				"access-control-expose-headers": STALE_AFFINITY_HEADER,
+				"vary": "Origin",
+			}
+		)
+	return headers
 
 
 def _http_to_ws_url(http_url: str) -> str:
@@ -210,9 +226,20 @@ class AffinityRouter:
 						status_code=302,
 						headers={"location": client_loader_location},
 					)
+				headers = _stale_affinity_headers(request)
+				requested_method = request.headers.get("access-control-request-method")
+				if request.method == "OPTIONS" and requested_method:
+					headers["access-control-allow-methods"] = requested_method
+					requested_headers = request.headers.get(
+						"access-control-request-headers"
+					)
+					if requested_headers:
+						headers["access-control-allow-headers"] = requested_headers
+					return Response(status_code=204, headers=headers)
 				return JSONResponse(
 					{"detail": "stale affinity"},
 					status_code=409,
+					headers=headers,
 				)
 			raise
 		url = target.base_url.rstrip("/")

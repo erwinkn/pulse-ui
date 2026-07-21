@@ -1,5 +1,7 @@
 import type { Directives } from "./client";
 
+const STALE_AFFINITY_HEADER = "x-pulse-stale-affinity";
+
 export type DirectivesSource = Directives | (() => Directives | undefined) | undefined;
 
 function readDirectives(source: DirectivesSource): Directives {
@@ -18,7 +20,12 @@ export function buildPulseRequest(
 ): [URL, RequestInit] {
 	const { directives: directivesSource, jsonBody, headers, body, ...rest } = init;
 	const directives = readDirectives(directivesSource);
-	const url = input instanceof URL ? new URL(input.toString()) : new URL(input, window.location.href);
+	const url =
+		input instanceof URL
+			? new URL(input.toString())
+			: typeof window === "undefined"
+				? new URL(input)
+				: new URL(input, window.location.href);
 
 	if (directives.query) {
 		for (const [key, value] of Object.entries(directives.query)) {
@@ -51,7 +58,7 @@ export function buildPulseRequest(
 	];
 }
 
-export function pulseFetch(
+export async function pulseFetch(
 	input: string | URL,
 	init: RequestInit & {
 		directives?: DirectivesSource;
@@ -59,5 +66,12 @@ export function pulseFetch(
 	} = {},
 ): Promise<Response> {
 	const [url, nextInit] = buildPulseRequest(input, init);
-	return fetch(url, nextInit);
+	const response = await fetch(url, nextInit);
+	if (
+		typeof window !== "undefined" &&
+		response.headers.get(STALE_AFFINITY_HEADER) === "1"
+	) {
+		window.location.reload();
+	}
+	return response;
 }

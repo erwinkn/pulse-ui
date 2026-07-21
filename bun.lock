@@ -155,7 +155,7 @@
         "@mantine/hooks": "^8",
         "@mantine/notifications": "^8",
         "dayjs": "^1",
-        "pulse-ui-client": "^0.1.105",
+        "pulse-ui-client": "^0.1.107",
         "react": "^19.1.1",
         "react-dom": "^19.1.1",
         "recharts": "^3",

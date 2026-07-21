@@ -1,6 +1,6 @@
 import type { NavigateFunction } from "react-router";
 import { io, type Socket } from "socket.io-client";
-import { ChannelBridge, PulseChannelResetError } from "./channel";
+import { ChannelBridge, createRandomId, PulseChannelResetError } from "./channel";
 import type { RouteInfo } from "./helpers";
 import { pulseFetch } from "./http";
 import type {
@@ -26,6 +26,16 @@ function documentIsHidden(): boolean {
 function browserIsOnline(): boolean {
 	return typeof navigator === "undefined" || navigator.onLine !== false;
 }
+
+const PAGE_INSTANCE_AUTH_KEY = "__pulse_page_instance_id";
+const RENDER_ID_COLLISION_CODE = "render_id_collision";
+const pageWindow =
+	typeof window === "undefined"
+		? undefined
+		: (window as typeof window & { __pulsePageInstanceId?: string });
+const pageInstanceId = pageWindow
+	? (pageWindow.__pulsePageInstanceId ??= createRandomId())
+	: createRandomId();
 
 export interface SocketIODirectives {
 	headers?: Record<string, string>;
@@ -194,7 +204,10 @@ export class PulseSocketIOClient {
 		return new Promise((resolve, reject) => {
 			const socket = io(this.#url, {
 				transports: ["websocket", "webtransport"],
-				auth: this.#directives.socketio?.auth,
+				auth: {
+					...this.#directives.socketio?.auth,
+					[PAGE_INSTANCE_AUTH_KEY]: pageInstanceId,
+				},
 				query: this.#directives.socketio?.query,
 			});
 			this.#socket = socket;
@@ -227,6 +240,10 @@ export class PulseSocketIOClient {
 			socket.on("connect_error", (err) => {
 				if (this.#socket !== socket) return;
 				console.error("[SocketIOTransport] Connection failed:", err);
+				const data = (err as Error & { data?: { code?: unknown } }).data;
+				if (data?.code === RENDER_ID_COLLISION_CODE && typeof window !== "undefined") {
+					window.location.reload();
+				}
 				this.#handleConnectionError();
 				reject(err);
 			});

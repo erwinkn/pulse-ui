@@ -9,7 +9,7 @@ dependencies = [
     "aiohttp>=3.12.15",
     "fastapi>=0.116.1",
     "httpx>=0.28.1",
-    "pulse-framework",
+    "pulse-framework>=0.1.107",
     "redis>=6.4.0",
     "uvicorn>=0.35.0",
 ]

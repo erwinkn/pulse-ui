@@ -12,11 +12,18 @@ const client = {
 	acquireChannel: () => channel,
 	releaseChannel: () => {},
 };
-const submitForm = mock((_options: { values: unknown }) => {});
+let currentDirectives = {
+	query: { pulse_deployment: "prod-old" },
+};
+const directivesSource = () => currentDirectives;
+const submitForm = mock(
+	(_options: { values: unknown; directives?: typeof directivesSource }) => {},
+);
 
 mock.module("pulse-ui-client", () => ({
 	submitForm,
 	usePulseClient: () => client,
+	usePulseDirectivesSource: () => directivesSource,
 }));
 
 const { Form } = await import("./form");
@@ -200,6 +207,27 @@ describe("MantineForm list-valued fields", () => {
 });
 
 describe("MantineForm submit values", () => {
+	it("passes live Pulse directives to submitForm", () => {
+		submitForm.mockClear();
+		const view = render(
+			<MantineProvider>
+				<Form channelId="form-directives" action="/submit" initialValues={{ name: "Ada" }}>
+					<TextInput name="name" label="Name" />
+					<button type="submit">Submit</button>
+				</Form>
+			</MantineProvider>,
+		);
+
+		currentDirectives = {
+			query: { pulse_deployment: "prod-current" },
+		};
+		fireEvent.submit(view.container.querySelector("form")!);
+
+		const options = submitForm.mock.calls.at(-1)?.[0];
+		expect(options?.directives).toBe(directivesSource);
+		expect(options?.directives?.()).toEqual(currentDirectives);
+	});
+
 	it("submits shadowable field names as values", () => {
 		submitForm.mockClear();
 		const view = render(

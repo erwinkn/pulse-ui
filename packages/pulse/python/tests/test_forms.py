@@ -1,5 +1,6 @@
 import json
 from io import BytesIO
+from typing import cast
 
 import httpx
 import pulse as ps
@@ -66,7 +67,9 @@ def test_decode_structured_form_data_hydrates_manifest_files():
 		)
 	)
 
-	assert forms._decode_structured_form_data(data) == {  # pyright: ignore[reportPrivateUsage]
+	assert forms._decode_structured_form_data(  # pyright: ignore[reportPrivateUsage]
+		data, ps.Serializer()
+	) == {
 		"samples": [
 			{
 				"sample_id": "sample-1",
@@ -74,6 +77,32 @@ def test_decode_structured_form_data_hydrates_manifest_files():
 			}
 		]
 	}
+
+
+def test_decode_structured_form_data_uses_configured_serializer():
+	class RecordingSerializer:
+		def __init__(self) -> None:
+			self.payloads: list[object] = []
+
+		def deserialize(self, payload: object) -> object:
+			self.payloads.append(payload)
+			return {"name": "Ada"}
+
+	recording = RecordingSerializer()
+	serializer = cast(ps.Serializer, cast(object, recording))
+	data = forms.normalize_form_data(
+		StarletteFormData(
+			{
+				"__pulse_data__": "[5,null]",
+				"__pulse_files__": "[]",
+			}
+		)
+	)
+
+	assert forms._decode_structured_form_data(  # pyright: ignore[reportPrivateUsage]
+		data, serializer
+	) == {"name": "Ada"}
+	assert recording.payloads == [[5, None]]
 
 
 @pytest.mark.parametrize("reserved", ["__pulse_data__", "__pulse_files__"])
@@ -88,7 +117,9 @@ def test_decode_structured_form_data_rejects_reserved_values(reserved: str):
 	)
 
 	with pytest.raises(ValueError, match=f"Form field '{reserved}' is reserved"):
-		forms._decode_structured_form_data(data)  # pyright: ignore[reportPrivateUsage]
+		forms._decode_structured_form_data(  # pyright: ignore[reportPrivateUsage]
+			data, ps.Serializer()
+		)
 
 
 def test_decode_structured_form_data_rejects_unreferenced_file_parts():
@@ -104,7 +135,9 @@ def test_decode_structured_form_data_rejects_unreferenced_file_parts():
 	)
 
 	with pytest.raises(ValueError, match="unreferenced file parts"):
-		forms._decode_structured_form_data(data)  # pyright: ignore[reportPrivateUsage]
+		forms._decode_structured_form_data(  # pyright: ignore[reportPrivateUsage]
+			data, ps.Serializer()
+		)
 
 
 @pytest.mark.asyncio

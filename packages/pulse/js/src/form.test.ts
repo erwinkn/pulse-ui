@@ -76,7 +76,7 @@ describe("submitForm", () => {
 
 		const body = fetchMock.mock.calls[0]![1]!.body as FormData;
 		const serialized = JSON.parse(body.get("__pulse_data__") as string);
-		expect(deserialize<any>(serialized)).toEqual({
+		expect(deserialize(serialized)).toEqual({
 			samples: [
 				{
 					sample_id: "sample-1",

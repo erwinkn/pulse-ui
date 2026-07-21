@@ -360,8 +360,10 @@ type ClientMessage =
   | ClientUpdateMessage
   | ClientDetachMessage
   | ClientApiResultMessage
+  | ClientChannelEventMessage
   | ClientChannelRequestMessage
-  | ClientChannelResponseMessage;
+  | ClientChannelResponseMessage
+  | ClientJsResultMessage;
 ```
 
 #### ClientAttachMessage
@@ -373,6 +375,7 @@ interface ClientAttachMessage {
   type: "attach";
   path: string;
   routeInfo: RouteInfo;
+  attachId: string;
 }
 ```
 
@@ -427,17 +430,30 @@ interface ClientApiResultMessage {
 }
 ```
 
+#### ClientChannelEventMessage
+
+Fire-and-forget channel event sent to the server.
+
+```ts
+interface ClientChannelEventMessage {
+  type: "channel_event";
+  channel: string;
+  event: string;
+  payload: any;
+}
+```
+
 #### ClientChannelRequestMessage
 
-Channel event sent to server.
+Channel request awaiting a server response.
 
 ```ts
 interface ClientChannelRequestMessage {
-  type: "channel_message";
+  type: "channel_request";
   channel: string;
   event: string;
-  payload?: any;
-  requestId?: string;
+  requestId: string;
+  payload: any;
 }
 ```
 
@@ -446,13 +462,28 @@ interface ClientChannelRequestMessage {
 Response to a server channel request.
 
 ```ts
-interface ClientChannelResponseMessage {
-  type: "channel_message";
+type ClientChannelResponseMessage = {
+  type: "channel_response";
   channel: string;
   responseTo: string;
-  payload?: any;
-  error?: any;
-}
+} & (
+  | { ok: true; payload: any }
+  | { ok: false; error: string }
+);
+```
+
+#### ClientJsResultMessage
+
+Result of JavaScript execution requested by the server.
+
+```ts
+type ClientJsResultMessage = {
+  type: "js_result";
+  id: string;
+} & (
+  | { ok: true; result: any }
+  | { ok: false; error: string }
+);
 ```
 
 ### Server Messages
@@ -464,8 +495,12 @@ type ServerMessage =
   | ServerErrorMessage
   | ServerApiCallMessage
   | ServerNavigateToMessage
+  | ServerReloadMessage
+  | ServerAttachAckMessage
+  | ServerChannelEventMessage
   | ServerChannelRequestMessage
-  | ServerChannelResponseMessage;
+  | ServerChannelResponseMessage
+  | ServerJsExecMessage;
 ```
 
 #### ServerInitMessage
@@ -505,9 +540,9 @@ interface ServerErrorMessage {
 
 interface ServerError {
   message: string;
-  stack?: string;
-  phase: "render" | "callback" | "mount" | "unmount" | "navigate" | "server";
-  details?: Record<string, any>;
+  stack: string;
+  phase: "render" | "callback" | "mount" | "unmount" | "navigate" | "server" | "effect" | "connect";
+  details: Record<string, any>;
 }
 ```
 
@@ -539,20 +574,34 @@ interface ServerNavigateToMessage {
   hard: boolean;
   sourceRoutePath?: string;
   sourcePath?: string;
+  sourceMountId?: string;
+}
+```
+
+#### ServerChannelEventMessage
+
+Fire-and-forget channel event from the server.
+
+```ts
+interface ServerChannelEventMessage {
+  type: "channel_event";
+  channel: string;
+  event: string;
+  payload: any;
 }
 ```
 
 #### ServerChannelRequestMessage
 
-Channel event from server.
+Channel request awaiting a client response.
 
 ```ts
 interface ServerChannelRequestMessage {
-  type: "channel_message";
+  type: "channel_request";
   channel: string;
   event: string;
-  payload?: any;
-  requestId?: string;
+  requestId: string;
+  payload: any;
 }
 ```
 
@@ -561,13 +610,14 @@ interface ServerChannelRequestMessage {
 Response to a client channel request.
 
 ```ts
-interface ServerChannelResponseMessage {
-  type: "channel_message";
+type ServerChannelResponseMessage = {
+  type: "channel_response";
   channel: string;
   responseTo: string;
-  payload?: any;
-  error?: any;
-}
+} & (
+  | { ok: true; payload: any }
+  | { ok: false; error: string }
+);
 ```
 
 ---
@@ -658,27 +708,16 @@ type MessageListener = (message: ServerMessage) => void;
 Wire format for serialized data.
 
 ```ts
-type Serialized = [[number[], number[], number[], number[]], PlainJSON];
+type Serialized = [5, WireValue];
 ```
 
-### PlainJSON
+### WireValue
 
 JSON-compatible value.
 
 ```ts
-type JsonPrimitive = string | number | boolean | null;
-type JsonValue = JsonPrimitive | JsonValue[] | { [k: string]: JsonValue };
-type PlainJSON = JsonValue;
-```
-
-### DeserializationOptions
-
-Options for deserialization.
-
-```ts
-interface DeserializationOptions {
-  coerceNullsToUndefined?: boolean;
-}
+type Primitive = string | number | boolean | null;
+type WireValue = Primitive | WireValue[] | { [k: string]: WireValue };
 ```
 
 ---

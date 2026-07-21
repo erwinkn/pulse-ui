@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dev = [
     "pulse-ag-grid",
     "pulse-framework",
+    "pulse-pandas",
     "pulse-lucide",
     "pulse-mantine",
     "pulse-msal",
@@ -30,6 +31,7 @@ dev = [
 [tool.uv.sources]
 pulse-ag-grid = { workspace = true }
 pulse-framework = { workspace = true }
+pulse-pandas = { workspace = true }
 pulse-lucide = { workspace = true }
 pulse-mantine = { workspace = true }
 pulse-msal = { workspace = true }
@@ -42,6 +44,7 @@ pulse-railway = { workspace = true }
 members = [
 	"packages/pulse/python",
 	"packages/pulse-ag-grid",
+	"packages/pulse-pandas",
 	"packages/pulse-lucide",
 	"packages/pulse-mantine/python",
 	"packages/pulse-msal",

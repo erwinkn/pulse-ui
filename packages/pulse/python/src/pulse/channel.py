@@ -8,11 +8,13 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pulse.context import PulseContext
 from pulse.messages import (
-	ClientChannelRequestMessage,
+	ClientChannelIncomingMessage,
 	ClientChannelResponseMessage,
+	ServerChannelEventMessage,
 	ServerChannelMessage,
 	ServerChannelRequestMessage,
-	ServerChannelResponseMessage,
+	ServerChannelResponseErrorMessage,
+	ServerChannelResponseSuccessMessage,
 )
 from pulse.scheduling import create_future
 
@@ -114,8 +116,6 @@ class ChannelsManager:
 	def remove_route(self, path: str) -> None:
 		# route_path is already an absolute path
 		route_channels = list(self._channels_by_route.get(path, set()))
-		# if route_channels:
-		# 	print(f"Disposing {len(route_channels)} channel(s) for route {route_path}")
 		for channel_id in route_channels:
 			channel = self._channels.get(channel_id)
 			if channel is None:
@@ -126,27 +126,24 @@ class ChannelsManager:
 
 	# ------------------------------------------------------------------
 	def handle_client_response(self, message: ClientChannelResponseMessage) -> None:
-		response_to = message.get("responseTo")
-		if not response_to:
-			return
-
-		error = message.get("error")
-		if error is not None:
-			self.resolve_pending_error(response_to, error)
+		response_to = message["responseTo"]
+		if message["ok"] is False:
+			self.resolve_pending_error(response_to, message["error"])
 		else:
-			self._resolve_pending_success(response_to, message.get("payload"))
+			self._resolve_pending_success(response_to, message["payload"])
 
 	def handle_client_event(
 		self,
 		*,
 		render: "RenderSession",
 		session: "UserSession",
-		message: ClientChannelRequestMessage,
+		message: ClientChannelIncomingMessage,
 	) -> None:
-		channel_id = str(message.get("channel"))
+		channel_id = message["channel"]
 		channel = self._channels.get(channel_id)
 		if channel is None:
-			if request_id := message.get("requestId"):
+			if message["type"] == "channel_request":
+				request_id = message["requestId"]
 				self._send_error_response(channel_id, request_id, "Channel closed")
 			return
 
@@ -157,8 +154,10 @@ class ChannelsManager:
 			return
 
 		event = message["event"]
-		payload = message.get("payload")
-		request_id = message.get("requestId")
+		payload = message["payload"]
+		request_id = (
+			message["requestId"] if message["type"] == "channel_request" else None
+		)
 
 		if event == "__close__":
 			reason: str | None = None
@@ -195,18 +194,18 @@ class ChannelsManager:
 				):
 					result = await channel.dispatch(event, payload, request_id)
 			except Exception as exc:
-				if request_id:
+				if request_id is not None:
 					self._send_error_response(channel.id, request_id, str(exc))
 				else:
 					logger.exception("Unhandled error in channel handler")
 				return
 
-			if request_id:
-				msg = ServerChannelResponseMessage(
-					type="channel_message",
+			if request_id is not None:
+				msg = ServerChannelResponseSuccessMessage(
+					type="channel_response",
 					channel=channel.id,
-					event=None,
 					responseTo=request_id,
+					ok=True,
 					payload=result,
 				)
 				self.send_to_client(
@@ -254,12 +253,11 @@ class ChannelsManager:
 			self.resolve_pending_error(request_id, ChannelClosed(message))
 			return
 		try:
-			msg = ServerChannelResponseMessage(
-				type="channel_message",
+			msg = ServerChannelResponseErrorMessage(
+				type="channel_response",
 				channel=channel.id,
-				event=None,
 				responseTo=request_id,
-				payload=None,
+				ok=False,
 				error=message,
 			)
 			self.send_to_client(
@@ -314,22 +312,16 @@ class ChannelsManager:
 		*,
 		reason: str | None = None,
 	) -> None:
-		# pending = sum(
-		# 	1
-		# 	for pending in self.pending_requests.values()
-		# 	if pending.channel_id == channel.id
-		# )
-		# print(f"Disposing channel id={channel.id} render={channel.render_id} session={channel.session_id} route={channel.route_path} reason={reason or 'unspecified'} pending={pending}")
 		self._cleanup_channel_refs(channel)
 		self._cancel_pending_for_channel(channel.id)
 		self._channels.pop(channel.id, None)
 		# Notify client that the channel has been closed
 		try:
-			msg = ServerChannelRequestMessage(
-				type="channel_message",
+			msg = ServerChannelEventMessage(
+				type="channel_event",
 				channel=channel.id,
 				event="__close__",
-				payload=None,
+				payload=reason,
 			)
 			self.send_to_client(
 				channel=channel,
@@ -451,7 +443,7 @@ class Channel:
 
 		Args:
 			event: Event name.
-			payload: Data to send (optional).
+			payload: Data to send. Defaults to ``None``.
 
 		Raises:
 			ChannelClosed: If the channel is closed.
@@ -464,8 +456,8 @@ class Channel:
 		"""
 
 		self._ensure_open()
-		msg = ServerChannelRequestMessage(
-			type="channel_message",
+		msg = ServerChannelEventMessage(
+			type="channel_event",
 			channel=self.id,
 			event=event,
 			payload=payload,
@@ -486,7 +478,7 @@ class Channel:
 
 		Args:
 			event: Event name.
-			payload: Data to send (optional).
+			payload: Data to send. Defaults to ``None``.
 			timeout: Timeout in seconds (optional).
 
 		Returns:
@@ -508,11 +500,11 @@ class Channel:
 		fut = create_future()
 		self._manager.register_pending(request_id, fut, self.id)
 		msg = ServerChannelRequestMessage(
-			type="channel_message",
+			type="channel_request",
 			channel=self.id,
 			event=event,
-			payload=payload,
 			requestId=request_id,
+			payload=payload,
 		)
 		self._manager.send_to_client(
 			channel=self,
@@ -549,14 +541,12 @@ class Channel:
 		if self.closed:
 			raise ChannelClosed(f"Channel '{self.id}' is closed")
 
-	async def dispatch(
-		self, event: str, payload: Any, request_id: str | None
-	) -> Any | None:
+	async def dispatch(self, event: str, payload: Any, request_id: str | None) -> Any:
 		handlers = list(self._handlers.get(event, ()))
 		if not handlers:
 			return None
 
-		last_result: Any | None = None
+		last_result: Any = None
 		for handler in handlers:
 			try:
 				result = handler(payload)

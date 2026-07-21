@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 import httpx
 import pulse as ps
 import pytest
@@ -36,6 +38,6 @@ async def test_prerender_normalizes_paths(monkeypatch: pytest.MonkeyPatch):
 		)
 
 	assert resp.status_code == 200
-	payload = deserialize(resp.json())
+	payload = cast(dict[str, Any], deserialize(resp.json()))
 	assert "/a" in payload["views"]
 	assert "a" not in payload["views"]

@@ -1,344 +1,593 @@
-export type Primitive = number | string | boolean | null | undefined;
-export type JSON<T> = T | Array<JSON<T>> | { [K: string]: JSON<T> };
-export type PlainJSON = JSON<Primitive>;
-export type Serializable = any;
+export type Primitive = number | string | boolean | null;
 
-export type Serialized = [[number[], number[], number[], number[]], PlainJSON];
+export type WireValue = Primitive | WireValue[] | { [key: string]: WireValue };
+export type Serialized = [5, WireValue];
 
-function isDomNode(value: object): boolean {
-	if (typeof Node !== "undefined" && value instanceof Node) {
-		return true;
-	}
-	for (
-		let prototype = Object.getPrototypeOf(value);
-		prototype !== null && prototype !== Object.prototype;
-		prototype = Object.getPrototypeOf(prototype)
-	) {
-		const tag = Object.getOwnPropertyDescriptor(prototype, Symbol.toStringTag);
-		if (
-			tag?.value === "Node" &&
-			typeof Object.getOwnPropertyDescriptor(prototype, "nodeType")?.get === "function" &&
-			typeof Object.getOwnPropertyDescriptor(prototype, "nodeName")?.get === "function" &&
-			typeof Object.getOwnPropertyDescriptor(prototype, "ownerDocument")?.get === "function" &&
-			typeof Object.getOwnPropertyDescriptor(prototype, "cloneNode")?.value === "function"
-		) {
-			return true;
-		}
-	}
-	return false;
+const VERSION = 5;
+const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
+const DATETIME_RE =
+	/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})Z(?![\s\S])/;
+const isWellFormed = String.prototype.isWellFormed;
+
+type PathSegment = string | number;
+type PortableSetValue = Primitive | Date;
+
+interface CanonicalSetItem {
+	value: PortableSetValue;
+	rank: number;
+	number: number;
+	text: string;
+	collisionKey: string;
 }
 
-const REACT_FIBER_KEYS = [
-	"tag",
-	"key",
-	"elementType",
-	"type",
-	"stateNode",
-	"return",
-	"child",
-	"sibling",
-	"index",
-	"ref",
-	"pendingProps",
-	"memoizedProps",
-	"updateQueue",
-	"memoizedState",
-	"dependencies",
-	"mode",
-	"flags",
-	"subtreeFlags",
-	"deletions",
-	"lanes",
-	"childLanes",
-	"alternate",
-] as const;
+export function serialize(data: unknown): Serialized {
+	const seen = new Map<object, number>();
+	const path: PathSegment[] = [];
 
-const CHECK_REACT_FIBER =
-	import.meta.env?.DEV ??
-	(typeof process !== "undefined" && process.env.NODE_ENV !== "production");
-
-function isReactFiber(value: object): boolean {
-	const candidate = value as Record<string, unknown>;
-	if (!REACT_FIBER_KEYS.every((key) => Object.hasOwn(candidate, key))) {
-		return false;
-	}
-	if (
-		typeof candidate.tag !== "number" ||
-		typeof candidate.index !== "number" ||
-		typeof candidate.mode !== "number" ||
-		typeof candidate.flags !== "number" ||
-		typeof candidate.subtreeFlags !== "number" ||
-		typeof candidate.lanes !== "number" ||
-		typeof candidate.childLanes !== "number"
-	) {
-		return false;
-	}
-	return true;
-}
-
-export function serialize(data: Serializable): Serialized {
-	const seen = new Map<any, number>();
-	const refs: number[] = [];
-	const dates: number[] = [];
-	const sets: number[] = [];
-	const maps: number[] = [];
-
-	// Single global counter - increments once per payload node visit
-	let globalIndex = 0;
-
-	function process(value: Serializable, context?: string): PlainJSON {
-		const idx = globalIndex++;
-
-		if (value == null || typeof value === "string" || typeof value === "boolean") {
-			return value;
-		}
-
-		if (typeof value === "number") {
-			if (Number.isNaN(value)) {
-				return null;
-			}
-			if (!Number.isFinite(value)) {
-				const kind = value > 0 ? "Infinity" : "-Infinity";
-				const ctx = context ? ` in '${context}'` : "";
-				throw new Error(
-					`Cannot serialize ${kind}${ctx}. NaN and Infinity are not supported because they cannot be serialized to JSON.`,
-				);
-			}
-			return value;
-		}
-
-		// Functions and symbols cannot cross the wire. Rather than crash the whole
-		// payload, coerce them to null — exactly like NaN above. A common real-world
-		// source is a React element ($$typeof is a symbol) leaking into a callback arg;
-		// one stray element shouldn't nuke an entire form submission. `idx` was already
-		// consumed at the top of `process`, so the dropped leaf behaves like any other
-		// primitive and the ref/date/set/map indices stay aligned with `deserialize`.
-		if (typeof value === "function" || typeof value === "symbol") {
+	function encode(value: unknown): WireValue {
+		if (value === null || value === undefined) {
 			return null;
 		}
 
-		if (typeof value === "object") {
-			const ctx = context ? ` in '${context}'` : "";
-			if (isDomNode(value)) {
-				throw new Error(
-					`Cannot serialize a DOM node${ctx}. Extract DOM events/elements before serializing.`,
-				);
-			}
-			// A raw DOM node is always invalid serializer input, including in production.
-			// Fiber has no public brand, so keep its heuristic diagnostic out of the hot
-			// production path; DOM nodes are rejected before their expandos are traversed.
-			if (CHECK_REACT_FIBER && isReactFiber(value)) {
-				throw new Error(
-					`Cannot serialize a React Fiber${ctx}. Extract DOM events/elements before serializing.`,
-				);
-			}
+		if (typeof value === "boolean") {
+			return value;
+		}
+		if (typeof value === "string") {
+			validateString(value, "serialize", path);
+			return value;
+		}
+		if (typeof value === "number") {
+			return encodeNumber(value, path);
+		}
+		const valueType = typeof value;
+		if (valueType !== "object") {
+			throw new TypeError(`Cannot serialize ${valueType} at ${formatPath(path)}`);
 		}
 
-		const prevRef = seen.get(value);
-		if (prevRef !== undefined) {
-			// Make sure to push the current index, but use the ref's index as the value!
-			refs.push(idx);
-			return prevRef;
+		const object = value as object;
+		const existingId = seen.get(object);
+		if (existingId !== undefined) {
+			return ["$", existingId];
 		}
-
-		seen.set(value, idx);
+		seen.set(object, seen.size);
 
 		if (value instanceof Date) {
-			dates.push(idx);
-			return value.toISOString();
+			return ["$", "t", dateToWire(value, path)];
 		}
 
 		if (Array.isArray(value)) {
 			const length = value.length;
-			const result = new Array(length);
-			for (let i = 0; i < length; i++) {
-				result[i] = process(value[i], context);
+			const items = new Array<WireValue>(length);
+			for (let index = 0; index < length; index += 1) {
+				path.push(index);
+				items[index] = encode(value[index]);
+				path.pop();
 			}
-			return result;
+			return items.length > 0 && items[0] === "$" ? ["$", "a", items] : items;
 		}
 
 		if (value instanceof Map) {
-			maps.push(idx);
-			const rec: Record<string, any> = {};
-			for (const [key, entry] of value.entries()) {
-				rec[String(key)] = process(entry, String(key));
+			const entries: [string, WireValue][] = [];
+			const iterator = Map.prototype.entries.call(value) as IterableIterator<
+				[unknown, unknown]
+			>;
+			let index = 0;
+			for (const [rawKey, entry] of iterator) {
+				if (typeof rawKey !== "string") {
+					throw new TypeError(
+						`Cannot serialize Map key of type ${typeof rawKey} at ${formatSetPath(path, "map", index)}`,
+					);
+				}
+				validateString(rawKey, "serialize", path);
+				path.push(rawKey);
+				entries.push([rawKey, encode(entry)]);
+				path.pop();
+				index += 1;
 			}
-			return rec;
+			return ["$", "m", entries];
 		}
 
 		if (value instanceof Set) {
-			sets.push(idx);
-			const size = value.size;
-			const result = new Array(size);
-			let i = 0;
-			for (const entry of value) {
-				result[i] = process(entry, context);
-				i += 1;
+			const items = canonicalizeSet(value, path);
+			const encoded = new Array<WireValue>(items.length);
+			for (let index = 0; index < items.length; index += 1) {
+				path.push(`<set:${index}>`);
+				encoded[index] = encode(items[index].value);
+				path.pop();
 			}
-			return result;
+			return ["$", "s", encoded];
 		}
 
-		if (typeof value === "object") {
-			const rec: Record<string, any> = {};
-			const keys = Object.keys(value);
-			for (let i = 0; i < keys.length; i++) {
-				const key = keys[i];
-				rec[key] = process(value[key], key);
-			}
-			return rec;
+		const prototype = Object.getPrototypeOf(value);
+		if (prototype !== Object.prototype && prototype !== null) {
+			throw new TypeError(
+				`Cannot serialize object with prototype ${prototypeName(prototype)} at ${formatPath(path)}`,
+			);
 		}
 
-		// Reachable only for genuinely unsupported types that carry real data the
-		// caller likely intended to send (e.g. bigint) — unlike functions/symbols, we
-		// don't silently drop these. Build the message from `typeof`, never from `value`
-		// itself: interpolating a symbol here would throw "Cannot convert a symbol to a
-		// string", masking both the real error and the `context` path.
-		const where = context ? ` in '${context}'` : "";
-		throw new Error(
-			`Cannot serialize value of type '${typeof value}'${where}. ` +
-				`Only JSON-compatible values (plus Date, Map, and Set) can be sent over the wire.`,
-		);
+		const result: Record<string, WireValue> = Object.create(null);
+		const keys = Object.keys(value);
+		for (let index = 0; index < keys.length; index += 1) {
+			const key = keys[index];
+			validateString(key, "serialize", path);
+			const entry = (value as Record<string, unknown>)[key];
+			if (entry === undefined) {
+				continue;
+			}
+			path.push(key);
+			result[key] = encode(entry);
+			path.pop();
+		}
+		return result;
 	}
 
-	const payload = process(data);
-	return [[refs, dates, sets, maps], payload];
+	return [VERSION, encode(data)];
 }
 
-export interface DeserializationOptions {
-	coerceNullsToUndefined?: boolean;
-}
+export function deserialize(payload: unknown): unknown {
+	if (!Array.isArray(payload) || payload.length !== 2) {
+		throw new TypeError("Wire payload must be [5, value]");
+	}
+	if (payload[0] !== VERSION) {
+		throw new Error(`Unknown serialization version: ${String(payload[0])}`);
+	}
 
-export function deserialize<Data extends Serializable = Serializable>(
-	payload: Serialized,
-	options?: DeserializationOptions,
-): Data {
-	const [[refsA, datesA, setsA, mapsA], data] = payload;
+	const identities: any[] = [];
+	const path: PathSegment[] = [];
 
-	const refs = new Set(refsA);
-	const dates = new Set(datesA);
-	const sets = new Set(setsA);
-	const maps = new Set(mapsA);
+	function register<T>(value: T): T {
+		identities.push(value);
+		return value;
+	}
 
-	const objects = new Map<number, any>();
-	let globalIndex = 0;
-
-	function reconstruct(value: PlainJSON): any {
-		const idx = globalIndex++;
-		if (refs.has(idx)) {
-			if (typeof value !== "number") {
-				throw new Error("Reference payload must be a numeric index");
-			}
-			if (!objects.has(value)) {
-				throw new Error(`Dangling reference to index ${value}`);
-			}
-			return objects.get(value);
-		}
-
-		if (dates.has(idx)) {
-			if (typeof value !== "string") {
-				throw new Error("Date payload must be an ISO string");
-			}
-			const literal = parseDateLiteral(value);
-			if (literal) {
-				const [y, m, d] = literal;
-				const dt = new Date(Date.UTC(y, m - 1, d));
-				objects.set(idx, dt);
-				return dt;
-			}
-			if (isDateLiteral(value)) {
-				throw new Error(`Invalid date literal: ${value}`);
-			}
-			const dt = new Date(value);
-			objects.set(idx, dt);
-			return dt;
-		}
-
-		if (
-			value == null ||
-			typeof value === "number" ||
-			typeof value === "string" ||
-			typeof value === "boolean"
-		) {
-			if (options?.coerceNullsToUndefined) {
-				return value ?? undefined;
-			}
+	function decode(value: unknown): any {
+		if (value === null || typeof value === "boolean") {
 			return value;
 		}
-
+		if (typeof value === "string") {
+			validateString(value, "deserialize", path);
+			return value;
+		}
+		if (typeof value === "number") {
+			return decodeNumber(value, path);
+		}
 		if (Array.isArray(value)) {
-			if (sets.has(idx)) {
-				const result = new Set();
-				objects.set(idx, result);
-				for (let i = 0; i < value.length; i++) {
-					result.add(reconstruct(value[i]));
-				}
-				return result;
+			if (value.length > 0 && value[0] === "$") {
+				return decodeMarker(value);
 			}
-
-			const length = value.length;
-			const arr = new Array(length);
-			objects.set(idx, arr);
-			for (let i = 0; i < length; i++) {
-				arr[i] = reconstruct(value[i]);
+			const result = register(new Array(value.length));
+			for (let index = 0; index < value.length; index += 1) {
+				path.push(index);
+				result[index] = decode(value[index]);
+				path.pop();
 			}
-			return arr;
+			return result;
+		}
+		if (typeof value !== "object" || value === null) {
+			throw new TypeError(
+				`Cannot deserialize wire value of type ${typeof value} at ${formatPath(path)}`,
+			);
 		}
 
-		if (typeof value === "object") {
-			if (maps.has(idx)) {
-				const result = new Map<string, any>();
-				objects.set(idx, result);
-				const keys = Object.keys(value);
-				for (let i = 0; i < keys.length; i++) {
-					const key = keys[i];
-					result.set(key, reconstruct(value[key]));
-				}
-				return result;
-			}
+		const prototype = Object.getPrototypeOf(value);
+		if (prototype !== Object.prototype && prototype !== null) {
+			throw new TypeError(`Malformed wire object at ${formatPath(path)}`);
+		}
+		const result = register({} as Record<string, any>);
+		const keys = Object.keys(value);
+		for (let index = 0; index < keys.length; index += 1) {
+			const key = keys[index];
+			validateString(key, "deserialize", path);
+			path.push(key);
+			const entry = decode((value as Record<string, unknown>)[key]);
+			path.pop();
+			defineRecordValue(result, key, entry);
+		}
+		return result;
+	}
 
-			const result: Record<string, any> = {};
-			objects.set(idx, result);
-			const keys = Object.keys(value);
-			for (let i = 0; i < keys.length; i++) {
-				const key = keys[i];
-				result[key] = reconstruct(value[key]);
+	function decodeMarker(marker: unknown[]): any {
+		if (marker.length === 2 && typeof marker[1] === "number") {
+			const identityId = decodeIdentityId(marker[1], path);
+			if (identityId >= identities.length) {
+				throw new Error(
+					`Dangling reference to id ${identityId} at ${formatPath(path)}`,
+				);
+			}
+			return identities[identityId];
+		}
+
+		if (marker.length < 2 || typeof marker[1] !== "string") {
+			throw new Error(`Malformed marker at ${formatPath(path)}`);
+		}
+		const tag = marker[1];
+		validateString(tag, "deserialize", path);
+
+		if (tag === "a") {
+			assertMarkerLength(marker, 3, path);
+			const rawItems = marker[2];
+			if (!Array.isArray(rawItems) || rawItems.length === 0 || rawItems[0] !== "$") {
+				throw new Error(
+					`Escaped array payload must begin with '$' at ${formatPath(path)}`,
+				);
+			}
+			const result = register(new Array(rawItems.length));
+			for (let index = 0; index < rawItems.length; index += 1) {
+				path.push(index);
+				result[index] = decode(rawItems[index]);
+				path.pop();
 			}
 			return result;
 		}
 
-		throw new Error(`Unsupported value in deserialization: ${value}`);
+		if (tag === "t") {
+			assertMarkerLength(marker, 3, path);
+			if (typeof marker[2] !== "string") {
+				throw new Error(`Datetime payload must be a string at ${formatPath(path)}`);
+			}
+			return register(dateFromWire(marker[2], path));
+		}
+
+		if (tag === "f") {
+			assertMarkerLength(marker, 3, path);
+			const raw = marker[2];
+			// Value semantics: numbers never claim identities, so no register.
+			if (
+				typeof raw !== "number" ||
+				!Number.isFinite(raw) ||
+				Math.abs(raw) <= MAX_SAFE_INTEGER
+			) {
+				throw new Error(`Malformed big-float marker at ${formatPath(path)}`);
+			}
+			return raw;
+		}
+
+		if (tag === "m") {
+			assertMarkerLength(marker, 3, path);
+			const rawEntries = marker[2];
+			if (!Array.isArray(rawEntries)) {
+				throw new Error(`Map payload must be an array at ${formatPath(path)}`);
+			}
+			const result = register(new Map<string, any>());
+			const keys = new Set<string>();
+			for (let index = 0; index < rawEntries.length; index += 1) {
+				const rawEntry = rawEntries[index];
+				if (
+					!Array.isArray(rawEntry) ||
+					rawEntry.length !== 2 ||
+					typeof rawEntry[0] !== "string"
+				) {
+					throw new Error(
+						`Map entry must be [string, value] at ${formatSetPath(path, "map", index)}`,
+					);
+				}
+				const key = rawEntry[0];
+				validateString(key, "deserialize", path);
+				if (keys.has(key)) {
+					throw new Error(
+						`Duplicate Map key ${JSON.stringify(key)} at ${formatSetPath(path, "map", index)}`,
+					);
+				}
+				keys.add(key);
+				path.push(key);
+				result.set(key, decode(rawEntry[1]));
+				path.pop();
+			}
+			return result;
+		}
+
+		if (tag === "s") {
+			assertMarkerLength(marker, 3, path);
+			const rawItems = marker[2];
+			if (!Array.isArray(rawItems)) {
+				throw new Error(`Set payload must be an array at ${formatPath(path)}`);
+			}
+			const result = register(new Set<PortableSetValue>());
+			const collisions = new Set<string>();
+			let previous: CanonicalSetItem | undefined;
+			for (let index = 0; index < rawItems.length; index += 1) {
+				path.push(`<set:${index}>`);
+				const value = decode(rawItems[index]);
+				const item = describeDecodedSetValue(value, path);
+				path.pop();
+				if (previous !== undefined && compareSetItems(previous, item) > 0) {
+					throw new Error(
+						`Set entries are not canonically ordered at ${formatSetPath(path, "set", index)}`,
+					);
+				}
+				if (collisions.has(item.collisionKey)) {
+					throw new Error(
+						`Duplicate or cross-runtime-colliding Set entry at ${formatSetPath(path, "set", index)}`,
+					);
+				}
+				previous = item;
+				collisions.add(item.collisionKey);
+				result.add(item.value);
+			}
+			return result;
+		}
+
+		throw new Error(`Unknown marker tag ${JSON.stringify(tag)} at ${formatPath(path)}`);
 	}
 
-	return reconstruct(data);
+	return decode(payload[1]);
 }
 
-const DATE_LITERAL_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-function isDateLiteral(value: string): boolean {
-	return DATE_LITERAL_RE.test(value);
+function encodeNumber(value: number, path: PathSegment[]): WireValue {
+	if (Number.isNaN(value)) {
+		return null;
+	}
+	if (!Number.isFinite(value)) {
+		throw new Error(`Cannot serialize non-finite number at ${formatPath(path)}`);
+	}
+	if (Object.is(value, -0)) {
+		return 0;
+	}
+	// JSON.stringify emits large integral doubles as integer literals, which
+	// Python would decode as int; the "f" marker pins them as doubles.
+	return Math.abs(value) > MAX_SAFE_INTEGER ? ["$", "f", value] : value;
 }
 
-function parseDateLiteral(value: string): [number, number, number] | null {
-	if (!isDateLiteral(value)) {
-		return null;
+function decodeNumber(value: number, path: PathSegment[]): number {
+	if (!Number.isFinite(value)) {
+		throw new Error(`Cannot deserialize non-finite number at ${formatPath(path)}`);
 	}
-	const [yStr, mStr, dStr] = value.split("-");
-	const y = Number(yStr);
-	const m = Number(mStr);
-	const d = Number(dStr);
-	if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) {
-		return null;
+	if (Math.abs(value) > MAX_SAFE_INTEGER) {
+		throw new Error(
+			`Cannot deserialize number beyond the safe integer range outside a big-float marker at ${formatPath(path)}`,
+		);
 	}
-	if (m < 1 || m > 12 || d < 1 || d > 31) {
-		return null;
+	return Object.is(value, -0) ? 0 : value;
+}
+
+function validateString(
+	value: string,
+	verb: "serialize" | "deserialize",
+	path: PathSegment[],
+): void {
+	if (!isWellFormed.call(value)) {
+		throw new Error(`Cannot ${verb} ill-formed Unicode string at ${formatPath(path)}`);
 	}
-	const dt = new Date(Date.UTC(y, m - 1, d));
+}
+
+function dateToWire(value: Date, path: PathSegment[]): string {
+	const time = Date.prototype.getTime.call(value);
+	const year = Date.prototype.getUTCFullYear.call(value);
+	if (Number.isNaN(time)) {
+		throw new Error(`Cannot serialize invalid Date at ${formatPath(path)}`);
+	}
+	if (year < 1 || year > 9999) {
+		throw new Error(
+			`Cannot serialize Date outside supported year range 0001-9999 at ${formatPath(path)}`,
+		);
+	}
+	return Date.prototype.toISOString.call(value);
+}
+
+function dateFromWire(value: string, path: PathSegment[]): Date {
+	validateString(value, "deserialize", path);
+	const match = DATETIME_RE.exec(value);
+	if (!match || Number(match[1]) < 1) {
+		throw new Error(`Invalid datetime literal at ${formatPath(path)}: ${value}`);
+	}
+	const result = new Date(value);
 	if (
-		dt.getUTCFullYear() !== y ||
-		dt.getUTCMonth() !== m - 1 ||
-		dt.getUTCDate() !== d
+		Number.isNaN(Date.prototype.getTime.call(result)) ||
+		Date.prototype.toISOString.call(result) !== value
 	) {
-		return null;
+		throw new Error(`Invalid datetime literal at ${formatPath(path)}: ${value}`);
 	}
-	return [y, m, d];
+	return result;
+}
+
+// Wire order is sorted, not insertion order: Python set iteration varies per
+// process (string hash randomization), so canonical order is the only way both
+// runtimes emit identical wire bytes for identical sets. collisionKey mirrors
+// Python's dual-equality check — members must stay distinct under both JS
+// SameValueZero and Python __eq__ (where true == 1 == 1.0 collapse).
+function canonicalizeSet(value: Set<unknown>, path: PathSegment[]): CanonicalSetItem[] {
+	const result: CanonicalSetItem[] = [];
+	const collisions = new Set<string>();
+	const iterator = Set.prototype.values.call(value) as IterableIterator<unknown>;
+	let index = 0;
+	for (const entry of iterator) {
+		const item = describeSetInput(entry, path, index);
+		if (collisions.has(item.collisionKey)) {
+			throw new Error(
+				`Cannot serialize cross-runtime-colliding Set value at ${formatSetPath(path, "set", index)}`,
+			);
+		}
+		collisions.add(item.collisionKey);
+		result.push(item);
+		index += 1;
+	}
+	result.sort(compareSetItems);
+	return result;
+}
+
+function describeSetInput(
+	value: unknown,
+	path: PathSegment[],
+	index: number,
+): CanonicalSetItem {
+	if (value === undefined || value === null || (typeof value === "number" && Number.isNaN(value))) {
+		return describePortableSetValue(null);
+	}
+	if (typeof value === "number") {
+		if (!Number.isFinite(value)) {
+			throw new Error(
+				`Cannot serialize non-finite number at ${formatSetPath(path, "set", index)}`,
+			);
+		}
+		return describePortableSetValue(Object.is(value, -0) ? 0 : value);
+	}
+	if (typeof value === "string") {
+		if (!isWellFormed.call(value)) {
+			throw new Error(
+				`Cannot serialize ill-formed Unicode string at ${formatSetPath(path, "set", index)}`,
+			);
+		}
+		return describePortableSetValue(value);
+	}
+	if (typeof value === "boolean") {
+		return describePortableSetValue(value);
+	}
+	if (value instanceof Date) {
+		dateToWire(value, path);
+		return describePortableSetValue(value);
+	}
+	throw new TypeError(
+		`Cannot serialize non-portable Set value of type ${valueTypeName(value)} at ${formatSetPath(path, "set", index)}`,
+	);
+}
+
+function describeDecodedSetValue(
+	value: unknown,
+	path: PathSegment[],
+): CanonicalSetItem {
+	if (
+		value === null ||
+		typeof value === "boolean" ||
+		typeof value === "number" ||
+		typeof value === "string" ||
+		value instanceof Date
+	) {
+		return describePortableSetValue(value);
+	}
+	throw new Error(`Cannot deserialize non-portable Set value at ${formatPath(path)}`);
+}
+
+function describePortableSetValue(value: PortableSetValue): CanonicalSetItem {
+	if (value === null) {
+		return {
+			value,
+			rank: 0,
+			number: 0,
+			text: "",
+			collisionKey: "null",
+		};
+	}
+	if (typeof value === "boolean") {
+		return {
+			value,
+			rank: 1,
+			number: Number(value),
+			text: "",
+			collisionKey: value ? "bool-number:1" : "bool-number:0",
+		};
+	}
+	if (typeof value === "number") {
+		return {
+			value,
+			rank: 2,
+			number: value,
+			text: "",
+			collisionKey:
+				value === 0 || value === 1 ? `bool-number:${value}` : `number:${String(value)}`,
+		};
+	}
+	if (typeof value === "string") {
+		return {
+			value,
+			rank: 3,
+			number: 0,
+			text: value,
+			collisionKey: `string:${value}`,
+		};
+	}
+	const text = Date.prototype.toISOString.call(value);
+	return {
+		value,
+		rank: 4,
+		number: 0,
+		text,
+		collisionKey: `datetime:${text}`,
+	};
+}
+
+function compareSetItems(left: CanonicalSetItem, right: CanonicalSetItem): number {
+	if (left.rank !== right.rank) {
+		return left.rank - right.rank;
+	}
+	if (left.rank === 1 || left.rank === 2) {
+		return left.number < right.number ? -1 : left.number > right.number ? 1 : 0;
+	}
+	return compareCodePoints(left.text, right.text);
+}
+
+function compareCodePoints(left: string, right: string): number {
+	let leftIndex = 0;
+	let rightIndex = 0;
+	while (leftIndex < left.length && rightIndex < right.length) {
+		const leftCodePoint = left.codePointAt(leftIndex) as number;
+		const rightCodePoint = right.codePointAt(rightIndex) as number;
+		if (leftCodePoint !== rightCodePoint) {
+			return leftCodePoint - rightCodePoint;
+		}
+		leftIndex += leftCodePoint > 0xffff ? 2 : 1;
+		rightIndex += rightCodePoint > 0xffff ? 2 : 1;
+	}
+	return left.length - right.length;
+}
+
+function decodeIdentityId(value: number, path: PathSegment[]): number {
+	if (!Number.isSafeInteger(value) || value < 0) {
+		throw new Error(`Invalid identity id at ${formatPath(path)}: ${String(value)}`);
+	}
+	return Object.is(value, -0) ? 0 : value;
+}
+
+function assertMarkerLength(marker: unknown[], expected: number, path: PathSegment[]): void {
+	if (marker.length !== expected) {
+		throw new Error(`Malformed marker at ${formatPath(path)}`);
+	}
+}
+
+function defineRecordValue(result: Record<string, any>, key: string, value: any): void {
+	if (key === "__proto__") {
+		Object.defineProperty(result, key, {
+			value,
+			enumerable: true,
+			configurable: true,
+			writable: true,
+		});
+		return;
+	}
+	result[key] = value;
+}
+
+function formatPath(path: PathSegment[]): string {
+	let result = "$";
+	for (let index = 0; index < path.length; index += 1) {
+		const segment = path[index];
+		if (typeof segment === "number") {
+			result += `[${segment}]`;
+		} else if (segment.startsWith("<")) {
+			result += segment;
+		} else if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(segment)) {
+			result += `.${segment}`;
+		} else {
+			result += `[${JSON.stringify(segment)}]`;
+		}
+	}
+	return result;
+}
+
+function formatSetPath(
+	path: PathSegment[],
+	kind: "set" | "map",
+	index: number,
+): string {
+	return `${formatPath(path)}<${kind}:${index}>`;
+}
+
+function valueTypeName(value: unknown): string {
+	if (value === null) return "null";
+	if (typeof value !== "object") return typeof value;
+	return value.constructor?.name ?? "object";
+}
+
+function prototypeName(prototype: object | null): string {
+	if (prototype === null) return "null";
+	return prototype.constructor?.name ?? "unknown";
 }

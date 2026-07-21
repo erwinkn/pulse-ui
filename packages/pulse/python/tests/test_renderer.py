@@ -1290,6 +1290,7 @@ async def test_ref_on_mount_uses_route_context():
 		render=render,
 		session=session,
 		message={
+			"type": "channel_event",
 			"channel": handle.channel_id,
 			"event": "ref:mounted",
 			"payload": {"refId": handle.id},

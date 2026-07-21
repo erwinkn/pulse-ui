@@ -1453,9 +1453,13 @@ from pulse.scheduling import (
 from pulse.scheduling import (
 	repeat as repeat,
 )
-from pulse.serializer import deserialize as deserialize
 
 # Serializer
+from pulse.serializer import PulseSerializable as PulseSerializable
+from pulse.serializer import Serializer as Serializer
+from pulse.serializer import SerializerAdapter as SerializerAdapter
+from pulse.serializer import WireMap as WireMap
+from pulse.serializer import deserialize as deserialize
 from pulse.serializer import serialize as serialize
 
 # State and routing

@@ -12,6 +12,7 @@
     "pulse-lucide",
     "---Core---",
     "pulse-js-client",
+    "pulse-pandas",
     "---Auth & Deploy---",
     "pulse-msal",
     "pulse-aws"

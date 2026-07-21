@@ -1,0 +1,23 @@
+[project]
+name = "pulse-pandas"
+version = "0.1.0"
+description = "Pandas serialization adapters for Pulse"
+readme = "README.md"
+authors = [{ name = "Erwin Kuhn", email = "erwin.kuhn@protonmail.com" }]
+requires-python = ">=3.12"
+dependencies = [
+	"numpy>=1.26",
+	"pandas>=2.2,<4",
+	# SerializerAdapter first ships in the release after 0.1.105
+	"pulse-framework>=0.1.106",
+]
+
+[dependency-groups]
+dev = ["pandas-stubs>=2.2"]
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["uv_build>=0.8.13,<0.9.0"]
+build-backend = "uv_build"

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, mock, vi } from "bun:test";
 import React from "react";
 import { act, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
+import type { ClientMessage } from "./messages";
 import { deserialize, serialize } from "./serialize/serializer";
 
 class FakeSocket {
@@ -71,12 +72,10 @@ async function makeClient(
 	);
 }
 
-function sentMessages(target: FakeSocket = socket) {
+function sentMessages(target: FakeSocket = socket): ClientMessage[] {
 	return target.emitted
 		.filter(([event]) => event === "message")
-		.map(([, payload]) =>
-			deserialize(payload as any, { coerceNullsToUndefined: true }),
-		);
+		.map(([, payload]) => deserialize(payload) as ClientMessage);
 }
 
 function waitForEffects() {
@@ -105,6 +104,7 @@ describe("PulseSocketIOClient attach ack", () => {
 
 		const attach = sentMessages()[0]!;
 		expect(attach).toMatchObject({ type: "attach", path: "/" });
+		if (attach.type !== "attach") throw new Error("Expected attach message");
 
 		client.invokeCallback("/", "1.onClick", []);
 		expect(sentMessages()).toHaveLength(1);
@@ -133,6 +133,7 @@ describe("PulseSocketIOClient attach ack", () => {
 		await connected;
 
 		const attach = sentMessages()[0]!;
+		if (attach.type !== "attach") throw new Error("Expected attach message");
 		client.invokeCallback("/", "1.onClick", []);
 		client.detach("/");
 		socket.trigger(
@@ -147,6 +148,40 @@ describe("PulseSocketIOClient attach ack", () => {
 		expect(sentMessages().map((message) => message.type)).toEqual([
 			"attach",
 			"detach",
+		]);
+	});
+
+	it("preserves null channel payloads from the server", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		const handler = vi.fn();
+		client.acquireChannel("channel-1").on("value", handler);
+		socket.trigger("connect");
+		await connected;
+
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel_event",
+				channel: "channel-1",
+				event: "value",
+				payload: null,
+			}),
+		);
+
+		expect(handler).toHaveBeenCalledWith(null);
+	});
+
+	it("normalizes undefined successful JS results to null", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+
+		client.sendJsResult("exec-1", undefined);
+
+		expect(sentMessages()).toEqual([
+			{ type: "js_result", id: "exec-1", ok: true, result: null },
 		]);
 	});
 

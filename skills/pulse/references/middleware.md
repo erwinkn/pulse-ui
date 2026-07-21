@@ -219,7 +219,7 @@ async def channel(
         return Deny()
 
     # Check payload
-    if payload.get("sensitive") and not session.get("verified"):
+    if isinstance(payload, dict) and payload.get("sensitive") and not session.get("verified"):
         return Deny()
 
     return await next()

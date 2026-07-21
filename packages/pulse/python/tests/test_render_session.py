@@ -1241,7 +1241,9 @@ async def test_run_js_success_before_timeout():
 	exec_id = cast(Any, js_msgs[0])["id"]
 
 	# Simulate client response
-	session.handle_js_result({"id": exec_id, "result": 42, "error": None})
+	session.handle_js_result(
+		{"type": "js_result", "id": exec_id, "ok": True, "result": 42}
+	)
 
 	# The future should resolve with the result
 	result = await future
@@ -1456,7 +1458,9 @@ def test_handle_js_result_ignores_unknown_id():
 	session.connect(lambda _: None)
 
 	# Should not raise
-	session.handle_js_result({"id": "unknown-id", "result": 42, "error": None})
+	session.handle_js_result(
+		{"type": "js_result", "id": "unknown-id", "ok": True, "result": 42}
+	)
 
 	session.close()
 

@@ -43,19 +43,12 @@ export { PulseProvider, PulseView, usePulseClient } from "./pulse";
 // Renderer (structural expressions + eval-keyed props)
 export { VDOMRenderer } from "./renderer";
 // Serialization helpers
-// export { extractEvent } from "./serialize/events";
-// export {
-//   encodeForWire,
-//   decodeFromWire,
-//   cleanForSerialization,
-// } from "./serialize/clean";
 export { deserialize, serialize } from "./serialize/serializer";
 // Transports (types only - implementation is internal)
 export type { MessageListener, Transport } from "./transport";
 // VDOM types and helpers
 export type {
 	ComponentRegistry,
-	ComponentRegistry as ComponentRegistry2,
 	VDOM,
 	VDOMElement,
 	VDOMExpr,

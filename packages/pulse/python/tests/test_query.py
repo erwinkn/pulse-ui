@@ -497,6 +497,121 @@ async def test_query_retry_exhausted():
 
 
 @pytest.mark.asyncio
+async def test_unkeyed_query_retry_exhausted_stops_refetching():
+	retries = 2
+	attempts = 0
+
+	class S(ps.State):
+		dependency: int = 0
+
+		@ps.query(retries=retries, retry_delay=0.001)
+		async def fail(self) -> None:
+			nonlocal attempts
+			attempts += 1
+			await asyncio.sleep(0)
+			_ = self.dependency
+			raise RuntimeError("boom")
+
+	s = S()
+	q = s.fail
+	expected_attempts = retries + 1
+
+	try:
+		assert await wait_for(
+			lambda: attempts > expected_attempts or (q.is_error and not q.is_scheduled),
+			timeout=0.2,
+			poll_interval=0.001,
+		)
+		assert attempts == expected_attempts
+		assert q.status == "error"
+
+		attempts = 0
+		s.dependency = 1
+		assert await wait_for(
+			lambda: attempts > expected_attempts or (q.is_error and not q.is_scheduled),
+			timeout=0.2,
+			poll_interval=0.001,
+		)
+		await asyncio.sleep(0.01)
+		assert attempts == expected_attempts
+		assert q.status == "error"
+		assert q.is_scheduled is False
+		result = cast(UnkeyedQueryResult[None], q)
+		assert set(result._effect.deps) == set(s.properties())  # pyright: ignore[reportPrivateUsage]
+	finally:
+		query_result(q).dispose()
+
+
+@pytest.mark.asyncio
+async def test_unkeyed_query_retry_succeeds_without_extra_refetch():
+	attempts = 0
+
+	class S(ps.State):
+		@ps.query(retries=2, retry_delay=0.001)
+		async def value(self) -> str:
+			nonlocal attempts
+			attempts += 1
+			await asyncio.sleep(0)
+			if attempts == 1:
+				raise RuntimeError("temporary")
+			return "success"
+
+	s = S()
+	q = s.value
+
+	try:
+		await q.wait()
+		await asyncio.sleep(0.01)
+		assert attempts == 2
+		assert q.status == "success"
+		assert q.data == "success"
+		assert q.is_scheduled is False
+		result = cast(UnkeyedQueryResult[str], q)
+		assert result._effect.deps == {}  # pyright: ignore[reportPrivateUsage]
+	finally:
+		query_result(q).dispose()
+
+
+@pytest.mark.asyncio
+async def test_unkeyed_query_uses_final_retry_dependencies():
+	attempts = 0
+
+	class S(ps.State):
+		first: int = 0
+		second: int = 0
+
+		@ps.query(retries=1, retry_delay=0.001)
+		async def value(self) -> int:
+			nonlocal attempts
+			attempts += 1
+			await asyncio.sleep(0)
+			if attempts == 1:
+				_ = self.first
+				raise RuntimeError("temporary")
+			_ = self.second
+			return attempts
+
+	s = S()
+	q = s.value
+
+	try:
+		await q.wait()
+		assert q.data == 2
+		result = cast(UnkeyedQueryResult[int], q)
+		_, second = s.properties()
+		assert set(result._effect.deps) == {second}  # pyright: ignore[reportPrivateUsage]
+
+		s.first = 1
+		await asyncio.sleep(0.01)
+		assert attempts == 2
+
+		s.second = 1
+		assert await wait_for(lambda: attempts == 3 and q.data == 3)
+	finally:
+		query_result(q).dispose()
+
+
+@pytest.mark.asyncio
 async def test_query_retry_delay():
 	"""Test that retry delay is respected between attempts."""
 	key = ("test", 1)

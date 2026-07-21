@@ -18,7 +18,7 @@ from pulse import (
 	repeat,
 )
 from pulse.helpers import MISSING
-from pulse.reactive import Batch, flush_effects
+from pulse.reactive import Batch, Scope, flush_effects
 from pulse.reactive_extensions import (
 	ReactiveDict,
 	ReactiveList,
@@ -1071,6 +1071,56 @@ async def test_async_effect_tracks_dependencies_across_await():
 	await asyncio.sleep(0)
 	assert e.runs == 3
 	assert seen[-2:] == [("s1", 10), ("s2", 20)]
+
+
+@pytest.mark.asyncio
+async def test_untrack_resume_restores_parent_scope_across_await():
+	tracked = Signal(0, name="tracked")
+	untracked = Signal(0, name="untracked")
+	inner = Signal(0, name="inner")
+
+	with Scope() as scope:
+		with Untrack() as tracking:
+			_ = untracked()
+			await asyncio.sleep(0)
+			with Scope() as inner_scope:
+				with tracking.resume():
+					await asyncio.sleep(0)
+					_ = tracked()
+				_ = inner()
+
+	assert set(scope.deps) == {tracked}
+	assert set(inner_scope.deps) == {inner}
+
+
+def test_untrack_resume_can_replace_parent_dependencies():
+	first = Signal(0, name="first")
+	second = Signal(0, name="second")
+
+	with Scope() as scope:
+		with Untrack() as tracking:
+			with tracking.resume():
+				_ = first()
+			with tracking.resume(replace=True):
+				_ = second()
+
+	assert set(scope.deps) == {second}
+
+
+def test_untrack_resume_requires_active_parent_scope():
+	tracking = Untrack()
+	with pytest.raises(RuntimeError, match="outside an active Untrack context"):
+		with tracking.resume():
+			pass
+
+	with tracking:
+		with pytest.raises(RuntimeError, match="without a suspended scope"):
+			with tracking.resume():
+				pass
+
+	with pytest.raises(RuntimeError, match="outside an active Untrack context"):
+		with tracking.resume():
+			pass
 
 
 @pytest.mark.asyncio

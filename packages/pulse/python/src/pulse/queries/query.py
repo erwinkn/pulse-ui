@@ -265,32 +265,25 @@ async def run_fetch_with_retries(
 	fetch_fn: Callable[[], Awaitable[T]],
 	on_success: Callable[[T], Awaitable[None] | None] | None = None,
 	on_error: Callable[[Exception], Awaitable[None] | None] | None = None,
-	untrack: bool = False,
 ) -> None:
 	"""
 	Execute a fetch with retry logic, updating QueryState.
+	Dependency tracking is controlled by the caller.
 
 	Args:
 		state: The QueryState to update
 		fetch_fn: Async function to fetch data
 		on_success: Optional callback on success
 		on_error: Optional callback on error
-		untrack: If True, wrap fetch_fn in Untrack() to prevent dependency tracking.
-		         Use for keyed queries where fetch is triggered via create_task().
 	"""
 	state.reset_retries()
 
 	while True:
 		try:
-			if untrack:
-				with Untrack():
-					result = await fetch_fn()
-			else:
-				result = await fetch_fn()
+			result = await fetch_fn()
 			state.set_success(result)
 			if on_success:
-				with Untrack():
-					await maybe_await(call_flexible(on_success, result))
+				await maybe_await(call_flexible(on_success, result))
 			return
 		except asyncio.CancelledError:
 			raise
@@ -305,8 +298,7 @@ async def run_fetch_with_retries(
 				state.retry_reason.write(e)
 				state.apply_error(e)
 				if on_error:
-					with Untrack():
-						await maybe_await(call_flexible(on_error, e))
+					await maybe_await(call_flexible(on_error, e))
 				return
 
 
@@ -464,13 +456,13 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 				if obs._on_error:  # pyright: ignore[reportPrivateUsage]
 					await maybe_await(call_flexible(obs._on_error, e))  # pyright: ignore[reportPrivateUsage]
 
-		await run_fetch_with_retries(
-			self.state,
-			fetch_fn,
-			on_success=on_success,
-			on_error=on_error,
-			untrack=True,  # Keyed queries use create_task(), need to untrack
-		)
+		with Untrack():
+			await run_fetch_with_retries(
+				self.state,
+				fetch_fn,
+				on_success=on_success,
+				on_error=on_error,
+			)
 
 	def run_fetch(
 		self,
@@ -872,16 +864,19 @@ class UnkeyedQueryResult(Generic[T], Disposable, SuspendableQuery):
 		return (time.time() - self.state.last_updated.read()) > self._stale_time
 
 	async def _run(self):
-		"""Run the fetch through the effect (for dependency tracking)."""
-		# Unkeyed queries run inside AsyncEffect which has its own scope,
-		# so we don't need untrack=True here - deps should be tracked
-		await run_fetch_with_retries(
-			self.state,
-			self._fetch_fn,
-			on_success=self._on_success,
-			on_error=self._on_error,
-			untrack=False,
-		)
+		"""Run the fetch, tracking only dependencies read by the user fetch."""
+		with Untrack() as tracking:
+
+			async def tracked_fetch() -> T:
+				with tracking.resume(replace=True):
+					return await self._fetch_fn()
+
+			await run_fetch_with_retries(
+				self.state,
+				tracked_fetch,
+				on_success=self._on_success,
+				on_error=self._on_error,
+			)
 
 	def schedule(self):
 		"""Schedule the effect to run."""

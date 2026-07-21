@@ -23,6 +23,7 @@ from pulse_railway.constants import (
 	RAILWAY_PROJECT_ID,
 	RAILWAY_TOKEN,
 	REDIS_URL,
+	STALE_AFFINITY_HEADER,
 	STALE_AFFINITY_RELOAD_QUERY_PARAM,
 )
 from pulse_railway.router import (
@@ -163,6 +164,55 @@ async def test_router_keeps_form_posts_on_original_deployment_after_promotion(
 
 	assert response.status_code == 204
 	assert response.headers["x-pulse-selected-deployment"] == "prod-260721-190711"
+
+
+@pytest.mark.asyncio
+async def test_router_marks_form_post_after_original_deployment_is_drained(
+	backend_servers: dict[str, str],
+) -> None:
+	app = build_app(StaticResolver(backends=backend_servers, active_deployment="v2"))
+	async with AsyncClient(
+		transport=ASGITransport(app=app),
+		base_url="http://testserver",
+	) as client:
+		response = await client.post(
+			"/_pulse/forms/render-1/form-1",
+			params={"pulse_deployment": "drained"},
+			headers={"origin": "https://app.example.com"},
+		)
+	await app.state.router.close()
+
+	assert response.status_code == 409
+	assert response.headers[STALE_AFFINITY_HEADER] == "1"
+	assert response.headers["access-control-allow-origin"] == "https://app.example.com"
+	assert response.headers["access-control-allow-credentials"] == "true"
+	assert response.headers["access-control-expose-headers"] == STALE_AFFINITY_HEADER
+
+
+@pytest.mark.asyncio
+async def test_router_allows_stale_affinity_form_preflight(
+	backend_servers: dict[str, str],
+) -> None:
+	app = build_app(StaticResolver(backends=backend_servers, active_deployment="v2"))
+	async with AsyncClient(
+		transport=ASGITransport(app=app),
+		base_url="http://testserver",
+	) as client:
+		response = await client.options(
+			"/_pulse/forms/render-1/form-1",
+			params={"pulse_deployment": "drained"},
+			headers={
+				"origin": "https://app.example.com",
+				"access-control-request-method": "POST",
+				"access-control-request-headers": "x-pulse-render-id",
+			},
+		)
+	await app.state.router.close()
+
+	assert response.status_code == 204
+	assert response.headers["access-control-allow-origin"] == "https://app.example.com"
+	assert response.headers["access-control-allow-methods"] == "POST"
+	assert response.headers["access-control-allow-headers"] == "x-pulse-render-id"
 
 
 @pytest.mark.asyncio
@@ -319,6 +369,7 @@ async def test_router_returns_404_for_unknown_backend(
 
 	assert response.status_code == 409
 	assert response.json() == {"detail": "stale affinity"}
+	assert response.headers[STALE_AFFINITY_HEADER] == "1"
 
 
 @pytest.mark.asyncio

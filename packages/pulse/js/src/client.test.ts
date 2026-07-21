@@ -31,7 +31,7 @@ class FakeSocket {
 }
 
 let socket: FakeSocket;
-const io = vi.fn(() => {
+const io = vi.fn((_url?: string, _options?: Record<string, any>) => {
 	socket = new FakeSocket();
 	return socket;
 });
@@ -61,11 +61,12 @@ async function makeClient(
 		initialErrorDelay: 0,
 		reconnectErrorDelay: 0,
 	},
+	directives: Record<string, any> = {},
 ) {
 	const { PulseSocketIOClient } = await import("./client");
 	return new PulseSocketIOClient(
 		"http://pulse.test",
-		{},
+		directives,
 		vi.fn() as any,
 		connectionStatus,
 	);
@@ -176,6 +177,58 @@ describe("PulseSocketIOClient attach ack", () => {
 			type: "attach",
 			path: "/",
 		});
+	});
+
+	it("keeps one page identity across reconnects and client remounts", async () => {
+		const client = await makeClient(undefined, {
+			socketio: { auth: { tenant: "stoneware" } },
+		});
+		const connected = client.connect();
+		const firstOptions = io.mock.calls.at(-1)?.[1];
+		socket.trigger("connect");
+		await connected;
+
+		client.suspend();
+		const resumed = client.resume();
+		const secondOptions = io.mock.calls.at(-1)?.[1];
+		socket.trigger("connect");
+		await resumed;
+
+		const remountedClient = await makeClient();
+		const remounted = remountedClient.connect();
+		const remountedOptions = io.mock.calls.at(-1)?.[1];
+		socket.trigger("connect");
+		await remounted;
+
+		const firstAuth = firstOptions?.auth as Record<string, string>;
+		expect(firstAuth.tenant).toBe("stoneware");
+		expect(firstAuth.__pulse_page_instance_id).toBeTruthy();
+		expect(secondOptions?.auth.__pulse_page_instance_id).toBe(
+			firstAuth.__pulse_page_instance_id,
+		);
+		expect(remountedOptions?.auth.__pulse_page_instance_id).toBe(
+			firstAuth.__pulse_page_instance_id,
+		);
+	});
+
+	it("reloads only the page rejected for a render ID collision", async () => {
+		const reload = vi.fn();
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+		Object.defineProperty(window.location, "reload", {
+			configurable: true,
+			value: reload,
+		});
+		const client = await makeClient();
+		const connected = client.connect();
+		const error = Object.assign(new Error("collision"), {
+			data: { code: "render_id_collision" },
+		});
+
+		socket.trigger("connect_error", error);
+		await expect(connected).rejects.toBe(error);
+
+		expect(reload).toHaveBeenCalledTimes(1);
+		consoleError.mockRestore();
 	});
 
 	it("does not reload visible active tabs when reconnect times out", async () => {

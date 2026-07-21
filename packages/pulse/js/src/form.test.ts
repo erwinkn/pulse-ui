@@ -4,6 +4,7 @@ import { deserialize } from "./serialize/serializer";
 
 const originalFetch = globalThis.fetch;
 const originalNodeEnv = process.env.NODE_ENV;
+const originalReload = Object.getOwnPropertyDescriptor(window.location, "reload");
 
 function makeSubmitEvent() {
 	const form = document.createElement("form");
@@ -28,6 +29,11 @@ describe("submitForm", () => {
 	afterEach(() => {
 		globalThis.fetch = originalFetch;
 		process.env.NODE_ENV = originalNodeEnv;
+		if (originalReload) {
+			Object.defineProperty(window.location, "reload", originalReload);
+		} else {
+			Reflect.deleteProperty(window.location, "reload");
+		}
 		vi.restoreAllMocks();
 	});
 
@@ -182,6 +188,32 @@ describe("submitForm", () => {
 			"[Pulse] Form submission failed",
 			error,
 		);
+	});
+
+	it("reloads when a form POST reaches a drained deployment", async () => {
+		const reload = vi.fn();
+		Object.defineProperty(window.location, "reload", {
+			configurable: true,
+			value: reload,
+		});
+		globalThis.fetch = vi.fn(
+			async () =>
+				new Response("stale", {
+					status: 409,
+					headers: { "x-pulse-stale-affinity": "1" },
+				}),
+		) as any;
+		vi.spyOn(console, "error").mockImplementation(() => {});
+
+		await expect(
+			submitForm({
+				event: makeSubmitEvent(),
+				action: "http://pulse.test/submit",
+				formData: new FormData(),
+			}),
+		).rejects.toBeInstanceOf(FormSubmissionError);
+
+		expect(reload).toHaveBeenCalledTimes(1);
 	});
 
 	it("does not submit when user onSubmit prevents default", async () => {

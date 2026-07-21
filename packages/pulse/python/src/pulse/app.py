@@ -22,6 +22,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
+from socketio.exceptions import ConnectionRefusedError as SocketIOConnectionRefusedError
 from starlette.types import ASGIApp
 from starlette.websockets import WebSocket
 
@@ -88,6 +89,8 @@ from pulse.user_session import (
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 FRAMEWORK_API_PREFIX = "/_pulse"
+PAGE_INSTANCE_AUTH_KEY = "__pulse_page_instance_id"
+RENDER_ID_COLLISION_CODE = "render_id_collision"
 MAX_PENDING_SOCKET_MESSAGES = 100
 PULSE_ENDPOINT_UNWRAP_MARKER = "__pulse_endpoint_unwrap__"
 
@@ -267,6 +270,8 @@ class App:
 	_sessions_in_request: dict[str, int]
 	_socket_to_render: dict[str, str]
 	_render_to_socket: dict[str, str]
+	_render_to_page_instance: dict[str, str | None]
+	_render_connect_attempts: dict[str, object]
 	_connecting_sockets: set[str]
 	_pending_socket_messages: dict[str, list[Serialized]]
 	_render_cleanups: dict[str, TimerHandleLike]
@@ -351,6 +356,8 @@ class App:
 		# socket's disconnect cannot tear down a newer connection.
 		self._socket_to_render = {}
 		self._render_to_socket = {}
+		self._render_to_page_instance = {}
+		self._render_connect_attempts = {}
 		self._connecting_sockets = set()
 		self._pending_socket_messages = {}
 		# Map render_id -> cleanup timer handle for timeout-based expiry
@@ -812,24 +819,24 @@ class App:
 			auth: dict[str, str] | None,
 			rid: str | None,
 		):
-			# Parse cookies from environ and ensure a session exists
 			cookie = self.cookie.get_from_socketio(environ)
 			if cookie is None:
 				raise ConnectionRefusedError("Socket connect missing cookie")
 			session = await self.get_or_create_session(cookie)
 
 			if not rid:
-				# Still refuse connections without a renderId
 				self.close_session_if_inactive(session.sid)
 				raise ConnectionRefusedError(
 					f"Socket connect missing render_id session={session.sid}"
 				)
 
-			# Allow reconnects where the provided renderId no longer exists by creating a new RenderSession
+			page_instance_id = auth.get(PAGE_INSTANCE_AUTH_KEY) if auth else None
+			if not isinstance(page_instance_id, str) or not page_instance_id:
+				page_instance_id = None
+
 			render = self.render_sessions.get(rid)
 			created_render = render is None
 			if render is None:
-				# The client will try to attach to a non-existing RouteMount, which will cause a reload down the line
 				render = self.create_render(
 					rid, session, client_address=get_client_address_socketio(environ)
 				)
@@ -842,69 +849,98 @@ class App:
 						+ f"owner={owner} session={session.sid}"
 					)
 
-			# Authorize before binding the socket. A denied (re)connect must not
-			# rebind or tear down an existing render that another live socket may
-			# still be using; only the render we created for this attempt is ours
-			# to clean up.
+			# Claim synchronously before connect middleware can yield. A reconnect from
+			# the same page may replace its socket; another page must reload instead.
+			page_instance_claimed = rid not in self._render_to_page_instance
+			if page_instance_claimed:
+				self._render_to_page_instance[rid] = page_instance_id
+			elif self._render_to_page_instance[rid] != page_instance_id:
+				self.close_session_if_inactive(session.sid)
+				raise SocketIOConnectionRefusedError(
+					"Render session is active in another page instance",
+					{"code": RENDER_ID_COLLISION_CODE},
+				)
+			connect_attempt = object()
+			self._render_connect_attempts[rid] = connect_attempt
+
 			connect_error: Exception | None = None
-			with PulseContext.update(session=session, render=render):
+			try:
+				with PulseContext.update(session=session, render=render):
 
-				async def _next():
-					return Ok(None)
+					async def _next():
+						return Ok(None)
 
-				def _normalize_connect_response(res: Any) -> ConnectResponse:
-					if isinstance(res, (Ok, Deny)):
-						return res  # type: ignore[return-value]
-					# Treat any other value as allow
-					return Ok(None)
+					def _normalize_connect_response(res: Any) -> ConnectResponse:
+						if isinstance(res, (Ok, Deny)):
+							return res  # type: ignore[return-value]
+						return Ok(None)
 
-				try:
-					res = await self.middleware.connect(
-						request=PulseRequest.from_socketio_environ(environ, auth),
-						session=session.data,
-						next=_next,
-					)
-					res = _normalize_connect_response(res)
-				except Exception as exc:
-					# Treat a middleware error as allow, but surface it to the
-					# client once the socket is bound (see below).
-					connect_error = exc
-					res = Ok(None)
-				if isinstance(res, Deny):
-					if created_render:
-						self.close_render(rid)
-					else:
-						self.close_session_if_inactive(session.sid)
-					raise ConnectionRefusedError("Socket connection denied")
+					try:
+						res = await self.middleware.connect(
+							request=PulseRequest.from_socketio_environ(environ, auth),
+							session=session.data,
+							next=_next,
+						)
+						res = _normalize_connect_response(res)
+					except Exception as exc:
+						connect_error = exc
+						res = Ok(None)
 
-				# Bind the socket inside the session context so query resume
-				# (and recreated interval effects) capture the same
-				# (session, render) context as initial fetches.
-				def on_message(message: ServerMessage):
-					payload = serialize(message)
-					# `serialize` returns a tuple, which socket.io will mistake for multiple arguments
-					payload = list(payload)
-					self._tasks.create_task(
-						self.sio.emit("message", list(payload), to=sid)
-					)
+					if (
+						self.render_sessions.get(rid) is not render
+						or rid not in self._render_to_page_instance
+						or self._render_to_page_instance[rid] != page_instance_id
+						or self._render_connect_attempts.get(rid) is not connect_attempt
+					):
+						raise SocketIOConnectionRefusedError(
+							"Render session changed during socket connection",
+							{"code": RENDER_ID_COLLISION_CODE},
+						)
+					if isinstance(res, Deny):
+						if created_render:
+							self.close_render(rid)
+						else:
+							self.close_session_if_inactive(session.sid)
+						raise ConnectionRefusedError("Socket connection denied")
 
-				render.connect(on_message)
-				# Map socket sid to renderId for message routing. If the client
-				# reconnected before the old socket's disconnect fired, unmap the
-				# old socket so its late disconnect can't tear down this connection.
-				old_sid = self._render_to_socket.get(rid)
-				if old_sid is not None and old_sid != sid:
-					self._socket_to_render.pop(old_sid, None)
-				self._socket_to_render[sid] = rid
-				self._render_to_socket[rid] = sid
+					def on_message(message: ServerMessage):
+						payload = list(serialize(message))
+						self._tasks.create_task(
+							self.sio.emit("message", payload, to=sid)
+						)
 
-				# Cancel any pending cleanup since session is now connected
-				self._cancel_render_cleanup(rid)
+					render.connect(on_message)
+					old_sid = self._render_to_socket.get(rid)
+					if old_sid is not None and old_sid != sid:
+						self._socket_to_render.pop(old_sid, None)
+					self._socket_to_render[sid] = rid
+					self._render_to_socket[rid] = sid
+					self._cancel_render_cleanup(rid)
 
-				# Surface any connect-middleware error now that the socket is bound
-				# (reported pre-bind it would be dropped for a fresh render).
-				if connect_error is not None:
-					render.report_error("/", "connect", connect_error)
+					if connect_error is not None:
+						render.report_error("/", "connect", connect_error)
+			except Exception:
+				owns_connect_attempt = (
+					self._render_connect_attempts.get(rid) is connect_attempt
+				)
+				if owns_connect_attempt:
+					self._render_connect_attempts.pop(rid, None)
+				if (
+					page_instance_claimed
+					and owns_connect_attempt
+					and self.render_sessions.get(rid) is render
+					and self._render_to_socket.get(rid) is None
+					and self._render_to_page_instance.get(rid) == page_instance_id
+				):
+					self._render_to_page_instance.pop(rid, None)
+				if (
+					owns_connect_attempt
+					and self.render_sessions.get(rid) is render
+					and self._render_to_socket.get(rid) is None
+					and not render.connected
+				):
+					self._schedule_render_cleanup(rid)
+				raise
 
 		@self.sio.event
 		def disconnect(sid: str):  # pyright: ignore[reportUnusedFunction]
@@ -1223,6 +1259,8 @@ class App:
 		# Cancel any pending cleanup task
 		self._cancel_render_cleanup(rid)
 		self._render_message_locks.pop(rid, None)
+		self._render_to_page_instance.pop(rid, None)
+		self._render_connect_attempts.pop(rid, None)
 		socket_sid = self._render_to_socket.pop(rid, None)
 		if socket_sid is not None:
 			self._socket_to_render.pop(socket_sid, None)

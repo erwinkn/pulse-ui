@@ -109,6 +109,63 @@ async def test_router_prefers_query_param(backend_servers: dict[str, str]) -> No
 
 
 @pytest.mark.asyncio
+async def test_router_keeps_form_posts_on_original_deployment_after_promotion(
+	unused_tcp_port_factory: Callable[[], int],
+) -> None:
+	runners: list[web.AppRunner] = []
+	backends: dict[str, str] = {}
+
+	async def start_backend(name: str, status: int) -> None:
+		app = web.Application()
+
+		async def submit(request: web.Request) -> web.Response:
+			return web.json_response(
+				{
+					"deployment": name,
+					"query": dict(request.query),
+				},
+				status=status,
+			)
+
+		app.router.add_post("/_pulse/forms/render-1/form-1", submit)
+		runner = web.AppRunner(app)
+		await runner.setup()
+		port = unused_tcp_port_factory()
+		site = web.TCPSite(runner, "127.0.0.1", port)
+		await site.start()
+		runners.append(runner)
+		backends[name] = f"http://127.0.0.1:{port}"
+
+	await start_backend("prod-260721-190711", 204)
+	await start_backend("prod-260721-201609", 410)
+	app = build_app(
+		StaticResolver(
+			backends=backends,
+			active_deployment="prod-260721-201609",
+		)
+	)
+	try:
+		async with AsyncClient(
+			transport=ASGITransport(app=app),
+			base_url="http://testserver",
+		) as client:
+			response = await client.post(
+				"/_pulse/forms/render-1/form-1",
+				params={
+					"foo": "1",
+					"pulse_deployment": "prod-260721-190711",
+				},
+			)
+	finally:
+		await app.state.router.close()
+		for runner in runners:
+			await runner.cleanup()
+
+	assert response.status_code == 204
+	assert response.headers["x-pulse-selected-deployment"] == "prod-260721-190711"
+
+
+@pytest.mark.asyncio
 async def test_router_blocks_internal_paths(backend_servers: dict[str, str]) -> None:
 	app = build_app(StaticResolver(backends=backend_servers, active_deployment="v2"))
 	async with AsyncClient(

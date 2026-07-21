@@ -51,6 +51,43 @@ describe("submitForm", () => {
 		);
 	});
 
+	it("applies current directives to form POSTs and keeps directive values authoritative", async () => {
+		const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+		globalThis.fetch = fetchMock as any;
+		const event = makeSubmitEvent();
+		const formData = new FormData();
+		formData.set("name", "Ada");
+		let currentDirectives = {
+			query: {
+				pulse_deployment: "prod-b",
+				router: "stable",
+			},
+			headers: {
+				"x-pulse-test": "yes",
+			},
+		};
+
+		await submitForm({
+			event,
+			action: "http://pulse.test/submit?foo=1&pulse_deployment=prod-a",
+			formData,
+			directives: () => currentDirectives,
+		});
+
+		const call = fetchMock.mock.calls[0];
+		expect(call).toBeDefined();
+		const [url, init] = call as unknown as [URL, RequestInit];
+		expect(url).toEqual(
+			new URL(
+				"http://pulse.test/submit?foo=1&pulse_deployment=prod-b&router=stable",
+				window.location.href,
+			),
+		);
+		const headers = new Headers(init.headers);
+		expect(headers.get("x-pulse-test")).toBe("yes");
+		expect(headers.has("content-type")).toBe(false);
+	});
+
 	it("encodes structured values and files as Pulse multipart data", async () => {
 		const fetchMock = vi.fn(
 			async (_input: RequestInfo | URL, _init?: RequestInit) =>

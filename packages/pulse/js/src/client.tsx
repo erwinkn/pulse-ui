@@ -2,6 +2,7 @@ import type { NavigateFunction } from "react-router";
 import { io, type Socket } from "socket.io-client";
 import { ChannelBridge, PulseChannelResetError } from "./channel";
 import type { RouteInfo } from "./helpers";
+import { pulseFetch } from "./http";
 import type {
 	ClientApiResultMessage,
 	ClientCallbackMessage,
@@ -441,20 +442,11 @@ export class PulseSocketIOClient {
 
 	async #performApiCall(msg: ServerApiCallMessage) {
 		try {
-			const res = await fetch(msg.url, {
+			const res = await pulseFetch(msg.url, {
+				directives: () => this.#directives,
 				method: msg.method || "GET",
-				headers: {
-					...(msg.headers || {}),
-					...(msg.body != null && !("content-type" in (msg.headers || {}))
-						? { "content-type": "application/json" }
-						: {}),
-				},
-				body:
-					msg.body != null
-						? typeof msg.body === "string"
-							? msg.body
-							: JSON.stringify(msg.body)
-						: undefined,
+				headers: msg.headers || {},
+				jsonBody: msg.body,
 				credentials: msg.credentials || "include",
 			});
 			const headersObj: Record<string, string> = {};

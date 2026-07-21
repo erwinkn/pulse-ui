@@ -353,8 +353,23 @@ class QueryParamProperty(StateProperty, InitializableProperty):
 		super().__set_name__(owner, name)
 		self.param_name = name
 
+	def hydrate(self, state: "State") -> None:
+		ctx = PulseContext.get()
+		if ctx.render is None or ctx.route is None:
+			raise RuntimeError(
+				"QueryParam properties require a route render context. Create the state inside a component render."
+			)
+		raw = ctx.route.queryParams.get(self.param_name)
+		value = _parse_query_param_value(
+			raw,
+			default=self.default_value,
+			codec=self.codec,
+			param=self.param_name,
+		)
+		self.__set__(state, value)
+
 	@override
-	def initialize(self, state: "State", name: str) -> None:
+	def initialize(self, state: "State", name: str) -> "QueryParamSync":
 		ctx = PulseContext.get()
 		if ctx.render is None or ctx.route is None:
 			raise RuntimeError(
@@ -363,6 +378,7 @@ class QueryParamProperty(StateProperty, InitializableProperty):
 		sync = ctx.route.query_param_sync
 		registration = sync.register(state, name, self)
 		setattr(state, f"_query_param_reg_{name}", registration)
+		return sync
 
 
 @dataclass
@@ -425,8 +441,6 @@ class QueryParamSync(Disposable):
 		)
 		self._bindings[param] = binding
 		self._ensure_effects()
-		self._apply_route_to_binding(binding)
-		self._prime_effects()
 		return QueryParamRegistration(self, param)
 
 	def unregister(self, param: str) -> None:
@@ -457,8 +471,8 @@ class QueryParamSync(Disposable):
 						lazy=True,
 					)
 
-	def _prime_effects(self) -> None:
-		if self._route_effect:
+	def prime(self) -> None:
+		if self._route_effect and self._route_effect.runs == 0:
 			self._route_effect.run()
 		if self._state_effect:
 			self._state_effect.run()
@@ -480,6 +494,8 @@ class QueryParamSync(Disposable):
 
 	def _sync_from_route(self) -> None:
 		_ = self.route.queryParams
+		if self._route_effect and self._route_effect.runs == 0:
+			return
 		for binding in self._bindings.values():
 			self._apply_route_to_binding(binding)
 

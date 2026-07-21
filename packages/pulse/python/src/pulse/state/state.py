@@ -230,6 +230,25 @@ class State(Disposable, metaclass=StateMeta):
 
 	_scope: Scope
 
+	def __new__(cls, *args: Any, **kwargs: Any):
+		instance = super().__new__(cls)
+		for _, attr in instance._initializable_properties():
+			if isinstance(attr, QueryParamProperty):
+				attr.hydrate(instance)
+		return instance
+
+	def _initializable_properties(
+		self,
+	) -> Iterator[tuple[str, InitializableProperty]]:
+		for cls in self.__class__.__mro__:
+			if cls is State or cls is ABC:
+				continue
+			for name, attr in cls.__dict__.items():
+				if getattr(self.__class__, name, attr) is not attr:
+					continue
+				if isinstance(attr, InitializableProperty):
+					yield name, attr
+
 	def _initialize(self):
 		# Idempotent: avoid double-initialization when subclass calls super().__init__
 		status = getattr(self, STATE_STATUS_FIELD, StateStatus.UNINITIALIZED)
@@ -242,18 +261,15 @@ class State(Disposable, metaclass=StateMeta):
 		setattr(self, STATE_STATUS_FIELD, StateStatus.INITIALIZING)
 
 		self._scope = Scope()
+		query_param_sync = None
 		with self._scope:
-			# Traverse MRO so effects declared on base classes are also initialized
-			for cls in self.__class__.__mro__:
-				if cls is State or cls is ABC:
-					continue
-				for name, attr in cls.__dict__.items():
-					# If the attribute is shadowed in a subclass with a non-StateEffect, skip
-					if getattr(self.__class__, name, attr) is not attr:
-						continue
-					if isinstance(attr, InitializableProperty):
-						# Initialize properties like state effects or queries
-						attr.initialize(self, name)
+			for name, attr in self._initializable_properties():
+				if isinstance(attr, QueryParamProperty):
+					query_param_sync = attr.initialize(self, name)
+				else:
+					attr.initialize(self, name)
+		if query_param_sync is not None:
+			query_param_sync.prime()
 
 		setattr(self, STATE_STATUS_FIELD, StateStatus.INITIALIZED)
 

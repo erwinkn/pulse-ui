@@ -281,7 +281,8 @@ def SearchPage():
 ```
 
 **Sync behavior (two-way):**
-- On load / URL change (including back/forward), the param is parsed into the field; a missing param yields the default. Parse failures raise `ValueError` with the param name.
+- On load, the param is parsed before the State constructor runs, so constructor logic can use it. A missing param yields the default; constructor writes take precedence. Parse failures raise `ValueError` with the param name.
+- On URL changes (including back/forward), the new param is parsed into the field.
 - Assigning the field updates the URL via a `replace` navigation (no new history entry). Other query params in the URL are preserved.
 - A value equal to the default — or `None` — is **omitted** from the URL. (`None` round-trips only when the default is `None`; an empty param value parses as `None` for optional types.)
 

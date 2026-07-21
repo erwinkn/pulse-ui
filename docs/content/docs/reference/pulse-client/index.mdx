@@ -107,16 +107,20 @@ The client maintains a persistent WebSocket connection to the Pulse server:
 ```
 React App                          Pulse Server
     |                                   |
-    |-- attach (path, routeInfo) ------>|
-    |<-------- vdom_init (VDOM) --------|
+    |-- attach (viewId, revision, instanceId) -->|
+    |<------ attach_ack / snapshot -----|
     |                                   |
-    |<------ vdom_update (ops[]) -------|  (on state change)
+    |<-- vdom_update (base -> revision)-|  (on state change)
     |                                   |
-    |-- callback (path, id, args) ----->|  (on user interaction)
+    |-- callback (viewId, revision, id, args) -->|  (on user interaction)
     |                                   |
 ```
 
 When a user interacts with the UI, callbacks are sent to the server. The server updates state and sends VDOM patches back. The client applies these patches incrementally, preserving React's reconciliation benefits.
+
+Each mounted view has a stable ID and monotonic revision. Callbacks carry both, so a delayed event runs against the callback the user actually saw. Pulse reuses callbacks when their identity is provably stable—such as equivalent default captures, bound methods, partials, and `ps.stable()` wrappers—while changed handlers are stored as sparse per-key versions for the mount suspension window.
+
+Attach attempts also have unique IDs. Installing a snapshot starts a fresh attach, so a late acknowledgement cannot confirm or roll back newer view state. If server reconnect buffering grows too large, Pulse discards the incremental replay and returns one authoritative snapshot instead. The browser also caps its combined disconnected-message and pre-attach callback backlog at 10,000 messages, then reloads to restore synchronization.
 
 ## See Also
 

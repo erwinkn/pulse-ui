@@ -235,6 +235,10 @@ class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
 		self._update_interval()
 		if self._interval is not None:
 			return
+		self._refetch_if_stale()
+
+	@override
+	def _refetch_if_stale(self) -> None:
 		observers = [obs for obs in self._observers if obs._enabled.value]  # pyright: ignore[reportPrivateUsage]
 		if not observers:
 			return

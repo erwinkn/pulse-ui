@@ -58,6 +58,8 @@ interface PulsePrerender {
 }
 
 interface PulsePrerenderView {
+  viewId: string;
+  revision: number;
   vdom: VDOM;
 }
 ```
@@ -373,6 +375,10 @@ interface ClientAttachMessage {
   type: "attach";
   path: string;
   routeInfo: RouteInfo;
+  attachId: string;
+  viewId: string;
+  revision: number;
+  instanceId: string;
 }
 ```
 
@@ -384,6 +390,8 @@ Invokes a server callback.
 interface ClientCallbackMessage {
   type: "callback";
   path: string;
+  viewId: string;
+  revision: number;
   callback: string;
   args: any[];
 }
@@ -397,6 +405,8 @@ Updates route info for an attached path.
 interface ClientUpdateMessage {
   type: "update";
   path: string;
+  viewId: string;
+  revision: number;
   routeInfo: RouteInfo;
 }
 ```
@@ -409,6 +419,8 @@ Detaches from a view path.
 interface ClientDetachMessage {
   type: "detach";
   path: string;
+  viewId: string;
+  instanceId: string;
 }
 ```
 
@@ -459,7 +471,6 @@ interface ClientChannelResponseMessage {
 
 ```ts
 type ServerMessage =
-  | ServerInitMessage
   | ServerUpdateMessage
   | ServerErrorMessage
   | ServerApiCallMessage
@@ -468,14 +479,14 @@ type ServerMessage =
   | ServerChannelResponseMessage;
 ```
 
-#### ServerInitMessage
+#### ViewSnapshot
 
-Initial VDOM for a view.
+An authoritative VDOM checkpoint returned by prerendering or attach recovery.
 
 ```ts
-interface ServerInitMessage {
-  type: "vdom_init";
-  path: string;
+interface ViewSnapshot {
+  viewId: string;
+  revision: number;
   vdom: VDOM;
 }
 ```
@@ -488,6 +499,9 @@ VDOM updates.
 interface ServerUpdateMessage {
   type: "vdom_update";
   path: string;
+  viewId: string;
+  baseRevision: number;
+  revision: number;
   ops: VDOMUpdate[];
 }
 ```
@@ -500,6 +514,7 @@ Server error information.
 interface ServerErrorMessage {
   type: "server_error";
   path: string;
+  viewId?: string;
   error: ServerError;
 }
 
@@ -537,8 +552,10 @@ interface ServerNavigateToMessage {
   path: string;
   replace: boolean;
   hard: boolean;
-  sourceRoutePath?: string;
-  sourcePath?: string;
+  origin?: {
+    viewId: string;
+    pathname: string;
+  };
 }
 ```
 
@@ -587,9 +604,16 @@ interface PulseClient {
   isConnected(): boolean;
   onConnectionChange(listener: ConnectionStatusListener): () => void;
   updateRoute(path: string, routeInfo: RouteInfo): void;
-  invokeCallback(path: string, callback: string, args: any[]): void;
-  attach(path: string, view: MountedView): void;
-  detach(path: string): void;
+  invokeCallback(
+    path: string,
+    viewId: string,
+    revision: number,
+    callback: string,
+    args: any[],
+  ): void;
+  attach(path: string, snapshot: ViewSnapshot, instanceId: string, view: MountedView): void;
+  installSnapshot(path: string, snapshot: ViewSnapshot): void;
+  detach(path: string, instanceId: string): void;
 }
 ```
 
@@ -616,8 +640,8 @@ Callbacks for a mounted view.
 ```ts
 interface MountedView {
   routeInfo: RouteInfo;
-  onInit: (view: PulsePrerenderView) => void;
-  onUpdate: (ops: VDOMUpdate[]) => void;
+  onInit: (view: ViewSnapshot) => void;
+  onUpdate: (ops: VDOMUpdate[], viewId: string, revision: number) => void;
   onJsExec: (msg: ServerJsExecMessage) => void;
   onServerError: (error: ServerError) => void;
 }

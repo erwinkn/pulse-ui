@@ -505,10 +505,7 @@ class QueryParamSync(Disposable):
 			raw_params = info["queryParams"]
 			current_params = dict(cast(Mapping[str, str], raw_params))
 			pathname = info["pathname"]
-			source_route_path = self.route.route_path
-			source_path = pathname
-			mount = self.render.route_mounts.get(source_route_path)
-			source_mount_id = mount.mount_id if mount is not None else None
+			mount = self.render.route_mounts.get(self.route.route_path)
 			hash_frag = info["hash"]
 		query_params = dict(current_params)
 		for binding in self._bindings.values():
@@ -544,11 +541,9 @@ class QueryParamSync(Disposable):
 			path=path,
 			replace=True,
 			hard=False,
-			sourceRoutePath=source_route_path,
-			sourcePath=source_path,
 		)
-		if source_mount_id is not None:
-			message["sourceMountId"] = source_mount_id
+		if mount is not None:
+			message["origin"] = mount.origin()
 		self.render.send(message)
 
 	@override

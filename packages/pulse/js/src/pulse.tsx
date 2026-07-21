@@ -11,9 +11,8 @@ import {
 import { useLocation, useNavigate, useParams } from "react-router";
 import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
 import type { RouteInfo } from "./helpers";
-import type { ServerError } from "./messages";
+import type { ServerError, ViewSnapshot } from "./messages";
 import { VDOMRenderer } from "./renderer";
-import type { VDOM } from "./vdom";
 
 // =================================================================
 // Types
@@ -31,9 +30,7 @@ export interface PulseConfig {
 	apiPrefix: string;
 }
 
-export type PulsePrerenderView = {
-	vdom: VDOM;
-};
+export type PulsePrerenderView = ViewSnapshot;
 
 export type PulsePrerender = {
 	views: Record<string, PulsePrerenderView>;
@@ -193,8 +190,19 @@ export function PulseView({ path, registry }: PulseViewProps) {
 		() => new VDOMRenderer(client, path, registry),
 		[client, path, registry],
 	);
-	const [tree, setTree] = useState<ReactNode>(() => renderer.init(initialView));
+	const [instanceId] = useState(
+		() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+	);
+	const disposeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const [rendered, setRendered] = useState(() => ({
+		tree: renderer.init(initialView),
+		viewId: initialView.viewId,
+		revision: initialView.revision,
+	}));
 	const [serverError, setServerError] = useState<ServerError | null>(null);
+	useIsomorphicLayoutEffect(() => {
+		renderer.commit(rendered.viewId, rendered.revision);
+	}, [rendered.revision, rendered.viewId, renderer]);
 
 	const location = useLocation();
 	const params = useParams();
@@ -222,14 +230,26 @@ export function PulseView({ path, registry }: PulseViewProps) {
 	// biome-ignore lint/correctness/useExhaustiveDependencies: We don't want to detach on navigation, so another useEffect syncs the routeInfo on navigation.
 	useEffect(() => {
 		if (inBrowser) {
-			client.attach(path, {
+			if (disposeTimer.current) {
+				clearTimeout(disposeTimer.current);
+				disposeTimer.current = null;
+			}
+			client.attach(path, initialView, instanceId, {
 				routeInfo,
 				onInit: (view) => {
-					setTree(renderer.init(view));
+					setRendered({
+						tree: renderer.init(view),
+						viewId: view.viewId,
+						revision: view.revision,
+					});
 					setServerError(null);
 				},
-				onUpdate: (ops) => {
-					setTree((prev) => (prev == null ? prev : renderer.applyUpdates(prev, ops)));
+				onUpdate: (ops, viewId, revision) => {
+					setRendered((prev) => ({
+						tree: prev.tree == null ? prev.tree : renderer.applyUpdates(prev.tree, ops),
+						viewId,
+						revision,
+					}));
 					setServerError(null);
 				},
 				onJsExec: (msg) => {
@@ -240,18 +260,24 @@ export function PulseView({ path, registry }: PulseViewProps) {
 					} catch (e) {
 						error = e instanceof Error ? e.message : String(e);
 					}
-					client.sendJsResult(msg.id, result, error);
+					client.sendJsResult(msg.viewId, msg.id, result, error);
 				},
 				onServerError: setServerError,
 			});
 			return () => {
-				renderer.clearPendingCallbacks();
-				renderer.dispose();
-				client.detach(path);
+				client.detach(path, instanceId);
+				if (process.env.NODE_ENV === "production") {
+					renderer.dispose();
+					return;
+				}
+				disposeTimer.current = setTimeout(() => {
+					disposeTimer.current = null;
+					renderer.dispose();
+				}, 0);
 			};
 		}
 		//  routeInfo is NOT included here on purpose
-	}, [client, renderer, path]);
+	}, [client, instanceId, renderer, path]);
 
 	useEffect(() => {
 		if (inBrowser) {
@@ -260,25 +286,34 @@ export function PulseView({ path, registry }: PulseViewProps) {
 	}, [client, path, routeInfo]);
 	// Hack for our current prerendering setup on client-side navigation. Will be improved soon
 	const hasRendered = useRef(false);
+	const renderedWith = useRef(renderer);
 	useIsomorphicLayoutEffect(() => {
 		// First rendering pass, no need to update the tree
 		if (!hasRendered.current) {
 			hasRendered.current = true;
 		}
 		// 2nd+ rendering pass. Happens when a route stays mounted on navigation.
-		else {
-			setTree(renderer.init(initialView));
+		else if (renderedWith.current !== renderer) {
+			setRendered({
+				tree: renderer.init(initialView),
+				viewId: initialView.viewId,
+				revision: initialView.revision,
+			});
 		}
+		else {
+			client.installSnapshot(path, initialView);
+		}
+		renderedWith.current = renderer;
 		// Note: Do NOT reset hasRendered in cleanup. The cleanup runs when effect 
 		// deps change and at least once on mount with strict mode,
 		// not just on unmount, which would cause subsequent runs to skip setTree.
-	}, [initialView, renderer]);
+	}, [client, initialView, path, renderer]);
 
 	if (serverError) {
 		return <ServerErrorPopup error={serverError} />;
 	}
 
-	return tree;
+	return rendered.tree;
 }
 
 function ServerErrorPopup({ error }: { error: ServerError }) {

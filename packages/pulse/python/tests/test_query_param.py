@@ -49,6 +49,52 @@ def flush_query_param_sync(route_ctx: RouteContext) -> None:
 
 
 class TestQueryParam:
+	def test_query_param_is_available_in_state_constructor(self):
+		class QState(ps.State):
+			q: ps.QueryParam[str] = "default"
+			initial_q: str = ""
+
+			def __init__(self):
+				self.initial_q = self.q
+
+		app, session, route_ctx = make_context(
+			make_route_info("/", query_params={"q": "hello"})
+		)
+		session.connect(lambda _msg: None)
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			state = QState()
+
+		assert state.initial_q == "hello"
+
+	def test_state_constructor_can_override_query_param(self):
+		class QState(ps.State):
+			q: ps.QueryParam[str] = "default"
+			page: ps.QueryParam[int] = 1
+
+			def __init__(self):
+				assert self.q == "from-url"
+				assert self.page == 2
+				self.q = "from-constructor"
+				self.page = 3
+
+		app, session, route_ctx = make_context(
+			make_route_info("/", query_params={"q": "from-url", "page": "2"})
+		)
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			state = QState()
+			flush_query_param_sync(route_ctx)
+
+		assert state.q == "from-constructor"
+		assert state.page == 3
+		assert len(messages) == 1
+		msg = messages[0]
+		assert msg["type"] == "navigate_to"
+		query = parse_qs(urlparse(str(msg["path"])).query)
+		assert query["q"] == ["from-constructor"]
+		assert query["page"] == ["3"]
+
 	def test_state_to_url_preserves_params(self):
 		class QState(ps.State):
 			q: ps.QueryParam[str] = ""

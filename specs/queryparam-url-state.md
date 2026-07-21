@@ -18,7 +18,7 @@ class Filters(ps.State):
 ```
 
 ## Behavior
-- Init: if URL has param -> parse -> set state; else use class default.
+- Init: before the state constructor runs, parse a URL param into the field; if it is missing, use the class default. Constructor writes take precedence.
 - State->URL: setting property updates URL query param.
 - URL->State: browser navigation or manual URL edit updates property.
 - Removal: if value is `None` or equals default -> param removed.

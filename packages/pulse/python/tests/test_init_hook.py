@@ -47,6 +47,36 @@ def test_init_preserves_object_identity_and_runs_once():
 	assert second_list == [0, 1]
 
 
+def test_init_rewrites_component_renamed_before_decoration():
+	def make_component(label: str):
+		def Example() -> tuple[str, int, int]:
+			with ps.init():
+				state = {"count": 0}
+			state["count"] += 1
+			return label, id(state), state["count"]
+
+		Example.__name__ = "RenamedExample"
+		return ps.component(Example)
+
+	first = make_component("first")
+	second = make_component("second")
+	with HookContext():
+		first_label, first_id, first_count = cast(
+			tuple[str, int, int], cast(object, first.fn())
+		)
+		_, second_id, second_count = cast(
+			tuple[str, int, int], cast(object, first.fn())
+		)
+	with HookContext():
+		second_label, _, _ = cast(tuple[str, int, int], cast(object, second.fn()))
+
+	assert first_label == "first"
+	assert second_label == "second"
+	assert first_id == second_id
+	assert first_count == 1
+	assert second_count == 2
+
+
 def test_init_reruns_when_key_changes():
 	calls: list[str] = []
 

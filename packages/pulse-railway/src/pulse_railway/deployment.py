@@ -490,6 +490,7 @@ def railway_up_command(
 		"--service",
 		service_name,
 		"--ci",
+		"--detach",
 	]
 	command.append("--path-as-root")
 	if no_gitignore:

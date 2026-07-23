@@ -144,7 +144,7 @@ Use either the name or ID form for each target, not both.
 - deploy app file is positional: `pulse-railway deploy path/to/app.py`
 - `--context` resolves from the shell invocation directory
 - `--web-root` for deploy overrides must be relative to the deploy context
-- source deploys use `railway up`, so the Railway CLI must be available
+- source deploys use detached `railway up` and poll the Railway API for completion, so the Railway CLI must be available
 - image deploys use `docker buildx build --push`
 
 ## Railway Model

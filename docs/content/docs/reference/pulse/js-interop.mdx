@@ -65,7 +65,9 @@ from pulse import JsFunction
 | `fn` | `Callable` | Original Python function |
 | `id` | `str` | Unique identifier for deduplication |
 | `deps` | `dict[str, Expr]` | Resolved dependencies |
-| `js_name` | `str` | Unique JS function name (e.g., `"myFunc_1"`) |
+| `js_name` | `str` | Unique JS function name based on the callable name captured when wrapped (e.g., `"myFunc_1"`) |
+
+Changing the Python callable's `__name__` after wrapping does not rename its emitted JavaScript symbol.
 
 ### Methods
 

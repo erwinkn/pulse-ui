@@ -183,12 +183,16 @@ class JsFunction(Expr, Generic[*Args, R]):
 
 	fn: Callable[[*Args], R]
 	id: str
+	# Unique JS identifier, frozen at wrapping time so later renames of the
+	# Python callable don't change the emitted symbol.
+	js_name: str
 	deps: dict[str, Expr]
 	_transpiled: Function | None = field(default=None)
 
 	def __init__(self, fn: Callable[..., Any], *, _register: bool = True) -> None:
 		self.fn = fn
 		self.id = next_id()
+		self.js_name = f"{to_js_identifier(fn.__name__)}_{self.id}"
 		self._transpiled = None
 		if _register:
 			# Register self in cache BEFORE analyzing deps (handles cycles)
@@ -199,11 +203,6 @@ class JsFunction(Expr, Generic[*Args, R]):
 	@override
 	def __call__(self, *args: *Args) -> R:  # pyright: ignore[reportIncompatibleMethodOverride]
 		return Expr.__call__(self, *args)  # pyright: ignore[reportReturnType]
-
-	@property
-	def js_name(self) -> str:
-		"""Unique JS identifier for this function."""
-		return f"{to_js_identifier(self.fn.__name__)}_{self.id}"
 
 	@override
 	def emit(self, out: list[str]) -> None:
@@ -276,22 +275,21 @@ class JsxFunction(Expr, Generic[P, R]):
 
 	fn: Callable[P, R]
 	id: str
+	# Unique JS identifier, frozen at wrapping time so later renames of the
+	# Python callable don't change the emitted symbol.
+	js_name: str
 	deps: dict[str, Expr]
 	_transpiled: Function | None = field(default=None)
 
 	def __init__(self, fn: Callable[..., Any]) -> None:
 		self.fn = fn
 		self.id = next_id()
+		self.js_name = f"{to_js_identifier(fn.__name__)}_{self.id}"
 		self._transpiled = None
 		# Register self in cache BEFORE analyzing deps (handles cycles)
 		FUNCTION_CACHE[fn] = self
 		# Now analyze and build deps
 		self.deps = analyze_deps(fn)
-
-	@property
-	def js_name(self) -> str:
-		"""Unique JS identifier for this function."""
-		return f"{to_js_identifier(self.fn.__name__)}_{self.id}"
 
 	@override
 	def emit(self, out: list[str]) -> None:

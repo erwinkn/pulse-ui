@@ -16,7 +16,7 @@ from pulse.transpiler import (
 	javascript,
 	registered_functions,
 )
-from pulse.transpiler.function import Constant, analyze_deps
+from pulse.transpiler.function import Constant, JsxFunction, analyze_deps
 
 
 @pytest.fixture(autouse=True)
@@ -46,6 +46,34 @@ class TestJavascriptDecorator:
 
 		assert isinstance(add, JsFunction)
 		assert add.js_name == "add_1"
+
+	def test_js_function_name_is_stable_after_wrapping(self):
+		@javascript
+		def stable(value: int) -> int:
+			return value
+
+		name = f"stable_{stable.id}"
+		stable.fn.__name__ = "renamed_before_transpile"
+		declaration = emit(stable.transpile())
+		stable.fn.__name__ = "renamed_after_transpile"
+
+		assert stable.js_name == name
+		assert emit(stable) == name
+		assert declaration.startswith(f"function {name}(")
+
+	def test_jsx_function_name_is_stable_after_wrapping(self):
+		def Stable(value: int) -> int:
+			return value
+
+		stable = JsxFunction(Stable)
+		name = f"Stable_{stable.id}"
+		stable.fn.__name__ = "RenamedBeforeTranspile"
+		declaration = emit(stable.transpile())
+		stable.fn.__name__ = "RenamedAfterTranspile"
+
+		assert stable.js_name == name
+		assert emit(stable) == name
+		assert declaration.startswith(f"function {name}(")
 
 	def test_caching(self):
 		"""Test that the same function returns the same JsFunction."""

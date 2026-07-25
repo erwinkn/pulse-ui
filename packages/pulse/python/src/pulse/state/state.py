@@ -20,6 +20,7 @@ from pulse.state.property import (
 	ComputedProperty,
 	InitializableProperty,
 	StateEffect,
+	StateMemberDescriptor,
 	StateProperty,
 )
 from pulse.state.query_param import QueryParam, QueryParamProperty, extract_query_param
@@ -135,6 +136,18 @@ class StateMeta(ABCMeta):
 			prop.__set_name__(cls, attr_name)
 
 		return cls
+
+	@override
+	def __setattr__(cls, name: str, value: Any) -> None:
+		# __set_name__ only runs at class creation, so late assignment would
+		# bypass the one-member-per-descriptor binding contract.
+		if isinstance(value, StateMemberDescriptor):
+			raise TypeError(
+				f"Cannot assign {type(value).__name__} '{value.name}' to "
+				+ f"'{cls.__name__}.{name}' after class creation. Define state "
+				+ "members in the class body."
+			)
+		super().__setattr__(name, value)
 
 	@override
 	def __call__(cls, *args: Any, **kwargs: Any):

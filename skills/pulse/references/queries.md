@@ -2,6 +2,8 @@
 
 Async data fetching with caching, loading states, and automatic refetching.
 
+On each State instance, query, infinite-query, and mutation descriptors store a separate result wrapper per descriptor. This is independent of query keys, which still control shared query data. Inheritance preserves the defining descriptor; fresh same-name subclass descriptors get separate wrappers, including through `super()`. Assigning one descriptor object to multiple members or classes raises `TypeError`; create a fresh descriptor for each member.
+
 ## `@ps.query`
 
 Cached async data fetching on State methods.

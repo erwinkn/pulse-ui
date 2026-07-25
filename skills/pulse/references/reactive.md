@@ -132,7 +132,7 @@ class Tracker(ps.State):
 With options:
 
 ```python
-@ps.effect(name="fetcher", lazy=True, interval=10.0)
+@ps.effect(lazy=True, interval=10.0)
 async def fetch_data(self):
     self.data = await api.get_data()
 ```

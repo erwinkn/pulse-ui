@@ -89,7 +89,7 @@ def computed(fn: Callable[[TState], T], *, name: str | None = None) -> ComputedP
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `fn` | `Callable` | required | Function to compute the value |
-| `name` | `str \| None` | `None` | Debug name for the computed |
+| `name` | `str \| None` | `None` | Diagnostic name. State methods default to the class member name; standalone computeds default to the callable name. Does not affect member identity. |
 
 ### Usage
 
@@ -103,6 +103,8 @@ class MyState(ps.State):
     def doubled(self):
         return self.count * 2
 ```
+
+Each state instance caches one computed per descriptor. Inherited descriptors share the base definition; a fresh same-name descriptor on a subclass gets its own cache entry, so `super()` can access the base computed independently. Assigning one descriptor object to multiple members or classes raises `TypeError`; create a fresh descriptor for each member.
 
 As a standalone computed:
 
@@ -125,7 +127,6 @@ Decorator for side effects that run when dependencies change.
 def effect(
     fn: EffectFn,
     *,
-    name: str | None = None,
     immediate: bool = False,
     lazy: bool = False,
     on_error: Callable[[Exception], None] | None = None,
@@ -137,15 +138,16 @@ def effect(
 def effect(fn: AsyncEffectFn, ...) -> AsyncEffect: ...
 
 @overload
-def effect(fn: StateEffectFn[Any]) -> Effect: ...
+def effect(fn: StateEffectFn[Any] | AsyncStateEffectFn[Any]) -> StateEffect[Any]: ...
 ```
+
+On a State method, `@ps.effect` leaves a `StateEffect` descriptor on the class; accessing it on an instance returns the per-instance `Effect`. The effect's debug name is always `"ClassName.method_name"`.
 
 ### Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `fn` | `Callable` | required | Effect function |
-| `name` | `str \| None` | `None` | Debug name |
 | `immediate` | `bool` | `False` | Run synchronously when scheduled (sync only) |
 | `lazy` | `bool` | `False` | Don't run on creation |
 | `on_error` | `Callable[[Exception], None] \| None` | `None` | Error handler |

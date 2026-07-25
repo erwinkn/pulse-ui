@@ -522,7 +522,7 @@ def global_state(
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `factory` | `Callable \| type` | required | State class or factory function |
-| `key` | `str \| None` | `None` | Optional custom key |
+| `key` | `str \| None` | `None` | Stable identity key. Defaults to the factory module plus qualified name. Use a unique, non-empty key for factories created repeatedly from the same lexical definition. |
 
 ### Returns
 
@@ -552,6 +552,27 @@ class UserCache(ps.State):
 def user_profile(user_id: str):
     cache = UserCache(id=user_id)  # Shared per user_id
     return m.Text(cache.data.get("name", "Loading..."))
+```
+
+### Dynamic factories
+
+Factories produced repeatedly from one lexical definition have the same default identity. Give each logical accessor a unique, non-empty key:
+
+```python
+class ScopedSettings(ps.State):
+    scope: str = ""
+
+    def __init__(self, scope: str):
+        self.scope = scope
+
+def make_settings(scope: str):
+    def create_settings():
+        return ScopedSettings(scope)
+
+    return ps.global_state(create_settings, key=f"settings:{scope}")
+
+tenant_settings = make_settings("tenant-a")
+admin_settings = make_settings("admin")
 ```
 
 ---

@@ -37,7 +37,7 @@ from pulse.queries.common import (
 from pulse.queries.effect import AsyncQueryEffect
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.scheduling import TimerHandleLike, create_task, is_pytest, later
-from pulse.state.property import InitializableProperty
+from pulse.state.property import InitializableProperty, StateMemberDescriptor
 from pulse.state.state import State
 
 if TYPE_CHECKING:
@@ -1129,7 +1129,7 @@ class KeyedQueryResult(Generic[T], Disposable):
 			self._observe_effect.dispose()
 
 
-class QueryProperty(Generic[T, TState], InitializableProperty):
+class QueryProperty(StateMemberDescriptor, Generic[T, TState], InitializableProperty):
 	"""Descriptor for state-bound queries created by the @query decorator.
 
 	QueryProperty is the return type of the ``@query`` decorator. It acts as a
@@ -1164,7 +1164,6 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 	```
 	"""
 
-	name: str
 	_fetch_fn: "Callable[[TState], Awaitable[T]]"
 	_keep_alive: bool
 	_keep_previous_data: bool
@@ -1183,7 +1182,6 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 	_on_success_fn: Callable[[TState, T], Any] | None
 	_on_error_fn: Callable[[TState, Exception], Any] | None
 	_fetch_on_mount: bool
-	_priv_result: str
 
 	def __init__(
 		self,
@@ -1200,7 +1198,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		fetch_on_mount: bool = True,
 		key: QueryKey | Callable[[TState], QueryKey] | None = None,
 	):
-		self.name = name
+		super().__init__(name)
 		self._fetch_fn = fetch_fn
 		if key is None:
 			self._key = None
@@ -1225,7 +1223,6 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		self._initial_data = MISSING
 		self._enabled = enabled
 		self._fetch_on_mount = fetch_on_mount
-		self._priv_result = f"__query_{name}"
 
 	# Decorator to attach a key function
 	def key(self, fn: Callable[[TState], QueryKey]):
@@ -1272,10 +1269,9 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		self, state: Any, name: str
 	) -> KeyedQueryResult[T] | UnkeyedQueryResult[T]:
 		# Return cached query instance if present
-		result: KeyedQueryResult[T] | UnkeyedQueryResult[T] | None = getattr(
-			state, self._priv_result, None
-		)
-		if result:
+		cache = self.instance_cache(state)
+		result: KeyedQueryResult[T] | UnkeyedQueryResult[T] | None = cache.get(self)
+		if result is not None:
 			# Don't re-initialize, just return the cached instance
 			return result
 
@@ -1308,7 +1304,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 			)
 
 		# Store result on the instance
-		setattr(state, self._priv_result, result)
+		cache[self] = result
 		return result
 
 	def _create_keyed(

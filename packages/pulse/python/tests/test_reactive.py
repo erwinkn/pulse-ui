@@ -278,7 +278,7 @@ def test_batching():
 def test_effects_run_after_batch():
 	with Batch():
 
-		@effect(name="effect_in_batch")
+		@effect()
 		def e(): ...
 
 		assert e.runs == 0
@@ -414,7 +414,7 @@ def test_diamond_problem():
 
 	d_runs = 0
 
-	@computed(name="d")
+	@computed
 	def d():
 		nonlocal d_runs
 		d_runs += 1
@@ -424,7 +424,7 @@ def test_diamond_problem():
 
 	result = 0
 
-	@effect(name="diamond_effect")
+	@effect()
 	def e():  # pyright: ignore[reportUnusedFunction]
 		nonlocal result
 		result = d()

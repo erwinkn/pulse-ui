@@ -16,6 +16,7 @@ from pulse.helpers import Disposable
 from pulse.reactive import Computed, Effect, Scope, Signal
 from pulse.reactive_extensions import ReactiveProperty
 from pulse.state.property import (
+	MEMBER_CACHE_ATTR,
 	ComputedProperty,
 	InitializableProperty,
 	StateEffect,
@@ -210,6 +211,9 @@ class State(Disposable, metaclass=StateMeta):
 		if isinstance(cls_attr, ComputedProperty):
 			raise AttributeError(f"Cannot set computed property '{name}'")
 
+		if isinstance(cls_attr, StateEffect):
+			raise AttributeError(f"Cannot set effect '{name}'")
+
 		# Reject all other public writes
 		raise AttributeError(
 			"Cannot set non-reactive property '"
@@ -338,9 +342,12 @@ class State(Disposable, metaclass=StateMeta):
 			for effect in state.effects():
 			    print(effect.name)
 		"""
-		for value in self.__dict__.values():
-			if isinstance(value, Effect):
-				yield value
+		cache = self.__dict__.get(MEMBER_CACHE_ATTR, {})
+		for _, attr in self._initializable_properties():
+			if isinstance(attr, StateEffect):
+				effect = cache.get(attr)
+				if effect is not None:
+					yield effect
 
 	def on_dispose(self) -> None:
 		"""
@@ -369,7 +376,8 @@ class State(Disposable, metaclass=StateMeta):
 		"""
 		# Call user-defined cleanup hook first
 		self.on_dispose()
-		for value in self.__dict__.values():
+		member_cache = self.__dict__.get(MEMBER_CACHE_ATTR, {})
+		for value in (*self.__dict__.values(), *member_cache.values()):
 			if isinstance(value, Disposable):
 				value.dispose()
 

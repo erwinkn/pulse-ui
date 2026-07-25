@@ -406,7 +406,8 @@ def global_state(
 	Args:
 		factory: State class or factory function that creates the state instance.
 		key: Optional custom key for the global state. If not provided, a key
-			is derived from the factory's module and qualified name.
+			is derived from the factory's module and qualified name. Factories
+			created repeatedly from one lexical definition must pass unique, non-empty keys.
 
 	Returns:
 		GlobalStateAccessor: A callable that returns the shared state instance.

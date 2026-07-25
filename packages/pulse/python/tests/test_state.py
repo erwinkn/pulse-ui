@@ -174,19 +174,36 @@ class TestState:
 			assert Valid.__dict__["value"] is descriptor
 			assert descriptor.name == "value"
 
-	def test_state_descriptor_late_attachment_works(self):
-		def member(self: ps.State) -> int:
+	def test_state_descriptor_late_assignment_rejected(self):
+		def computed_member(self: ps.State) -> int:
 			return 1
 
-		descriptor = ps.computed(member)
+		async def query_member(self: ps.State) -> int:
+			return 1
+
+		async def infinite_member(self: ps.State, _page: int) -> int:
+			return 1
+
+		async def mutation_member(self: ps.State) -> int:
+			return 1
+
+		def effect_member(self: ps.State) -> None:
+			return None
 
 		class S(ps.State):
 			pass
 
-		type.__setattr__(S, "value", descriptor)
-		assert cast(Any, S()).value == 1
-		# __set_name__ never ran, so diagnostics fall back to the callable name
-		assert descriptor.name == "member"
+		descriptors: list[Any] = [
+			ps.computed(computed_member),
+			ps.query(query_member),
+			ps.infinite_query(initial_page_param=0)(infinite_member),
+			ps.mutation(mutation_member),
+			ps.effect(effect_member),
+		]
+		# __set_name__ only runs at class creation, so late assignment is rejected
+		for descriptor in descriptors:
+			with pytest.raises(TypeError, match="after class creation"):
+				S.value = descriptor  # pyright: ignore[reportAttributeAccessIssue]
 
 	def test_state_effect_stored_in_member_cache(self):
 		class MyState(ps.State):

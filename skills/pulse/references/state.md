@@ -73,6 +73,7 @@ class CartState(ps.State):
 - Can depend on other computed properties
 - Each instance caches one computed per descriptor; fresh same-name subclass descriptors get separate entries, including through `super()`
 - Assigning one descriptor object to multiple members or classes raises `TypeError`; create a fresh descriptor for each member
+- Descriptors must be defined in the class body; assigning one to an existing State class raises `TypeError`
 
 ### When to Use
 

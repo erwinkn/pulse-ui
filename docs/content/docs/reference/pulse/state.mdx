@@ -78,10 +78,10 @@ Decorator for computed (derived) properties.
 
 ```python
 @overload
-def computed(fn: Callable[[], T], *, name: str | None = None) -> Computed[T]: ...
+def computed(fn: Callable[[], T]) -> Computed[T]: ...
 
 @overload
-def computed(fn: Callable[[TState], T], *, name: str | None = None) -> ComputedProperty[T]: ...
+def computed(fn: Callable[[TState], T]) -> ComputedProperty[T]: ...
 ```
 
 ### Parameters
@@ -89,7 +89,8 @@ def computed(fn: Callable[[TState], T], *, name: str | None = None) -> ComputedP
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `fn` | `Callable` | required | Function to compute the value |
-| `name` | `str \| None` | `None` | Diagnostic name. State methods default to the class member name; standalone computeds default to the callable name. Does not affect member identity. |
+
+The diagnostic name is derived automatically: state methods use the class member name, standalone computeds use the callable name.
 
 ### Usage
 
@@ -104,7 +105,7 @@ class MyState(ps.State):
         return self.count * 2
 ```
 
-Each state instance caches one computed per descriptor. Inherited descriptors share the base definition; a fresh same-name descriptor on a subclass gets its own cache entry, so `super()` can access the base computed independently. Assigning one descriptor object to multiple members or classes raises `TypeError`; create a fresh descriptor for each member.
+Each state instance caches one computed per descriptor. Inherited descriptors share the base definition; a fresh same-name descriptor on a subclass gets its own cache entry, so `super()` can access the base computed independently. Assigning one descriptor object to multiple members or classes raises `TypeError`; create a fresh descriptor for each member. Descriptors must be defined in the class body — assigning one to an existing State class also raises `TypeError`.
 
 As a standalone computed:
 

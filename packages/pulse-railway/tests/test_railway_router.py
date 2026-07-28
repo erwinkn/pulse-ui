@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator, Callable
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pulse as ps
 import pytest
 import pytest_asyncio
 import socketio
@@ -50,6 +51,9 @@ async def backend_servers(
 		async def root(_: web.Request) -> web.Response:
 			return web.json_response({"deployment": name})
 
+		async def docs(_: web.Request) -> web.Response:
+			return web.json_response({"deployment": name, "page": "docs"})
+
 		async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
 			ws = web.WebSocketResponse()
 			await ws.prepare(request)
@@ -61,6 +65,7 @@ async def backend_servers(
 			return ws
 
 		app.router.add_get("/", root)
+		app.router.add_get("/docs", docs)
 		app.router.add_get("/ws", websocket_handler)
 		runner = web.AppRunner(app)
 		await runner.setup()
@@ -92,6 +97,91 @@ async def test_router_uses_active_backend(backend_servers: dict[str, str]) -> No
 	assert response.status_code == 200
 	assert response.json() == {"deployment": "v2"}
 	assert response.headers["x-pulse-selected-deployment"] == "v2"
+
+
+@pytest.mark.asyncio
+async def test_router_proxies_app_docs_route(backend_servers: dict[str, str]) -> None:
+	app = build_app(StaticResolver(backends=backend_servers, active_deployment="v2"))
+	async with AsyncClient(
+		transport=ASGITransport(app=app),
+		base_url="http://testserver",
+	) as client:
+		response = await client.get("/docs")
+	await app.state.router.close()
+
+	assert response.status_code == 200
+	assert response.json() == {"deployment": "v2", "page": "docs"}
+	assert response.headers["x-pulse-selected-deployment"] == "v2"
+
+
+def test_router_openapi_excludes_infrastructure_routes() -> None:
+	app = build_app(StaticResolver(backends={}))
+
+	assert app.openapi()["paths"] == {}
+
+
+@pytest.mark.asyncio
+async def test_router_proxies_custom_app_docs_and_openapi(
+	unused_tcp_port_factory: Callable[[], int],
+) -> None:
+	backend_port = unused_tcp_port_factory()
+	backend = ps.App(
+		routes=[],
+		mode="subdomains",
+		fastapi=ps.FastAPIConfig(
+			title="User API",
+			docs_url="/api/docs",
+			redoc_url=None,
+			openapi_url="/api/openapi.json",
+			swagger_ui_oauth2_redirect_url="/api/docs/oauth2-redirect",
+		),
+	)
+
+	@backend.fastapi.get("/api/users")
+	def users() -> list[object]:  # pyright: ignore[reportUnusedFunction]
+		return []
+
+	backend.setup(f"http://127.0.0.1:{backend_port}")
+	backend_server = uvicorn.Server(
+		uvicorn.Config(
+			backend.fastapi,
+			host="127.0.0.1",
+			port=backend_port,
+			log_level="warning",
+		)
+	)
+	backend_task = asyncio.create_task(backend_server.serve())
+	for _ in range(100):
+		if backend_server.started:
+			break
+		await asyncio.sleep(0.01)
+	else:
+		raise RuntimeError("backend server did not start")
+
+	app = build_app(
+		StaticResolver(
+			backends={"v1": f"http://127.0.0.1:{backend_port}"},
+			active_deployment="v1",
+		)
+	)
+	try:
+		async with AsyncClient(
+			transport=ASGITransport(app=app),
+			base_url="http://testserver",
+		) as client:
+			docs = await client.get("/api/docs")
+			openapi = await client.get("/api/openapi.json")
+	finally:
+		await app.state.router.close()
+		backend_server.should_exit = True
+		await backend_task
+
+	assert docs.status_code == 200
+	assert "/api/openapi.json" in docs.text
+	assert docs.headers["x-pulse-selected-deployment"] == "v1"
+	assert openapi.status_code == 200
+	assert set(openapi.json()["paths"]) == {"/api/users"}
+	assert openapi.headers["x-pulse-selected-deployment"] == "v1"
 
 
 @pytest.mark.asyncio

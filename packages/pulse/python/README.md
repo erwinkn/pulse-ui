@@ -166,7 +166,7 @@ def handle_message(data):
 
 ## Main Exports
 
-- `App`, `Route`, `Layout` - app/routing
+- `App`, `FastAPIConfig`, `Route`, `Layout` - app/routing
 - `component` - server-side component decorator
 - `states`, `effects`, `setup`, `init` - hooks
 - `query`, `mutation`, `infinite_query` - data fetching

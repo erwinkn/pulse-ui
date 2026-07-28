@@ -20,6 +20,7 @@ from starlette.datastructures import UploadFile as UploadFile
 
 # Core app/session
 from pulse.app import App as App
+from pulse.app import FastAPIConfig as FastAPIConfig
 from pulse.app import PulseMode as PulseMode
 from pulse.channel import (
 	Channel as Channel,

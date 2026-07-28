@@ -141,6 +141,31 @@ class ConnectionStatusConfig:
 	reconnect_error_delay: float = 8.0
 
 
+@dataclass
+class FastAPIConfig:
+	"""Configuration for FastAPI's generated OpenAPI schema and documentation."""
+
+	title: str = "Pulse UI Server"
+	summary: str | None = None
+	description: str = ""
+	version: str = "0.1.0"
+	openapi_url: str | None = f"{FRAMEWORK_API_PREFIX}/openapi.json"
+	docs_url: str | None = f"{FRAMEWORK_API_PREFIX}/docs"
+	redoc_url: str | None = None
+	swagger_ui_oauth2_redirect_url: str | None = (
+		f"{FRAMEWORK_API_PREFIX}/docs/oauth2-redirect"
+	)
+	openapi_tags: list[dict[str, Any]] | None = None
+	servers: list[dict[str, Any]] | None = None
+	terms_of_service: str | None = None
+	contact: dict[str, Any] | None = None
+	license_info: dict[str, Any] | None = None
+	swagger_ui_init_oauth: dict[str, Any] | None = None
+	swagger_ui_parameters: dict[str, Any] | None = None
+	separate_input_output_schemas: bool = True
+	openapi_external_docs: dict[str, Any] | None = None
+
+
 class PulseAPIRoute(APIRoute):
 	def __init__(
 		self,
@@ -216,7 +241,7 @@ class App:
 			namespace.
 		proxy: Single-server proxy tuning. Ignored in subdomains mode.
 		cors: CORS configuration. Auto-configured based on mode if not provided.
-		fastapi: Additional FastAPI constructor options.
+		fastapi: FastAPI OpenAPI and generated documentation configuration.
 		session_timeout: Session cleanup timeout in seconds. Defaults to 60.0.
 		connection_status: Connection status UI timing configuration.
 
@@ -302,7 +327,7 @@ class App:
 		mode: PulseMode = "single-server",
 		proxy: Proxy | None = None,
 		cors: CORSOptions | None = None,
-		fastapi: dict[str, Any] | None = None,
+		fastapi: FastAPIConfig | None = None,
 		session_timeout: float = 60.0,
 		prerender_queue_timeout: float = 60.0,
 		disconnect_queue_timeout: float = 300.0,
@@ -377,8 +402,30 @@ class App:
 			config=codegen or CodegenConfig(),
 		)
 
+		fastapi_config = fastapi or FastAPIConfig()
+
 		self.fastapi = PulseFastAPI(
-			title="Pulse UI Server",
+			title=fastapi_config.title,
+			summary=fastapi_config.summary,
+			description=fastapi_config.description,
+			version=fastapi_config.version,
+			openapi_url=fastapi_config.openapi_url,
+			docs_url=fastapi_config.docs_url,
+			redoc_url=fastapi_config.redoc_url,
+			swagger_ui_oauth2_redirect_url=(
+				fastapi_config.swagger_ui_oauth2_redirect_url
+			),
+			openapi_tags=fastapi_config.openapi_tags,
+			servers=fastapi_config.servers,
+			terms_of_service=fastapi_config.terms_of_service,
+			contact=fastapi_config.contact,
+			license_info=fastapi_config.license_info,
+			swagger_ui_init_oauth=fastapi_config.swagger_ui_init_oauth,
+			swagger_ui_parameters=fastapi_config.swagger_ui_parameters,
+			separate_input_output_schemas=(
+				fastapi_config.separate_input_output_schemas
+			),
+			openapi_external_docs=fastapi_config.openapi_external_docs,
 			lifespan=self.fastapi_lifespan,
 		)
 		self.fastapi.router.route_class = PulseAPIRoute
@@ -629,16 +676,16 @@ class App:
 		# Apply prefix to all routes
 		prefix = self.api_prefix
 
-		@self.fastapi.get(f"{prefix}/health")
+		@self.fastapi.get(f"{prefix}/health", include_in_schema=False)
 		def healthcheck():  # pyright: ignore[reportUnusedFunction]
 			return {"health": "ok", "message": "Pulse server is running"}
 
-		@self.fastapi.get(f"{prefix}/set-cookies")
+		@self.fastapi.get(f"{prefix}/set-cookies", include_in_schema=False)
 		def set_cookies():  # pyright: ignore[reportUnusedFunction]
 			return {"health": "ok", "message": "Cookies updated"}
 
 		# RouteInfo is the request body
-		@self.fastapi.post(f"{prefix}/prerender")
+		@self.fastapi.post(f"{prefix}/prerender", include_in_schema=False)
 		async def prerender(payload: PrerenderPayload, request: Request):  # pyright: ignore[reportUnusedFunction]
 			"""
 			POST /prerender
@@ -748,7 +795,10 @@ class App:
 			# Fallback (shouldn't happen)
 			raise ValueError("Unexpected prerender result type")
 
-		@self.fastapi.post(f"{prefix}/forms/{{render_id}}/{{form_id}}")
+		@self.fastapi.post(
+			f"{prefix}/forms/{{render_id}}/{{form_id}}",
+			include_in_schema=False,
+		)
 		async def handle_form_submit(  # pyright: ignore[reportUnusedFunction]
 			render_id: str, form_id: str, request: Request
 		) -> Response:

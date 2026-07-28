@@ -379,16 +379,22 @@ def build_app(
 		yield
 		await router.close()
 
-	app = FastAPI(lifespan=lifespan)
+	app = FastAPI(
+		lifespan=lifespan,
+		docs_url=None,
+		redoc_url=None,
+		openapi_url=None,
+	)
 	app.state.router = router
 
-	@app.get(DEFAULT_ROUTER_HEALTH_PATH)
+	@app.get(DEFAULT_ROUTER_HEALTH_PATH, include_in_schema=False)
 	async def healthz() -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
 		return await router.health()
 
 	@app.api_route(
 		"/{path:path}",
 		methods=["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"],
+		include_in_schema=False,
 	)
 	async def proxy_http(path: str, request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
 		return await router.proxy_http(request, path)

@@ -37,7 +37,7 @@ class ChatState(ps.State):
         """Handle incoming message from client."""
         msg = Message(user=payload["user"], text=payload["text"])
         self.messages.append(msg)
-        # Broadcast to all connected clients
+        # Send to the connected client endpoint
         self.channel.emit("new_message", {"user": msg.user, "text": msg.text})
 
     def send_notification(self, text: str):
@@ -69,6 +69,9 @@ useEffect = ps.Import("useEffect", "react")
 @ps.javascript(jsx=True)
 def ChatClient(*, channelId: str):
     bridge = usePulseChannel(channelId)
+    if bridge is None:
+        return None
+
     messages, setMessages = useState([])
     inputText, setInputText = useState("")
 
@@ -108,11 +111,11 @@ def ChatClient(*, channelId: str):
 
 ## How it works
 
-- `ps.channel()` creates a bidirectional channel scoped to the current user session
+- `ps.channel()` creates a bidirectional channel owned by the current rendered view
 - `channel.on(event, handler)` registers a handler for client events
-- `channel.emit(event, payload)` sends fire-and-forget messages to the client
-- `usePulseChannel(id)` connects the client to the channel
-- Channels are automatically cleaned up when the component unmounts
+- `channel.emit(event, payload)` sends fire-and-forget messages to the connected client endpoint
+- `usePulseChannel(id)` connects the browser endpoint to the channel
+- Channels are automatically cleaned up when the owning route mount unmounts
 
 ## Request-response pattern
 

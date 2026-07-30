@@ -106,6 +106,7 @@ import { usePulseChannel } from "pulse-client";
 
 function Chat() {
   const channel = usePulseChannel("chat");
+  if (!channel) return null;
   channel.on("new_message", (msg) => { /* handle */ });
   channel.emit("message", { text: "Hello" });
 }
@@ -115,7 +116,7 @@ function Chat() {
 
 **Components**: `PulseProvider`, `PulseView`, `PulseForm`, `RenderLazy`
 
-**Hooks**: `usePulseClient()`, `usePulseChannel(name)`
+**Hooks**: `usePulseClient()`, `usePulseChannel(name)`, `usePulseChannelManager()`
 
 **Functions**: `serialize`, `deserialize`, `extractServerRouteInfo`, `submitForm`
 

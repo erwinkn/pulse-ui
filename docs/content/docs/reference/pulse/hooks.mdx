@@ -508,7 +508,7 @@ def client_address() -> str
 
 ## global_state
 
-Create a globally shared state accessor.
+Create a state accessor shared across the current render session.
 
 ```python
 def global_state(
@@ -517,6 +517,12 @@ def global_state(
 ) -> GlobalStateAccessor[P, S]
 ```
 
+The instance is scoped to the render session (one browser tab), not to the process. Every component and callback in the session sees the same instance, and it is disposed when the session closes. Separate tabs—and separate users—always get separate instances.
+
+<Callout type="info">
+	`global_state` never shares data between users. To coordinate across one user's tabs, use [`ps.session()`](#session). Passing `id=` keys instances *within* a session; it does not widen the scope.
+</Callout>
+
 ### Parameters
 
 | Parameter | Type | Default | Description |
@@ -524,9 +530,11 @@ def global_state(
 | `factory` | `Callable \| type` | required | State class or factory function |
 | `key` | `str \| None` | `None` | Stable identity key. Defaults to the factory module plus qualified name. Use a unique, non-empty key for factories created repeatedly from the same lexical definition. |
 
+The returned accessor takes an optional `id` to keep one instance per entity within the session.
+
 ### Returns
 
-`GlobalStateAccessor` - callable that returns the shared state instance.
+`GlobalStateAccessor` - callable that returns the session's state instance.
 
 ### Example
 
@@ -537,20 +545,20 @@ class AppSettings(ps.State):
     language: str = "en"
 
 def settings_panel():
-    settings = AppSettings()  # Same instance across all components
+    settings = AppSettings()  # Same instance everywhere in this session
     return m.Select(
         value=settings.theme,
         data=["light", "dark"],
         on_change=lambda v: setattr(settings, "theme", v),
     )
 
-# With instance ID for per-entity global state
+# With an instance ID, for one instance per entity within the session
 @ps.global_state
 class UserCache(ps.State):
     data: dict = {}
 
 def user_profile(user_id: str):
-    cache = UserCache(id=user_id)  # Shared per user_id
+    cache = UserCache(id=user_id)  # One per user_id, still session-scoped
     return m.Text(cache.data.get("name", "Loading..."))
 ```
 

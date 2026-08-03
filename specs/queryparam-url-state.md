@@ -26,16 +26,19 @@ class Filters(ps.State):
 - No new JS protocol; use existing navigate/update messages.
 
 ## Binding Rules
-- Only allowed when state instance is created in render context (route + render session). Else error on init.
-- Bound to a single RouteContext (mount). Uses live route updates from that mount.
-- Duplicate param key in the same mount -> error on init.
+- Only allowed when state instance is created in a render context (render session). Else error on init.
+- Bound to the RenderSession, and follows the session's current URL, so a binding
+  outlives the mount that declared it (e.g. on a session-scoped `global_state`).
+- Duplicate param key from the same route -> error on init. A binding from another
+  route takes over the param (overlapping mounts during navigation), and the
+  displaced binding still follows the URL until its state is disposed.
 
 ## Sync Model (no new JS)
 - Use existing server message `navigate_to` to update URL.
 - Use existing client `update` to send `routeInfo` back on navigation.
-- Server side adds per-mount `QueryParamSync` manager:
+- Server side adds a per-session `QueryParamSync` manager:
   - Register bindings (key, signal, default, codec).
-  - Effect A (URL->State): watches `route.info["queryParams"]`, parses, writes state with guard.
+  - Effect A (URL->State): watches `render.url["queryParams"]`, parses, writes state with guard.
   - Effect B (State->URL): watches bound signals, builds new query map, `render.send({"type": "navigate_to", ...})`.
   - Guard: skip if serialized value unchanged or if change came from URL sync.
 

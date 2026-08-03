@@ -1219,9 +1219,6 @@ from pulse.hooks.init import (
 	init as init,
 )
 from pulse.hooks.runtime import (
-	GLOBAL_STATES as GLOBAL_STATES,
-)
-from pulse.hooks.runtime import (
 	GlobalStateAccessor as GlobalStateAccessor,
 )
 from pulse.hooks.runtime import (

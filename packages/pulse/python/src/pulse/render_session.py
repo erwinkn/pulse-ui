@@ -4,7 +4,7 @@ import traceback
 import uuid
 from asyncio import iscoroutine
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, TypeVar, cast, overload
 
 from pulse.channel import Channel
 from pulse.context import PulseContext
@@ -20,6 +20,7 @@ from pulse.messages import (
 )
 from pulse.queries.store import QueryStore
 from pulse.reactive import REACTIVE_CONTEXT, Effect, Untrack, flush_effects
+from pulse.reactive_extensions import ReactiveDict
 from pulse.renderer import RenderTree
 from pulse.routing import (
 	Layout,
@@ -35,6 +36,7 @@ from pulse.scheduling import (
 	TimerRegistry,
 	create_future,
 )
+from pulse.state.query_param import QueryParamSync
 from pulse.state.state import State
 from pulse.transpiler.id import next_id
 from pulse.transpiler.nodes import Expr
@@ -85,6 +87,20 @@ def run_js(expr: Any, *, result: bool = False) -> asyncio.Future[Any] | None:
 
 MountState = Literal["pending", "active", "suspended", "closed"]
 T_Render = TypeVar("T_Render")
+
+
+class SessionUrl(TypedDict):
+	"""The URL currently displayed by the session's browser tab.
+
+	A render session is one browser tab, so it has exactly one URL. Every
+	mount reports the same pathname/hash/query params (they all derive from
+	the client's single ``location``); only ``pathParams``/``catchall`` are
+	mount-specific, and those live on `RouteContext`.
+	"""
+
+	pathname: str
+	hash: str
+	queryParams: dict[str, str]
 
 
 class RouteMount:
@@ -249,6 +265,8 @@ class RenderSession:
 	forms: "FormRegistry"
 	query_store: QueryStore
 	route_mounts: dict[str, RouteMount]
+	url: SessionUrl
+	query_param_sync: QueryParamSync
 	connected: bool
 	prerender_queue_timeout: float
 	dev_strict_mode_detach_timeout: float
@@ -284,6 +302,14 @@ class RenderSession:
 		self.id = id
 		self.routes = routes
 		self.route_mounts = {}
+		self.url = cast(
+			SessionUrl,
+			cast(
+				object,
+				ReactiveDict({"pathname": "", "hash": "", "queryParams": {}}),
+			),
+		)
+		self.query_param_sync = QueryParamSync(self)
 		self._server_address = server_address
 		self._client_address = client_address
 		self._send_message = None
@@ -664,6 +690,7 @@ class RenderSession:
 	def close(self):
 		# Close all pending timers at the start, to avoid anything firing while we clean up
 		self._timers.cancel_all()
+		self.query_param_sync.dispose()
 		self.forms.dispose()
 		self._tasks.cancel_all()
 		for path, mount in list(self.route_mounts.items()):
@@ -700,6 +727,20 @@ class RenderSession:
 		if not mount:
 			raise ValueError(f"No active route for '{path}'")
 		return mount
+
+	def set_url(self, info: RouteInfo) -> None:
+		"""Record the URL the client is currently displaying.
+
+		Called by every `RouteContext` on creation and on route updates. All
+		mounts report the same URL, so this is last-writer-wins by design.
+		"""
+		self.url.update(
+			{
+				"pathname": info["pathname"],
+				"hash": info["hash"],
+				"queryParams": info["queryParams"],
+			}
+		)
 
 	def get_global_state(self, key: str, factory: Callable[[], Any]) -> Any:
 		"""Return a per-session singleton for the provided key."""

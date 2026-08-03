@@ -301,8 +301,9 @@ def SearchPage():
 **Lists** are stored as reactive lists: in-place mutation (`state.tags.append(...)`) also syncs the URL. A non-default empty list serializes as an empty param value.
 
 **Constraints:**
-- Requires a route render context — creating the state outside a component render raises `RuntimeError`.
-- One binding per param name per route; a duplicate raises `ValueError`.
+- Requires a render context — creating the state outside a component render raises `RuntimeError`.
+- One binding per param name per route; a duplicate *in the same route* raises `ValueError`. A binding declared by another route takes over the param (this is what makes navigation between two routes that both bind `?q=` work).
+- The binding belongs to the render session, not to the mount that created it, so a `ps.global_state` field keeps syncing across in-app navigation. The URL stays the source of truth: navigating to a URL without the param resets the field to its default.
 - Server-synced by design: every change is a round-trip. For rapid URL updates (map viewport, scroll position), sync client-side with `history.replaceState` in transpiled code instead — see `js-interop.md` → "Latency-sensitive interactions".
 
 ## Path Parameters

@@ -5,10 +5,10 @@ from urllib.parse import parse_qs, urlparse
 
 import pulse as ps
 import pytest
-from pulse.messages import ServerMessage
+from pulse.messages import ServerMessage, ServerNavigateToMessage
 from pulse.reactive import flush_effects
 from pulse.render_session import RenderSession
-from pulse.routing import Route, RouteContext, RouteInfo, RouteTree
+from pulse.routing import Route, RouteInfo, RouteTree
 
 
 class MissingType:
@@ -41,9 +41,9 @@ def make_context(route_info: RouteInfo):
 	return app, session, route_ctx
 
 
-def flush_query_param_sync(route_ctx: RouteContext) -> None:
+def flush_query_param_sync(session: RenderSession) -> None:
 	flush_effects()
-	effect = route_ctx.query_param_sync._state_effect  # pyright: ignore[reportPrivateUsage]
+	effect = session.query_param_sync._state_effect  # pyright: ignore[reportPrivateUsage]
 	if effect is not None:
 		effect.flush()
 
@@ -84,7 +84,7 @@ class TestQueryParam:
 		session.connect(messages.append)
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			state = QState()
-			flush_query_param_sync(route_ctx)
+			flush_query_param_sync(session)
 
 		assert state.q == "from-constructor"
 		assert state.page == 3
@@ -112,12 +112,14 @@ class TestQueryParam:
 			flush_effects()
 			messages.clear()
 			state.q = "next"
-			flush_query_param_sync(route_ctx)
+			flush_query_param_sync(session)
 
 		assert len(messages) == 1
 		msg = messages[0]
 		assert msg["type"] == "navigate_to"
-		assert msg.get("sourceRoutePath") == "/"
+		# Session-scoped sync: attributed to the URL it was built from, not to a mount.
+		assert "sourceRoutePath" not in msg
+		assert "sourceMountId" not in msg
 		assert msg.get("sourcePath") == "/"
 		parsed = urlparse(str(msg["path"]))
 		query = parse_qs(parsed.query)
@@ -171,7 +173,7 @@ class TestQueryParam:
 			flush_effects()
 			messages.clear()
 			state.tags = ["x,y", "z\\w"]
-			flush_query_param_sync(route_ctx)
+			flush_query_param_sync(session)
 
 		assert len(messages) == 1
 		msg = messages[0]
@@ -193,7 +195,7 @@ class TestQueryParam:
 			flush_effects()
 			messages.clear()
 			state.tags.append("alpha")
-			flush_query_param_sync(route_ctx)
+			flush_query_param_sync(session)
 
 		assert len(messages) == 1
 		msg = messages[0]
@@ -217,7 +219,7 @@ class TestQueryParam:
 			flush_effects()
 			messages.clear()
 			state.q = "hello"
-			flush_query_param_sync(route_ctx)
+			flush_query_param_sync(session)
 
 		assert len(messages) == 1
 		msg = messages[0]
@@ -250,7 +252,7 @@ class TestQueryParam:
 			flush_effects()
 			messages.clear()
 			state.tags = []
-			flush_query_param_sync(route_ctx)
+			flush_query_param_sync(session)
 
 		assert len(messages) == 1
 		msg = messages[0]
@@ -273,7 +275,7 @@ class TestQueryParam:
 			state = QState()
 			messages.clear()
 			state.q = "next"
-			flush_query_param_sync(route_ctx)
+			flush_query_param_sync(session)
 
 		assert len(messages) == 1
 		msg = messages[0]
@@ -293,3 +295,177 @@ class TestQueryParam:
 			with ps.PulseContext(app=app, render=session, route=route_ctx):
 				state = TimeState()
 				assert state.ts.tzinfo == timezone.utc
+
+	def test_duplicate_param_in_same_route_raises(self):
+		class First(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		class Second(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+		session.connect(lambda _msg: None)
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			_first = First()
+			with pytest.raises(ValueError, match="'q' is already bound"):
+				_second = Second()
+
+
+def make_two_route_session():
+	"""A session with routes /a and /b, nothing mounted yet."""
+
+	def render():
+		return ps.div()
+
+	route_a = Route("a", ps.component(render))
+	route_b = Route("b", ps.component(render))
+	routes = RouteTree([route_a, route_b])
+	app = ps.App(routes=[route_a, route_b])
+	return app, RenderSession("test", routes)
+
+
+def navigations(messages: list[ServerMessage]) -> list[ServerNavigateToMessage]:
+	return [m for m in messages if m["type"] == "navigate_to"]
+
+
+class TestQueryParamAcrossMounts:
+	"""A `QueryParam` binding is owned by the session, so it outlives mounts.
+
+	Each test navigates /a -> /b the way the client does: the incoming route is
+	prerendered while the outgoing one is still mounted, then /a detaches.
+	"""
+
+	def navigate(
+		self,
+		session: RenderSession,
+		path: str,
+		query_params: dict[str, str],
+		*,
+		detach: str | None = None,
+	) -> None:
+		info = make_route_info(path, query_params=query_params)
+		session.prerender([path], info)
+		if detach is not None:
+			session.detach(detach)
+		session.attach(path, info)
+
+	def test_binding_survives_mount_change(self):
+		class Filters(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		session_filters = ps.global_state(Filters)
+
+		app, session = make_two_route_session()
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
+
+		start = make_route_info("/a", query_params={"q": "hello", "other": "1"})
+		session.prerender(["/a"], start)
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/a"].route
+		):
+			state = session_filters()
+			assert state.q == "hello"
+			flush_effects()
+
+		self.navigate(session, "/b", {"q": "hello", "other": "1"}, detach="/a")
+		assert "/a" not in session.route_mounts
+
+		# URL -> state still works after the mount that created the state is gone
+		# (back/forward, or a manual edit of the query string).
+		session.update_route(
+			"/b", make_route_info("/b", query_params={"q": "world", "other": "1"})
+		)
+		flush_effects()
+		assert state.q == "world"
+
+		# state -> URL still works, against the *current* route.
+		messages.clear()
+		state.q = "next"
+		flush_query_param_sync(session)
+		navs = navigations(messages)
+		assert len(navs) == 1
+		assert navs[0].get("sourcePath") == "/b"
+		parsed = urlparse(str(navs[0]["path"]))
+		assert parsed.path == "/b"
+		query = parse_qs(parsed.query)
+		assert query["q"] == ["next"]
+		# Unrelated params on the new route are preserved
+		assert query["other"] == ["1"]
+
+		session.close()
+
+	def test_param_absent_from_new_route_resets_to_default(self):
+		class Filters(ps.State):
+			q: ps.QueryParam[str] = "fallback"
+
+		session_filters = ps.global_state(Filters)
+
+		app, session = make_two_route_session()
+		session.connect(lambda _msg: None)
+		session.prerender(["/a"], make_route_info("/a", query_params={"q": "hello"}))
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/a"].route
+		):
+			state = session_filters()
+			assert state.q == "hello"
+			flush_effects()
+
+		# The URL stays the source of truth: a route without the param means default.
+		self.navigate(session, "/b", {}, detach="/a")
+		flush_effects()
+		assert state.q == "fallback"
+
+		session.close()
+
+	def test_same_param_on_another_route_takes_over(self):
+		"""Overlapping mounts must not collide; the newest binding owns the URL."""
+
+		class FiltersA(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		class FiltersB(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		app, session = make_two_route_session()
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
+
+		session.prerender(["/a"], make_route_info("/a", query_params={"q": "hello"}))
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/a"].route
+		):
+			a = FiltersA()
+			flush_effects()
+
+		# The new route is prerendered while /a is still mounted: no error.
+		info_b = make_route_info("/b", query_params={"q": "hello"})
+		session.prerender(["/b"], info_b)
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/b"].route
+		):
+			b = FiltersB()
+			flush_effects()
+
+		# The newest binding writes the URL...
+		messages.clear()
+		b.q = "from-b"
+		flush_query_param_sync(session)
+		navs = navigations(messages)
+		assert len(navs) == 1
+		assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["from-b"]
+
+		# ...the displaced one does not, while it is still mounted.
+		messages.clear()
+		a.q = "from-a"
+		flush_query_param_sync(session)
+		assert navigations(messages) == []
+
+		# Both still follow the URL.
+		session.update_route("/b", make_route_info("/b", query_params={"q": "shared"}))
+		session.update_route("/a", make_route_info("/a", query_params={"q": "shared"}))
+		flush_effects()
+		assert a.q == "shared"
+		assert b.q == "shared"
+
+		session.close()

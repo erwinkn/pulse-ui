@@ -890,13 +890,13 @@ class App:
 
 				old_sid = self._render_to_socket.get(rid)
 				if old_sid is not None and old_sid != sid:
+					# The client reconnected before the old socket's disconnect
+					# fired: unmap the old socket so its late disconnect can't
+					# tear down this connection, and replay the missed disconnect
+					# so attach re-inits and stale queries refetch.
+					self._socket_to_render.pop(old_sid, None)
 					render.resync()
 				render.connect(on_message)
-				# Map socket sid to renderId for message routing. If the client
-				# reconnected before the old socket's disconnect fired, unmap the
-				# old socket so its late disconnect can't tear down this connection.
-				if old_sid is not None and old_sid != sid:
-					self._socket_to_render.pop(old_sid, None)
 				self._socket_to_render[sid] = rid
 				self._render_to_socket[rid] = sid
 

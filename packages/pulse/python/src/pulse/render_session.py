@@ -340,12 +340,18 @@ class RenderSession:
 			self.query_store.resume_all()
 
 	def resync(self) -> None:
-		"""Prepare active mounts and queries for a replacement WebSocket."""
-		self.query_store.suspend_all()
-		for mount in self.route_mounts.values():
-			if mount.state == "active":
-				mount.start_pending(self.disconnect_queue_timeout)
-				mount.suspend()
+		"""A replacement socket arrived before the old one's disconnect fired:
+		apply the missed disconnect, skipping the reconnect grace period.
+
+		Suspending (rather than leaving mounts pending) forces attach to send a
+		fresh init — updates in the gap went to the dead socket, so the pending
+		queue can't cover what the client missed. Only previously-active mounts
+		are suspended; never-active prerender mounts keep their dispose timers.
+		"""
+		active = [m for m in self.route_mounts.values() if m.state == "active"]
+		self.disconnect()
+		for mount in active:
+			mount.suspend()
 
 	def disconnect(self):
 		"""WebSocket disconnected. Queue briefly, then suspend mounts on timeout."""

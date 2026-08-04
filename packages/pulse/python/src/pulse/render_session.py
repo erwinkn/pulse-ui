@@ -339,6 +339,20 @@ class RenderSession:
 		with PulseContext.update(render=self):
 			self.query_store.resume_all()
 
+	def resync(self) -> None:
+		"""A replacement socket arrived before the old one's disconnect fired:
+		apply the missed disconnect, skipping the reconnect grace period.
+
+		Suspending (rather than leaving mounts pending) forces attach to send a
+		fresh init — updates in the gap went to the dead socket, so the pending
+		queue can't cover what the client missed. Only previously-active mounts
+		are suspended; never-active prerender mounts keep their dispose timers.
+		"""
+		active = [m for m in self.route_mounts.values() if m.state == "active"]
+		self.disconnect()
+		for mount in active:
+			mount.suspend()
+
 	def disconnect(self):
 		"""WebSocket disconnected. Queue briefly, then suspend mounts on timeout."""
 		self._send_message = None

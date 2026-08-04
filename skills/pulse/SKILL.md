@@ -52,6 +52,7 @@ app = ps.App([ps.Route("/", App)])
 | Global state | `@ps.global_state` decorator | State |
 | Lists | `ps.For(items, lambda item, i: ...)` | Rendering |
 | Conditionals | `ps.If(cond, then=..., else_=...)` | Rendering |
+| URL query param state | `field: ps.QueryParam[T] = default` on State | Routing |
 | Session data | `ps.session()` | Runtime |
 | WebSocket ID | `ps.websocket_id()` | Runtime |
 | NPM packages | `ps.require("package")` | JS Interop |
@@ -300,6 +301,26 @@ async def handle_click():
 ps.button("Load", onClick=handle_click)
 ```
 
+#### ⚠️ Latency: server handlers vs. transpiled callbacks
+
+A handler bound to `ps.State` runs **on the server** — every invocation is a WebSocket round-trip. That is fine for deliberate, infrequent actions (button clicks, submitting a form, changing an explicit filter). It is **not** viable for callbacks that fire frequently or rapidly:
+
+- map pan/zoom (`moveend`), scroll, drag, pointer-move
+- per-keystroke handling (beyond what `ps.debounced` smooths)
+- anything driving an animation or a "feels-instant" UI response
+
+For those, do the work **client-side in transpiled code** (`@ps.javascript` / `@ps.javascript(jsx=True)`) or a hand-written react_component, and keep the server out of the hot path. Pass server data in as props; compute and apply the effect locally.
+
+```python
+# BAD — server round-trip on every map move; panning lags
+MapView(onBoundsChange=state.set_bounds)  # state.set_bounds filters a list server-side
+
+# GOOD — map filters the list in the browser; server never sees the move
+# (see references/js-interop.md → "Latency-sensitive interactions")
+```
+
+Rule of thumb: **if it fires faster than a human clicks, it belongs in transpiled JS.** See `references/js-interop.md` for the full pattern (incl. coordinating two client components via a `window` `CustomEvent`).
+
 ### Lists & Conditionals
 
 #### `ps.For` — Iterate with keys
@@ -373,7 +394,7 @@ ps.navigate("/path")                    # Programmatic, ignored if source route 
 ps.redirect("/login")                   # Server redirect (throws)
 ```
 
-See `references/routing.md` for layouts, nested routes, and path parameters.
+See `references/routing.md` for layouts, nested routes, path parameters, and `ps.QueryParam` (typed URL query-param state).
 
 ### Forms
 
@@ -631,7 +652,8 @@ def DataTable():
 7. **Use `ps.Link`** for internal navigation, not `ps.a`
 8. **Access route params** via `ps.route()["pathParams"]`
 9. **Clean up** in `on_dispose()` method or effect return
-10. **Run `make all`** before committing
+10. **Keep latency-sensitive callbacks off the server** — state handlers are WebSocket round-trips; rapid/frequent interactions (pan, scroll, drag, resize) belong in transpiled code (see Events → Latency)
+11. **Run `make all`** before committing
 
 ## Working with JavaScript
 

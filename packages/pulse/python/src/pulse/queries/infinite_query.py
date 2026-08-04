@@ -44,7 +44,7 @@ from pulse.queries.query import (
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.reactive_extensions import ReactiveList, unwrap
 from pulse.scheduling import TimerHandleLike, create_task, later
-from pulse.state.property import InitializableProperty
+from pulse.state.property import InitializableProperty, StateMemberDescriptor
 from pulse.state.state import State
 
 T = TypeVar("T")
@@ -1154,7 +1154,9 @@ class InfiniteQueryResult(Generic[T, TParam], Disposable):
 		self._observe_effect.dispose()
 
 
-class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
+class InfiniteQueryProperty(
+	StateMemberDescriptor, Generic[T, TParam, TState], InitializableProperty
+):
 	"""Descriptor for state-bound infinite queries created by the @infinite_query decorator.
 
 	InfiniteQueryProperty is the return type of the ``@infinite_query`` decorator.
@@ -1197,7 +1199,6 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 	```
 	"""
 
-	name: str
 	_fetch_fn: "Callable[[TState, TParam], Awaitable[T]]"
 	_keep_alive: bool
 	_keep_previous_data: bool
@@ -1229,7 +1230,6 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 	_initial_data_updated_at: float | dt.datetime | None
 	_enabled: bool
 	_fetch_on_mount: bool
-	_priv_result: str
 
 	def __init__(
 		self,
@@ -1249,7 +1249,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 		fetch_on_mount: bool = True,
 		key: QueryKey | Callable[[TState], QueryKey] | None = None,
 	):
-		self.name = name
+		super().__init__(name)
 		self._fetch_fn = fetch_fn
 		self._initial_page_param = initial_page_param
 		self._get_next_page_param = None
@@ -1278,7 +1278,6 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 		self._initial_data_updated_at = initial_data_updated_at
 		self._enabled = enabled
 		self._fetch_on_mount = fetch_on_mount
-		self._priv_result = f"__inf_query_{name}"
 
 	def key(self, fn: Callable[[TState], QueryKey]):
 		if self._key is not None:
@@ -1342,10 +1341,9 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 
 	@override
 	def initialize(self, state: Any, name: str) -> InfiniteQueryResult[T, TParam]:
-		result: InfiniteQueryResult[T, TParam] | None = getattr(
-			state, self._priv_result, None
-		)
-		if result:
+		cache = self.instance_cache(state)
+		result: InfiniteQueryResult[T, TParam] | None = cache.get(self)
+		if result is not None:
 			return result
 
 		if self._get_next_page_param is None:
@@ -1418,7 +1416,7 @@ class InfiniteQueryProperty(Generic[T, TParam, TState], InitializableProperty):
 			fetch_on_mount=self._fetch_on_mount,
 		)
 
-		setattr(state, self._priv_result, result)
+		cache[self] = result
 		return result
 
 	def _resolve_keyed(

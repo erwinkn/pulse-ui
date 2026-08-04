@@ -1,5 +1,5 @@
 from collections.abc import Awaitable, Callable
-from typing import ParamSpec, TypeVar
+from typing import ParamSpec, TypeVar, final
 
 import pulse as ps
 import pytest
@@ -32,6 +32,110 @@ def with_render_session(fn: Callable[P, Awaitable[R]]):
 			return await fn(*args, **kwargs)
 
 	return wrapper
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_factory_mutations_use_class_member_identity():
+	successes: list[tuple[int, int]] = []
+	errors: list[tuple[int, str]] = []
+
+	def make_mutation(value: int, *, fails: bool = False):
+		async def member(self: ps.State) -> int:
+			if fails:
+				raise RuntimeError(f"failure {value}")
+			return value
+
+		member.__name__ = "shared"
+		descriptor = ps.mutation(member)
+
+		@descriptor.on_success
+		async def _success(  # pyright: ignore[reportUnusedFunction]
+			self: ps.State,
+		):
+			successes.append((id(self), value))
+
+		@descriptor.on_error
+		async def _error(  # pyright: ignore[reportUnusedFunction]
+			self: ps.State, error: Exception
+		):
+			errors.append((id(self), str(error)))
+
+		return descriptor
+
+	@final
+	class S(ps.State):
+		first = make_mutation(1)
+		second = make_mutation(2)
+		failing = make_mutation(3, fails=True)
+
+	s = S()
+	first = s.first
+	second = s.second
+
+	assert first is not second
+	assert S.__dict__["first"].name == "first"
+	assert S.__dict__["second"].name == "second"
+	assert S.__dict__["failing"].name == "failing"
+	assert await first() == 1
+	assert await second() == 2
+	with pytest.raises(RuntimeError, match="failure 3"):
+		await s.failing()
+	assert successes == [(id(s), 1), (id(s), 2)]
+	assert errors == [(id(s), "failure 3")]
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_mutation_descriptor_inheritance_keeps_base_binding():
+	def make_mutation():
+		async def renamed(self: ps.State) -> str:
+			return type(self).__name__
+
+		renamed.__name__ = "shared"
+		return ps.mutation(renamed)
+
+	class Base(ps.State):
+		item = make_mutation()  # pyright: ignore[reportUnannotatedClassAttribute]
+
+	class Left(Base):
+		pass
+
+	class Right(Base):
+		pass
+
+	descriptor = Base.__dict__["item"]
+	states = [Base(), Left(), Right()]
+	results = [state.item for state in states]
+
+	assert descriptor.name == "item"
+	assert len({id(result) for result in results}) == 3
+	assert [await result() for result in results] == ["Base", "Left", "Right"]
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_mutation_override_uses_defining_member_identity():
+	class Base(ps.State):
+		@ps.mutation
+		async def item(self) -> int:
+			return 1
+
+	class Child(Base):
+		@ps.mutation
+		async def item(  # pyright: ignore[reportIncompatibleVariableOverride]
+			self,
+		) -> int:
+			return await super().item() + 1
+
+	state = Child()
+	child = state.item
+	assert await child() == 2
+	base = super(Child, state).item
+
+	assert child is not base
+	assert child.data == 2
+	assert base.data == 1
 
 
 @pytest.mark.asyncio

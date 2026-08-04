@@ -44,6 +44,7 @@ MantineForm(
     touchTrigger="change",  # "change" | "focus"
     syncMode="none",  # "none" | "blur" | "change"
     debounceMs=300,  # debounce for text inputs
+    onSyncValues=handler,  # called with values dict on every sync (see Synced Values)
 )
 ```
 
@@ -59,6 +60,20 @@ form.render(
     Select(name="country"),
 ]
 ```
+
+Supported form fields with `name=` participate in form state, sync, and validation. This includes:
+
+- List-valued `MultiSelect`, `TagsInput`, and `CheckboxGroup`
+- `Autocomplete` (connected since pulse-mantine 0.1.39)
+
+Low-level composition primitives are not form fields. Examples:
+
+- `PillsInput` and `PillsInputField`
+- `ChipGroup`
+- `ComboboxSearch`
+
+Connect a custom component explicitly with `useField`/`createConnectedField`
+when needed.
 
 ## Validation
 
@@ -185,6 +200,8 @@ form.set_values({"email": "new@example.com", "name": "John"})
 form.set_field_value("email", "updated@example.com")
 ```
 
+Both methods update visible inputs in controlled and uncontrolled modes (see Server Write-Backs).
+
 ### List Operations (Dynamic Forms)
 ```python
 form.insert_list_item("members", {"name": ""})  # append
@@ -222,13 +239,103 @@ Button(
 )
 ```
 
+## Server Write-Backs
+
+`form.set_values()` and `form.set_field_value()` update the visible inputs in both `mode="controlled"` and `mode="uncontrolled"`:
+
+- Controlled inputs update in place through React state.
+- Uncontrolled inputs remount: every `name=`-connected input is keyed with Mantine's `form.key(path)`, which changes after a programmatic update, so the input re-reads the new value on mount. Custom JS inputs get the same behavior via `useField` / `createConnectedField` (see JS Exports).
+
+**Before pulse-mantine 0.1.42**, uncontrolled inputs did NOT visually update from server `set_values` / `set_field_value` — form state changed but the DOM kept the old text. On older versions, use `mode="controlled"` for any form the server writes back to (or force a remount yourself with a fresh `key` on the input).
+
+### Dynamic list rows need identity keys (uncontrolled)
+
+`insert_list_item` / `remove_list_item` / `reorder_list_item` do not bump Mantine's input keys. In uncontrolled mode, index-based row keys (`key=f"item-{i}"`) leave stale text in the remaining inputs after a remove or reorder: React reuses the old row's DOM while form state has shifted. Store a stable id in each item and use it as the row key:
+
+```python
+import uuid
+
+def add_item():
+    form.insert_list_item("items", {"id": uuid.uuid4().hex, "name": ""})
+
+items = form.values.get("items") or []  # requires syncMode="change"/"blur"
+return form.render(onSubmit=handle)[
+    ps.For(
+        list(range(len(items))),
+        lambda i: Group(key=items[i]["id"])[
+            TextInput(name=f"items.{i}.name"),
+        ],
+    ),
+    Button("Add", onClick=add_item),
+]
+```
+
+With identity row keys, inputs remount with the right values after a shift because their field path (and therefore `form.key`) changes.
+
+### NumberInput and programmatic writes
+
+Mantine's `NumberInput` manages its displayed text internally; in practice a programmatic write that coincides with a remount (e.g. a paste-fill that also changes row keys) can fail to show up. When programmatic writes must land reliably, prefer `TextInput(name=..., inputMode="numeric")` and coerce to a number on the server.
+
+## Async Initial Values
+
+`initialValues` are captured when `MantineForm` is constructed, and the client form initializes once per mount. A form created with empty `initialValues` before async data arrives stays empty — recreating the Python instance alone (e.g. `ps.init(key=...)`) does not help, because the already-mounted client form keeps its values. Two robust patterns:
+
+```python
+# 1. Mount the form only once data is loaded (first mount sees real values)
+@ps.component
+def Page():
+    record = load_record()
+    if record is None:
+        return Loader()
+    return RecordForm(record)
+
+@ps.component
+def RecordForm(record: dict):
+    with ps.init():
+        form = MantineForm(initialValues=record)
+    ...
+
+# 2. Create the form empty, write values when data arrives
+#    (uncontrolled needs pulse-mantine >= 0.1.42 to show the update)
+form.set_values(record)
+```
+
+To swap `initialValues` wholesale, recreate the form with `ps.init(key=...)` AND pass the same key to `form.render(key=...)` so the client form remounts and re-initializes.
+
+## File Uploads
+
+`FileInput(name=...)` (or `Dropzone(name=...)`, see `references/dropzone.md`) inside a MantineForm submits files with the rest of the form. On submit, the handler receives them as `ps.UploadFile` at their field path:
+
+```python
+form = MantineForm(initialValues={"title": "", "attachment": None}, syncMode="change")
+
+async def handle_submit(values):
+    file: ps.UploadFile = values["attachment"]
+    data = await file.read()
+
+return form.render(onSubmit=handle_submit)[
+    TextInput(name="title"),
+    FileInput(name="attachment", label="Attachment"),
+    Button("Submit", type="submit"),
+]
+```
+
+- Files are stripped from value-sync payloads, so file fields don't break `syncMode="change"`/`"blur"`. `form.values` never contains files (a multi-file field syncs as `[]`); files arrive only on submit. Requires pulse-mantine >= 0.1.41 with pulse >= 0.1.99 — before that, file values in a synced form broke sync and submission.
+- Multi-file fields (`FileInput(multiple=True)`, Dropzone) submit as a list of `UploadFile`.
+- Validate with `AllowedFileTypes` / `MaxFileSize` (run client-side).
+
 ## Synced Values (Dynamic Forms)
 
 Access form values on server with `syncMode`:
 
 ```python
+import uuid
+
+def new_item():
+    return {"id": uuid.uuid4().hex, "name": ""}
+
 form = MantineForm(
-    initialValues={"items": [{"name": ""}]},
+    initialValues={"items": [new_item()]},
     syncMode="change",  # sync on every change
     debounceMs=300,
 )
@@ -237,7 +344,7 @@ form = MantineForm(
 items = form.values.get("items") or []
 
 def add_item():
-    form.insert_list_item("items", {"name": ""})
+    form.insert_list_item("items", new_item())
 
 def remove_item(i):
     form.remove_list_item("items", i)
@@ -245,7 +352,7 @@ def remove_item(i):
 return form.render(onSubmit=handle)[
     ps.For(
         list(range(len(items))),
-        lambda i: Group(key=f"item-{i}")[
+        lambda i: Group(key=items[i]["id"])[  # identity key, see Server Write-Backs
             TextInput(name=f"items.{i}.name"),
             Button("Remove", onClick=lambda: remove_item(i)),
         ],
@@ -253,6 +360,26 @@ return form.render(onSubmit=handle)[
     Button("Add Item", onClick=add_item),
 ]
 ```
+
+### Sync Transport
+
+Value sync travels over the Pulse WebSocket channel, not HTTP. A `POST /_pulse/forms/{render_id}/{form_id}` in the network tab is a native form submission (multipart/form-data) — a submit button, or Enter pressed in a text input, which submits the form by default HTML behavior. It is not the sync path and fires regardless of `syncMode`.
+
+### `onSyncValues` Callback
+
+```python
+def on_sync(values: dict):
+    print("synced:", values)
+
+form = MantineForm(
+    initialValues={"items": []},
+    syncMode="change",
+    debounceMs=300,
+    onSyncValues=on_sync,
+)
+```
+
+Called with the full values dict every time the client pushes a sync: after the (debounced) change or on blur per `syncMode`, and after server write-backs (`set_values`, `set_field_value`, list operations, `reset` — the client echoes the resulting values back). Fires after `form.values` has been updated, as a background task. Does nothing with `syncMode="none"`. File values are stripped (see File Uploads). Added in pulse-mantine 0.1.40.
 
 ## Field Name Paths
 
@@ -339,7 +466,7 @@ Create custom inputs that integrate with forms:
 
 ```tsx
 // In JS:
-import { createConnectedField, useFieldProps } from "pulse-mantine";
+import { createConnectedField, useField } from "pulse-mantine";
 
 // HOC approach:
 const ConnectedCustomInput = createConnectedField(CustomInput, {
@@ -349,10 +476,12 @@ const ConnectedCustomInput = createConnectedField(CustomInput, {
 
 // Hook approach:
 function MyInput(props) {
-    const fieldProps = useFieldProps(props, { debounceOnChange: true });
-    return <input {...fieldProps} />;
+    const { inputProps, key } = useField(props, { debounceOnChange: true });
+    return <input key={key} {...inputProps} />;
 }
 ```
+
+The returned `key` keeps custom uncontrolled inputs in sync after programmatic form actions. `createConnectedField` applies it automatically.
 
 Options:
 - `inputType`: "input" | "checkbox"

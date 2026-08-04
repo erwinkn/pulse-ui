@@ -50,6 +50,7 @@ A tuple containing:
 | `Object` | Recursively processed |
 | Circular refs | Tracked and restored |
 | `function`, `symbol` | Coerced to null (e.g. a stray React element won't crash the payload) |
+| DOM nodes | Throws; extract the event or element data before serializing |
 | `bigint`, other | Throws a contextual error naming the type and path |
 
 ### Example
@@ -100,6 +101,10 @@ serialize({ onClick: () => {}, label: "Save" });
 // bigint (and any other genuinely unsupported type) throws a contextual error
 serialize({ amount: 10n });
 // Error: Cannot serialize value of type 'bigint' in 'amount'.
+
+// Raw DOM nodes throw instead of traversing browser or React internals
+serialize({ input: document.querySelector("input") });
+// Error: Cannot serialize a DOM node in 'input'. Extract DOM events/elements before serializing.
 ```
 
 ---
@@ -291,13 +296,18 @@ Rejects with `FormSubmissionError` when the form endpoint returns a non-2xx resp
 ### Parameters
 
 ```ts
-interface SubmitFormOptions {
+interface SubmitFormBase {
   event: FormEvent<HTMLFormElement>;
   action: string;
   onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
-  formData?: FormData;
   force?: boolean;
 }
+
+type SubmitFormOptions = SubmitFormBase & (
+  | { formData: FormData; values?: never }
+  | { values: unknown; formData?: never }
+  | { formData?: never; values?: never }
+);
 ```
 
 | Option | Type | Description |
@@ -306,7 +316,10 @@ interface SubmitFormOptions {
 | `action` | `string` | Form action URL |
 | `onSubmit` | `function` | Optional submit handler |
 | `formData` | `FormData` | Optional pre-built form data |
+| `values` | `unknown` | Optional structured values encoded by Pulse |
 | `force` | `boolean` | Submit even if `defaultPrevented` |
+
+Pass either `formData` or `values`, never both. When neither is provided, Pulse reads native controls from the submitted form.
 
 ### Example
 

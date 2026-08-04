@@ -26,6 +26,7 @@ These are the building blocks for creating your application and defining its URL
 | `Layout` | Layout wrapper for nested routes |
 | `RouteInfo` | TypedDict with current route information |
 | `PulseMode` | Literal type: `'single-server'` or `'subdomains'` |
+| `FastAPIConfig` | Generated FastAPI docs and OpenAPI configuration |
 | `CodegenConfig` | Code generation configuration |
 
 ## Components
@@ -113,7 +114,8 @@ Built-in form handling with typed data extraction. `Form` handles submission aut
 | `Form` | Form component with automatic handling |
 | `ManualForm` | Form with manual submit control |
 | `FormData` | Typed form data container |
-| `FormValue` | Single form field value |
+| `FormScalar` | Non-container form value |
+| `FormValue` | Native or structured form value |
 | `UploadFile` | Uploaded file (from starlette) |
 
 ## Channels

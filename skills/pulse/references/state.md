@@ -34,6 +34,7 @@ class MyState(ps.State):
 - Public type-annotated attributes become reactive
 - Private attributes (underscore prefix) stay plain Python
 - Cannot add new public attributes after init (raises `AttributeError`)
+- Annotate a field as `ps.QueryParam[T]` to two-way sync it with a URL query parameter (see `routing.md`)
 
 ### Constructor Arguments
 
@@ -70,6 +71,9 @@ class CartState(ps.State):
 - Only recalculates when dependencies change
 - Dependencies tracked automatically
 - Can depend on other computed properties
+- Each instance caches one computed per descriptor; fresh same-name subclass descriptors get separate entries, including through `super()`
+- Assigning one descriptor object to multiple members or classes raises `TypeError`; create a fresh descriptor for each member
+- Descriptors must be defined in the class body; assigning one to an existing State class raises `TypeError`
 
 ### When to Use
 
@@ -120,7 +124,6 @@ class SubscriptionState(ps.State):
     immediate=True,      # Run sync instead of batched (sync only)
     lazy=True,           # Don't run on creation
     interval=5.0,        # Re-run every N seconds (polling)
-    name="my_effect",    # Debug name
 )
 def my_effect(self):
     pass
@@ -199,6 +202,21 @@ get_config = ps.global_state(create_config)
 
 # Usage
 config = get_config()
+```
+
+The default accessor identity is the factory module plus qualified name. Factories created repeatedly from the same lexical definition need unique, non-empty keys:
+
+```python
+def make_config_accessor(namespace: str):
+    def create_config() -> ConfigState:
+        state = ConfigState()
+        state.load_defaults()
+        return state
+
+    return ps.global_state(create_config, key=f"config:{namespace}")
+
+tenant_config = make_config_accessor("tenant")
+admin_config = make_config_accessor("admin")
 ```
 
 ## State Lifecycle

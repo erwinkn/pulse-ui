@@ -43,14 +43,12 @@ def connect_handler(app: ps.App) -> ConnectHandler:
 	return cast(ConnectHandler, app.sio.handlers["/"]["connect"])
 
 
-def make_route_info(pathname: str) -> ps.RouteInfo:
+def make_route_info(pathname: str) -> ps.Location:
 	return {
 		"pathname": pathname,
 		"hash": "",
 		"query": "",
 		"queryParams": {},
-		"pathParams": {},
-		"catchall": [],
 	}
 
 
@@ -136,7 +134,7 @@ async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 			{
 				"type": "attach",
 				"path": "/",
-				"routeInfo": make_route_info("/"),
+				"location": make_route_info("/"),
 				"attachId": "attach-a",
 			}
 		),
@@ -196,7 +194,7 @@ async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 			{
 				"type": "attach",
 				"path": "/",
-				"routeInfo": make_route_info("/"),
+				"location": make_route_info("/"),
 				"attachId": "attach-b",
 			}
 		),

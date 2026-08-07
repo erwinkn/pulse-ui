@@ -44,13 +44,11 @@ async def test_socket_messages_for_render_are_serialized(
 				{
 					"type": "attach",
 					"path": "/",
-					"routeInfo": {
+					"location": {
 						"pathname": "/",
 						"hash": "",
 						"query": "",
 						"queryParams": {},
-						"pathParams": {},
-						"catchall": [],
 					},
 				}
 			),
@@ -117,13 +115,11 @@ async def test_attach_sends_ack_after_route_is_attached(
 		{
 			"type": "attach",
 			"path": "/",
-			"routeInfo": {
+			"location": {
 				"pathname": "/",
 				"hash": "",
 				"query": "",
 				"queryParams": {},
-				"pathParams": {},
-				"catchall": [],
 			},
 			"attachId": "attach-1",
 		},
@@ -156,13 +152,11 @@ async def test_attach_does_not_ack_when_route_needs_reload(
 		{
 			"type": "attach",
 			"path": "/",
-			"routeInfo": {
+			"location": {
 				"pathname": "/",
 				"hash": "",
 				"query": "",
 				"queryParams": {},
-				"pathParams": {},
-				"catchall": [],
 			},
 			"attachId": "attach-1",
 		},
@@ -193,13 +187,11 @@ async def test_socket_messages_wait_for_connect_to_finish(
 			{
 				"type": "attach",
 				"path": "/",
-				"routeInfo": {
+				"location": {
 					"pathname": "/",
 					"hash": "",
 					"query": "",
 					"queryParams": {},
-					"pathParams": {},
-					"catchall": [],
 				},
 			}
 		),

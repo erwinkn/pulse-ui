@@ -1,6 +1,6 @@
 from typing import Any, Literal, NotRequired, TypedDict
 
-from pulse.routing import RouteInfo
+from pulse.routing import Location
 from pulse.transpiler.vdom import VDOM, VDOMNode, VDOMOperation
 
 
@@ -114,14 +114,14 @@ class ClientCallbackMessage(TypedDict):
 class ClientAttachMessage(TypedDict):
 	type: Literal["attach"]
 	path: str
-	routeInfo: RouteInfo
+	location: Location
 	attachId: NotRequired[str]
 
 
 class ClientUpdateMessage(TypedDict):
 	type: Literal["update"]
 	path: str
-	routeInfo: RouteInfo
+	location: Location
 
 
 class ClientDetachMessage(TypedDict):
@@ -193,7 +193,7 @@ ClientMessage = ClientPulseMessage | ClientChannelMessage
 
 class PrerenderPayload(TypedDict):
 	paths: list[str]
-	routeInfo: RouteInfo
+	location: Location
 	ttlSeconds: NotRequired[float | int]
 	renderId: NotRequired[str]
 

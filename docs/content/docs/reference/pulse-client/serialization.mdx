@@ -231,14 +231,14 @@ a.ref = b;  // circular
 
 ---
 
-## extractServerRouteInfo
+## extractServerLocation
 
-Extracts route information from a React Router loader function. Use this in SSR loaders to pass route context to the Pulse server.
+Extracts the request URL from a React Router loader function. Use this in SSR loaders to pass the browser location to the Pulse server. Route-match data (`pathParams`, `catchall`) is derived server-side by matching each route's pattern against the pathname—the client only ever reports the URL.
 
 ```ts
-import { extractServerRouteInfo } from "pulse-ui-client";
+import { extractServerLocation } from "pulse-ui-client";
 
-function extractServerRouteInfo(args: LoaderFunctionArgs): RouteInfo
+function extractServerLocation(args: LoaderFunctionArgs): PulseLocation
 ```
 
 ### Parameters
@@ -250,31 +250,28 @@ function extractServerRouteInfo(args: LoaderFunctionArgs): RouteInfo
 ### Returns
 
 ```ts
-interface RouteInfo {
+interface PulseLocation {
   pathname: string;
   hash: string;
   query: string;
   queryParams: Record<string, string>;
-  pathParams: Record<string, string | undefined>;
-  catchall: string[];
 }
 ```
 
 ### Example
 
 ```ts
-import { extractServerRouteInfo } from "pulse-ui-client";
+import { extractServerLocation } from "pulse-ui-client";
 import type { LoaderFunctionArgs } from "react-router";
 
 export async function loader(args: LoaderFunctionArgs) {
-  const routeInfo = extractServerRouteInfo(args);
+  const location = extractServerLocation(args);
 
-  // routeInfo.pathname = "/users/123"
-  // routeInfo.pathParams = { id: "123" }
-  // routeInfo.queryParams = { tab: "settings" }
+  // location.pathname = "/users/123"
+  // location.queryParams = { tab: "settings" }
 
   // Pass to Pulse server for SSR
-  const prerender = await fetchPulsePrerender(routeInfo);
+  const prerender = await fetchPulsePrerender(location);
   return { prerender };
 }
 ```

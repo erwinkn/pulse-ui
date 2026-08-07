@@ -155,13 +155,11 @@ async def test_prerender_request_retains_user_session(
 			"/_pulse/prerender",
 			json={
 				"paths": ["/a"],
-				"routeInfo": {
+				"location": {
 					"pathname": "/a",
 					"hash": "",
 					"query": "",
 					"queryParams": {},
-					"pathParams": {},
-					"catchall": [],
 				},
 			},
 		)

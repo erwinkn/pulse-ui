@@ -19,7 +19,7 @@ from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import ServerMessage
 from pulse.reactive import Effect
 from pulse.render_session import RenderSession
-from pulse.routing import Route, RouteInfo, RouteTree
+from pulse.routing import Location, Route, RouteTree
 from pulse.test_helpers import wait_for
 from pulse.transpiler.nodes import Element, PulseNode
 
@@ -64,16 +64,12 @@ def make_routes() -> RouteTree:
 	return RouteTree([route_a, route_b])
 
 
-def make_route_info(
-	pathname: str, *, path_params: dict[str, str] | None = None
-) -> RouteInfo:
+def make_route_info(pathname: str) -> Location:
 	return {
 		"pathname": pathname,
 		"hash": "",
 		"query": "",
 		"queryParams": {},
-		"pathParams": path_params or {},
-		"catchall": [],
 	}
 
 
@@ -613,7 +609,7 @@ def test_route_bound_navigation_uses_current_path_for_dynamic_routes():
 	session = RenderSession("test-id", routes)
 	messages: list[ServerMessage] = []
 	session.connect(messages.append)
-	route_info = make_route_info("/items/123", path_params={"id": "123"})
+	route_info = make_route_info("/items/123")
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/items/:id"], route_info)
@@ -636,29 +632,33 @@ def test_route_bound_navigation_uses_current_path_for_dynamic_routes():
 
 
 def test_route_bound_navigation_validates_source_route_identity():
-	routes = RouteTree([Route("a", simple_component), Route("b", simple_component)])
+	# Both routes match the pathname "/shared": navigation attribution must
+	# distinguish them by route path, not by pathname alone.
+	routes = RouteTree(
+		[Route("shared", simple_component), Route(":slug", simple_component)]
+	)
 	session = RenderSession("test-id", routes)
 	messages: list[ServerMessage] = []
 	session.connect(messages.append)
 	route_info = make_route_info("/shared")
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"], route_info)
-		session.attach("/a", route_info)
-		session.prerender(["/b"], route_info)
-		session.attach("/b", route_info)
+		session.prerender(["/shared"], route_info)
+		session.attach("/shared", route_info)
+		session.prerender(["/:slug"], route_info)
+		session.attach("/:slug", route_info)
 
-	mount = session.route_mounts["/a"]
+	mount = session.route_mounts["/shared"]
 	with ps.PulseContext.update(
 		render=session,
 		route=mount.route,
 		source_route_path=mount.route.route_path,
 		source_path=mount.route.pathname,
 	):
-		session.detach("/a")
+		session.detach("/shared")
 		ps.navigate("/after")
 
-	assert "/b" in session.route_mounts
+	assert "/:slug" in session.route_mounts
 	assert not [msg for msg in messages if msg["type"] == "navigate_to"]
 
 	session.close()
@@ -727,8 +727,8 @@ async def test_async_callback_navigation_after_route_update_is_ignored_by_defaul
 	session = RenderSession("test-id", routes)
 	messages: list[ServerMessage] = []
 	session.connect(messages.append)
-	first_info = make_route_info("/items/123", path_params={"id": "123"})
-	next_info = make_route_info("/items/456", path_params={"id": "456"})
+	first_info = make_route_info("/items/123")
+	next_info = make_route_info("/items/456")
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/items/:id"], first_info)
@@ -944,13 +944,11 @@ async def test_route_info_updated_on_reconnect():
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
-	route_info1: RouteInfo = {
+	route_info1: Location = {
 		"pathname": "/a",
 		"hash": "",
 		"query": "foo=bar",
 		"queryParams": {"foo": "bar"},
-		"pathParams": {},
-		"catchall": [],
 	}
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"], route_info1)
@@ -965,13 +963,11 @@ async def test_route_info_updated_on_reconnect():
 	# Reconnect with different query params
 	session.connect(lambda msg: messages.append(msg))
 
-	route_info2: RouteInfo = {
+	route_info2: Location = {
 		"pathname": "/a",
 		"hash": "",
 		"query": "baz=qux",
 		"queryParams": {"baz": "qux"},
-		"pathParams": {},
-		"catchall": [],
 	}
 	with ps.PulseContext.update(render=session):
 		session.attach("/a", route_info2)
@@ -1869,13 +1865,11 @@ async def test_update_route_updates_route_context():
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
-	initial_info: RouteInfo = {
+	initial_info: Location = {
 		"pathname": "/a",
 		"hash": "",
 		"query": "x=1",
 		"queryParams": {"x": "1"},
-		"pathParams": {},
-		"catchall": [],
 	}
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"], initial_info)
@@ -1885,13 +1879,11 @@ async def test_update_route_updates_route_context():
 	assert mount.route.query == "x=1"
 
 	# Update route
-	updated_info: RouteInfo = {
+	updated_info: Location = {
 		"pathname": "/a",
 		"hash": "section",
 		"query": "y=2",
 		"queryParams": {"y": "2"},
-		"pathParams": {},
-		"catchall": [],
 	}
 	session.update_route("/a", updated_info)
 

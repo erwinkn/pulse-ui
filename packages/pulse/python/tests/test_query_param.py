@@ -8,7 +8,7 @@ import pytest
 from pulse.messages import ServerMessage, ServerNavigateToMessage
 from pulse.reactive import flush_effects
 from pulse.render_session import RenderSession
-from pulse.routing import Route, RouteInfo, RouteTree
+from pulse.routing import Location, Route, RouteTree
 
 
 class MissingType:
@@ -17,18 +17,16 @@ class MissingType:
 
 def make_route_info(
 	pathname: str, *, query_params: dict[str, str] | None = None, hash: str = ""
-) -> RouteInfo:
+) -> Location:
 	return {
 		"pathname": pathname,
 		"hash": hash,
 		"query": "",
 		"queryParams": query_params or {},
-		"pathParams": {},
-		"catchall": [],
 	}
 
 
-def make_context(route_info: RouteInfo):
+def make_context(route_info: Location):
 	def render():
 		return ps.div()
 

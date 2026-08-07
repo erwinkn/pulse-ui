@@ -1437,6 +1437,7 @@ from pulse.render_session import run_js as run_js
 from pulse.request import PulseRequest as PulseRequest
 from pulse.requirements import require as require
 from pulse.routing import Layout as Layout
+from pulse.routing import Location as Location
 from pulse.routing import Route as Route
 from pulse.routing import RouteInfo as RouteInfo
 from pulse.scheduling import (

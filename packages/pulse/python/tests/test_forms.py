@@ -143,13 +143,11 @@ async def test_invalid_structured_form_payload_returns_400(
 				"/_pulse/prerender",
 				json={
 					"paths": ["/a"],
-					"routeInfo": {
+					"location": {
 						"pathname": "/a",
 						"hash": "",
 						"query": "",
 						"queryParams": {},
-						"pathParams": {},
-						"catchall": [],
 					},
 				},
 			)

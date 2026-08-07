@@ -38,17 +38,15 @@ const io = vi.fn((_url?: string, _options?: Record<string, any>) => {
 
 mock.module("socket.io-client", () => ({ io }));
 
-const routeInfo = {
+const location = {
 	hash: "",
 	pathname: "/",
 	query: "",
 	queryParams: {},
-	pathParams: {},
-	catchall: [],
 };
 
 const view = {
-	routeInfo,
+	location,
 	onInit: vi.fn(),
 	onUpdate: vi.fn(),
 	onJsExec: vi.fn(),

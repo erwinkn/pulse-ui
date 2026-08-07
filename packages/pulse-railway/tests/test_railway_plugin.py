@@ -33,7 +33,7 @@ async def test_prerender_adds_affinity_query_directives(monkeypatch) -> None:
 
 	middleware = RailwayDirectivesMiddleware(plugin)
 	result = await middleware.prerender(
-		payload={"paths": ["/"], "routeInfo": {}},
+		payload={"paths": ["/"], "location": {}},
 		request=object(),
 		session={},
 		next=lambda: _ok_prerender(),

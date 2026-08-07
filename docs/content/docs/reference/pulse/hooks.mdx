@@ -284,7 +284,7 @@ def route() -> RouteInfo
 
 ### Returns
 
-`RouteInfo` with access to route parameters, path, and query.
+`RouteInfo` with access to route parameters, path, and query. `pathParams` and `catchall` are derived server-side from the tab's URL by matching it against the route's pattern.
 
 ### Example
 

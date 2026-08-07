@@ -370,7 +370,7 @@ ps.Layout(
 
 ## RouteInfo
 
-TypedDict containing current route information.
+TypedDict containing current route information. Returned by `ps.route()` inside components. `pathParams` and `catchall` are derived server-side by matching the route's pattern against the tab's URL.
 
 ```python
 class RouteInfo(TypedDict):
@@ -380,6 +380,20 @@ class RouteInfo(TypedDict):
     queryParams: dict[str, str]   # Parsed query parameters
     pathParams: dict[str, str]    # Dynamic path parameters
     catchall: list[str]  # Catch-all segments
+```
+
+---
+
+## Location
+
+TypedDict containing the URL a browser tab is displaying. This is what the client reports on navigation—one `Location` per tab. Route-match data (`pathParams`, `catchall`) is derived from it server-side, per mount.
+
+```python
+class Location(TypedDict):
+    pathname: str        # Current URL path
+    hash: str            # URL hash (after #)
+    query: str           # Query string (after ?)
+    queryParams: dict[str, str]   # Parsed query parameters
 ```
 
 ---

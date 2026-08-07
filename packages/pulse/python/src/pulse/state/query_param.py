@@ -32,7 +32,6 @@ T = TypeVar("T")
 
 if TYPE_CHECKING:
 	from pulse.render_session import RenderSession
-	from pulse.routing import RouteContext
 	from pulse.state.state import State
 
 
@@ -355,11 +354,11 @@ class QueryParamProperty(StateProperty, InitializableProperty):
 
 	def hydrate(self, state: "State") -> None:
 		ctx = PulseContext.get()
-		if ctx.render is None or ctx.route is None:
+		if ctx.render is None:
 			raise RuntimeError(
-				"QueryParam properties require a route render context. Create the state inside a component render."
+				"QueryParam properties require a render context. Create the state inside a component render."
 			)
-		raw = ctx.route.queryParams.get(self.param_name)
+		raw = ctx.render.url["queryParams"].get(self.param_name)
 		value = _parse_query_param_value(
 			raw,
 			default=self.default_value,
@@ -371,22 +370,23 @@ class QueryParamProperty(StateProperty, InitializableProperty):
 	@override
 	def initialize(self, state: "State", name: str) -> "QueryParamSync":
 		ctx = PulseContext.get()
-		if ctx.render is None or ctx.route is None:
+		if ctx.render is None:
 			raise RuntimeError(
-				"QueryParam properties require a route render context. Create the state inside a component render."
+				"QueryParam properties require a render context. Create the state inside a component render."
 			)
-		sync = ctx.route.query_param_sync
+		sync = ctx.render.query_param_sync
 		registration = sync.register(state, name, self)
 		setattr(state, f"_query_param_reg_{name}", registration)
 		return sync
 
 
-@dataclass
+@dataclass(eq=False)
 class QueryParamBinding:
 	param: str
 	state: "State"
 	prop: QueryParamProperty
 	attr_name: str
+	route_path: str | None
 
 	def signal(self) -> Signal[Any]:
 		return self.prop.get_signal(self.state)
@@ -400,27 +400,39 @@ class QueryParamBinding:
 
 class QueryParamRegistration(Disposable):
 	_sync: "QueryParamSync"
-	_param: str
+	_binding: QueryParamBinding
 
-	def __init__(self, sync: "QueryParamSync", param: str) -> None:
+	def __init__(self, sync: "QueryParamSync", binding: QueryParamBinding) -> None:
 		self._sync = sync
-		self._param = param
+		self._binding = binding
 
 	@override
 	def dispose(self) -> None:
-		self._sync.unregister(self._param)
+		self._sync.unregister(self._binding)
 
 
 class QueryParamSync(Disposable):
-	route: "RouteContext"
+	"""Two-way sync between `QueryParam` state properties and the session URL.
+
+	Owned by the `RenderSession`, not by a mount: a binding lives as long as
+	the state that declared it, so a session-scoped state keeps syncing across
+	in-app navigation.
+
+	Bindings for one param name form a stack. The most recent registration owns
+	the URL; earlier ones still follow the URL but no longer write to it. This
+	tolerates the transient overlap during client-side navigation, where the
+	incoming route's states are created (via prerender) while the outgoing
+	route is still mounted. Two states of the *same* route claiming one param
+	is still an error.
+	"""
+
 	render: "RenderSession"
-	_bindings: dict[str, QueryParamBinding]
+	_bindings: dict[str, list[QueryParamBinding]]
 	_route_effect: Effect | None
 	_state_effect: Effect | None
 
-	def __init__(self, render: "RenderSession", route: "RouteContext") -> None:
+	def __init__(self, render: "RenderSession") -> None:
 		self.render = render
-		self.route = route
 		self._bindings = {}
 		self._route_effect = None
 		self._state_effect = None
@@ -431,22 +443,33 @@ class QueryParamSync(Disposable):
 		param = prop.param_name
 		if not param:
 			raise RuntimeError("QueryParam param name was not resolved")
-		if param in self._bindings:
+		ctx = PulseContext.get()
+		route_path = ctx.route.route_path if ctx.route is not None else None
+		stack = self._bindings.get(param)
+		if stack is None:
+			stack = []
+		elif any(existing.route_path == route_path for existing in stack):
 			raise ValueError(f"QueryParam '{param}' is already bound in this route")
 		binding = QueryParamBinding(
 			param=param,
 			state=state,
 			prop=prop,
 			attr_name=attr_name,
+			route_path=route_path,
 		)
-		self._bindings[param] = binding
+		stack.append(binding)
+		self._bindings[param] = stack
 		self._ensure_effects()
-		return QueryParamRegistration(self, param)
+		return QueryParamRegistration(self, binding)
 
-	def unregister(self, param: str) -> None:
-		binding = self._bindings.pop(param, None)
-		if binding is None:
+	def unregister(self, binding: QueryParamBinding) -> None:
+		stack = self._bindings.get(binding.param)
+		if stack is None or binding not in stack:
 			return
+		was_owner = stack[-1] is binding
+		stack.remove(binding)
+		if not stack:
+			del self._bindings[binding.param]
 		if not self._bindings:
 			if self._route_effect:
 				self._route_effect.dispose()
@@ -454,6 +477,15 @@ class QueryParamSync(Disposable):
 			if self._state_effect:
 				self._state_effect.dispose()
 				self._state_effect = None
+			return
+		if was_owner and self._state_effect is not None:
+			# Ownership moved to the previous binding: re-run so the state
+			# effect tracks the restored binding's signal. The restored binding
+			# has been following the URL all along, so this normally finds
+			# nothing to write and emits no navigation.
+			if self._route_effect is not None:
+				self._route_effect.run()
+			self._state_effect.run()
 
 	def _ensure_effects(self) -> None:
 		if self._route_effect is None or self._state_effect is None:
@@ -477,8 +509,12 @@ class QueryParamSync(Disposable):
 		if self._state_effect:
 			self._state_effect.run()
 
+	def _active_bindings(self) -> list[QueryParamBinding]:
+		"""The binding that owns the URL for each param name."""
+		return [stack[-1] for stack in self._bindings.values() if stack]
+
 	def _apply_route_to_binding(self, binding: QueryParamBinding) -> None:
-		query_params = self.route.queryParams
+		query_params = self.render.url["queryParams"]
 		raw = query_params.get(binding.param)
 		parsed = _parse_query_param_value(
 			raw,
@@ -493,25 +529,26 @@ class QueryParamSync(Disposable):
 		binding.prop.__set__(binding.state, parsed)
 
 	def _sync_from_route(self) -> None:
-		_ = self.route.queryParams
+		_ = self.render.url["queryParams"]
 		if self._route_effect and self._route_effect.runs == 0:
 			return
-		for binding in self._bindings.values():
-			self._apply_route_to_binding(binding)
+		# Every binding follows the URL, including displaced ones whose state is
+		# still mounted; only writing back to the URL is exclusive.
+		for stack in self._bindings.values():
+			for binding in stack:
+				self._apply_route_to_binding(binding)
 
 	def _sync_to_route(self) -> None:
 		with Untrack():
-			info = self.route.info
-			raw_params = info["queryParams"]
-			current_params = dict(cast(Mapping[str, str], raw_params))
-			pathname = info["pathname"]
-			source_route_path = self.route.route_path
-			source_path = pathname
-			mount = self.render.route_mounts.get(source_route_path)
-			source_mount_id = mount.mount_id if mount is not None else None
-			hash_frag = info["hash"]
+			url = self.render.url
+			current_params = dict(cast(Mapping[str, str], url["queryParams"]))
+			pathname = url["pathname"]
+			hash_frag = url["hash"]
+		if not pathname:
+			# No route info yet: nothing to navigate relative to.
+			return
 		query_params = dict(current_params)
-		for binding in self._bindings.values():
+		for binding in self._active_bindings():
 			signal = binding.signal()
 			value = signal.read()
 			codec = binding.codec()
@@ -539,17 +576,18 @@ class QueryParamSync(Disposable):
 				path += hash_frag
 			else:
 				path += "#" + hash_frag
-		message = ServerNavigateToMessage(
-			type="navigate_to",
-			path=path,
-			replace=True,
-			hard=False,
-			sourceRoutePath=source_route_path,
-			sourcePath=source_path,
+		# Session-scoped, so the navigation is not bound to a route mount: the
+		# only staleness question is whether the URL it was built from is still
+		# the one on screen. `sourcePath` alone expresses exactly that.
+		self.render.send(
+			ServerNavigateToMessage(
+				type="navigate_to",
+				path=path,
+				replace=True,
+				hard=False,
+				sourcePath=pathname,
+			)
 		)
-		if source_mount_id is not None:
-			message["sourceMountId"] = source_mount_id
-		self.render.send(message)
 
 	@override
 	def dispose(self) -> None:

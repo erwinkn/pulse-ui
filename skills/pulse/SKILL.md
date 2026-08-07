@@ -502,7 +502,8 @@ See `references/queries.md` for infinite queries, query callbacks, optimistic up
 
 ### Global State
 
-Share state across components:
+Share state across components, scoped to the render session (one browser tab —
+never across tabs or users, even with `id=`):
 
 ```python
 @ps.global_state

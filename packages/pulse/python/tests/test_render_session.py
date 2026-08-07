@@ -363,6 +363,69 @@ async def test_global_state_disposed_on_session_close():
 	assert disposed == ["ok"]
 
 
+class KeyedState(ps.State):
+	count: int = 0
+
+
+def test_global_state_with_id_is_session_scoped():
+	"""`id` keys instances within a session; it never widens the scope."""
+	accessor = ps.global_state(KeyedState)
+	routes = make_global_routes()
+	s1 = RenderSession("s1", routes)
+	s2 = RenderSession("s2", routes)
+
+	with ps.PulseContext.update(render=s1):
+		a1 = accessor(id="room-1")
+		# Same session + same id -> same instance
+		assert accessor(id="room-1") is a1
+		# Different id -> different instance within the session
+		a2 = accessor(id="room-2")
+		assert a2 is not a1
+		# No id -> yet another instance (distinct key)
+		assert accessor() is not a1
+
+	with ps.PulseContext.update(render=s2):
+		b1 = accessor(id="room-1")
+
+	# Same key + same id, different sessions -> no sharing
+	assert b1 is not a1
+	a1.count = 5
+	assert b1.count == 0
+
+	s1.close()
+	s2.close()
+
+
+def test_global_state_requires_render_context():
+	accessor = ps.global_state(KeyedState)
+	with pytest.raises(RuntimeError, match="must be called inside a Pulse render"):
+		accessor()
+	# The keyed path used to bypass the context entirely
+	with pytest.raises(RuntimeError, match="must be called inside a Pulse render"):
+		accessor(id="room-1")
+
+
+def test_keyed_global_states_disposed_on_session_close():
+	disposed: list[str] = []
+
+	class Tracked(ps.State):
+		label: str = ""
+
+		@override
+		def on_dispose(self):
+			disposed.append(self.label)
+
+	accessor = ps.global_state(Tracked)
+	session = RenderSession("s1", make_global_routes())
+	with ps.PulseContext.update(render=session):
+		accessor(id="a").label = "a"
+		accessor(id="b").label = "b"
+		accessor().label = "none"
+
+	session.close()
+	assert sorted(disposed) == ["a", "b", "none"]
+
+
 def test_dummy_placeholder_to_keep_line_numbers_stable():
 	# Placeholder after revert; keep file stable
 	assert True

@@ -599,7 +599,7 @@ def TodosPage():
     ...
 ```
 
-`ps.global_state(TodosState)` creates a function which returns the global state instance for the current user session, providing automatic isolation.
+`ps.global_state(TodosState)` creates a function which returns the shared state instance for the current render session (one browser tab), providing automatic isolation.
 
 > [!NOTE]
 > Pulse currently does not support sharing a state instance between user sessions. This is a planned feature to enable real-time collaboration, but it has not been developed and tested yet. Do not try to create a single state instance to use across sessions, you will encounter errors.

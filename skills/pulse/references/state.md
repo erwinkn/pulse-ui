@@ -145,7 +145,9 @@ Async effects auto-cancel previous task when dependencies change.
 
 ## `@ps.global_state` Decorator
 
-Create app-wide singleton state shared across components.
+Create session-wide state shared across components. The instance is scoped to the
+render session (one browser tab) and disposed when it closes — never shared
+across tabs or users. Use `ps.session()` to coordinate a single user's tabs.
 
 ```python
 @ps.global_state
@@ -174,21 +176,23 @@ cache = UserCache(user_id="123")
 
 ### ID-Based Instances
 
-Share state across sessions or scope by ID:
+Keep one instance per entity, within the session:
 
 ```python
 session_counter = ps.global_state(CounterState)
-shared_counter = ps.global_state(CounterState)
+room_counter = ps.global_state(CounterState)
 
-# Per-session (no id)
-a = session_counter(label="Session")  # Isolated per browser session
+# One instance for the whole session (no id)
+a = session_counter(label="Session")
 
-# Shared by id
-b = shared_counter("room-1", label="Shared")  # Same instance for all with id="room-1"
-c = shared_counter("room-2", label="Shared")  # Different instance
+# One instance per id
+b = room_counter("room-1", label="Room")  # Distinct from...
+c = room_counter("room-2", label="Room")  # ...this one
 ```
 
-Without `id`, state is scoped to the current session. With `id`, state is shared globally across all sessions using that ID.
+`id` is a keying discriminator *within* the session, not a scope switch: two
+tabs (or two users) never see each other's instances. Cross-user shared state is
+not supported.
 
 ### Factory Function
 

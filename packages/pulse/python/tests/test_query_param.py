@@ -469,3 +469,75 @@ class TestQueryParamAcrossMounts:
 		assert b.q == "shared"
 
 		session.close()
+
+	def test_restored_binding_regains_url_ownership(self):
+		"""Disposing the owning binding hands the URL back to the previous one.
+
+		The restored binding must be re-tracked by the state effect, or its
+		changes silently stop writing to the URL.
+		"""
+
+		class Filters(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		session_filters = ps.global_state(Filters)
+
+		class FiltersB(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		def render():
+			return ps.div()
+
+		route_a = Route("a", ps.component(render))
+		route_b = Route("b", ps.component(render))
+		route_c = Route("c", ps.component(render))
+		routes = RouteTree([route_a, route_b, route_c])
+		app = ps.App(routes=[route_a, route_b, route_c])
+		session = RenderSession("test", routes)
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
+
+		# /a: the session-scoped state binds q.
+		session.prerender(["/a"], make_route_info("/a", query_params={"q": "hello"}))
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/a"].route
+		):
+			state = session_filters()
+			flush_effects()
+
+		# /b: a route-local state takes over q.
+		info_b = make_route_info("/b", query_params={"q": "hello"})
+		session.prerender(["/b"], info_b)
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/b"].route
+		):
+			b = FiltersB()
+			flush_effects()
+		session.detach("/a")
+		session.attach("/b", info_b)
+
+		# /c: no local binding; /b unmounts and its state is disposed.
+		info_c = make_route_info("/c", query_params={"q": "hello"})
+		session.prerender(["/c"], info_c)
+		session.detach("/b")
+		session.attach("/c", info_c)
+		b.dispose()
+		flush_effects()
+
+		# The session-scoped binding owns the URL again: no navigation was
+		# emitted by the handover itself...
+		messages.clear()
+		flush_query_param_sync(session)
+		assert navigations(messages) == []
+
+		# ...and its changes write to the URL once more.
+		state.q = "from-restored"
+		flush_query_param_sync(session)
+		navs = navigations(messages)
+		assert len(navs) == 1
+		assert navs[0].get("sourcePath") == "/c"
+		parsed = urlparse(str(navs[0]["path"]))
+		assert parsed.path == "/c"
+		assert parse_qs(parsed.query)["q"] == ["from-restored"]
+
+		session.close()

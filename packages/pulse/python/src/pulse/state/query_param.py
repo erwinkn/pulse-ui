@@ -466,6 +466,7 @@ class QueryParamSync(Disposable):
 		stack = self._bindings.get(binding.param)
 		if stack is None or binding not in stack:
 			return
+		was_owner = stack[-1] is binding
 		stack.remove(binding)
 		if not stack:
 			del self._bindings[binding.param]
@@ -476,6 +477,15 @@ class QueryParamSync(Disposable):
 			if self._state_effect:
 				self._state_effect.dispose()
 				self._state_effect = None
+			return
+		if was_owner and self._state_effect is not None:
+			# Ownership moved to the previous binding: re-run so the state
+			# effect tracks the restored binding's signal. The restored binding
+			# has been following the URL all along, so this normally finds
+			# nothing to write and emits no navigation.
+			if self._route_effect is not None:
+				self._route_effect.run()
+			self._state_effect.run()
 
 	def _ensure_effects(self) -> None:
 		if self._route_effect is None or self._state_effect is None:

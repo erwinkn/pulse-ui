@@ -61,40 +61,15 @@ async def prerender(
 ) -> PrerenderResponse
 ```
 
-Handle batch prerender at the top level (HTTP request).
+Handle batch prerender for the full HTTP request. Call `next()` to get the `Prerender` result; you can modify it (views and directives) before returning.
 
 **Parameters:**
-- `payload` - Full prerender payload.
+- `payload` - Full prerender payload (see `PrerenderPayload` below).
 - `request` - Normalized request object.
 - `session` - Session data dictionary.
 - `next` - Callable to continue the middleware chain.
 
 **Returns:** `Ok[Prerender]`, `Redirect`, or `NotFound`.
-
-##### prerender_route
-
-```python
-async def prerender_route(
-    self,
-    *,
-    path: str,
-    request: PulseRequest,
-    route_info: RouteInfo,
-    session: dict[str, Any],
-    next: Callable[[], Awaitable[RoutePrerenderResponse]],
-) -> RoutePrerenderResponse
-```
-
-Handle individual route prerender.
-
-**Parameters:**
-- `path` - Route path being prerendered.
-- `request` - Normalized request object.
-- `route_info` - Route information.
-- `session` - Session data dictionary.
-- `next` - Callable to continue the middleware chain.
-
-**Returns:** `Ok[ServerInitMessage]`, `Redirect`, or `NotFound`.
 
 ##### connect
 
@@ -187,7 +162,6 @@ def __init__(
     self,
     *,
     prerender_ms: float = 80.0,
-    prerender_route_ms: float = 60.0,
     connect_ms: float = 40.0,
     message_ms: float = 25.0,
     channel_ms: float = 20.0,
@@ -196,7 +170,6 @@ def __init__(
 
 **Parameters:**
 - `prerender_ms` - Latency for batch prerender requests. Default: 80ms.
-- `prerender_route_ms` - Latency for individual route prerenders. Default: 60ms.
 - `connect_ms` - Latency for WebSocket connections. Default: 40ms.
 - `message_ms` - Latency for WebSocket messages. Default: 25ms.
 - `channel_ms` - Latency for channel messages. Default: 20ms.
@@ -264,11 +237,17 @@ ConnectResponse = Ok[None] | Deny
 PrerenderResponse = Ok[Prerender] | Redirect | NotFound
 ```
 
-### RoutePrerenderResponse
+### PrerenderPayload
 
 ```python
-RoutePrerenderResponse = Ok[ServerInitMessage] | Redirect | NotFound
+class PrerenderPayload(TypedDict):
+    paths: list[str]
+    location: Location
+    ttlSeconds: NotRequired[float | int]
+    renderId: NotRequired[str]
 ```
+
+The body of a prerender request. `paths` lists the route paths being rendered; `location` is the browser URL (`pathname`, `hash`, `query`, `queryParams`). Per-mount route params are derived server-side by matching each route's pattern against `location["pathname"]`.
 
 ## Example: Auth Middleware
 
@@ -276,16 +255,16 @@ RoutePrerenderResponse = Ok[ServerInitMessage] | Redirect | NotFound
 import pulse as ps
 
 class AuthMiddleware(ps.PulseMiddleware):
-    async def prerender_route(
+    async def prerender(
         self,
         *,
-        path: str,
+        payload: ps.PrerenderPayload,
         request: ps.PulseRequest,
-        route_info: ps.RouteInfo,
         session: dict[str, Any],
         next,
     ):
-        if path.startswith("/admin") and not session.get("is_admin"):
+        pathname = payload["location"]["pathname"]
+        if pathname.startswith("/admin") and not session.get("is_admin"):
             return ps.Redirect("/login")
         return await next()
 

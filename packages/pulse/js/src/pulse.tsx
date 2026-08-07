@@ -9,9 +9,9 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useLocation, useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
-import type { RouteInfo } from "./helpers";
+import type { PulseLocation } from "./helpers";
 import type { ServerError } from "./messages";
 import { VDOMRenderer } from "./renderer";
 import type { VDOM } from "./vdom";
@@ -208,11 +208,8 @@ export function PulseView({ path, registry }: PulseViewProps) {
 	const [serverError, setServerError] = useState<ServerError | null>(null);
 
 	const location = useLocation();
-	const params = useParams();
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: using hacky deep equality for params
-	const routeInfo = useMemo(() => {
-		const { "*": catchall = "", ...pathParams } = params;
+	const pulseLocation = useMemo(() => {
 		const queryParams = new URLSearchParams(location.search);
 		const query = location.search.startsWith("?")
 			? location.search.slice(1)
@@ -225,16 +222,14 @@ export function PulseView({ path, registry }: PulseViewProps) {
 			pathname: location.pathname,
 			query,
 			queryParams: Object.fromEntries(queryParams.entries()),
-			pathParams,
-			catchall: catchall.length > 0 ? catchall.split("/") : [],
-		} satisfies RouteInfo;
-	}, [location.hash, location.pathname, location.search, JSON.stringify(params)]);
+		} satisfies PulseLocation;
+	}, [location.hash, location.pathname, location.search]);
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: We don't want to detach on navigation, so another useEffect syncs the routeInfo on navigation.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: We don't want to detach on navigation, so another useEffect syncs the location on navigation.
 	useEffect(() => {
 		if (inBrowser) {
 			client.attach(path, {
-				routeInfo,
+				location: pulseLocation,
 				onInit: (view) => {
 					setTree(renderer.init(view));
 					setServerError(null);
@@ -261,14 +256,14 @@ export function PulseView({ path, registry }: PulseViewProps) {
 				client.detach(path);
 			};
 		}
-		//  routeInfo is NOT included here on purpose
+		//  location is NOT included here on purpose
 	}, [client, renderer, path]);
 
 	useEffect(() => {
 		if (inBrowser) {
-			client.updateRoute(path, routeInfo);
+			client.updateRoute(path, pulseLocation);
 		}
-	}, [client, path, routeInfo]);
+	}, [client, path, pulseLocation]);
 	// Hack for our current prerendering setup on client-side navigation. Will be improved soon
 	const hasRendered = useRef(false);
 	useIsomorphicLayoutEffect(() => {

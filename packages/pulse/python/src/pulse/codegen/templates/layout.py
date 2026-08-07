@@ -1,7 +1,7 @@
 from mako.template import Template
 
 LAYOUT_TEMPLATE = Template(
-	"""import { deserialize, extractServerRouteInfo, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";
+	"""import { deserialize, extractServerLocation, PulseProvider, type PulseConfig, type PulsePrerender } from "pulse-ui-client";
 import { Outlet, data, type LoaderFunctionArgs, type ClientLoaderFunctionArgs } from "react-router";
 import { matchRoutes } from "react-router";
 import { rrPulseRouteTree } from "./routes.runtime";
@@ -37,7 +37,7 @@ export async function loader(args: LoaderFunctionArgs) {
   const res = await fetch(`$${"{"}internalServerAddress}$${"{"}config.apiPrefix}/prerender`, {
     method: "POST",
     headers: fwd,
-    body: JSON.stringify({ paths, routeInfo: extractServerRouteInfo(args) }),
+    body: JSON.stringify({ paths, location: extractServerLocation(args) }),
   });
   if (!res.ok) throw new Error("Failed to prerender batch:" + res.status);
   const body = await res.json();
@@ -83,7 +83,7 @@ export async function clientLoader(args: ClientLoaderFunctionArgs) {
     headers,
     credentials: "include",
     redirect: "manual",
-    body: JSON.stringify({ paths, routeInfo: extractServerRouteInfo(args) }),
+    body: JSON.stringify({ paths, location: extractServerLocation(args) }),
   });
   if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400)) {
     window.location.assign(args.request.url);

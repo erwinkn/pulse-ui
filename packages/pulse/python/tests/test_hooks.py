@@ -8,7 +8,7 @@ from pulse.hooks.stable import stable
 from pulse.hooks.state import state
 from pulse.reactive import Signal
 from pulse.render_session import RenderSession
-from pulse.routing import Route, RouteContext, RouteInfo, RouteTree
+from pulse.routing import Location, Route, RouteContext, RouteTree
 from pulse.state.state import State
 
 
@@ -30,18 +30,16 @@ class DummyState(State):
 
 def make_route_info(
 	pathname: str, *, query_params: dict[str, str] | None = None, hash: str = ""
-) -> RouteInfo:
+) -> Location:
 	return {
 		"pathname": pathname,
 		"hash": hash,
 		"query": "",
 		"queryParams": query_params or {},
-		"pathParams": {},
-		"catchall": [],
 	}
 
 
-def make_route_context(route_info: RouteInfo):
+def make_route_context(route_info: Location):
 	def render():
 		return ps.div()
 
@@ -49,7 +47,7 @@ def make_route_context(route_info: RouteInfo):
 	routes = RouteTree([route])
 	session = RenderSession("test", routes)
 	session.set_url(route_info)
-	route_ctx = RouteContext(route_info, route)
+	route_ctx = RouteContext(route, route_info)
 	app = ps.App(routes=[route])
 	return app, session, route_ctx, route
 

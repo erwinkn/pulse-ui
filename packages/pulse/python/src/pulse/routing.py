@@ -2,6 +2,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TypedDict, cast, override
+from urllib.parse import unquote
 
 from pulse.component import Component
 from pulse.env import env
@@ -246,8 +247,8 @@ class Route:
 			+ ")"
 		)
 
-	def default_route_info(self) -> "RouteInfo":
-		"""Return a default RouteInfo for this route.
+	def default_location(self) -> "Location":
+		"""Return a default Location for this route.
 
 		Only valid for non-dynamic routes. Raises InvalidRouteError if the
 		route contains any dynamic (":name"), optional ("segment?"), or
@@ -257,18 +258,79 @@ class Route:
 		# Disallow optional, dynamic, and catch-all segments on self and ancestors
 		if route_or_ancestors_have_dynamic(self):
 			raise InvalidRouteError(
-				f"Cannot build default RouteInfo for dynamic route '{self.path}'."
+				f"Cannot build default Location for dynamic route '{self.path}'."
 			)
 
-		pathname = self.unique_path()
 		return {
-			"pathname": pathname,
+			"pathname": self.unique_path(),
 			"hash": "",
 			"query": "",
 			"queryParams": {},
-			"pathParams": {},
-			"catchall": [],
 		}
+
+
+def url_pattern_segments(route: "Route | Layout") -> list[PathSegment]:
+	"""The URL segments a mount matches, from the root down to this route.
+
+	Layouts contribute no URL segments; only `Route.segments` along the
+	ancestor chain shape the URL.
+	"""
+	chain: list[Route | Layout] = []
+	node: Route | Layout | None = route
+	while node is not None:
+		chain.append(node)
+		node = node.parent
+	segments: list[PathSegment] = []
+	for ancestor in reversed(chain):
+		if isinstance(ancestor, Route):
+			segments.extend(ancestor.segments)
+	return segments
+
+
+def match_route_path(
+	route: "Route | Layout", pathname: str
+) -> tuple[dict[str, str], list[str]] | None:
+	"""Extract pathParams/catchall by matching the route's URL pattern
+	against a concrete pathname.
+
+	Mirrors React Router matching: static segments compare
+	case-insensitively against the raw pathname, matched params are
+	percent-decoded, optional segments are consumed greedily (the
+	expansion that includes them ranks higher), and a trailing splat
+	captures every remaining segment. URL segments beyond the pattern are
+	allowed — children of this route consume them.
+
+	Returns None when the pattern cannot match the pathname.
+	"""
+	segments = url_pattern_segments(route)
+	stripped = pathname.strip("/")
+	url_parts = stripped.split("/") if stripped else []
+
+	def matched_from(
+		seg_idx: int, url_idx: int, params: dict[str, str]
+	) -> tuple[dict[str, str], list[str]] | None:
+		if seg_idx == len(segments):
+			return params, []
+		seg = segments[seg_idx]
+		if seg.is_splat:
+			return params, [unquote(part) for part in url_parts[url_idx:]]
+		if url_idx < len(url_parts):
+			part = url_parts[url_idx]
+			if seg.is_dynamic:
+				result = matched_from(
+					seg_idx + 1, url_idx + 1, {**params, seg.name: unquote(part)}
+				)
+				if result is not None:
+					return result
+			elif part.lower() == seg.name.lower():
+				result = matched_from(seg_idx + 1, url_idx + 1, params)
+				if result is not None:
+					return result
+		if seg.is_optional:
+			return matched_from(seg_idx + 1, url_idx, params)
+		return None
+
+	return matched_from(0, 0, {})
 
 
 def filter_layouts(path_list: list[str]):
@@ -371,8 +433,8 @@ class Layout:
 	def __repr__(self) -> str:
 		return f"Layout(children={len(self.children)})"
 
-	def default_route_info(self) -> "RouteInfo":
-		"""Return a default RouteInfo corresponding to this layout's URL path.
+	def default_location(self) -> "Location":
+		"""Return a default Location corresponding to this layout's URL path.
 
 		The layout itself does not contribute a path segment. The resulting
 		pathname is the URL path formed by its ancestor routes. This method
@@ -382,19 +444,16 @@ class Layout:
 		# Walk up the tree to ensure there are no dynamic segments in ancestor routes
 		if route_or_ancestors_have_dynamic(self):
 			raise InvalidRouteError(
-				"Cannot build default RouteInfo for layout under a dynamic route."
+				"Cannot build default Location for layout under a dynamic route."
 			)
 
 		# Build pathname from ancestor route path segments (exclude layout indicators)
 		path_list = self._path_list(include_layouts=False)
-		pathname = ensure_absolute_path("/".join(path_list))
 		return {
-			"pathname": pathname,
+			"pathname": ensure_absolute_path("/".join(path_list)),
 			"hash": "",
 			"query": "",
 			"queryParams": {},
-			"pathParams": {},
-			"catchall": [],
 		}
 
 
@@ -513,6 +572,20 @@ class RouteInfo(TypedDict):
 	catchall: list[str]
 
 
+class Location(TypedDict):
+	"""The URL a browser tab is displaying.
+
+	This is everything the client reports about a navigation: one Location
+	per tab, sent at the session's message boundaries. Route-match data
+	(`pathParams`/`catchall`) is *derived* from it server-side, per mount.
+	"""
+
+	pathname: str
+	hash: str
+	query: str
+	queryParams: dict[str, str]
+
+
 class RouteContext:
 	"""Runtime context for the current route.
 
@@ -548,21 +621,56 @@ class RouteContext:
 
 	def __init__(
 		self,
-		info: RouteInfo,
 		pulse_route: Route | Layout,
+		location: Location,
 		route_path: str | None = None,
 	):
-		self.info = cast(RouteInfo, cast(object, ReactiveDict(info)))
 		self.pulse_route = pulse_route
 		self.route_path = ensure_absolute_path(route_path or pulse_route.unique_path())
+		matched = match_route_path(pulse_route, location["pathname"])
+		if matched is None:
+			raise ValueError(
+				f"Path '{location['pathname']}' does not match route '{self.route_path}'"
+			)
+		path_params, catchall = matched
+		self.info = cast(
+			RouteInfo,
+			cast(
+				object,
+				ReactiveDict(
+					{
+						"pathname": location["pathname"],
+						"hash": location["hash"],
+						"query": location["query"],
+						"queryParams": location["queryParams"],
+						"pathParams": path_params,
+						"catchall": catchall,
+					}
+				),
+			),
+		)
 
-	def update(self, info: RouteInfo) -> None:
-		"""Update the route info with new values.
+	def update(self, location: Location) -> None:
+		"""Derive fresh route info from the session's new location.
 
-		Args:
-			info: New route info to apply.
+		A location this mount's pattern does not match means the URL moved
+		on to another route and this mount is on its way out: it keeps its
+		last coherent snapshot instead of mixing old params with a new URL.
 		"""
-		self.info.update(info)
+		matched = match_route_path(self.pulse_route, location["pathname"])
+		if matched is None:
+			return
+		path_params, catchall = matched
+		self.info.update(
+			{
+				"pathname": location["pathname"],
+				"hash": location["hash"],
+				"query": location["query"],
+				"queryParams": location["queryParams"],
+				"pathParams": path_params,
+				"catchall": catchall,
+			}
+		)
 
 	@property
 	def pathname(self) -> str:

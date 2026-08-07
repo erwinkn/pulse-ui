@@ -21,17 +21,16 @@ class AuthMiddleware(ps.PulseMiddleware):
     # Routes that don't require authentication
     PUBLIC_PATHS = {"/", "/login", "/signup"}
 
-    async def prerender_route(
+    async def prerender(
         self,
         *,
-        path: str,
-        route_info: ps.RouteInfo,
+        payload: ps.PrerenderPayload,
         request: ps.PulseRequest,
         session: dict[str, Any],
-        next: Callable[[], Awaitable[ps.RoutePrerenderResponse]],
-    ) -> ps.RoutePrerenderResponse:
+        next: Callable[[], Awaitable[ps.PrerenderResponse]],
+    ) -> ps.PrerenderResponse:
         """Redirect unauthenticated users to login."""
-        if path in self.PUBLIC_PATHS:
+        if payload["location"]["pathname"] in self.PUBLIC_PATHS:
             return await next()
 
         if not session.get("user_email"):
@@ -65,7 +64,7 @@ app = ps.App(
 
 ## How it works
 
-- `prerender_route` runs before rendering each page. Return `ps.Redirect("/login")` to send unauthenticated users to the login page.
+- `prerender` runs before rendering the page. `payload["location"]["pathname"]` is the URL the browser is requesting. Return `ps.Redirect("/login")` to send unauthenticated users to the login page.
 - `connect` runs when a WebSocket connection is established. Return `ps.Deny()` to reject the connection entirely.
 - The `session` dict persists across requests for the same user. Store auth state here after login.
 

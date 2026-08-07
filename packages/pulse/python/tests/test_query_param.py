@@ -139,7 +139,7 @@ class TestQueryParam:
 			state = QState()
 			assert state.q == "hello"
 			messages.clear()
-			route_ctx.update(make_route_info("/", query_params={"q": "world"}))
+			session.update_route("/", make_route_info("/", query_params={"q": "world"}))
 			flush_effects()
 			assert state.q == "world"
 		assert messages == []

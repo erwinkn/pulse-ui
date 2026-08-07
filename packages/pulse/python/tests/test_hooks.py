@@ -48,7 +48,8 @@ def make_route_context(route_info: RouteInfo):
 	route = Route("/", ps.component(render))
 	routes = RouteTree([route])
 	session = RenderSession("test", routes)
-	route_ctx = RouteContext(route_info, route, session)
+	session.set_url(route_info)
+	route_ctx = RouteContext(route_info, route)
 	app = ps.App(routes=[route])
 	return app, session, route_ctx, route
 

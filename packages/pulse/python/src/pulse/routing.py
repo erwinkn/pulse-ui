@@ -1,14 +1,11 @@
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, TypedDict, cast, override
+from typing import TypedDict, cast, override
 
 from pulse.component import Component
 from pulse.env import env
 from pulse.reactive_extensions import ReactiveDict
-
-if TYPE_CHECKING:
-	from pulse.render_session import RenderSession
 
 # angle brackets cannot appear in a regular URL path, this ensures no name conflicts
 LAYOUT_INDICATOR = "<layout>"
@@ -548,22 +545,16 @@ class RouteContext:
 	info: RouteInfo
 	pulse_route: Route | Layout
 	route_path: str
-	render: "RenderSession"
 
 	def __init__(
 		self,
 		info: RouteInfo,
 		pulse_route: Route | Layout,
-		render: "RenderSession",
 		route_path: str | None = None,
 	):
 		self.info = cast(RouteInfo, cast(object, ReactiveDict(info)))
 		self.pulse_route = pulse_route
 		self.route_path = ensure_absolute_path(route_path or pulse_route.unique_path())
-		self.render = render
-		# The session, not the mount, owns URL-derived state (query param
-		# bindings outlive any single mount).
-		render.set_url(info)
 
 	def update(self, info: RouteInfo) -> None:
 		"""Update the route info with new values.
@@ -572,7 +563,6 @@ class RouteContext:
 			info: New route info to apply.
 		"""
 		self.info.update(info)
-		self.render.set_url(info)
 
 	@property
 	def pathname(self) -> str:

@@ -684,12 +684,12 @@ class App:
 		def set_cookies():  # pyright: ignore[reportUnusedFunction]
 			return {"health": "ok", "message": "Cookies updated"}
 
-		# RouteInfo is the request body
+		# Location is the request body
 		@self.fastapi.post(f"{prefix}/prerender", include_in_schema=False)
 		async def prerender(payload: PrerenderPayload, request: Request):  # pyright: ignore[reportUnusedFunction]
 			"""
 			POST /prerender
-			Body: { paths: string[], routeInfo: RouteInfo, ttlSeconds?: number }
+			Body: { paths: string[], location: Location, ttlSeconds?: number }
 			Headers: X-Pulse-Render-Id (optional, for render session reuse)
 			Returns: { renderId: string, <path>: VDOM, ... }
 			"""
@@ -703,7 +703,7 @@ class App:
 				)
 			paths = [ensure_absolute_path(path) for path in paths]
 			payload["paths"] = paths
-			route_info = payload.get("routeInfo")
+			location = payload.get("location")
 
 			client_addr: str | None = get_client_address(request)
 			# Reuse render session from header (set by middleware) or create new one
@@ -751,7 +751,7 @@ class App:
 						},
 					}
 
-					captured = render.prerender(paths, route_info)
+					captured = render.prerender(paths, location)
 
 					for p in paths:
 						res = _normalize_prerender_result(captured[p])
@@ -1112,7 +1112,7 @@ class App:
 	) -> None:
 		async def _next() -> Ok[None]:
 			if msg["type"] == "attach":
-				attached = render.attach(msg["path"], msg["routeInfo"])
+				attached = render.attach(msg["path"], msg["location"])
 				attach_id = msg.get("attachId")
 				if attached and isinstance(attach_id, str):
 					render.send(
@@ -1123,7 +1123,7 @@ class App:
 						}
 					)
 			elif msg["type"] == "update":
-				render.update_route(msg["path"], msg["routeInfo"])
+				render.update_route(msg["path"], msg["location"])
 			elif msg["type"] == "callback":
 				render.execute_callback(msg["path"], msg["callback"], msg["args"])
 			elif msg["type"] == "detach":

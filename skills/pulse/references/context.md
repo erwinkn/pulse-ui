@@ -90,6 +90,8 @@ def user_page():
 - `pathParams` - Dynamic path parameters (e.g., `{"id": "123"}`)
 - `catchall` - Catch-all segments as list
 
+The client only reports the URL (`ps.Location`: pathname, hash, query, queryParams); `pathParams` and `catchall` are derived server-side by matching the route's pattern against the pathname.
+
 ### `ps.pulse_route()`
 
 Get the current route definition.

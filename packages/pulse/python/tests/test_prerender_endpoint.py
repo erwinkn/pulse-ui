@@ -24,13 +24,11 @@ async def test_prerender_normalizes_paths(monkeypatch: pytest.MonkeyPatch):
 			"/_pulse/prerender",
 			json={
 				"paths": ["a"],
-				"routeInfo": {
+				"location": {
 					"pathname": "/a",
 					"hash": "",
 					"query": "",
 					"queryParams": {},
-					"pathParams": {},
-					"catchall": [],
 				},
 			},
 		)

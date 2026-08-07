@@ -52,13 +52,13 @@ def unique_path(self) -> str
 
 Return absolute path with leading `/`.
 
-##### default_route_info
+##### default_location
 
 ```python
-def default_route_info(self) -> RouteInfo
+def default_location(self) -> Location
 ```
 
-Return default `RouteInfo` for static routes.
+Return a default `Location` for static routes.
 
 **Raises:** `InvalidRouteError` if route or ancestors have dynamic segments.
 
@@ -126,9 +126,21 @@ app = ps.App(
 )
 ```
 
+### Location
+
+TypedDict containing the URL a browser tab is displaying. This is everything the client reports about a navigation: one `Location` per tab.
+
+```python
+class Location(TypedDict):
+    pathname: str       # Current URL path
+    hash: str           # URL hash (without #)
+    query: str          # Query string (without ?)
+    queryParams: dict[str, str]  # Parsed query parameters
+```
+
 ### RouteInfo
 
-TypedDict containing route information from the client.
+TypedDict containing current route information. This is what `ps.route()` returns inside components. The route-match fields (`pathParams`, `catchall`) are derived server-side by matching the route's pattern against the tab's `Location`.
 
 ```python
 class RouteInfo(TypedDict):

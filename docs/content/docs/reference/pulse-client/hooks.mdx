@@ -87,7 +87,7 @@ interface PulseClient {
   onConnectionChange(listener: ConnectionStatusListener): () => void;
 
   // Route management
-  updateRoute(path: string, routeInfo: RouteInfo): void;
+  updateRoute(path: string, location: PulseLocation): void;
   attach(path: string, view: MountedView): void;
   detach(path: string): void;
 

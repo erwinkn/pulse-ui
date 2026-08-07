@@ -40,9 +40,12 @@ With middleware, you write this check once and it protects every route automatic
 class AuthMiddleware(ps.PulseMiddleware):
     PUBLIC_PATHS = {"/", "/login", "/signup", "/about"}
 
-    async def prerender_route(self, *, path, route_info, request, session, next):
+    async def prerender(self, *, payload, request, session, next):
+        # The URL the browser is requesting
+        pathname = payload["location"]["pathname"]
+
         # Allow public routes without authentication
-        if path in self.PUBLIC_PATHS:
+        if pathname in self.PUBLIC_PATHS:
             return await next()
 
         # Protected route: check if user is logged in
@@ -85,7 +88,7 @@ The key pattern is calling `await next()` to pass control to the next middleware
 
 ## Middleware hooks
 
-Middleware can intercept five different points in the request lifecycle. You only need to override the ones you care about.
+Middleware can intercept four different points in the request lifecycle. You only need to override the ones you care about.
 
 ### `prerender`
 
@@ -93,20 +96,13 @@ Called when the browser first requests a page. This happens before any HTML is s
 
 ```python
 async def prerender(self, *, payload, request, session, next):
-    # `payload` contains info about which paths are being requested
-    # Return Redirect or NotFound to short-circuit rendering
-    return await next()
-```
-
-### `prerender_route`
-
-Called for each individual route being rendered. More granular than `prerender` when you need route-specific logic:
-
-```python
-async def prerender_route(self, *, path, route_info, request, session, next):
-    # Protect admin routes
-    if path.startswith("/admin") and not session.get("is_admin"):
+    # payload["paths"] lists the routes being rendered for this request
+    # payload["location"] is the URL the browser is on:
+    #   {"pathname", "hash", "query", "queryParams"}
+    if payload["location"]["pathname"].startswith("/admin") and not session.get("is_admin"):
         return ps.Redirect("/login")
+
+    # Return Redirect or NotFound to short-circuit rendering
     return await next()
 ```
 
@@ -178,9 +174,9 @@ class AuthMiddleware(ps.PulseMiddleware):
     # Routes that don't require authentication
     PUBLIC_PATHS = {"/", "/login", "/signup", "/about"}
 
-    async def prerender_route(self, *, path, route_info, request, session, next):
+    async def prerender(self, *, payload, request, session, next):
         # Public routes are always accessible
-        if path in self.PUBLIC_PATHS:
+        if payload["location"]["pathname"] in self.PUBLIC_PATHS:
             return await next()
 
         # Protected routes require authentication

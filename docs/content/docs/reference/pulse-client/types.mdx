@@ -96,18 +96,16 @@ interface PulseFormProps extends ComponentPropsWithoutRef<"form"> {
 
 ## Route Types
 
-### RouteInfo
+### PulseLocation
 
-Route information extracted from the current URL.
+The URL a browser tab is displaying. There is one location per tab; the client only ever reports the URL. Route-match data (`pathParams`, `catchall`) is derived server-side per mount by matching each route's pattern against `pathname`.
 
 ```ts
-interface RouteInfo {
+interface PulseLocation {
   pathname: string;
   hash: string;
   query: string;
   queryParams: Record<string, string>;
-  pathParams: Record<string, string | undefined>;
-  catchall: string[];
 }
 ```
 
@@ -117,8 +115,6 @@ interface RouteInfo {
 | `hash` | URL hash fragment (e.g., `section`) |
 | `query` | Query string (e.g., `page=1`) |
 | `queryParams` | Parsed query parameters |
-| `pathParams` | Route parameters from path |
-| `catchall` | Segments from catch-all route (`/*`) |
 
 ---
 
@@ -372,7 +368,8 @@ Attaches to a view path.
 interface ClientAttachMessage {
   type: "attach";
   path: string;
-  routeInfo: RouteInfo;
+  location: PulseLocation;
+  attachId: string;
 }
 ```
 
@@ -391,13 +388,13 @@ interface ClientCallbackMessage {
 
 #### ClientUpdateMessage
 
-Updates route info for an attached path.
+Reports the tab's new location for an attached path.
 
 ```ts
 interface ClientUpdateMessage {
   type: "update";
   path: string;
-  routeInfo: RouteInfo;
+  location: PulseLocation;
 }
 ```
 
@@ -586,7 +583,7 @@ interface PulseClient {
   disconnect(): void;
   isConnected(): boolean;
   onConnectionChange(listener: ConnectionStatusListener): () => void;
-  updateRoute(path: string, routeInfo: RouteInfo): void;
+  updateRoute(path: string, location: PulseLocation): void;
   invokeCallback(path: string, callback: string, args: any[]): void;
   attach(path: string, view: MountedView): void;
   detach(path: string): void;
@@ -615,7 +612,7 @@ Callbacks for a mounted view.
 
 ```ts
 interface MountedView {
-  routeInfo: RouteInfo;
+  location: PulseLocation;
   onInit: (view: PulsePrerenderView) => void;
   onUpdate: (ops: VDOMUpdate[]) => void;
   onJsExec: (msg: ServerJsExecMessage) => void;

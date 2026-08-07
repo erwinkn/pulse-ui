@@ -192,13 +192,13 @@ Access the captured path with `route["catchall"]`:
 @ps.component
 def file_browser():
     route = ps.route()
-    file_path = route["catchall"]  # "docs/report.pdf"
+    file_path = "/".join(route["catchall"])  # ["docs", "report.pdf"] -> "docs/report.pdf"
     return ps.p(f"Viewing: {file_path}")
 ```
 
 ## Route information
 
-`ps.route()` returns a `RouteInfo` object with details about the current URL:
+`ps.route()` returns a `RouteInfo` object with details about the current URL. The browser only reports the URL itself—Pulse derives `pathParams` and `catchall` on the server by matching your route's pattern against it:
 
 ```python
 @ps.component

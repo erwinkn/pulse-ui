@@ -98,16 +98,16 @@ class PulseMiddleware:
 
 	```python
 	class AuthMiddleware(ps.PulseMiddleware):
-	    async def prerender_route(
+	    async def prerender(
 	        self,
 	        *,
-	        path: str,
+	        payload: ps.PrerenderPayload,
 	        request: ps.PulseRequest,
-	        route_info: ps.RouteInfo,
 	        session: dict[str, Any],
 	        next,
 	    ):
-	        if path.startswith("/admin") and not session.get("is_admin"):
+	        pathname = payload["location"]["pathname"]
+	        if pathname.startswith("/admin") and not session.get("is_admin"):
 	            return ps.Redirect("/login")
 	        return await next()
 

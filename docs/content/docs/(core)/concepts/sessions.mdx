@@ -226,9 +226,10 @@ If you need to check sessions before rendering any page (like for app-wide authe
 
 ```python
 class AuthMiddleware(ps.PulseMiddleware):
-    async def prerender_route(self, *, session, path, **kwargs):
+    async def prerender(self, *, session, payload, **kwargs):
         # Block unauthenticated users from admin pages
-        if path.startswith("/admin") and not session.get("is_admin"):
+        pathname = payload["location"]["pathname"]
+        if pathname.startswith("/admin") and not session.get("is_admin"):
             return ps.Redirect("/login")
         return await kwargs["next"]()
 

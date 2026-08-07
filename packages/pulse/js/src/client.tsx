@@ -1,7 +1,7 @@
 import type { NavigateFunction } from "react-router";
 import { io, type Socket } from "socket.io-client";
 import { ChannelBridge, createRandomId, PulseChannelResetError } from "./channel";
-import type { RouteInfo } from "./helpers";
+import type { PulseLocation } from "./helpers";
 import { pulseFetch } from "./http";
 import type {
 	ClientApiResultMessage,
@@ -48,7 +48,7 @@ export interface Directives {
 	socketio?: SocketIODirectives;
 }
 export interface MountedView {
-	routeInfo: RouteInfo;
+	location: PulseLocation;
 	onInit: (view: PulsePrerenderView) => void;
 	onUpdate: (ops: VDOMUpdate[]) => void;
 	onJsExec: (msg: ServerJsExecMessage) => void;
@@ -66,7 +66,7 @@ export interface PulseClient {
 	isConnected(): boolean;
 	onConnectionChange(listener: ConnectionStatusListener): () => void;
 	// Messages
-	updateRoute(path: string, routeInfo: RouteInfo): void;
+	updateRoute(path: string, location: PulseLocation): void;
 	invokeCallback(path: string, callback: string, args: any[]): void;
 	// VDOM subscription
 	attach(path: string, view: MountedView): void;
@@ -217,7 +217,7 @@ export class PulseSocketIOClient {
 				console.log("[SocketIOTransport] Connected:", this.#socket?.id);
 				// Send attach for all active views on connect/reconnect
 				for (const [path, route] of this.#activeViews) {
-					this.#sendAttach(path, route.routeInfo, socket);
+					this.#sendAttach(path, route.location, socket);
 				}
 
 				for (const payload of this.#messageQueue) {
@@ -293,17 +293,17 @@ export class PulseSocketIOClient {
 			throw new Error(`Path ${path} is already attached`);
 		}
 		this.#activeViews.set(path, view);
-		this.#sendAttach(path, view.routeInfo);
+		this.#sendAttach(path, view.location);
 	}
 
-	public updateRoute(path: string, routeInfo: RouteInfo) {
+	public updateRoute(path: string, location: PulseLocation) {
 		const view = this.#activeViews.get(path);
 		if (view) {
-			view.routeInfo = routeInfo;
+			view.location = location;
 			this.sendMessage({
 				type: "update",
 				path,
-				routeInfo,
+				location,
 			});
 		}
 	}
@@ -391,11 +391,11 @@ export class PulseSocketIOClient {
 			case "navigate_to": {
 				if (message.sourceRoutePath && message.sourcePath) {
 					const view = this.#activeViews.get(message.sourceRoutePath);
-					if (!view || view.routeInfo.pathname !== message.sourcePath) break;
+					if (!view || view.location.pathname !== message.sourcePath) break;
 				} else if (message.sourcePath) {
 					let sourceActive = false;
 					for (const view of this.#activeViews.values()) {
-						if (view.routeInfo.pathname === message.sourcePath) {
+						if (view.location.pathname === message.sourcePath) {
 							sourceActive = true;
 							break;
 						}
@@ -593,14 +593,14 @@ export class PulseSocketIOClient {
 		}
 	}
 
-	#sendAttach(path: string, routeInfo: RouteInfo, socket?: Socket): void {
+	#sendAttach(path: string, location: PulseLocation, socket?: Socket): void {
 		const attachId = `${path}:${++this.#nextAttachId}`;
 		this.#activeAttachIds.set(path, attachId);
 		this.#ackedAttachIds.delete(path);
 		const message = {
 			type: "attach" as const,
 			path,
-			routeInfo,
+			location,
 			attachId,
 		};
 		if (socket) {

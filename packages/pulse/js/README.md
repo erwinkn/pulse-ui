@@ -117,6 +117,6 @@ function Chat() {
 
 **Hooks**: `usePulseClient()`, `usePulseChannel(name)`
 
-**Functions**: `serialize`, `deserialize`, `extractServerRouteInfo`, `submitForm`
+**Functions**: `serialize`, `deserialize`, `extractServerLocation`, `submitForm`
 
 **Types**: `VDOM`, `VDOMNode`, `VDOMElement`, `PulseClient`, `Transport`, `ComponentRegistry`

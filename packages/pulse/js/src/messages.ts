@@ -2,7 +2,7 @@
 // Message Types
 // =================================================================
 
-import type { RouteInfo } from "./helpers";
+import type { PulseLocation } from "./helpers";
 import type { VDOM, VDOMNode, VDOMUpdate } from "./vdom";
 
 // Based on pulse/messages.py
@@ -112,13 +112,13 @@ export interface ClientCallbackMessage {
 export interface ClientAttachMessage {
 	type: "attach";
 	path: string;
-	routeInfo: RouteInfo;
+	location: PulseLocation;
 	attachId: string;
 }
 export interface ClientUpdateMessage {
 	type: "update";
 	path: string;
-	routeInfo: RouteInfo;
+	location: PulseLocation;
 }
 export interface ClientDetachMessage {
 	type: "detach";

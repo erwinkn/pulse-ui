@@ -1,16 +1,15 @@
 import type { LoaderFunctionArgs } from "react-router";
 
-export interface RouteInfo {
+/** The URL this tab is displaying. Route-match data (pathParams/catchall)
+ * is derived server-side per mount; the client only ever reports the URL. */
+export interface PulseLocation {
 	pathname: string;
 	hash: string;
 	query: string;
 	queryParams: Record<string, string>;
-	pathParams: Record<string, string | undefined>;
-	catchall: string[];
 }
 
-export function extractServerRouteInfo({ params, request }: LoaderFunctionArgs) {
-	const { "*": catchall = "", ...pathParams } = params;
+export function extractServerLocation({ request }: LoaderFunctionArgs) {
 	const parsedUrl = new URL(request.url);
 	const query = parsedUrl.search.startsWith("?")
 		? parsedUrl.search.slice(1)
@@ -24,7 +23,5 @@ export function extractServerRouteInfo({ params, request }: LoaderFunctionArgs) 
 		pathname: parsedUrl.pathname,
 		query,
 		queryParams: Object.fromEntries(parsedUrl.searchParams.entries()),
-		pathParams,
-		catchall: catchall.length > 1 ? catchall.split("/") : [],
-	} satisfies RouteInfo;
+	} satisfies PulseLocation;
 }

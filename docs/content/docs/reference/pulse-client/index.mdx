@@ -97,7 +97,7 @@ The package exports several categories of APIs:
 ### Utilities
 
 - **serialize** / **deserialize** - Wire format encoding
-- **extractServerRouteInfo** - Extract route info in loaders
+- **extractServerLocation** - Extract the browser URL in loaders
 - **submitForm** - Programmatic form submission
 
 ## Architecture
@@ -107,7 +107,7 @@ The client maintains a persistent WebSocket connection to the Pulse server:
 ```
 React App                          Pulse Server
     |                                   |
-    |-- attach (path, routeInfo) ------>|
+    |-- attach (path, location) ------->|
     |<-------- vdom_init (VDOM) --------|
     |                                   |
     |<------ vdom_update (ops[]) -------|  (on state change)

@@ -4,7 +4,7 @@ import traceback
 import uuid
 from asyncio import iscoroutine
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, overload
 
 from pulse.channel import Channel
 from pulse.context import PulseContext
@@ -24,9 +24,9 @@ from pulse.reactive_extensions import ReactiveDict
 from pulse.renderer import RenderTree
 from pulse.routing import (
 	Layout,
+	Location,
 	Route,
 	RouteContext,
-	RouteInfo,
 	RouteTree,
 	ensure_absolute_path,
 )
@@ -89,20 +89,6 @@ MountState = Literal["pending", "active", "suspended", "closed"]
 T_Render = TypeVar("T_Render")
 
 
-class SessionUrl(TypedDict):
-	"""The URL currently displayed by the session's browser tab.
-
-	A render session is one browser tab, so it has exactly one URL. Every
-	mount reports the same pathname/hash/query params (they all derive from
-	the client's single ``location``); only ``pathParams``/``catchall`` are
-	mount-specific, and those live on `RouteContext`.
-	"""
-
-	pathname: str
-	hash: str
-	queryParams: dict[str, str]
-
-
 class RouteMount:
 	render: "RenderSession"
 	path: str
@@ -125,11 +111,11 @@ class RouteMount:
 		render: "RenderSession",
 		path: str,
 		route: Route | Layout,
-		route_info: RouteInfo,
+		location: Location,
 	) -> None:
 		self.render = render
 		self.path = ensure_absolute_path(path)
-		self.route = RouteContext(route_info, route, self.path)
+		self.route = RouteContext(route, location, self.path)
 		self.effect = None
 		self._pulse_ctx = None
 		self.tree = RenderTree(route.render())
@@ -142,9 +128,6 @@ class RouteMount:
 		self.mount_id = uuid.uuid4().hex
 		self.render_batch_id = -1
 		self.render_batch_renders = 0
-
-	def update_route(self, route_info: RouteInfo) -> None:
-		self.route.update(route_info)
 
 	def renew_mount_id(self) -> None:
 		self.mount_id = uuid.uuid4().hex
@@ -265,7 +248,7 @@ class RenderSession:
 	forms: "FormRegistry"
 	query_store: QueryStore
 	route_mounts: dict[str, RouteMount]
-	url: SessionUrl
+	url: Location
 	query_param_sync: QueryParamSync
 	connected: bool
 	prerender_queue_timeout: float
@@ -303,10 +286,12 @@ class RenderSession:
 		self.routes = routes
 		self.route_mounts = {}
 		self.url = cast(
-			SessionUrl,
+			Location,
 			cast(
 				object,
-				ReactiveDict({"pathname": "", "hash": "", "queryParams": {}}),
+				ReactiveDict(
+					{"pathname": "", "hash": "", "query": "", "queryParams": {}}
+				),
 			),
 		)
 		self.query_param_sync = QueryParamSync(self)
@@ -486,7 +471,7 @@ class RenderSession:
 	# ---- Prerendering ----
 
 	def prerender(
-		self, paths: list[str], route_info: RouteInfo | None = None
+		self, paths: list[str], location: Location | None = None
 	) -> dict[str, ServerInitMessage | ServerNavigateToMessage]:
 		"""
 		Synchronous render for SSR. Returns per-path init or navigate_to messages.
@@ -498,21 +483,20 @@ class RenderSession:
 
 		for path in normalized:
 			route = self.routes.find(path)
-			info = route_info or route.default_route_info()
-			# Session-scoped URL data is split off at the message boundary;
-			# mounts only ever receive it, never report it back up.
-			self.set_url(info)
+			loc = location or route.default_location()
+			# The session owns the URL; set_url pushes derived route info
+			# down to every mount. Mounts never receive URL data directly.
+			self.set_url(loc)
 			mount = self.route_mounts.get(path)
 
 			if mount is None:
-				mount = RouteMount(self, path, route, info)
+				mount = RouteMount(self, path, route, loc)
 				self.route_mounts[path] = mount
 				mount.ensure_effect(lazy=True, flush=False)
 			else:
-				mount.update_route(info)
 				if mount.effect is None:
 					mount.ensure_effect(lazy=True, flush=False)
-				if route_info is not None and mount.state == "active":
+				if location is not None and mount.state == "active":
 					mount.start_pending(self.prerender_queue_timeout)
 
 			if mount.state != "active" and mount.queue_timeout is None:
@@ -531,12 +515,12 @@ class RenderSession:
 
 	# ---- Client lifecycle ----
 
-	def attach(self, path: str, route_info: RouteInfo) -> bool:
+	def attach(self, path: str, location: Location) -> bool:
 		"""
 		Client ready to receive updates for path.
 		- PENDING: flush queue, transition to ACTIVE
 		- SUSPENDED: re-render, send a fresh init, transition to ACTIVE
-		- ACTIVE: update route_info
+		- ACTIVE: update the session location
 		- No mount: request reload
 		Returns True when callbacks can be accepted for this path.
 		"""
@@ -548,8 +532,7 @@ class RenderSession:
 			self.send({"type": "reload"})
 			return False
 
-		self.set_url(route_info)
-		mount.update_route(route_info)
+		self.set_url(location)
 		if mount.state == "suspended":
 			return self._resume_mount(mount, path)
 		if mount.state == "pending" and self._send_message:
@@ -574,18 +557,18 @@ class RenderSession:
 		self.send(message)
 		return True
 
-	def update_route(self, path: str, route_info: RouteInfo):
+	def update_route(self, path: str, location: Location):
 		"""Update routing state (query params, etc.) for attached path."""
 		path = ensure_absolute_path(path)
 		mount = self.route_mounts.get(path)
 		if mount is None:
 			# No-op when mount does not exist yet.
-			# Route updates may arrive before prerender; prerender creates the mount with
-			# the authoritative RouteInfo, so replaying/stashing is unnecessary.
+			# Route updates may arrive before prerender; prerender creates the
+			# mount with the authoritative Location, so replaying/stashing is
+			# unnecessary.
 			return
 		try:
-			self.set_url(route_info)
-			mount.update_route(route_info)
+			self.set_url(location)
 			if mount.state == "pending" and self._send_message:
 				mount.activate(self._send_message)
 		except Exception as e:
@@ -747,21 +730,25 @@ class RenderSession:
 			raise ValueError(f"No active route for '{path}'")
 		return mount
 
-	def set_url(self, info: RouteInfo) -> None:
+	def set_url(self, location: Location) -> None:
 		"""Record the URL the client is currently displaying.
 
 		Called at the session's message boundaries (prerender/attach/
-		update_route) before the info is handed to a mount. Every client
-		message reports the same URL for the same navigation, so this is
-		last-writer-wins by design.
+		update_route). The session URL is the single source of truth: every
+		mount's route info is derived from it here, flowing strictly down
+		the ownership tree. Every client message reports the same URL for
+		the same navigation, so this is last-writer-wins by design.
 		"""
 		self.url.update(
 			{
-				"pathname": info["pathname"],
-				"hash": info["hash"],
-				"queryParams": info["queryParams"],
+				"pathname": location["pathname"],
+				"hash": location["hash"],
+				"query": location["query"],
+				"queryParams": location["queryParams"],
 			}
 		)
+		for mount in self.route_mounts.values():
+			mount.route.update(location)
 
 	def get_global_state(self, key: str, factory: Callable[[], Any]) -> Any:
 		"""Return a per-session singleton for the provided key."""

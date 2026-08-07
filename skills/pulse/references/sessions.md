@@ -288,8 +288,9 @@ class AuthMiddleware(ps.PulseMiddleware):
         return await next()
 
     @override
-    async def prerender_route(self, *, path, session, **kwargs):
-        if path.startswith("/admin") and not session.get("user"):
+    async def prerender(self, *, payload, session, **kwargs):
+        pathname = payload["location"]["pathname"]
+        if pathname.startswith("/admin") and not session.get("user"):
             return Redirect("/login")
         return await kwargs["next"]()
 ```

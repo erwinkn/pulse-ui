@@ -177,6 +177,12 @@ Dynamic URL segments like `/users/:id`. The `:id` part matches any value and is 
 **Query Parameters**
 Key-value pairs in the URL after `?`, like `?page=2&sort=name`. Used for filters, pagination, and other optional state.
 
+**Location**
+The URL a browser tab is displaying: pathname, hash, query string, and parsed query parameters. One location per tab—it's the only routing information the client sends to the server.
+
+**Route Info**
+What `ps.route()` returns inside a component: the location plus `pathParams` and `catchall`, which the server derives by matching the route's pattern against the URL.
+
 **Navigation**
 Programmatically changing the URL and rendering a different route. Can be client-side (no page reload) or a full redirect.
 

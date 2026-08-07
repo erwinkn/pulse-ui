@@ -10,8 +10,8 @@ Inherit from `ps.PulseMiddleware` and override methods:
 from typing import override
 import pulse as ps
 from pulse.middleware import ConnectResponse, Ok, Redirect, NotFound, Deny
+from pulse.messages import PrerenderPayload
 from pulse.request import PulseRequest
-from pulse.routing import RouteInfo
 
 
 class AuthMiddleware(ps.PulseMiddleware):
@@ -26,22 +26,22 @@ class AuthMiddleware(ps.PulseMiddleware):
         # WebSocket connection handshake
         token = request.headers.get("authorization")
         if not self._validate_token(token):
-            return Deny("Invalid token")
+            return Deny()
         session["user"] = self._decode_token(token)
         return await next()
 
     @override
-    async def prerender_route(
+    async def prerender(
         self,
         *,
-        path: str,
-        route_info: RouteInfo,
+        payload: PrerenderPayload,
         request: PulseRequest,
         session: dict,
         next,
-    ) -> ps.RoutePrerenderResponse:
-        # Before rendering route (SSR)
-        if path.startswith("/admin") and not session.get("is_admin"):
+    ) -> ps.PrerenderResponse:
+        # Before rendering (SSR). payload["location"] is the browser URL.
+        pathname = payload["location"]["pathname"]
+        if pathname.startswith("/admin") and not session.get("is_admin"):
             return Redirect("/login")
         return await next()
 
@@ -61,7 +61,7 @@ class AuthMiddleware(ps.PulseMiddleware):
 
 ### `prerender`
 
-Called before batch SSR prerender for all paths in the request. Modify the payload, inject session data, or return early with redirects.
+Called before batch SSR prerender for all paths in the request. Inject session data, gate access, or modify the result before returning.
 
 ```python
 from pulse.messages import PrerenderPayload, Prerender
@@ -75,8 +75,8 @@ async def prerender(
     session: dict,
     next,
 ) -> ps.PrerenderResponse:
-    # payload.paths: list of paths being prerendered
-    # payload.routeInfo: route metadata
+    # payload["paths"]: list of route paths being prerendered
+    # payload["location"]: browser URL — {"pathname", "hash", "query", "queryParams"}
 
     # Inject data into session before render
     session["user"] = await get_user(request)
@@ -99,9 +99,9 @@ async def prerender(
 
 **Returns:** `await next()`, `Redirect(path)`, `NotFound()`, `Ok(Prerender)`
 
-**Payload fields:**
-- `paths`: List of paths being prerendered
-- `routeInfo`: Route metadata (params, query, etc.)
+**Payload fields (TypedDict):**
+- `paths`: List of route paths being prerendered
+- `location`: The browser URL (`pathname`, `hash`, `query`, `queryParams`). Per-mount `pathParams`/`catchall` are derived server-side from it.
 - `ttlSeconds`: Optional cache TTL
 - `renderId`: Optional render correlation ID
 
@@ -121,7 +121,7 @@ async def connect(
     # Extract auth from headers/cookies
     token = request.cookies.get("auth_token")
     if not token:
-        return Deny("Not authenticated")
+        return Deny()  # Not authenticated
 
     user = await verify_token(token)
     session["user"] = user
@@ -130,39 +130,7 @@ async def connect(
     return await next()  # Continue to app
 ```
 
-**Returns:** `await next()` or `Deny(reason)`
-
-### `prerender_route`
-
-Called before SSR render. Redirect unauthenticated users, inject session data.
-
-```python
-@override
-async def prerender_route(
-    self,
-    *,
-    path: str,
-    route_info: RouteInfo,
-    request: PulseRequest,
-    session: dict,
-    next,
-) -> ps.RoutePrerenderResponse:
-    # Protected routes
-    protected = ["/dashboard", "/settings", "/admin"]
-    if any(path.startswith(p) for p in protected):
-        if not session.get("user"):
-            return Redirect("/login")
-
-    # Admin-only
-    if path.startswith("/admin"):
-        user = session.get("user", {})
-        if not user.get("is_admin"):
-            return NotFound()
-
-    return await next()
-```
-
-**Returns:** `await next()`, `Redirect(path)`, `NotFound()`, `Ok(response)`
+**Returns:** `await next()` or `Deny()`
 
 ### `message`
 
@@ -181,7 +149,7 @@ async def message(
 
     # Rate limiting
     if not self._check_rate_limit(session):
-        return Deny("Rate limited")
+        return Deny()  # Rate limited
 
     # Logging
     print(f"[{session.get('user_id')}] {msg_type}")
@@ -189,7 +157,7 @@ async def message(
     return await next()
 ```
 
-**Returns:** `await next()` or `Deny(reason)`
+**Returns:** `await next()` or `Deny()`
 
 ### `channel`
 
@@ -239,11 +207,10 @@ async def channel(
 ```python
 from pulse.middleware import Ok, Redirect, NotFound, Deny
 
-Ok(response)      # Success with custom response
+Ok(payload)       # Success (Ok(None) for void success)
 Redirect(path)    # Redirect to path
-Redirect(path, replace=True)  # Replace history
 NotFound()        # 404 response
-Deny(reason)      # Reject request
+Deny()            # Reject request
 ```
 
 ## Request Object
@@ -339,9 +306,10 @@ class AuthMiddleware(ps.PulseMiddleware):
         return await next()
 
     @override
-    async def prerender_route(self, *, path, session, **kwargs):
+    async def prerender(self, *, payload, session, **kwargs):
         public = ["/", "/login", "/signup", "/public"]
-        if path not in public and not session.get("user"):
+        pathname = payload["location"]["pathname"]
+        if pathname not in public and not session.get("user"):
             return Redirect("/login")
         return await kwargs["next"]()
 ```
@@ -351,11 +319,12 @@ class AuthMiddleware(ps.PulseMiddleware):
 ```python
 class LoggingMiddleware(ps.PulseMiddleware):
     @override
-    async def prerender_route(self, *, path, request, **kwargs):
+    async def prerender(self, *, payload, request, **kwargs):
         start = time.time()
         result = await kwargs["next"]()
         duration = time.time() - start
-        print(f"[{request.client[0]}] {path} {duration:.3f}s")
+        pathname = payload["location"]["pathname"]
+        print(f"[{request.client[0]}] {pathname} {duration:.3f}s")
         return result
 ```
 
@@ -366,25 +335,26 @@ class RBACMiddleware(ps.PulseMiddleware):
     ADMIN_PATHS = ["/admin", "/settings/admin"]
 
     @override
-    async def prerender_route(self, *, path, session, **kwargs):
-        if any(path.startswith(p) for p in self.ADMIN_PATHS):
+    async def prerender(self, *, payload, session, **kwargs):
+        pathname = payload["location"]["pathname"]
+        if any(pathname.startswith(p) for p in self.ADMIN_PATHS):
             user = session.get("user", {})
             if user.get("role") != "admin":
                 return NotFound()
         return await kwargs["next"]()
 ```
 
-### CORS Headers
+### Custom Connection Directives
 
-Usually handled by FastAPI, but custom headers:
+Modify the prerender result's directives (headers sent on subsequent requests):
 
 ```python
-class CORSMiddleware(ps.PulseMiddleware):
+class DirectivesMiddleware(ps.PulseMiddleware):
     @override
-    async def prerender_route(self, *, request, **kwargs):
+    async def prerender(self, *, request, **kwargs):
         result = await kwargs["next"]()
         if isinstance(result, Ok):
-            result.response.headers["Access-Control-Allow-Origin"] = "*"
+            result.payload["directives"]["headers"]["x-custom"] = "value"
         return result
 ```
 

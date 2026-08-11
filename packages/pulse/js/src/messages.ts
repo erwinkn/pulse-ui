@@ -63,6 +63,14 @@ export interface ServerChannelResponseMessage {
 
 export type ServerChannelMessage = ServerChannelRequestMessage | ServerChannelResponseMessage;
 
+export interface ServerChannelConnectAckMessage {
+	type: "channel_connect_ack";
+	channel: string;
+	subscriptionId: string;
+	accepted: boolean;
+	error?: string;
+}
+
 export interface ServerNavigateToMessage {
 	type: "navigate_to";
 	path: string;
@@ -98,6 +106,7 @@ export type ServerMessage =
 	| ServerNavigateToMessage
 	| ServerReloadMessage
 	| ServerAttachAckMessage
+	| ServerChannelConnectAckMessage
 	| ServerChannelRequestMessage
 	| ServerChannelResponseMessage
 	| ServerJsExecMessage;
@@ -154,7 +163,25 @@ export interface ClientChannelResponseMessage {
 	requestId?: never;
 }
 
-export type ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage;
+export interface ClientChannelConnectMessage {
+	type: "channel_connect";
+	channel: string;
+	subscriptionId: string;
+	owner?: string;
+}
+
+export interface ClientChannelDisconnectMessage {
+	type: "channel_disconnect";
+	channel: string;
+	subscriptionId: string;
+	owner?: string;
+}
+
+export type ClientChannelMessage =
+	| ClientChannelRequestMessage
+	| ClientChannelResponseMessage
+	| ClientChannelConnectMessage
+	| ClientChannelDisconnectMessage;
 
 export interface ClientJsResultMessage {
 	type: "js_result";
@@ -169,6 +196,5 @@ export type ClientMessage =
 	| ClientUpdateMessage
 	| ClientDetachMessage
 	| ClientApiResultMessage
-	| ClientChannelRequestMessage
-	| ClientChannelResponseMessage
+	| ClientChannelMessage
 	| ClientJsResultMessage;

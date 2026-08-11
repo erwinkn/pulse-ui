@@ -38,6 +38,7 @@ def MyChannelComponent(*, channel_id: str):
 from collections.abc import Awaitable as _Awaitable
 from collections.abc import Callable as _Callable
 from typing import Any as _Any
+from typing import Literal as _Literal
 from typing import TypeVar as _TypeVar
 
 from pulse.transpiler.js_module import JsModule
@@ -99,7 +100,10 @@ class ChannelBridge:
 		...
 
 
-def usePulseChannel(channel_id: str) -> ChannelBridge | None:
+def usePulseChannel(
+	channel_id: str,
+	lifetime: _Literal["route", "tab"] = "route",
+) -> ChannelBridge | None:
 	"""React hook to connect to a Pulse channel.
 
 	Must be called from within a React component. The channel connection
@@ -107,6 +111,7 @@ def usePulseChannel(channel_id: str) -> ChannelBridge | None:
 
 	Args:
 	    channel_id: The unique identifier for the channel to connect to.
+	    lifetime: ``"route"`` for route ownership or ``"tab"`` for tab ownership.
 
 	Returns:
 	    A ChannelBridge instance for interacting with the channel.

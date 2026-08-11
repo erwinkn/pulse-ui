@@ -1,212 +1,256 @@
-import { timingSafeEqual } from "node:crypto";
-import type { IncomingMessage, ServerResponse } from "node:http";
-import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
-import type { EnvironmentModuleNode, Plugin } from "vite";
+import { fstatSync } from "node:fs";
+import { request } from "node:http";
+import type { Logger, Plugin } from "vite";
 
-const HEALTH_PATH = "/__pulse/health";
-const COMMIT_PATH = "/__pulse/commit";
-const MAX_BODY_BYTES = 64 * 1024;
+const URL_ENV = "PULSE_VITE_LIFECYCLE_URL";
+const SECRET_ENV = "PULSE_VITE_LIFECYCLE_SECRET";
+const INSTANCE_ENV = "PULSE_VITE_INSTANCE";
+const STATE_KEY = Symbol.for("pulse.vite.lifecycle");
 
-export interface PulseVitePluginOptions {
-	generatedDir?: string;
-	stagingDir?: string;
+interface LifecycleConfig {
+	url: string;
+	secret: string;
+	instance: string;
 }
 
-interface CommitRequest {
+interface ServerRegistration {
 	generation: number;
-	files: string[];
+	listening: boolean;
+	port?: number;
 }
 
-function sendJson(
-	response: ServerResponse,
-	statusCode: number,
-	body: Record<string, unknown>,
-) {
-	response.writeHead(statusCode, { "content-type": "application/json" });
-	response.end(JSON.stringify(body));
+interface InstanceState {
+	delivery: Promise<void>;
+	latestGeneration: number;
+	nextGeneration: number;
+	registrations: WeakMap<object, ServerRegistration>;
+	sequence: number;
 }
 
-function authorized(request: IncomingMessage, secret: string) {
-	const authorization = request.headers.authorization;
-	if (!authorization?.startsWith("Bearer ")) return false;
-
-	const provided = Buffer.from(authorization.slice("Bearer ".length));
-	const expected = Buffer.from(secret);
-	return provided.length === expected.length && timingSafeEqual(provided, expected);
+interface LifecycleState {
+	instances: Map<string, InstanceState>;
+	watchingSupervisor?: boolean;
 }
 
-async function readCommitRequest(request: IncomingMessage): Promise<CommitRequest> {
-	const contentLength = Number(request.headers["content-length"]);
-	if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
-		throw new Error("Request body is too large");
+type LifecycleEvent = "closed" | "configured" | "listening";
+
+function requiredEnv(name: string, value: string | undefined) {
+	if (value === undefined || value.trim() === "") {
+		throw new Error(`${name} must be set by the Pulse supervisor`);
 	}
+	return value;
+}
 
-	const chunks: Buffer[] = [];
-	let byteLength = 0;
-	for await (const chunk of request) {
-		const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-		byteLength += buffer.length;
-		if (byteLength > MAX_BODY_BYTES) throw new Error("Request body is too large");
-		chunks.push(buffer);
+function lifecycleConfig(): LifecycleConfig | undefined {
+	const url = process.env[URL_ENV];
+	const secret = process.env[SECRET_ENV];
+	const instance = process.env[INSTANCE_ENV];
+	if (url === undefined && secret === undefined && instance === undefined) return;
+
+	const requiredUrl = requiredEnv(URL_ENV, url);
+	const requiredSecret = requiredEnv(SECRET_ENV, secret);
+	const requiredInstance = requiredEnv(INSTANCE_ENV, instance);
+
+	let callback: URL;
+	try {
+		callback = new URL(requiredUrl);
+	} catch {
+		throw new Error(`${URL_ENV} must be a valid URL`);
 	}
-
-	const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 	if (
-		typeof value !== "object" ||
-		value === null ||
-		!("generation" in value) ||
-		!Number.isSafeInteger(value.generation) ||
-		(value.generation as number) <= 0
+		callback.protocol !== "http:" ||
+		(callback.hostname !== "127.0.0.1" && callback.hostname !== "[::1]") ||
+		callback.username !== "" ||
+		callback.password !== "" ||
+		callback.hash !== ""
 	) {
-		throw new Error("generation must be a positive safe integer");
+		throw new Error(
+			`${URL_ENV} must be an unauthenticated HTTP URL on 127.0.0.1 or ::1`,
+		);
 	}
-	const files = "files" in value ? value.files : [];
-	if (!Array.isArray(files) || files.some((file) => typeof file !== "string")) {
-		throw new Error("files must be an array of paths");
-	}
-	return { generation: value.generation as number, files };
-}
-
-function isWithin(file: string, directory: string) {
-	const path = relative(directory, file);
-	return path === "" || (!path.startsWith("..") && !isAbsolute(path));
-}
-
-export function pulseVitePlugin(options: PulseVitePluginOptions = {}): Plugin {
-	const secretValue = process.env.PULSE_VITE_CONTROL_SECRET;
-	const enabled = secretValue !== undefined;
-	if (enabled && !secretValue) {
-		throw new Error("PULSE_VITE_CONTROL_SECRET must not be empty");
-	}
-	const secret = secretValue ?? "";
-	const generatedDirOption =
-		options.generatedDir ?? process.env.PULSE_VITE_GENERATED_DIR ?? "app/pulse";
-	const stagingDirOption = options.stagingDir ?? process.env.PULSE_VITE_STAGING_DIR;
-
-	let generatedDir = "";
-	let stagingDir = "";
-	let latestGeneration = 0;
-	const pendingFiles = new Set<string>();
 
 	return {
-		name: "pulse:reload-coordination",
-		apply: "serve",
-		configResolved(config) {
-			generatedDir = resolve(config.root, generatedDirOption);
-			stagingDir = stagingDirOption
-				? resolve(config.root, stagingDirOption)
-				: resolve(
-						dirname(generatedDir),
-						`.${basename(generatedDir)}.pulse-reload`,
-					);
-		},
-		hotUpdate: {
-			order: "pre",
-			handler({ file }) {
-				if (
-					enabled &&
-					(isWithin(file, generatedDir) || isWithin(file, stagingDir))
-				) {
-					pendingFiles.add(file);
-					return [];
-				}
+		url: requiredUrl,
+		secret: requiredSecret,
+		instance: requiredInstance,
+	};
+}
+
+function lifecycleStateRoot() {
+	const globalRecord = globalThis as unknown as Record<symbol, unknown>;
+	return (globalRecord[STATE_KEY] ??= {
+		instances: new Map(),
+	}) as LifecycleState;
+}
+
+function stateFor(instance: string) {
+	const lifecycleState = lifecycleStateRoot();
+	let state = lifecycleState.instances.get(instance);
+	if (!state) {
+		state = {
+			delivery: Promise.resolve(),
+			latestGeneration: 0,
+			nextGeneration: 0,
+			registrations: new WeakMap(),
+			sequence: 0,
+		};
+		lifecycleState.instances.set(instance, state);
+	}
+	return state;
+}
+
+function notify(
+	lifecycle: LifecycleConfig,
+	event: LifecycleEvent,
+	sequence: number,
+	port: number | undefined,
+): Promise<void> {
+	const body = JSON.stringify({
+		event,
+		instance: lifecycle.instance,
+		sequence,
+		port,
+	});
+	return new Promise((resolve, reject) => {
+		const notification = request(
+			lifecycle.url,
+			{
+				method: "POST",
+				headers: {
+					authorization: `Bearer ${lifecycle.secret}`,
+					"content-length": Buffer.byteLength(body),
+					"content-type": "application/json",
+				},
 			},
-		},
-		configureServer(viteServer) {
-			if (!enabled) return;
-
-			viteServer.middlewares.use(async function pulseReloadMiddleware(
-				request,
-				response,
-				next,
-			) {
-				const path = new URL(request.url ?? "/", "http://pulse.local").pathname;
-				if (path !== HEALTH_PATH && path !== COMMIT_PATH) {
-					next();
-					return;
-				}
-
-				if (!authorized(request, secret)) {
-					sendJson(response, 401, { status: "unauthorized" });
-					return;
-				}
-
-				if (request.method === "GET" && path === HEALTH_PATH) {
-					sendJson(response, 200, {
-						status: "ready",
-						generation: latestGeneration,
-					});
-					return;
-				}
-				if (request.method !== "POST" || path !== COMMIT_PATH) {
-					sendJson(response, 404, { status: "not_found" });
-					return;
-				}
-
-				let commit: CommitRequest;
-				try {
-					commit = await readCommitRequest(request);
-				} catch (error) {
-					sendJson(response, 400, {
-						status: "invalid_request",
-						error: error instanceof Error ? error.message : String(error),
-					});
-					return;
-				}
-				const publishedFiles = commit.files.map((file) =>
-					resolve(generatedDir, file),
-				);
-				if (publishedFiles.some((file) => !isWithin(file, generatedDir))) {
-					sendJson(response, 400, {
-						status: "invalid_request",
-						error: "files must stay inside the generated directory",
-					});
-					return;
-				}
-
-				if (commit.generation < latestGeneration) {
-					sendJson(response, 409, {
-						status: "stale",
-						generation: latestGeneration,
-					});
-					return;
-				}
-				if (commit.generation === latestGeneration) {
-					sendJson(response, 200, {
-						status: "committed",
-						generation: latestGeneration,
-					});
-					return;
-				}
-
-				try {
-					const files = new Set([...pendingFiles, ...publishedFiles]);
-					for (const environment of Object.values(viteServer.environments)) {
-						const invalidated = new Set<EnvironmentModuleNode>();
-						for (const file of files) {
-							for (const module of
-								environment.moduleGraph.getModulesByFile(file) ?? []) {
-								environment.moduleGraph.invalidateModule(module, invalidated);
-							}
-						}
-					}
-					viteServer.ws.send({ type: "full-reload" });
-					latestGeneration = commit.generation;
-					pendingFiles.clear();
-				} catch (error) {
-					const message = error instanceof Error ? error.message : String(error);
-					viteServer.config.logger.error(
-						`Pulse generation ${commit.generation} commit failed: ${message}`,
-					);
-					sendJson(response, 500, { status: "error", error: message });
-					return;
-				}
-
-				sendJson(response, 200, {
-					status: "committed",
-					generation: latestGeneration,
+			(response) => {
+				const status = response.statusCode ?? 0;
+				response.resume();
+				response.once("error", reject);
+				response.once("end", () => {
+					if (status >= 200 && status < 300) resolve();
+					else reject(new Error(`supervisor returned HTTP ${status}`));
 				});
+			},
+		);
+		notification.once("error", reject);
+		notification.end(body);
+	});
+}
+
+function enqueue(
+	state: InstanceState,
+	lifecycle: LifecycleConfig,
+	event: LifecycleEvent,
+	port: number | undefined,
+	logger: Logger,
+) {
+	const sequence = ++state.sequence;
+	state.delivery = state.delivery
+		.then(() => notify(lifecycle, event, sequence, port))
+		.catch((error: unknown) => {
+			const message = error instanceof Error ? error.message : String(error);
+			logger.error(`Pulse could not report Vite ${event}: ${message}`);
+		});
+}
+
+function watchSupervisor() {
+	const lifecycleState = lifecycleStateRoot();
+	if (lifecycleState.watchingSupervisor) return;
+	// The supervisor always feeds us stdin through a pipe. Anything else
+	// (a TTY, /dev/null under a test runner) would hit EOF spuriously.
+	try {
+		if (!fstatSync(0).isFIFO()) return;
+	} catch {
+		return;
+	}
+	lifecycleState.watchingSupervisor = true;
+	// The supervisor holds our stdin pipe open for our whole lifetime; EOF
+	// means it died without stopping us, so exit rather than run orphaned.
+	const exit = () => process.exit(0);
+	process.stdin.once("end", exit);
+	process.stdin.once("close", exit);
+	process.stdin.once("error", exit);
+	process.stdin.resume();
+	// Do not let the stdin watch alone keep the process alive.
+	process.stdin.unref();
+}
+
+export function pulseVitePlugin(): Plugin {
+	const lifecycle = lifecycleConfig();
+	const state = lifecycle ? stateFor(lifecycle.instance) : undefined;
+	let generation = 0;
+
+	return {
+		name: "pulse:lifecycle",
+		apply: "serve",
+		configureServer(server) {
+			if (!lifecycle || !state) return;
+			watchSupervisor();
+			const httpServer = server.httpServer;
+			if (!httpServer) {
+				throw new Error("Pulse lifecycle requires Vite to own an HTTP server");
+			}
+
+			if (generation === 0) generation = ++state.nextGeneration;
+			state.latestGeneration = generation;
+			// Report "configured" before the server listens so the supervisor can
+			// tell a missing plugin apart from a slow Vite start.
+			enqueue(state, lifecycle, "configured", undefined, server.config.logger);
+			const existing = state.registrations.get(httpServer);
+			if (existing) {
+				existing.generation = generation;
+				return;
+			}
+
+			const registration: ServerRegistration = {
+				generation,
+				listening: false,
+			};
+			state.registrations.set(httpServer, registration);
+
+			const reportListening = () => {
+				if (
+					registration.listening ||
+					registration.generation !== state.latestGeneration
+				) {
+					return;
+				}
+				const address = httpServer.address();
+				if (!address || typeof address === "string") {
+					server.config.logger.error(
+						"Pulse could not report Vite listening: server has no TCP port",
+					);
+					return;
+				}
+				registration.listening = true;
+				registration.port = address.port;
+				enqueue(
+					state,
+					lifecycle,
+					"listening",
+					address.port,
+					server.config.logger,
+				);
+			};
+
+			httpServer.once("close", () => {
+				if (
+					!registration.listening ||
+					registration.port === undefined ||
+					registration.generation !== state.latestGeneration
+				) {
+					return;
+				}
+				enqueue(
+					state,
+					lifecycle,
+					"closed",
+					registration.port,
+					server.config.logger,
+				);
 			});
+			if (httpServer.listening) queueMicrotask(reportListening);
+			else httpServer.once("listening", reportListening);
 		},
 	};
 }

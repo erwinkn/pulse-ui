@@ -67,9 +67,8 @@ bun install
 cd ..
 ```
 
-This scaffolds a server-side rendered React app that Pulse will use to display your components. You can take a look at how `examples/main.py` and `examples/web/` are set up for a working reference.
-
-Add the Pulse development bridge in `web/vite.config.ts`:
+Register Pulse's Vite plugin in `web/vite.config.ts`. The development
+supervisor uses it to learn when Vite is actually listening:
 
 ```ts
 import { reactRouter } from "@react-router/dev/vite";
@@ -81,7 +80,7 @@ export default defineConfig({
 });
 ```
 
-Pulse uses this bridge through Vite's existing development server for Python reloads. Vite keeps handling ordinary frontend HMR. If you forget this step, don't worry—`pulse run` checks for the plugin at startup and adds it to your Vite config automatically.
+This scaffolds a server-side rendered React app that Pulse will use to display your components. You can take a look at how `examples/main.py` and `examples/web/` are set up for a working reference.
 
 ## Step 3: Run your app
 
@@ -91,9 +90,9 @@ Now you're ready to start your Pulse app:
 uv run pulse run app.py
 ```
 
-The `pulse run` command starts the Python and React Router servers. When you save Python, Pulse prepares the new backend and routes together, then reloads the browser after both are ready.
+The `pulse run` command starts the Python and React Router servers. Pulse keeps the public port reserved while you work, starting with 8000 and choosing the first available port. When you save Python, Pulse restarts both servers and regenerates the routes without handing that port between processes. Vite stays on loopback behind the proxy in single-server mode, then reloads the browser when the new stack is ready. In-memory Pulse state resets. JavaScript, TypeScript, and CSS changes still use Vite's normal HMR.
 
-Open the URL shown in your terminal (usually `http://localhost:5173`) and you should see "Hello Pulse" displayed in your browser!
+Open the URL shown in your terminal (usually `http://localhost:8000`) and you should see "Hello Pulse" displayed in your browser!
 
 ## Customizing the frontend location
 

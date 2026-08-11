@@ -336,14 +336,10 @@ class ReactProxy:
 				await asyncio.gather(*pending, return_exceptions=True)
 			# Surface unexpected errors from the completed task.
 			for task in done:
-				if task.cancelled():
-					continue
 				exc = task.exception()
 				if exc and not isinstance(exc, asyncio.CancelledError):
 					raise exc
 
-		except asyncio.CancelledError:
-			return
 		except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError) as exc:
 			logger.error("WebSocket proxy connection failed: %s", exc)
 			with suppress(asyncio.CancelledError, Exception):

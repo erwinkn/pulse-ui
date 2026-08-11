@@ -15,7 +15,7 @@ Pulse's guiding principles are:
 - **High ceiling.** You can build any online application in Pulse.
 - **Essentials built-in.** Pulse is not prescriptive, but it aims to be comprehensive. It won't tell you how to build your authentication, but it will provide you with forms, queries, middleware, and all the hooks needed to extend the framework.
 - **JavaScript as a first class citizen.** JavaScript code is never hidden, interoperability is easy. You can live anywhere between Python-only to working side-by-side with web developers.
-- **Excellent developer experience.** In addition to a great API, Pulse's dev server provides hot reloads and built-in development tooling, like latency controls.
+- **Excellent developer experience.** In addition to a great API, Pulse's dev server provides automatic restarts and built-in development tooling, like latency controls.
 
 There is a tutorial at https://github.com/erwinkn/pulse-ui-tutorial. Real docs are coming soon as well, stay tuned!
 

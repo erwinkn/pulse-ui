@@ -7,9 +7,8 @@ This module provides the CLI commands for running the server and generating rout
 
 from __future__ import annotations
 
+import asyncio
 import os
-import re
-import secrets
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -29,6 +28,8 @@ from pulse.cli.lock import FolderLock, active_lock_info, interrupt_active_dev_se
 from pulse.cli.logging import CLILogger
 from pulse.cli.models import AppLoadResult, CommandSpec
 from pulse.cli.processes import execute_commands
+from pulse.cli.relay import PortReservation, reserve_port
+from pulse.cli.reload import DevSupervisor
 from pulse.cli.secrets import resolve_dev_secret
 from pulse.cli.uvicorn_log_config import get_log_config
 from pulse.env import (
@@ -37,9 +38,6 @@ from pulse.env import (
 	ENV_PULSE_PORT,
 	ENV_PULSE_REACT_SERVER_ADDRESS,
 	ENV_PULSE_SECRET,
-	ENV_PULSE_VITE_CONTROL_SECRET,
-	ENV_PULSE_VITE_GENERATED_DIR,
-	ENV_PULSE_VITE_STAGING_DIR,
 	PulseEnv,
 	env,
 )
@@ -66,9 +64,9 @@ def run(
 	address: str = typer.Option(
 		"localhost",
 		"--address",
-		help="Host uvicorn binds to",
+		help="Public server host",
 	),
-	port: int = typer.Option(8000, "--port", help="Port uvicorn binds to"),
+	port: int = typer.Option(8000, "--port", help="Public server port"),
 	# Env flags
 	dev: bool = typer.Option(False, "--dev", help="Run in development mode"),
 	prod: bool = typer.Option(False, "--prod", help="Run in production mode"),
@@ -115,7 +113,8 @@ def run(
 		logger.error("Cannot use --server-only and --web-only at the same time.")
 		raise typer.Exit(1)
 
-	bootstrap_modules = set(sys.modules)
+	supervised_reload = env.pulse_env == "dev" and reload and not web_only
+	bootstrap_modules: set[str] = set(sys.modules) if supervised_reload else set()
 	logger.print(f"Loading app from {app_file}")
 	app_ctx = load_app_from_target(app_file, logger)
 	_apply_app_context_to_env(app_ctx)
@@ -150,7 +149,20 @@ def run(
 				f"Stopped existing Pulse dev server at {stopped.url} (pid={stopped.pid})."
 			)
 
-	if find_port:
+	public_port: PortReservation | None = None
+	vite_port: PortReservation | None = None
+	if supervised_reload:
+		try:
+			public_port = reserve_port(address, port, find_port=find_port)
+			ctx.call_on_close(public_port.close)
+			port = public_port.port
+			if not server_only:
+				vite_port = reserve_port("127.0.0.1", 5173, find_port=True)
+				ctx.call_on_close(vite_port.close)
+		except RuntimeError as exc:
+			logger.error(str(exc))
+			raise typer.Exit(1) from None
+	elif find_port:
 		port = find_available_port(port)
 
 	dev_secret: str | None = None
@@ -163,19 +175,12 @@ def run(
 	web_args = extra_flags if web_only else []
 
 	commands: list[CommandSpec] = []
-	supervised_reload = env.pulse_env == "dev" and reload and not web_only
 	if supervised_reload and server_args:
 		logger.error(
 			"Raw Uvicorn arguments are not supported with Pulse reload yet. "
 			+ "Use --no-reload to pass them through."
 		)
 		raise typer.Exit(1)
-	vite_control_secret = (
-		secrets.token_urlsafe(32) if supervised_reload and not server_only else None
-	)
-	reload_stage_root = _reload_stage_root(
-		app_instance.codegen.cfg.pulse_path, web_root
-	)
 
 	# Track readiness for announcement
 	server_ready = {"server": False, "web": False}
@@ -210,38 +215,46 @@ def run(
 	# Build web command first (when needed) so we can set PULSE_REACT_SERVER_ADDRESS
 	# before building the uvicorn command, which needs that env var
 	web_port: int | None = None
+	web_cmd: CommandSpec | None = None
+	server_cmd: CommandSpec | None = None
 	if not server_only:
-		web_port = find_available_port(5173)
+		web_port = (
+			vite_port.port if vite_port is not None else find_available_port(5173)
+		)
+		vite_bind_port: int | None = None
+		if supervised_reload:
+			# Give Vite an explicit private port so a user-configured strictPort
+			# cannot collide with the relay's reservation. Released immediately;
+			# without --strictPort Vite still scans upward if it gets stolen.
+			private_reservation = reserve_port("127.0.0.1", 0, find_port=False)
+			vite_bind_port = private_reservation.port
+			private_reservation.close()
 		web_cmd = build_web_command(
 			web_root=web_root,
-			extra_args=web_args,
-			port=web_port,
+			extra_args=(
+				[*web_args, "--host", "127.0.0.1"] if supervised_reload else web_args
+			),
+			port=vite_bind_port if supervised_reload else web_port,
+			strict_port=not supervised_reload,
 			mode=app_instance.env,
-			ready_pattern=r"localhost:\d+",
+			ready_pattern=None if supervised_reload else r"localhost:\d+",
 			on_ready=mark_web_ready,
 			plain=plain,
-			vite_control_secret=vite_control_secret,
-			generated_dir=str(app_instance.codegen.cfg.pulse_path),
-			staging_dir=str(reload_stage_root),
 		)
-		commands.append(web_cmd)
+		if not supervised_reload:
+			commands.append(web_cmd)
 		# Set env var so app can read the React server address (only used in single-server mode)
-		env.react_server_address = f"http://localhost:{web_port}"
+		web_host = "127.0.0.1" if supervised_reload else "localhost"
+		env.react_server_address = f"http://{web_host}:{web_port}"
 
 	if not web_only:
 		if supervised_reload:
-			server_cmd = build_reload_command(
+			server_cmd = build_dev_worker_command(
 				app_ctx=app_ctx,
 				address=address,
 				port=port,
 				dev_secret=dev_secret,
-				server_only=server_only,
-				web_root=web_root,
 				verbose=verbose,
-				vite_port=web_port,
-				vite_control_secret=vite_control_secret,
-				stage_root=reload_stage_root,
-				ready_pattern=r"Pulse reload ready",
 				on_ready=mark_server_ready,
 				plain=plain,
 			)
@@ -260,18 +273,14 @@ def run(
 				on_ready=mark_server_ready,
 				plain=plain,
 			)
-		commands.append(server_cmd)
+		if not supervised_reload:
+			commands.append(server_cmd)
 
 	exit_code = 1
 	try:
 		with FolderLock(web_root, address=address, port=port):
-			# Install web dependencies and generate route files before launching
-			# the web dev server. Without the install, a fresh checkout's web
-			# process dies with "react-router: command not found"; without codegen,
-			# it reads routes.ts before the server has generated "./pulse/routes"
-			# and dies with "Cannot find module './pulse/routes'". Both steps are
-			# idempotent and cheap on warm starts, and run under the lock so a
-			# rejected concurrent run never rewrites a live instance's files.
+			# Install before launching Vite. In supervised development the backend
+			# owns codegen and Vite starts only after the backend is fully ready.
 			if env.pulse_env == "dev" and not server_only:
 				try:
 					dep_plan = prepare_web_dependencies(
@@ -286,32 +295,47 @@ def run(
 				except subprocess.CalledProcessError:
 					logger.error("Failed to install web dependencies with Bun.")
 					raise typer.Exit(1) from None
-				logger.print("Generating routes")
-				try:
-					app_instance.run_codegen(local_server_url(address, port))
-				except Exception:
-					logger.error("Failed to generate routes")
-					logger.print_exception()
-					raise typer.Exit(1) from None
-
-			if vite_control_secret is not None:
-				_ensure_vite_plugin(web_root, logger)
+				if not supervised_reload:
+					logger.print("Generating routes")
+					try:
+						app_instance.run_codegen(local_server_url(address, port))
+					except Exception:
+						logger.error("Failed to generate routes")
+						logger.print_exception()
+						raise typer.Exit(1) from None
 
 			if supervised_reload:
-				# The bootstrap import creates the route tree Vite needs at startup.
-				# Generation workers own every import used by the running backend.
+				assert server_cmd is not None
+				watch_root = app_ctx.app_dir or app_ctx.server_cwd or Path.cwd()
+				generated_path = app_instance.codegen.cfg.pulse_path.resolve()
+				registered_sources = {
+					asset.source_path.resolve() for asset in get_registered_assets()
+				}
 				_release_reload_bootstrap(app_ctx, bootstrap_modules)
 				del app_instance
 				del app_ctx
-
-			try:
-				exit_code = execute_commands(
-					commands,
-					tag_mode=logger.get_tag_mode(),
+				exit_code = asyncio.run(
+					DevSupervisor(
+						backend=server_cmd,
+						web=web_cmd,
+						watch_roots=(watch_root,),
+						ignored_roots=(generated_path,),
+						registered_sources=registered_sources,
+						tag_mode=logger.get_tag_mode(),
+						public_port=public_port,
+						vite_port=vite_port,
+						web_first=is_single_server,
+					).run()
 				)
-			except RuntimeError as exc:
-				logger.error(str(exc))
-				raise typer.Exit(1) from None
+			else:
+				try:
+					exit_code = execute_commands(
+						commands,
+						tag_mode=logger.get_tag_mode(),
+					)
+				except RuntimeError as exc:
+					logger.error(str(exc))
+					raise typer.Exit(1) from None
 	except typer.Exit:
 		raise
 	except RuntimeError as exc:
@@ -479,7 +503,13 @@ def build_uvicorn_command(
 	on_ready: Callable[[], None] | None = None,
 	plain: bool = False,
 ) -> CommandSpec:
-	cwd = app_ctx.server_cwd or app_ctx.app_dir or Path.cwd()
+	cwd, command_env = _server_process_context(
+		app_ctx=app_ctx,
+		address=address,
+		port=port,
+		dev_secret=dev_secret,
+		plain=plain,
+	)
 	app_import = f"{app_ctx.module_name}:{app_ctx.app_var}.asgi_factory"
 	args: list[str] = [
 		sys.executable,
@@ -515,28 +545,8 @@ def build_uvicorn_command(
 	if plain:
 		args.append("--no-use-colors")
 
-	command_env = os.environ.copy()
-	command_env.update(
-		{
-			"PYTHONUNBUFFERED": "1",
-			ENV_PULSE_HOST: address,
-			ENV_PULSE_PORT: str(port),
-		}
-	)
-	if plain:
-		command_env["NO_COLOR"] = "1"
-		command_env["FORCE_COLOR"] = "0"
-	else:
-		command_env["FORCE_COLOR"] = "1"
-	# Pass React server address to uvicorn process if set
-	if ENV_PULSE_REACT_SERVER_ADDRESS in os.environ:
-		command_env[ENV_PULSE_REACT_SERVER_ADDRESS] = os.environ[
-			ENV_PULSE_REACT_SERVER_ADDRESS
-		]
 	if app_ctx.app.env == "prod" and server_only:
 		command_env[ENV_PULSE_DISABLE_CODEGEN] = "1"
-	if dev_secret:
-		command_env[ENV_PULSE_SECRET] = dev_secret
 
 	# Apply custom log config to filter noisy requests (dev/ci only)
 	if app_ctx.app.env != "prod" and not verbose:
@@ -558,65 +568,41 @@ def build_uvicorn_command(
 	)
 
 
-def build_reload_command(
+def build_dev_worker_command(
 	*,
 	app_ctx: AppLoadResult,
 	address: str,
 	port: int,
 	dev_secret: str | None,
-	server_only: bool,
-	web_root: Path,
 	verbose: bool,
-	vite_port: int | None,
-	vite_control_secret: str | None,
-	stage_root: Path,
-	ready_pattern: str | None = None,
 	on_ready: Callable[[], None] | None = None,
 	plain: bool = False,
 ) -> CommandSpec:
-	base = build_uvicorn_command(
+	cwd, command_env = _server_process_context(
 		app_ctx=app_ctx,
 		address=address,
 		port=port,
-		reload_enabled=False,
-		extra_args=[],
 		dev_secret=dev_secret,
-		server_only=server_only,
-		web_root=web_root,
-		verbose=verbose,
 		plain=plain,
 	)
 	target = app_ctx.target
 	if app_ctx.mode == "path" and app_ctx.app_file is not None:
 		target = f"{app_ctx.app_file}:{app_ctx.app_var}"
-	watch_root = app_ctx.app_dir or app_ctx.server_cwd or Path.cwd()
 	args = [
 		sys.executable,
 		"-m",
-		"pulse.cli.reload",
+		"pulse.cli.dev_worker",
 		"--target",
 		target,
 		"--host",
 		address,
 		"--port",
 		str(port),
-		"--live-path",
-		str(app_ctx.app.codegen.cfg.pulse_path),
-		"--watch-root",
-		str(watch_root),
-		"--stage-root",
-		str(stage_root),
+		"--bind-host",
+		"127.0.0.1",
+		"--bind-port",
+		"0",
 	]
-	for asset in get_registered_assets():
-		args.extend(["--source", str(asset.source_path.resolve())])
-		if not asset.source_path.resolve().is_relative_to(watch_root.resolve()):
-			args.extend(["--watch-root", str(asset.source_path.resolve().parent)])
-	# The secret travels via env, not argv: command lines are world-readable in
-	# the process table, and it must authenticate the Vite control endpoints.
-	base.env.pop(ENV_PULSE_VITE_CONTROL_SECRET, None)
-	if vite_port is not None and vite_control_secret is not None:
-		args.extend(["--vite-port", str(vite_port)])
-		base.env[ENV_PULSE_VITE_CONTROL_SECRET] = vite_control_secret
 	if plain:
 		args.append("--plain")
 	if verbose:
@@ -624,12 +610,41 @@ def build_reload_command(
 	return CommandSpec(
 		name="server",
 		args=args,
-		cwd=base.cwd,
-		env=base.env,
-		ready_pattern=ready_pattern,
+		cwd=cwd,
+		env=command_env,
 		on_ready=on_ready,
-		suppress_ready_output=True,
 	)
+
+
+def _server_process_context(
+	*,
+	app_ctx: AppLoadResult,
+	address: str,
+	port: int,
+	dev_secret: str | None,
+	plain: bool,
+) -> tuple[Path, dict[str, str]]:
+	cwd = app_ctx.server_cwd or app_ctx.app_dir or Path.cwd()
+	command_env = os.environ.copy()
+	command_env.update(
+		{
+			"PYTHONUNBUFFERED": "1",
+			ENV_PULSE_HOST: address,
+			ENV_PULSE_PORT: str(port),
+		}
+	)
+	if plain:
+		command_env["NO_COLOR"] = "1"
+		command_env["FORCE_COLOR"] = "0"
+	else:
+		command_env["FORCE_COLOR"] = "1"
+	if ENV_PULSE_REACT_SERVER_ADDRESS in os.environ:
+		command_env[ENV_PULSE_REACT_SERVER_ADDRESS] = os.environ[
+			ENV_PULSE_REACT_SERVER_ADDRESS
+		]
+	if dev_secret:
+		command_env[ENV_PULSE_SECRET] = dev_secret
+	return cwd, command_env
 
 
 def build_web_command(
@@ -637,13 +652,11 @@ def build_web_command(
 	web_root: Path,
 	extra_args: Sequence[str],
 	port: int | None = None,
+	strict_port: bool = True,
 	mode: PulseEnv = "dev",
 	ready_pattern: str | None = None,
 	on_ready: Callable[[], None] | None = None,
 	plain: bool = False,
-	vite_control_secret: str | None = None,
-	generated_dir: str | None = None,
-	staging_dir: str | None = None,
 ) -> CommandSpec:
 	command_env = os.environ.copy()
 	if mode == "prod":
@@ -665,6 +678,8 @@ def build_web_command(
 		else:
 			# react-router dev accepts --port flag
 			args.extend(["--port", str(port)])
+			if strict_port:
+				args.append("--strictPort")
 	if extra_args:
 		args.extend(extra_args)
 
@@ -673,18 +688,6 @@ def build_web_command(
 			"PYTHONUNBUFFERED": "1",
 		}
 	)
-	for internal_name in (
-		ENV_PULSE_VITE_CONTROL_SECRET,
-		ENV_PULSE_VITE_GENERATED_DIR,
-		ENV_PULSE_VITE_STAGING_DIR,
-	):
-		command_env.pop(internal_name, None)
-	if vite_control_secret is not None:
-		command_env[ENV_PULSE_VITE_CONTROL_SECRET] = vite_control_secret
-		if generated_dir is not None:
-			command_env[ENV_PULSE_VITE_GENERATED_DIR] = generated_dir
-		if staging_dir is not None:
-			command_env[ENV_PULSE_VITE_STAGING_DIR] = staging_dir
 	if plain:
 		command_env["NO_COLOR"] = "1"
 		command_env["FORCE_COLOR"] = "0"
@@ -706,63 +709,6 @@ def _apply_app_context_to_env(app_ctx: AppLoadResult) -> None:
 		env.pulse_app_file = str(app_ctx.app_file)
 	if app_ctx.app_dir:
 		env.pulse_app_dir = str(app_ctx.app_dir)
-
-
-VITE_CONFIG_FILENAMES = (
-	"vite.config.ts",
-	"vite.config.mts",
-	"vite.config.cts",
-	"vite.config.js",
-	"vite.config.mjs",
-	"vite.config.cjs",
-)
-VITE_PLUGIN_IMPORT = 'import { pulseVitePlugin } from "pulse-ui-client/vite";\n'
-VITE_PLUGINS_ARRAY = re.compile(r"plugins\s*:\s*\[")
-
-
-def _ensure_vite_plugin(web_root: Path, logger: CLILogger) -> None:
-	"""Pulse reload coordinates with Vite through pulseVitePlugin(); without it the
-	dev server would time out at startup, so add the plugin or fail with instructions."""
-	config_path = next(
-		(path for name in VITE_CONFIG_FILENAMES if (path := web_root / name).is_file()),
-		None,
-	)
-	if config_path is None:
-		logger.error(
-			f"No Vite config found in {web_root}. Pulse reload requires "
-			+ "pulseVitePlugin() from 'pulse-ui-client/vite' in the Vite plugins array."
-		)
-		raise typer.Exit(1)
-	content = config_path.read_text()
-	if "pulseVitePlugin" in content:
-		return
-	plugins_array = VITE_PLUGINS_ARRAY.search(content)
-	if plugins_array is None:
-		logger.error(
-			f"{config_path} does not register pulseVitePlugin(), which Pulse reload "
-			+ "requires. Add it to your Vite config:\n"
-			+ '  import { pulseVitePlugin } from "pulse-ui-client/vite";\n'
-			+ "  // in defineConfig: plugins: [..., pulseVitePlugin()]"
-		)
-		raise typer.Exit(1)
-	insert_at = plugins_array.end()
-	config_path.write_text(
-		VITE_PLUGIN_IMPORT
-		+ content[:insert_at]
-		+ "pulseVitePlugin(), "
-		+ content[insert_at:]
-	)
-	logger.warning(
-		f"Added pulseVitePlugin() to {config_path.name} (required for Pulse reload)."
-	)
-
-
-def _reload_stage_root(live_path: Path, web_root: Path) -> Path:
-	live_path = live_path.resolve()
-	web_root = web_root.resolve()
-	if live_path.is_relative_to(web_root):
-		return web_root / ".pulse" / "reload" / live_path.name
-	return live_path.parent / f".{live_path.name}.pulse-reload"
 
 
 def _release_reload_bootstrap(

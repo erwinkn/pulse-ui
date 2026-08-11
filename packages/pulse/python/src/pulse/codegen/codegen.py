@@ -141,8 +141,6 @@ class Codegen:
 
 	@property
 	def output_folder(self):
-		if output := env.codegen_output:
-			return Path(output)
 		return self.cfg.pulse_path
 
 	@property
@@ -155,9 +153,8 @@ class Codegen:
 		internal_server_address: str | None = None,
 		connection_status: "ConnectionStatusConfig | None" = None,
 	):
-		# Staged development generations live outside Vite's watched tree.
-		if env.codegen_output is None:
-			ensure_gitignore_has(self.cfg.web_root, f"app/{self.cfg.pulse_dir}/")
+		# Ensure generated files are gitignored
+		ensure_gitignore_has(self.cfg.web_root, f"app/{self.cfg.pulse_dir}/")
 
 		self._copied_files = set()
 

@@ -75,13 +75,12 @@ class EffectState(HookState):
 			return existing
 
 		effect = factory()
+		self.resources.own(effect)
 		self.effects[full_identity] = effect
 		return effect
 
 	@override
-	def dispose(self) -> None:
-		for eff in self.effects.values():
-			eff.dispose()
+	def on_dispose(self) -> None:
 		self.effects.clear()
 		self._seen_this_render.clear()
 

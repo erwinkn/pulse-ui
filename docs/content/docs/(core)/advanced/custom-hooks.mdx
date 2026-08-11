@@ -26,7 +26,7 @@ class TimerHookState(ps.hooks.State):
     def elapsed(self) -> float:
         return time.time() - self.start_time
 
-    def dispose(self) -> None:
+    def on_dispose(self) -> None:
         # Called when the component unmounts
         print(f"Timer ran for {self.elapsed():.2f}s")
 ```
@@ -60,7 +60,7 @@ The `HookState` base class provides three lifecycle methods you can override:
 |--------|--------------|----------|
 | `on_render_start(render_cycle)` | Before each render | Reset per-render state, start measurements |
 | `on_render_end(render_cycle)` | After each render | Finalize calculations, trigger side effects |
-| `dispose()` | When component unmounts | Clean up resources, cancel subscriptions |
+| `on_dispose()` | When component unmounts | Clean up resources, cancel subscriptions |
 
 ```python
 class RenderCounterState(ps.hooks.State):
@@ -76,9 +76,30 @@ class RenderCounterState(ps.hooks.State):
     def on_render_end(self, render_cycle: int) -> None:
         self.last_render_duration = time.time() - self._render_start
 
-    def dispose(self) -> None:
+    def on_dispose(self) -> None:
         print(f"Component rendered {self.total_renders} times")
 ```
+
+## Resource ownership
+
+Every hook state owns a `ResourceScope`. Resources you create inside the factory (effects, states) are captured into it automatically, and it is disposed when the component unmounts—you don't need to track them yourself:
+
+```python
+class PollerHookState(ps.hooks.State):
+    def __init__(self):
+        # Owned by the hook state, disposed on unmount
+        self.poller = ps.Effect(self._poll, interval=5.0)
+```
+
+For resources created later (outside the factory), attach them explicitly:
+
+```python
+def start(self):
+    self.task = ps.Effect(self._run, lazy=True)
+    self.resources.own(self.task)
+```
+
+`dispose()` itself cannot be overridden—it runs your `on_dispose()`, then disposes the owned resources. This guarantees cleanup even if `on_dispose()` raises.
 
 ## Hook keys
 
@@ -138,7 +159,7 @@ class ConnectionPoolState(ps.hooks.State):
         async with self.pool.acquire() as conn:
             return await conn.fetch(sql, *args)
 
-    def dispose(self) -> None:
+    def on_dispose(self) -> None:
         # Clean up when component tree unmounts
         self.pool.close()
 

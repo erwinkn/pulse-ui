@@ -6,7 +6,7 @@ from pulse.hooks.core import HookContext
 from pulse.hooks.setup import setup, setup_key
 from pulse.hooks.stable import stable
 from pulse.hooks.state import state
-from pulse.reactive import Signal
+from pulse.reactive import Effect, Scope, Signal, Untrack
 from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteContext, RouteInfo, RouteTree
 from pulse.state.state import State
@@ -89,6 +89,202 @@ def test_setup_reinitializes_when_key_changes():
 	assert first is not second
 	assert first["label"] == "alpha"
 	assert second["label"] == "beta"
+
+
+def test_setup_disposes_created_state_and_effect_on_unmount():
+	ctx = HookContext()
+	effects: list[Effect] = []
+
+	def factory():
+		state = DummyState()
+		effects.append(Effect(lambda: None, lazy=True))
+		return state
+
+	with ctx:
+		state = setup(factory)
+
+	assert state.dispose_calls == 0
+	assert not effects[0].__disposed__
+
+	ctx.unmount()
+
+	assert state.dispose_calls == 1
+	assert effects[0].__disposed__
+
+
+@pytest.mark.parametrize("nested_scope", ["scope", "untrack"])
+def test_setup_ownership_survives_nested_reactive_scope(nested_scope: str):
+	ctx = HookContext()
+	effects: list[Effect] = []
+
+	def factory():
+		context = Scope() if nested_scope == "scope" else Untrack()
+		with context:
+			state = DummyState()
+			effects.append(Effect(lambda: None, lazy=True))
+		return state
+
+	with ctx:
+		state = setup(factory)
+
+	ctx.unmount()
+
+	assert state.dispose_calls == 1
+	assert effects[0].__disposed__
+
+
+def test_setup_owns_state_created_by_immediate_effect():
+	ctx = HookContext()
+	states: list[DummyState] = []
+	effects: list[Effect] = []
+
+	def factory():
+		@ps.effect(immediate=True)
+		def create_state():
+			states.append(DummyState())
+
+		effects.append(create_state)
+
+	with ctx:
+		setup(factory)
+
+	ctx.unmount()
+
+	assert states[0].dispose_calls == 1
+	assert effects[0].__disposed__
+
+
+def test_setup_key_change_disposes_previous_scope_before_replacement():
+	ctx = HookContext()
+	states: list[DummyState] = []
+	effects: list[Effect] = []
+
+	def factory():
+		state = DummyState()
+		states.append(state)
+		effects.append(Effect(lambda: None, lazy=True))
+		return state
+
+	with ctx:
+		setup_key("first")
+		first = setup(factory)
+
+	with ctx:
+		setup_key("second")
+		second = setup(factory)
+
+	assert first is states[0]
+	assert second is states[1]
+	assert first.dispose_calls == 1
+	assert effects[0].__disposed__
+	assert second.dispose_calls == 0
+	assert not effects[1].__disposed__
+
+	ctx.unmount()
+
+	assert first.dispose_calls == 1
+	assert second.dispose_calls == 1
+	assert effects[1].__disposed__
+
+
+def test_setup_rolls_back_scope_when_initializer_raises():
+	ctx = HookContext()
+	states: list[DummyState] = []
+	effects: list[Effect] = []
+
+	def failing_factory():
+		states.append(DummyState())
+		effects.append(Effect(lambda: None, lazy=True))
+		raise RuntimeError("boom")
+
+	with ctx:
+		with pytest.raises(RuntimeError, match="boom"):
+			setup(failing_factory)
+
+	assert states[0].dispose_calls == 1
+	assert effects[0].__disposed__
+
+	with ctx:
+		recovered = setup(DummyState)
+
+	ctx.unmount()
+	assert states[0].dispose_calls == 1
+	assert recovered.dispose_calls == 1
+
+
+def test_setup_failed_key_change_disposes_old_and_failed_scopes():
+	ctx = HookContext()
+	states: list[DummyState] = []
+	effects: list[Effect] = []
+
+	def create_state():
+		state = DummyState()
+		states.append(state)
+		return state
+
+	def failing_factory():
+		create_state()
+		effects.append(Effect(lambda: None, lazy=True))
+		raise RuntimeError("boom")
+
+	with ctx:
+		setup_key("first")
+		first = setup(create_state)
+
+	with pytest.raises(RuntimeError, match="boom"):
+		with ctx:
+			setup_key("second")
+			setup(failing_factory)
+
+	assert first.dispose_calls == 1
+	assert states[1].dispose_calls == 1
+	assert effects[0].__disposed__
+
+	with ctx:
+		setup_key("second")
+		recovered = setup(create_state)
+
+	assert recovered is states[2]
+	assert recovered.dispose_calls == 0
+	ctx.unmount()
+	assert first.dispose_calls == 1
+	assert states[1].dispose_calls == 1
+	assert recovered.dispose_calls == 1
+
+
+def test_setup_transfers_direct_state_tree_to_state_hook():
+	ctx = HookContext()
+	created: list[tuple[DummyState, DummyState]] = []
+
+	class Parent(DummyState):
+		_child: DummyState
+
+		def __init__(self, child: DummyState):
+			self._child = child
+			super().__init__()
+
+	def factory():
+		child = DummyState()
+		parent = Parent(child)
+		created.append((parent, child))
+		return state(parent, key="direct")
+
+	with ctx:
+		setup_key("first")
+		first = setup(factory)
+
+	with ctx:
+		setup_key("second")
+		second = setup(factory)
+
+	assert second is first
+	assert first.dispose_calls == 0
+	assert created[0][1].dispose_calls == 0
+	assert created[1][0].dispose_calls == 1
+	assert created[1][1].dispose_calls == 1
+	ctx.unmount()
+	assert first.dispose_calls == 1
+	assert created[0][1].dispose_calls == 1
 
 
 def test_setup_enforces_single_call_per_render():
@@ -396,3 +592,66 @@ def test_pulse_route_returns_definition():
 	with ps.PulseContext(app=app, render=session, route=route_ctx):
 		definition = ps.pulse_route()
 		assert definition is route
+
+
+def test_hook_state_subclass_cannot_override_dispose():
+	from pulse.hooks.core import HookState
+
+	with pytest.raises(TypeError, match="on_dispose"):
+
+		class BadHookState(HookState):  # pyright: ignore[reportUnusedClass]
+			@override
+			def dispose(self) -> None:
+				pass
+
+
+def test_hook_factory_resources_are_owned_and_disposed():
+	from pulse.hooks.core import Hook, HookMetadata, HookState
+
+	class TimerHookState(HookState):
+		effect: Effect
+
+		def __init__(self) -> None:
+			self.effect = Effect(lambda: None, lazy=True)
+
+	timer_hook = Hook(
+		name="test:factory_resources",
+		factory=TimerHookState,
+		metadata=HookMetadata(),
+	)
+
+	ctx = HookContext()
+	with ctx:
+		hook_state = timer_hook()
+
+	assert not hook_state.effect.__disposed__
+	ctx.unmount()
+	assert hook_state.effect.__disposed__
+
+
+def test_hook_state_on_dispose_failure_still_disposes_resources():
+	from pulse.hooks.core import Hook, HookMetadata, HookState
+
+	class FailingHookState(HookState):
+		effect: Effect
+
+		def __init__(self) -> None:
+			self.effect = Effect(lambda: None, lazy=True)
+
+		@override
+		def on_dispose(self) -> None:
+			raise RuntimeError("boom")
+
+	failing_hook = Hook(
+		name="test:failing_on_dispose",
+		factory=FailingHookState,
+		metadata=HookMetadata(),
+	)
+
+	ctx = HookContext()
+	with ctx:
+		hook_state = failing_hook()
+
+	# HookNamespace catches and logs the error; resources are still disposed.
+	ctx.unmount()
+	assert hook_state.effect.__disposed__

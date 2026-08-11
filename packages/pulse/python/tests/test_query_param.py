@@ -8,6 +8,7 @@ import pytest
 from pulse.messages import ServerMessage, ServerNavigateToMessage
 from pulse.reactive import flush_effects
 from pulse.render_session import RenderSession
+from pulse.resources import ResourceScope
 from pulse.routing import Route, RouteInfo, RouteTree
 
 
@@ -156,6 +157,53 @@ class TestQueryParam:
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			state = QState()
 			assert state.q == "hello"
+
+	def test_init_binding_is_released_when_child_unmounts_in_same_route(self):
+		class Filters(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		show_child = {"value": True}
+		states: list[Filters] = []
+
+		@ps.component
+		def Child():
+			with ps.init():
+				state = Filters()
+				states.append(state)
+			return ps.span(state.q)
+
+		@ps.component
+		def Parent():
+			child = Child() if show_child["value"] else ps.span("hidden")
+			return ps.div()[child]
+
+		route = Route("/", Parent)
+		routes = RouteTree([route])
+		app = ps.App(routes=[route])
+		session = RenderSession("test", routes)
+		session.prerender(["/"], make_route_info("/", query_params={"q": "hello"}))
+		mount = session.route_mounts["/"]
+
+		assert len(states) == 1
+		assert len(session.query_param_sync._bindings["q"]) == 1  # pyright: ignore[reportPrivateUsage]
+
+		with ps.PulseContext(app=app, render=session, route=mount.route):
+			show_child["value"] = False
+			mount.tree.rerender()
+
+		assert "/" in session.route_mounts
+		assert states[0].__disposed__
+		assert "q" not in session.query_param_sync._bindings  # pyright: ignore[reportPrivateUsage]
+
+		with ps.PulseContext(app=app, render=session, route=mount.route):
+			show_child["value"] = True
+			mount.tree.rerender()
+
+		assert len(states) == 2
+		assert not states[1].__disposed__
+		assert len(session.query_param_sync._bindings["q"]) == 1  # pyright: ignore[reportPrivateUsage]
+
+		session.close()
 
 	def test_list_parsing_and_serialization(self):
 		class TagState(ps.State):
@@ -309,6 +357,25 @@ class TestQueryParam:
 			_first = First()
 			with pytest.raises(ValueError, match="'q' is already bound"):
 				_second = Second()
+
+	def test_failed_state_initialization_releases_registered_params(self):
+		class Existing(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		class Partial(ps.State):
+			other: ps.QueryParam[str] = ""
+			q: ps.QueryParam[str] = ""
+
+		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+		session.connect(lambda _msg: None)
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			existing = Existing()
+			with pytest.raises(ValueError, match="'q' is already bound"):
+				Partial()
+
+			assert set(session.query_param_sync._bindings) == {"q"}  # pyright: ignore[reportPrivateUsage]
+			existing.dispose()
+			assert session.query_param_sync._bindings == {}  # pyright: ignore[reportPrivateUsage]
 
 
 def make_two_route_session():
@@ -468,6 +535,62 @@ class TestQueryParamAcrossMounts:
 		assert a.q == "shared"
 		assert b.q == "shared"
 
+		session.close()
+
+	def test_disposing_first_state_keeps_shared_sync_alive(self):
+		class FiltersA(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		class FiltersB(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		app, session = make_two_route_session()
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
+		info_a = make_route_info("/a", query_params={"q": "first"})
+		info_b = make_route_info("/b", query_params={"q": "first"})
+		session.prerender(["/a"], info_a)
+
+		first_scope = ResourceScope()
+		with (
+			first_scope,
+			ps.PulseContext(
+				app=app, render=session, route=session.route_mounts["/a"].route
+			),
+		):
+			first = FiltersA()
+
+		session.prerender(["/b"], info_b)
+		second_scope = ResourceScope()
+		with (
+			second_scope,
+			ps.PulseContext(
+				app=app, render=session, route=session.route_mounts["/b"].route
+			),
+		):
+			second = FiltersB()
+		flush_effects()
+
+		first_scope.dispose()
+		assert first.__disposed__
+		assert not second.__disposed__
+		assert session.query_param_sync._state_effect is not None  # pyright: ignore[reportPrivateUsage]
+		assert not session.query_param_sync._state_effect.__disposed__  # pyright: ignore[reportPrivateUsage]
+
+		session.detach("/a")
+		session.attach("/b", info_b)
+		messages.clear()
+		second.q = "second"
+		flush_query_param_sync(session)
+		navs = navigations(messages)
+		assert len(navs) == 1
+		assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["second"]
+
+		session.update_route("/b", make_route_info("/b", query_params={"q": "url"}))
+		flush_effects()
+		assert second.q == "url"
+
+		second_scope.dispose()
 		session.close()
 
 	def test_restored_binding_regains_url_ownership(self):

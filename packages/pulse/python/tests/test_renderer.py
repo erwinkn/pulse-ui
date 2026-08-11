@@ -785,8 +785,8 @@ def test_keyed_parent_node_move_preserves_child_state():
 	assert hasattr(stored_hook_state, "storage")
 	# Find the captured counter in the storage
 	for entry in stored_hook_state.storage.values():
-		if "counter" in entry["vars"]:
-			stored_counter = entry["vars"]["counter"]
+		if "counter" in entry.vars:
+			stored_counter = entry.vars["counter"]
 			assert isinstance(stored_counter, Counter)
 			assert stored_counter.label == "A"
 			assert stored_counter.count == 1

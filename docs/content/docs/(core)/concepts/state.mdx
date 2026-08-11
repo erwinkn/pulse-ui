@@ -137,6 +137,10 @@ def UserCounter(user_id: str):
     return ps.div(f"Count: {state.count}")
 ```
 
+The init block owns states and effects it creates. Pulse disposes them before re-running the block for a new key, if initialization fails partway through, or when the component unmounts. Disposing a state stops its effects and calls `on_dispose()`.
+
+Accessing an existing state does not transfer ownership. A state passed into the block, or obtained through `ps.state()` or `ps.global_state()`, keeps its original lifetime.
+
 Without `ps.init()`, each render would create a brand-new `CounterState` starting at zero:
 
 ```python
@@ -180,6 +184,8 @@ def Dashboard():
 ```
 
 You can also pass arguments: `config = ps.setup(load_config, "production", cache=True)`
+
+`ps.setup()` follows the same lifecycle as `ps.init()`. It owns states and effects created by its initializer, disposes them when `ps.setup_key()` changes or the component unmounts, and rolls them back if initialization raises. Shared states keep their existing owners.
 
 ### `ps.state()` - dynamic state by key
 

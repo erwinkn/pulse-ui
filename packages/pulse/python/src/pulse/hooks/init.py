@@ -7,10 +7,12 @@ import inspect
 import textwrap
 import types
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any, Literal, cast, override
 
 from pulse.helpers import getsourcecode
 from pulse.hooks.core import HookState, hooks
+from pulse.hooks.lifecycle import InitializationScope
 from pulse.transpiler.errors import TranspileError
 
 # Storage keyed by (code object, lineno) of the `with ps.init()` call site.
@@ -76,6 +78,7 @@ class InitContext:
 	pre_keys: set[str]
 	saved: dict[str, Any]
 	key: str | None
+	_scope: InitializationScope | None
 
 	def __init__(self, *, key: str | None = None):
 		self.callsite = None
@@ -84,6 +87,7 @@ class InitContext:
 		self.pre_keys = set()
 		self.saved = {}
 		self.key = key
+		self._scope = None
 
 	def __enter__(self):
 		self.frame = previous_frame()
@@ -91,14 +95,21 @@ class InitContext:
 		# Use code object to disambiguate identical line numbers in different fns.
 		self.callsite = (self.frame.f_code, self.frame.f_lineno)
 
-		storage = _init_hook().storage
+		hook_state = _init_hook()
+		storage = hook_state.storage
 		entry = storage.get(self.callsite)
-		if entry is None or entry.get("key") != self.key:
+		if entry is None or entry.key != self.key:
+			if entry is not None:
+				entry.dispose()
+				del storage[self.callsite]
 			self.first_render = True
 			self.saved = {}
+			self._scope = InitializationScope(label="ps.init")
+			hook_state.resources.own(self._scope)
+			self._scope.__enter__()
 		else:
 			self.first_render = False
-			self.saved = entry["vars"]
+			self.saved = entry.vars
 		return self
 
 	def restore_variables(self):
@@ -112,7 +123,7 @@ class InitContext:
 		self.saved = values
 		assert self.callsite is not None, "callsite is None"
 		storage = _init_hook().storage
-		storage[self.callsite] = {"vars": values, "key": self.key}
+		storage[self.callsite] = InitEntry(vars=values, key=self.key)
 
 	def _capture_new_locals(self) -> dict[str, Any]:
 		frame = self.frame
@@ -132,11 +143,17 @@ class InitContext:
 		exc_value: BaseException | None,
 		exc_tb: Any,
 	) -> Literal[False]:
+		scope = self._scope
+		if scope is not None:
+			scope.__exit__(exc_type, exc_value, exc_tb)
+			self._scope = None
 		if exc_type is None:
-			captured = self._capture_new_locals()
-			assert self.callsite is not None, "callsite  None"
-			storage = _init_hook().storage
-			storage[self.callsite] = {"vars": captured, "key": self.key}
+			if self.first_render:
+				captured = self._capture_new_locals()
+				assert self.callsite is not None, "callsite is None"
+				_init_hook().storage[self.callsite] = InitEntry(
+					vars=captured, key=self.key, scope=scope
+				)
 		self.frame = None
 		return False
 
@@ -704,10 +721,26 @@ def _resolve_init_bindings(func: Callable[..., Any]) -> tuple[set[str], set[str]
 	return init_names, init_modules
 
 
+@dataclass(slots=True)
+class InitEntry:
+	"""Saved variables and resources owned by one init run."""
+
+	vars: dict[str, Any]
+	key: str | None
+	scope: InitializationScope | None = None
+
+	def dispose(self) -> None:
+		if self.scope is not None and not self.scope.__disposed__:
+			self.scope.dispose()
+		self.scope = None
+
+
 class InitState(HookState):
 	def __init__(self) -> None:
-		self.storage: dict[tuple[Any, int], dict[str, Any]] = {}
+		self.storage: dict[tuple[Any, int], InitEntry] = {}
 
 	@override
-	def dispose(self) -> None:
+	def on_dispose(self) -> None:
+		# Entry scopes are owned by self.resources, which disposes them
+		# with per-entry error isolation.
 		self.storage.clear()

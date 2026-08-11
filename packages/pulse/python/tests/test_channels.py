@@ -1,10 +1,15 @@
 import asyncio
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, cast, override
 
 import pulse as ps
 import pytest
-from pulse.channel import ChannelClosed
+from pulse.channel import (
+	DISCONNECTED_EMIT_BUFFER_CAP,
+	Channel,
+	ChannelClosed,
+	ChannelDisconnected,
+)
 from pulse.messages import ClientChannelResponseMessage
 from pulse.user_session import UserSession
 
@@ -18,6 +23,103 @@ class DummyRender:
 
 	def send(self, message: dict[str, Any]):
 		self.sent.append(message)
+
+
+def connect_channel(
+	render: ps.RenderSession,
+	session: UserSession,
+	channel: Channel,
+	*,
+	owner: str | None = None,
+	subscription_id: str = "subscription-1",
+) -> bool:
+	message: dict[str, Any] = {
+		"type": "channel_connect",
+		"channel": channel.id,
+		"subscriptionId": subscription_id,
+	}
+	if owner is not None:
+		message["owner"] = owner
+	return render.channels.handle_client_connect(
+		render=render,
+		session=session,
+		message=cast(Any, message),
+	)
+
+
+def make_global_channel(
+	identifier: str,
+) -> tuple[ps.RenderSession, UserSession, Channel, list[dict[str, Any]]]:
+	app = ps.App()
+	render = ps.RenderSession("render-subscriptions", app.routes)
+	session = cast(
+		UserSession,
+		cast(object, SimpleNamespace(sid="session-subscriptions", data={})),
+	)
+	sent: list[dict[str, Any]] = []
+	render.send = sent.append  # pyright: ignore[reportAttributeAccessIssue]
+	with ps.PulseContext(app=app, session=session, render=render):
+		channel = render.channels.create(identifier, lifetime="tab")
+	return render, session, channel, sent
+
+
+def test_channel_lifetimes_define_automatic_cleanup_owner():
+	app = ps.App()
+	render = ps.RenderSession("render-lifetimes", app.routes)
+	session = cast(
+		UserSession,
+		cast(object, SimpleNamespace(sid="session-lifetimes", data={})),
+	)
+	route = cast(Any, SimpleNamespace(route_path="/lifetime-route"))
+
+	with ps.PulseContext(app=app, session=session, render=render, route=route):
+		route_channel = ps.channel("route-channel")
+		tab_channel = ps.channel("tab-channel", lifetime="tab")
+
+	assert route_channel.lifetime == "route"
+	assert route_channel.route_path == "/lifetime-route"
+	assert tab_channel.lifetime == "tab"
+	assert tab_channel.route_path is None
+
+	render.channels.remove_route("/lifetime-route")
+
+	assert route_channel.closed is True
+	assert tab_channel.closed is False
+
+	render.close()
+	assert tab_channel.closed is True
+
+
+def test_route_lifetime_requires_an_active_route():
+	app = ps.App()
+	render = ps.RenderSession("render-route-required", app.routes)
+	session = cast(
+		UserSession,
+		cast(object, SimpleNamespace(sid="session-route-required", data={})),
+	)
+
+	with ps.PulseContext(app=app, session=session, render=render):
+		with pytest.raises(RuntimeError, match="lifetime='tab'"):
+			ps.channel("route-channel")
+		tab_channel = ps.channel("tab-channel", lifetime="tab")
+
+	assert tab_channel.closed is False
+	render.close()
+
+
+def test_channel_rejects_unknown_lifetime():
+	app = ps.App()
+	render = ps.RenderSession("render-invalid-lifetime", app.routes)
+	session = cast(
+		UserSession,
+		cast(object, SimpleNamespace(sid="session-invalid-lifetime", data={})),
+	)
+
+	with ps.PulseContext(app=app, session=session, render=render):
+		with pytest.raises(ValueError, match="'route' or 'tab'"):
+			ps.channel("invalid-channel", lifetime=cast(Any, "process"))
+
+	render.close()
 
 
 @pytest.mark.asyncio
@@ -38,7 +140,13 @@ async def test_channel_emit_sends_message():
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
 	):
-		channel = real_render.channels.create("form-channel")
+		channel = real_render.channels.create("form-channel", lifetime="tab")
+		assert connect_channel(
+			real_render,
+			cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+			channel,
+		)
+		render.sent.clear()
 		channel.emit("setValues", {"values": {"a": 1}})
 
 	assert len(render.sent) == 1
@@ -67,7 +175,13 @@ async def test_channel_request_resolves_on_response():
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
 	):
-		channel = real_render.channels.create("req-channel")
+		channel = real_render.channels.create("req-channel", lifetime="tab")
+		assert connect_channel(
+			real_render,
+			cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+			channel,
+		)
+		render.sent.clear()
 		pending = asyncio.create_task(channel.request("get", {"x": 1}))
 
 	await asyncio.sleep(0)
@@ -115,7 +229,13 @@ async def test_channel_event_dispatch():
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
 	):
-		channel = real_render.channels.create("event-channel")
+		channel = real_render.channels.create("event-channel", lifetime="tab")
+		assert connect_channel(
+			real_render,
+			cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+			channel,
+		)
+		render.sent.clear()
 		channel.on("ping", lambda payload: received.append(payload))
 
 	with ps.PulseContext(
@@ -156,9 +276,443 @@ async def test_channel_pending_cancelled_on_render_close():
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
 	):
-		channel = real_render.channels.create("close-channel")
+		channel = real_render.channels.create("close-channel", lifetime="tab")
+		assert connect_channel(
+			real_render,
+			cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+			channel,
+		)
+		render.sent.clear()
 		pending = asyncio.create_task(channel.request("get", None))
 
 	real_render.close()
 	with pytest.raises(ChannelClosed):
 		await pending
+
+
+def test_disconnect_and_reconnect_preserve_channel_and_flush_buffer():
+	render, session, channel, sent = make_global_channel("reconnect-channel")
+	assert connect_channel(render, session, channel)
+	assert sent == [
+		{
+			"type": "channel_connect_ack",
+			"channel": channel.id,
+			"subscriptionId": "subscription-1",
+			"accepted": True,
+		}
+	]
+	sent.clear()
+
+	assert render.channels.handle_client_disconnect(
+		render=render,
+		session=session,
+		message={
+			"type": "channel_disconnect",
+			"channel": channel.id,
+			"subscriptionId": "subscription-1",
+		},
+	)
+	channel.emit("queued", {"value": 1})
+
+	assert channel.closed is False
+	assert channel.connected is False
+	assert channel.id in render.channels._channels  # pyright: ignore[reportPrivateUsage]
+	assert sent == []
+
+	assert connect_channel(
+		render,
+		session,
+		channel,
+		subscription_id="subscription-2",
+	)
+	assert sent == [
+		{
+			"type": "channel_connect_ack",
+			"channel": channel.id,
+			"subscriptionId": "subscription-2",
+			"accepted": True,
+		},
+		{
+			"type": "channel_message",
+			"channel": channel.id,
+			"event": "queued",
+			"payload": {"value": 1},
+		},
+	]
+
+
+def test_disconnected_emit_snapshots_payload_at_emit_time():
+	render, session, channel, sent = make_global_channel("snapshot-channel")
+	payload = {"items": [1]}
+	channel.emit("queued", payload)
+	payload["items"].append(2)
+
+	assert connect_channel(render, session, channel)
+	assert sent[-1] == {
+		"type": "channel_message",
+		"channel": channel.id,
+		"event": "queued",
+		"payload": {"items": [1]},
+	}
+
+
+def test_disconnected_emit_validates_payload_before_connect():
+	_, _, channel, _ = make_global_channel("invalid-buffer-channel")
+
+	with pytest.raises(TypeError, match="Unsupported value in serialization"):
+		channel.emit("invalid", lambda: None)
+
+
+def test_disconnected_emit_buffer_is_capped_and_drops_oldest():
+	render, session, channel, sent = make_global_channel("buffered-channel")
+	for value in range(DISCONNECTED_EMIT_BUFFER_CAP + 3):
+		channel.emit("value", value)
+
+	assert connect_channel(render, session, channel)
+	flushed = [message for message in sent if message["type"] == "channel_message"]
+	assert len(flushed) == DISCONNECTED_EMIT_BUFFER_CAP
+	assert flushed[0]["payload"] == 3
+	assert flushed[-1]["payload"] == DISCONNECTED_EMIT_BUFFER_CAP + 2
+
+
+@pytest.mark.asyncio
+async def test_disconnected_request_fails_immediately():
+	_, _, channel, sent = make_global_channel("disconnected-request")
+
+	with pytest.raises(ChannelDisconnected, match="no connected client subscriber"):
+		await channel.request("get")
+
+	assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_request_send_disconnect_race_cleans_pending_request(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	render, session, channel, _ = make_global_channel("request-send-race")
+	assert connect_channel(render, session, channel)
+	original_send = render.channels.send_to_client
+
+	def disconnect_before_send(*, channel: Channel, msg: Any) -> None:
+		render.channels.disconnect_all()
+		original_send(channel=channel, msg=msg)
+
+	monkeypatch.setattr(render.channels, "send_to_client", disconnect_before_send)
+
+	with pytest.raises(ChannelDisconnected, match="no connected client subscriber"):
+		await channel.request("get")
+
+	assert render.channels.pending_requests == {}
+
+
+@pytest.mark.asyncio
+async def test_transport_disconnect_rejects_pending_without_disposing_channel():
+	render, session, channel, sent = make_global_channel("pending-disconnect")
+	assert connect_channel(render, session, channel)
+	sent.clear()
+	pending = asyncio.create_task(channel.request("get"))
+	await asyncio.sleep(0)
+
+	render.channels.disconnect_all()
+
+	with pytest.raises(ChannelDisconnected, match="lost its connected client"):
+		await pending
+	assert channel.closed is False
+	assert channel.connected is False
+	assert channel.id in render.channels._channels  # pyright: ignore[reportPrivateUsage]
+
+
+def test_server_close_is_the_only_remote_terminal_notification():
+	render, session, channel, sent = make_global_channel("server-close")
+	assert connect_channel(render, session, channel)
+	sent.clear()
+	assert render.channels.handle_client_disconnect(
+		render=render,
+		session=session,
+		message={
+			"type": "channel_disconnect",
+			"channel": channel.id,
+			"subscriptionId": "subscription-1",
+		},
+	)
+	assert channel.closed is False
+	assert sent == []
+
+	assert connect_channel(
+		render,
+		session,
+		channel,
+		subscription_id="subscription-2",
+	)
+	sent.clear()
+	channel.close()
+
+	assert channel.closed is True
+	assert sent == [
+		{
+			"type": "channel_message",
+			"channel": channel.id,
+			"event": "__close__",
+			"payload": {"reason": "channel.close"},
+		}
+	]
+
+
+def test_connect_rejects_missing_channel_with_correlated_ack():
+	render, session, _, sent = make_global_channel("existing-channel")
+
+	accepted = render.channels.handle_client_connect(
+		render=render,
+		session=session,
+		message={
+			"type": "channel_connect",
+			"channel": "missing-channel",
+			"subscriptionId": "missing-subscription",
+		},
+	)
+
+	assert accepted is False
+	assert sent == [
+		{
+			"type": "channel_connect_ack",
+			"channel": "missing-channel",
+			"subscriptionId": "missing-subscription",
+			"accepted": False,
+			"error": "Channel is unavailable",
+		}
+	]
+
+
+def test_connect_requires_matching_opaque_owner_token():
+	render, session, channel, sent = make_global_channel("owned-channel")
+
+	accepted = render.channels.handle_client_connect(
+		render=render,
+		session=session,
+		message={
+			"type": "channel_connect",
+			"channel": channel.id,
+			"subscriptionId": "wrong-owner",
+			"owner": "/other",
+		},
+	)
+
+	assert accepted is False
+	assert channel.closed is False
+	assert channel.connected is False
+	assert sent[-1] == {
+		"type": "channel_connect_ack",
+		"channel": channel.id,
+		"subscriptionId": "wrong-owner",
+		"accepted": False,
+		"error": "Channel is unavailable",
+	}
+
+
+@pytest.mark.asyncio
+async def test_middleware_denied_connect_rejects_without_closing_channel():
+	class DenyChannelConnect(ps.PulseMiddleware):
+		@override
+		async def channel(
+			self,
+			*,
+			channel_id: str,
+			event: str,
+			payload: Any,
+			request_id: str | None,
+			session: dict[str, Any],
+			next: Any,
+		):
+			if event == "__connect__":
+				return ps.Deny()
+			return await next()
+
+	app = ps.App(middleware=DenyChannelConnect())
+	render = ps.RenderSession("render-denied", app.routes)
+	session = cast(
+		UserSession,
+		cast(object, SimpleNamespace(sid="session-denied", data={})),
+	)
+	sent: list[dict[str, Any]] = []
+	render.send = sent.append  # pyright: ignore[reportAttributeAccessIssue]
+	with ps.PulseContext(app=app, session=session, render=render):
+		channel = render.channels.create("denied-channel", lifetime="tab")
+
+	await app._handle_channel_message(  # pyright: ignore[reportPrivateUsage]
+		render,
+		session,
+		{
+			"type": "channel_connect",
+			"channel": channel.id,
+			"subscriptionId": "denied-subscription",
+		},
+	)
+
+	assert channel.closed is False
+	assert channel.connected is False
+	assert sent == [
+		{
+			"type": "channel_connect_ack",
+			"channel": channel.id,
+			"subscriptionId": "denied-subscription",
+			"accepted": False,
+			"error": "Denied",
+		}
+	]
+
+
+@pytest.mark.asyncio
+async def test_middleware_short_circuit_rejects_connect_instead_of_stranding_it():
+	class ShortCircuitChannelConnect(ps.PulseMiddleware):
+		@override
+		async def channel(
+			self,
+			*,
+			channel_id: str,
+			event: str,
+			payload: Any,
+			request_id: str | None,
+			session: dict[str, Any],
+			next: Any,
+		):
+			if event == "__connect__":
+				return ps.Ok(None)
+			return await next()
+
+	app = ps.App(middleware=ShortCircuitChannelConnect())
+	render = ps.RenderSession("render-short-circuit", app.routes)
+	session = cast(
+		UserSession,
+		cast(object, SimpleNamespace(sid="session-short-circuit", data={})),
+	)
+	sent: list[dict[str, Any]] = []
+	render.send = sent.append  # pyright: ignore[reportAttributeAccessIssue]
+	with ps.PulseContext(app=app, session=session, render=render):
+		channel = render.channels.create("short-circuit-channel", lifetime="tab")
+
+	await app._handle_channel_message(  # pyright: ignore[reportPrivateUsage]
+		render,
+		session,
+		{
+			"type": "channel_connect",
+			"channel": channel.id,
+			"subscriptionId": "short-circuit-subscription",
+		},
+	)
+
+	assert channel.connected is False
+	assert sent == [
+		{
+			"type": "channel_connect_ack",
+			"channel": channel.id,
+			"subscriptionId": "short-circuit-subscription",
+			"accepted": False,
+			"error": "Channel subscription not accepted",
+		}
+	]
+
+
+@pytest.mark.asyncio
+async def test_middleware_error_rejects_connect_without_stranding_bridge():
+	class RaiseChannelConnect(ps.PulseMiddleware):
+		@override
+		async def channel(
+			self,
+			*,
+			channel_id: str,
+			event: str,
+			payload: Any,
+			request_id: str | None,
+			session: dict[str, Any],
+			next: Any,
+		):
+			if event == "__connect__":
+				raise RuntimeError("middleware failed")
+			return await next()
+
+	app = ps.App(middleware=RaiseChannelConnect())
+	render = ps.RenderSession("render-error", app.routes)
+	session = cast(
+		UserSession,
+		cast(object, SimpleNamespace(sid="session-error", data={})),
+	)
+	sent: list[dict[str, Any]] = []
+	render.send = sent.append  # pyright: ignore[reportAttributeAccessIssue]
+	with ps.PulseContext(app=app, session=session, render=render):
+		channel = render.channels.create("error-channel", lifetime="tab")
+
+	await app._handle_channel_message(  # pyright: ignore[reportPrivateUsage]
+		render,
+		session,
+		{
+			"type": "channel_connect",
+			"channel": channel.id,
+			"subscriptionId": "error-subscription",
+		},
+	)
+
+	assert channel.connected is False
+	assert sent == [
+		{
+			"type": "channel_connect_ack",
+			"channel": channel.id,
+			"subscriptionId": "error-subscription",
+			"accepted": False,
+			"error": "Channel subscription failed",
+		}
+	]
+
+
+@pytest.mark.asyncio
+async def test_connect_does_not_complete_after_originating_socket_is_replaced():
+	started = asyncio.Event()
+	resume = asyncio.Event()
+
+	class DelayedChannelConnect(ps.PulseMiddleware):
+		@override
+		async def channel(
+			self,
+			*,
+			channel_id: str,
+			event: str,
+			payload: Any,
+			request_id: str | None,
+			session: dict[str, Any],
+			next: Any,
+		):
+			if event == "__connect__":
+				started.set()
+				await resume.wait()
+			return await next()
+
+	app = ps.App(middleware=DelayedChannelConnect())
+	render = ps.RenderSession("render-socket-generation", app.routes)
+	session = cast(
+		UserSession,
+		cast(object, SimpleNamespace(sid="session-socket-generation", data={})),
+	)
+	sent: list[dict[str, Any]] = []
+	render.send = sent.append  # pyright: ignore[reportAttributeAccessIssue]
+	with ps.PulseContext(app=app, session=session, render=render):
+		channel = render.channels.create("socket-generation-channel", lifetime="tab")
+	app._render_to_socket[render.id] = "old-socket"  # pyright: ignore[reportPrivateUsage]
+
+	connect = asyncio.create_task(
+		app._handle_channel_message(  # pyright: ignore[reportPrivateUsage]
+			render,
+			session,
+			{
+				"type": "channel_connect",
+				"channel": channel.id,
+				"subscriptionId": "old-subscription",
+			},
+			socket_sid="old-socket",
+		)
+	)
+	await started.wait()
+	app._render_to_socket[render.id] = "new-socket"  # pyright: ignore[reportPrivateUsage]
+	resume.set()
+	await connect
+
+	assert channel.connected is False
+	assert sent == []

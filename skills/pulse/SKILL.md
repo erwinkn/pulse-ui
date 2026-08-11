@@ -34,7 +34,9 @@ app = ps.App([ps.Route("/", App)])
 
 `pulse run app.py` → dev server on `:8000`
 
-Pulse owns Python development reloads. A reload prepares a disposable backend and generated route tree, confirms the Vite bridge, drains the previous backend, publishes only after replacement readiness, then asks the plugin for one full reload. Frontend-only JS/TS/CSS changes remain Vite HMR.
+Pulse owns Python development restarts. Its supervisor retains the first available public port from `:8000` and forwards it to replaceable Uvicorn workers. A Python change stops Vite and Uvicorn, then a fresh backend worker regenerates routes. In default single-server mode Vite stays on loopback behind the Uvicorn proxy; it is not publicly exposed on `:5173`. The browser reloads and in-memory Pulse state resets. Frontend-only JS/TS/CSS changes remain Vite HMR.
+
+Supervised reload requires `pulseVitePlugin()` from `pulse-ui-client/vite` in the Vite config's `plugins` array. The plugin reports Vite's listening lifecycle directly; do not infer readiness from log output.
 
 ## Quick Reference
 
@@ -520,15 +522,9 @@ uv run pulse run app.py --no-reload  # Direct Uvicorn, no Python watcher
 make all                         # Format, lint, typecheck, test
 ```
 
-For custom web setups, add `pulseVitePlugin()` in `vite.config.ts`:
+Python changes restart Uvicorn and Vite together. The long-running supervisor keeps the first available public port from `:8000` bound across reloads and forwards it to each Uvicorn worker. A fresh backend worker regenerates routes while both servers are stopped. In single-server mode Vite binds loopback behind the proxy instead of exposing `:5173` publicly. Vite reloads the browser. Pulse WebSocket connections and in-memory state reset. Frontend JavaScript, TypeScript, and CSS changes still use normal Vite HMR.
 
-```ts
-import { pulseVitePlugin } from "pulse-ui-client/vite";
-
-export default defineConfig({
-  plugins: [reactRouter(), pulseVitePlugin()],
-});
-```
+The Vite config must register `pulseVitePlugin()` from `pulse-ui-client/vite`. It is the supervisor's direct readiness signal.
 
 ## Common Patterns
 

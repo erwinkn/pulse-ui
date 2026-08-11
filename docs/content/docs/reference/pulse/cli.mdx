@@ -21,15 +21,15 @@ pulse run <app_file> [options]
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `--address` | `str` | `localhost` | Host uvicorn binds to |
-| `--port` | `int` | `8000` | Port uvicorn binds to |
+| `--address` | `str` | `localhost` | Public server host |
+| `--port` | `int` | `8000` | Public server port |
 | `--dev` | flag | - | Run in development mode (default) |
 | `--prod` | flag | - | Run in production mode |
 | `--plain` | flag | - | Plain output without colors or emojis |
 | `--server-only` | flag | - | Run only the Python server |
 | `--web-only` | flag | - | Run only the web dev server |
 | `--react-server-address` | `str` | - | React server URL (required for single-server + server-only) |
-| `--reload/--no-reload` | flag | auto | Enable/disable hot reload (auto-enabled in dev) |
+| `--reload/--no-reload` | flag | auto | Enable/disable Python restart watching (auto-enabled in dev) |
 | `--find-port/--no-find-port` | flag | `True` | Auto-find available port if specified is busy |
 | `--interrupt` | flag | - | Stop an existing Pulse dev instance for this app before starting |
 | `--verbose` | flag | - | Show all logs without filtering |
@@ -50,19 +50,15 @@ pulse run app.py --address 0.0.0.0 --port 8080
 pulse run app.py --server-only --react-server-address http://localhost:5173
 ```
 
-In dev mode, `pulse run` watches Python files and coordinates each reload. It prepares the next backend and generated routes in isolation, confirms the Vite bridge is ready, stops the previous backend with a finite drain deadline, starts the replacement, then publishes the generated files and asks Vite for one full browser reload. Reload failures never tear down the session: failed imports or code generation keep the last good generation running, a crashed backend restarts on your next save, and if Vite briefly misses a commit the backend keeps serving—refresh the browser manually if it looks stale.
+In dev mode, `pulse run` watches Python files and restarts the development stack on each save. It stops Vite and Uvicorn, then starts a fresh backend worker to regenerate the routes. The supervisor keeps the selected public port for its entire lifetime and forwards it to each new Uvicorn worker, avoiding port handoff races. With `--find-port`, it binds the first available port starting at `--port` (8000 by default).
 
-Vite still owns ordinary JavaScript, TypeScript, and CSS HMR. Add the Pulse plugin in `vite.config.ts` so generated routes only update through the coordinated commit (`pulse run` adds it automatically if it's missing):
+In the default single-server mode, Vite listens only on loopback behind Uvicorn's proxy; port 5173 is not exposed publicly. Pulse starts Vite first and Uvicorn last, then Vite's browser client reconnects and reloads the page. Pulse WebSocket connections and in-memory application state do not survive the restart.
 
-```ts
-import { reactRouter } from "@react-router/dev/vite";
-import { pulseVitePlugin } from "pulse-ui-client/vite";
-import { defineConfig } from "vite";
+Pulse reads Vite readiness directly from `pulseVitePlugin()` rather than terminal output. Add `pulseVitePlugin()` from `pulse-ui-client/vite` to the `plugins` array in `vite.config.ts`. The plugin reports itself as soon as Vite resolves its config, so a missing plugin fails startup within 15 seconds with an explanation, while a slow Vite start simply keeps waiting.
 
-export default defineConfig({
-  plugins: [reactRouter(), pulseVitePlugin()],
-});
-```
+If Python import, code generation, or startup fails, Vite stays stopped and the browser keeps waiting. Fix the error and save again to start a fresh stack. JavaScript, TypeScript, and CSS changes still use Vite's normal HMR without restarting Python.
+
+In dev mode, requests reach Uvicorn through a loopback relay, so the client address always reads as `127.0.0.1` and forwarded headers such as `X-Forwarded-For` are not trusted. Use `--no-reload` if your development flow depends on real client addresses.
 
 `--no-reload` bypasses the Pulse watcher and starts Uvicorn directly. Raw Uvicorn arguments currently require `--no-reload`.
 
@@ -155,7 +151,7 @@ Set the Pulse environment mode. Affects logging, security defaults, and error ha
 
 | Value | Description |
 |-------|-------------|
-| `dev` | Development mode with detailed errors and hot reload |
+| `dev` | Development mode with detailed errors and restart watching |
 | `ci` | CI/testing mode with stricter validation |
 | `prod` | Production mode with security hardening |
 

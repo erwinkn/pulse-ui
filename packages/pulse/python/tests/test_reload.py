@@ -1,163 +1,251 @@
 import asyncio
+import io
 import os
 import socket
+import sys
+import threading
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, final
-from unittest.mock import AsyncMock, Mock
+from types import SimpleNamespace
+from typing import Any, cast, final
 
 import pulse.cli.reload as reload_mod
 import pytest
 import uvicorn
-from aiohttp import web
-from pulse.app import App
+from aiohttp import ClientSession
 from pulse.cli.dev_worker import (
 	DEVELOPMENT_GRACEFUL_TIMEOUT,
 	WorkerConfig,
+	_watch_supervisor,  # pyright: ignore[reportPrivateUsage]
 	build_server_config,
 )
-from pulse.cli.reload import (
-	GenerationSupervisor,
-	GenerationWorker,
-	PulseWatchFilter,
-	publish_staged_tree,
-	wait_for_change_or_exit,
+from pulse.cli.models import CommandSpec
+from pulse.cli.processes import ManagedProcess
+from pulse.cli.reload import DevSupervisor, PulseWatchFilter
+from pulse.env import (
+	ENV_PULSE_BACKEND_INSTANCE,
+	ENV_PULSE_BACKEND_LIFECYCLE_SECRET,
+	ENV_PULSE_BACKEND_LIFECYCLE_URL,
+	ENV_PULSE_REACT_SERVER_ADDRESS,
+	ENV_PULSE_VITE_INSTANCE,
+	ENV_PULSE_VITE_LIFECYCLE_SECRET,
+	ENV_PULSE_VITE_LIFECYCLE_URL,
 )
-from pulse.codegen.codegen import Codegen, CodegenConfig
-from pulse.env import ENV_PULSE_CODEGEN_OUTPUT
-from pulse.routing import RouteTree
 from starlette.types import Receive, Scope, Send
 from watchfiles import Change
 
 
 @final
 class FakeProcess:
-	def __init__(self) -> None:
+	def __init__(self, name: str, events: list[str], *, hangs: bool = False) -> None:
+		self.name = name
+		self.events = events
+		self.hangs = hangs
 		self.alive = True
-		self.exitcode = 0
-		self.terminated = False
-		self.sentinel, self._sentinel_write = os.pipe()
+		self.code: int | None = None
+		self.on_send: Callable[[], None] | None = None
+		self.on_exit: Callable[[int], None] | None = None
+
+	@property
+	def returncode(self) -> int | None:
+		return self.code
 
 	def is_alive(self) -> bool:
 		return self.alive
+
+	def request_stop(self) -> None:
+		self.events.append(f"{self.name}:stop")
+		if not self.hangs:
+			self.exit(0)
+
+	def send_line(self, line: str) -> None:
+		self.events.append(f"{self.name}:{line}")
+		if self.on_send is not None:
+			self.on_send()
+
+	def kill_tree(self) -> None:
+		self.events.append(f"{self.name}:kill")
+		self.exit(-9)
 
 	def exit(self, code: int) -> None:
 		if not self.alive:
 			return
 		self.alive = False
-		self.exitcode = code
-		os.close(self._sentinel_write)
-
-	def terminate(self) -> None:
-		self.terminated = True
-		self.exit(-15)
-
-	def kill(self) -> None:
-		self.exit(-9)
-
-	def join(self, timeout: float | None = None) -> None:
-		return None
-
-
-@final
-class FakeControl:
-	def __init__(self, process: FakeProcess | None = None) -> None:
-		self.sent: list[dict[str, Any]] = []
-		self.closed = False
-		self.process = process
-
-	def send(self, message: dict[str, Any]) -> None:
-		self.sent.append(message)
-		if message.get("type") == "drain" and self.process is not None:
-			self.process.exit(0)
+		self.code = code
+		self.events.append(f"{self.name}:exit")
+		if self.on_exit is not None:
+			self.on_exit(code)
 
 	def close(self) -> None:
-		self.closed = True
+		self.events.append(f"{self.name}:close")
 
 
-def fake_worker(generation: int, stage: Path) -> GenerationWorker:
-	process = FakeProcess()
-	return GenerationWorker(generation, process, FakeControl(process), stage)
+def command(name: str, tmp_path: Path, ready_pattern: str | None = None) -> CommandSpec:
+	return CommandSpec(
+		name=name,
+		args=[name],
+		cwd=tmp_path,
+		env={},
+		ready_pattern=ready_pattern,
+	)
+
+
+def supervisor_shell(tmp_path: Path) -> DevSupervisor:
+	return DevSupervisor(
+		backend=command("server", tmp_path),
+		web=command("web", tmp_path, "web ready"),
+		watch_roots=(tmp_path,),
+		ignored_roots=(tmp_path / "web" / "app" / "pulse",),
+		registered_sources=set(),
+		tag_mode="plain",
+	)
 
 
 async def wait_until(predicate: Any) -> None:
-	async def poll() -> None:
+	async with asyncio.timeout(2):
 		while not predicate():
 			await asyncio.sleep(0.01)
 
-	await asyncio.wait_for(poll(), timeout=2)
 
+def install_process_script(
+	monkeypatch: pytest.MonkeyPatch,
+	events: list[str],
+	plans: list[tuple[str, str]],
+) -> list[FakeProcess]:
+	processes: list[FakeProcess] = []
 
-async def start_http_server(
-	handler: Any,
-) -> tuple[web.AppRunner, int]:
-	app = web.Application()
-	app.router.add_route("*", "/{path:.*}", handler)
-	runner = web.AppRunner(app)
-	await runner.setup()
-	sock = socket.socket()
-	sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-	sock.bind(("127.0.0.1", 0))
-	sock.listen()
-	port = sock.getsockname()[1]
-	await web.SockSite(runner, sock).start()
-	return runner, port
+	async def report_vite(spec: CommandSpec, name: str, *, listening: bool) -> None:
+		url = spec.env[ENV_PULSE_VITE_LIFECYCLE_URL]
+		headers = {
+			"Authorization": "Bearer " + spec.env[ENV_PULSE_VITE_LIFECYCLE_SECRET]
+		}
+		async with ClientSession() as session:
+			response = await session.post(
+				url,
+				headers=headers,
+				json={
+					"event": "configured",
+					"instance": spec.env[ENV_PULSE_VITE_INSTANCE],
+					"sequence": 1,
+				},
+			)
+			assert response.status == 204
+			events.append(f"{name}:configured")
+			if not listening:
+				return
+			response = await session.post(
+				url,
+				headers=headers,
+				json={
+					"event": "listening",
+					"instance": spec.env[ENV_PULSE_VITE_INSTANCE],
+					"sequence": 2,
+					"port": 5173,
+				},
+			)
+			assert response.status == 204
+			events.append(f"{name}:ready")
 
+	def start(
+		_cls: type[ManagedProcess],
+		spec: CommandSpec,
+		on_output: Callable[[str], None],
+		on_exit: Callable[[int], None],
+	) -> FakeProcess:
+		expected_name, outcome = plans.pop(0)
+		assert spec.name == expected_name
+		instance = 1 + sum(process.name.startswith(spec.name) for process in processes)
+		name = f"{spec.name}{instance}"
+		process = FakeProcess(name, events, hangs=outcome == "hang")
+		process.on_exit = on_exit
+		processes.append(process)
+		events.append(f"{name}:start")
 
-def supervisor_shell(tmp_path: Path) -> GenerationSupervisor:
-	supervisor = object.__new__(GenerationSupervisor)
-	supervisor.live_path = tmp_path / "web" / "app" / "pulse"
-	supervisor.live_path.parent.mkdir(parents=True)
-	supervisor.watch_roots = (tmp_path,)
-	supervisor.vite_port = None
-	supervisor.vite_secret = None
-	supervisor.plain = True
-	supervisor.desired = 0
-	supervisor.changed = asyncio.Event()
-	supervisor.filter = PulseWatchFilter((tmp_path,), (supervisor.live_path,))
-	supervisor._stage_parent = (  # pyright: ignore[reportPrivateUsage]
-		supervisor.live_path.parent / ".pulse.pulse-reload"
-	)
-	supervisor._stage_parent.mkdir()  # pyright: ignore[reportPrivateUsage]
-	supervisor._stage_root = (  # pyright: ignore[reportPrivateUsage]
-		supervisor._stage_parent / "run-test"  # pyright: ignore[reportPrivateUsage]
-	)
-	supervisor._stage_root.mkdir()  # pyright: ignore[reportPrivateUsage]
-	supervisor._listen_socket = Mock()  # pyright: ignore[reportPrivateUsage]
-	supervisor.active = None
-	supervisor.candidate = None
-	supervisor._announced_ready = False  # pyright: ignore[reportPrivateUsage]
-	return supervisor
+		async def report_backend(event: str, sources: list[str] | None = None) -> None:
+			body: dict[str, object] = {
+				"event": event,
+				"instance": spec.env[ENV_PULSE_BACKEND_INSTANCE],
+			}
+			if sources is not None:
+				body["sources"] = sources
+			if event == "ready":
+				body["port"] = 9000 + instance
+			async with ClientSession() as session:
+				response = await session.post(
+					spec.env[ENV_PULSE_BACKEND_LIFECYCLE_URL],
+					headers={
+						"Authorization": "Bearer "
+						+ spec.env[ENV_PULSE_BACKEND_LIFECYCLE_SECRET]
+					},
+					json=body,
+				)
+				assert response.status == 204
+				events.append(f"{name}:{event}")
 
+		if outcome in ("ready", "serve_fail", "serve_broken_pipe"):
+			if spec.name == "server":
+				asyncio.create_task(report_backend("prepared", []))
 
-@pytest.mark.asyncio
-async def test_active_worker_exit_unblocks_supervisor() -> None:
-	class ExitedProcess:
-		exitcode: int = 130
+				def mark_ready() -> None:
+					if outcome == "serve_fail":
+						process.exit(3)
+					elif outcome == "serve_broken_pipe":
+						process.exit(1)
+						raise BrokenPipeError
+					else:
+						asyncio.create_task(report_backend("ready"))
 
-		def is_alive(self) -> bool:
-			return False
+				process.on_send = mark_ready
+			else:
+				asyncio.create_task(report_vite(spec, name, listening=True))
+		elif outcome == "configured" and spec.name == "web":
+			asyncio.create_task(report_vite(spec, name, listening=False))
+		elif outcome == "malformed":
 
-	assert await wait_for_change_or_exit(asyncio.Event(), ExitedProcess()) == 130
+			async def report_malformed() -> None:
+				async with ClientSession() as session:
+					response = await session.post(
+						spec.env[ENV_PULSE_BACKEND_LIFECYCLE_URL],
+						headers={
+							"Authorization": "Bearer "
+							+ spec.env[ENV_PULSE_BACKEND_LIFECYCLE_SECRET]
+						},
+						json={
+							"event": "prepared",
+							"instance": spec.env[ENV_PULSE_BACKEND_INSTANCE],
+							"sources": "invalid",
+						},
+					)
+					assert response.status == 400
+					events.append(f"{name}:malformed")
+
+			asyncio.create_task(report_malformed())
+		elif outcome == "fail":
+			process.exit(1)
+		return process
+
+	async def watch(_self: DevSupervisor) -> None:
+		await asyncio.Event().wait()
+
+	monkeypatch.setattr(ManagedProcess, "start", classmethod(start))
+	monkeypatch.setattr(DevSupervisor, "_watch", watch)
+	return processes
 
 
 @pytest.mark.parametrize("plain", [True, False])
 @pytest.mark.asyncio
 async def test_watch_announces_reload_with_semantic_formatting(
 	plain: bool,
+	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
 	capsys: pytest.CaptureFixture[str],
 ) -> None:
 	async def one_change(*_args: object, **_kwargs: object):
-		yield {(Change.modified, "/app/main.py")}
+		yield {(Change.modified, str(tmp_path / "main.py"))}
 
 	monkeypatch.setattr(reload_mod, "awatch", one_change)
-	supervisor = object.__new__(GenerationSupervisor)
-	supervisor.watch_roots = (Path("/app"),)
-	supervisor.filter = PulseWatchFilter((Path("/app"),), ())
-	supervisor.desired = 0
-	supervisor.changed = asyncio.Event()
-	supervisor.plain = plain
+	supervisor = supervisor_shell(tmp_path)
+	supervisor.tag_mode = "plain" if plain else "colored"
 
 	await supervisor._watch()  # pyright: ignore[reportPrivateUsage]
 
@@ -178,257 +266,585 @@ def test_watch_filter_accepts_python_and_exact_registered_sources(
 	app_root = tmp_path / "app"
 	generated = app_root / "web" / "app" / "pulse"
 	external = tmp_path / "shared" / "theme.css"
-	application_root = app_root
-	filter_ = PulseWatchFilter(
-		(application_root,),
-		(generated,),
-		{external},
-	)
+	filter_ = PulseWatchFilter((app_root,), (generated,), {external})
 
-	assert filter_(Change.modified, str(application_root / "main.py"))
+	assert filter_(Change.modified, str(app_root / "main.py"))
 	assert filter_(Change.modified, str(external))
 	assert not filter_(Change.modified, str(external.with_name("other.css")))
 	assert not filter_(Change.modified, str(generated / "route.py"))
 	assert not filter_(Change.modified, str(app_root / "web" / "app.tsx"))
 	assert not filter_(Change.modified, str(app_root / "node_modules" / "tool.py"))
-	assert not filter_(Change.modified, str(app_root / "dist" / "bundle.py"))
+
+
+def test_watch_filter_ignores_junk_names_only_below_watch_roots(
+	tmp_path: Path,
+) -> None:
+	app_root = tmp_path / "build" / "myapp"
+	filter_ = PulseWatchFilter((app_root,), (), set())
+
+	# An ancestor named "build" must not suppress reloads for the app inside it.
+	assert filter_(Change.modified, str(app_root / "main.py"))
+	assert not filter_(Change.modified, str(app_root / "build" / "artifact.py"))
+	assert not filter_(Change.modified, str(app_root / "venv" / "lib" / "pkg.py"))
 
 
 def test_new_external_asset_adds_its_parent_watch_root(tmp_path: Path) -> None:
-	supervisor = supervisor_shell(tmp_path / "app")
+	app_root = tmp_path / "app"
 	external = tmp_path / "shared" / "theme.css"
-
-	assert supervisor._add_watch_sources(  # pyright: ignore[reportPrivateUsage]
-		[str(external)]
+	supervisor = DevSupervisor(
+		backend=command("server", tmp_path),
+		web=None,
+		watch_roots=(app_root,),
+		ignored_roots=(),
+		registered_sources={external},
+		tag_mode="plain",
 	)
+
 	assert external.parent.resolve() in supervisor.watch_roots
 	assert supervisor.filter(Change.modified, str(external))
-	assert not supervisor._add_watch_sources(  # pyright: ignore[reportPrivateUsage]
-		[str(external)]
-	)
+	assert not supervisor._add_watch_sources([str(external)])  # pyright: ignore[reportPrivateUsage]
 
 
-def test_publish_staged_tree_replaces_one_complete_generation(tmp_path: Path) -> None:
-	live = tmp_path / "web" / "app" / "pulse"
-	stage = tmp_path / ".pulse" / "generation-2"
-	(live / "old").mkdir(parents=True)
-	(live / "old" / "route.tsx").write_text("old")
-	(stage / "new").mkdir(parents=True)
-	(stage / "new" / "route.tsx").write_text("new")
-
-	published = publish_staged_tree(stage, live)
-
-	assert not (live / "old").exists()
-	assert (live / "new" / "route.tsx").read_text() == "new"
-	assert not stage.exists()
-	assert published == [live / "new" / "route.tsx", live / "old" / "route.tsx"]
-
-
-def test_publish_staged_tree_preserves_unchanged_files(tmp_path: Path) -> None:
-	live = tmp_path / "web" / "app" / "pulse"
-	stage = tmp_path / ".pulse" / "run-1" / "generation-2"
-	(live / "route.tsx").parent.mkdir(parents=True)
-	(live / "route.tsx").write_text("unchanged")
-	(stage / "route.tsx").parent.mkdir(parents=True)
-	(stage / "route.tsx").write_text("unchanged")
-	before = (live / "route.tsx").stat()
-
-	published = publish_staged_tree(stage, live)
-
-	after = (live / "route.tsx").stat()
-	assert after.st_ino == before.st_ino
-	assert after.st_mtime_ns == before.st_mtime_ns
-	assert published == []
-
-
-def test_cleanup_stale_stages_preserves_recovery_backup(tmp_path: Path) -> None:
-	stage_root = tmp_path / ".pulse" / "reload" / "pulse"
-	(stage_root / "run-old" / "generation-1").mkdir(parents=True)
-	(stage_root / "live-backup-preparing").mkdir()
-	(stage_root / "live-backup").mkdir()
-
-	reload_mod._cleanup_stale_stages(  # pyright: ignore[reportPrivateUsage]
-		stage_root
-	)
-
-	assert not (stage_root / "run-old").exists()
-	assert not (stage_root / "live-backup-preparing").exists()
-	assert (stage_root / "live-backup").exists()
-
-
-def test_publish_staged_tree_restores_live_tree_on_replace_failure(
+@pytest.mark.asyncio
+async def test_full_restart_stops_both_before_starting_backend(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-	live = tmp_path / "web" / "app" / "pulse"
-	stage = live.parent / ".pulse.pulse-reload" / "run-1" / "generation-2"
-	(live / "route.tsx").parent.mkdir(parents=True)
-	(live / "route.tsx").write_text("old")
-	(stage / "route.tsx").parent.mkdir(parents=True)
-	(stage / "route.tsx").write_text("new")
-	replace = os.replace
-	calls = 0
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	ready_count = 0
 
-	def fail_publish(source: Path, destination: Path) -> None:
-		nonlocal calls
-		calls += 1
-		if calls == 2:
-			raise OSError("publish failed")
-		replace(source, destination)
+	def backend_ready() -> None:
+		nonlocal ready_count
+		ready_count += 1
+		events.append(f"server{ready_count}:accepted")
 
-	monkeypatch.setattr(os, "replace", fail_publish)
+	supervisor.backend_spec.on_ready = backend_ready
+	install_process_script(
+		monkeypatch,
+		events,
+		[("server", "ready"), ("web", "ready"), ("server", "ready"), ("web", "ready")],
+	)
 
-	with pytest.raises(OSError, match="publish failed"):
-		publish_staged_tree(stage, live)
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "web1:ready" in events)
+	supervisor.desired += 1
+	supervisor.changed.set()
+	await wait_until(lambda: "web2:ready" in events)
+	supervisor.shutdown.set()
+	assert await run_task == 130
 
-	assert (live / "route.tsx").read_text() == "old"
-	assert (stage / "route.tsx").read_text() == "new"
-	assert not (stage.parents[1] / "live-backup").exists()
+	assert events.index("web1:stop") < events.index("server1:stop")
+	assert events.index("web1:exit") < events.index("server1:stop")
+	assert events.index("web1:close") < events.index("server2:start")
+	assert events.index("server1:close") < events.index("server2:start")
+	assert events.index("server2:accepted") < events.index("web2:start")
 
 
-def test_publish_staged_tree_recovers_backup_left_by_interrupted_publish(
+@pytest.mark.asyncio
+async def test_single_server_starts_vite_after_prepare_and_before_uvicorn(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	supervisor.web_first = True
+	events: list[str] = []
+	assert supervisor.web_spec is not None
+	supervisor.web_spec.on_ready = lambda: events.append("web1:accepted")
+
+	def record_backend_event(event: reload_mod._BackendLifecycleEvent) -> None:  # pyright: ignore[reportPrivateUsage]
+		events.append(f"server1:{event.event}-accepted")
+		supervisor._notify_backend_lifecycle(event)  # pyright: ignore[reportPrivateUsage]
+
+	supervisor._lifecycle._on_backend_event = record_backend_event  # pyright: ignore[reportPrivateUsage]
+	install_process_script(
+		monkeypatch,
+		events,
+		[("server", "ready"), ("web", "ready")],
+	)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "server1:ready" in events)
+	supervisor.shutdown.set()
+	assert await run_task == 130
+
+	assert events.index("server1:prepared-accepted") < events.index("web1:start")
+	assert events.index("web1:accepted") < events.index("server1:serve")
+	assert events.index("server1:serve") < events.index("server1:ready")
+	assert events.index("server1:stop") < events.index("web1:stop")
+	assert events.index("server1:exit") < events.index("web1:stop")
+
+
+@pytest.mark.asyncio
+async def test_backend_failure_keeps_vite_down_until_next_edit(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	install_process_script(
+		monkeypatch,
+		events,
+		[("server", "fail"), ("server", "ready"), ("web", "ready")],
+	)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "server1:close" in events)
+	assert not any(event.startswith("web") for event in events)
+
+	supervisor.desired += 1
+	supervisor.changed.set()
+	await wait_until(lambda: "web1:ready" in events)
+	supervisor.shutdown.set()
+	assert await run_task == 130
+
+
+@pytest.mark.asyncio
+async def test_rapid_edit_discards_starting_backend_without_starting_vite(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	install_process_script(
+		monkeypatch,
+		events,
+		[("server", "stall"), ("server", "ready"), ("web", "ready")],
+	)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "server1:start" in events)
+	supervisor.desired += 1
+	supervisor.changed.set()
+	await wait_until(lambda: "web1:ready" in events)
+	supervisor.shutdown.set()
+	assert await run_task == 130
+	assert not any(
+		event.startswith("web") for event in events[: events.index("server1:close")]
+	)
+	assert events.index("server1:close") < events.index("server2:start")
+
+
+@pytest.mark.asyncio
+async def test_shutdown_kills_hung_process_trees(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	install_process_script(
+		monkeypatch,
+		events,
+		[("server", "ready"), ("web", "hang")],
+	)
+	monkeypatch.setattr(reload_mod, "STOP_TIMEOUT", 0.01)
+	monkeypatch.setattr(reload_mod, "KILL_TIMEOUT", 0.01)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "web1:start" in events)
+	supervisor.shutdown.set()
+	assert await run_task == 130
+	assert "web1:kill" in events
+
+
+@pytest.mark.asyncio
+async def test_running_backend_crash_stops_vite_and_waits_for_edit(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	processes = install_process_script(
+		monkeypatch,
+		events,
+		[("server", "ready"), ("web", "ready")],
+	)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "web1:ready" in events)
+	processes[0].exit(7)
+	await wait_until(lambda: "web1:close" in events)
+
+	assert not run_task.done()
+	assert events.count("server1:start") == 1
+	supervisor.shutdown.set()
+	assert await run_task == 130
+
+
+@pytest.mark.asyncio
+async def test_backend_death_during_serve_handshake_is_a_backend_failure(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	install_process_script(
+		monkeypatch,
+		events,
+		[("server", "serve_broken_pipe"), ("server", "ready"), ("web", "ready")],
+	)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "server1:close" in events)
+
+	# The broken pipe must not crash the supervisor; it waits for the next edit.
+	assert not run_task.done()
+	assert not any(event.startswith("web") for event in events)
+
+	supervisor.desired += 1
+	supervisor.changed.set()
+	await wait_until(lambda: "web1:ready" in events)
+	supervisor.shutdown.set()
+	assert await run_task == 130
+
+
+@pytest.mark.asyncio
+async def test_backend_exit_while_vite_starts_is_not_lost(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	processes = install_process_script(
+		monkeypatch,
+		events,
+		[("server", "ready"), ("web", "stall")],
+	)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "web1:start" in events)
+	processes[0].exit(7)
+	await wait_until(lambda: "web1:close" in events)
+
+	assert not run_task.done()
+	supervisor.shutdown.set()
+	assert await run_task == 130
+
+
+@pytest.mark.asyncio
+async def test_running_vite_crash_returns_its_exit_code(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	processes = install_process_script(
+		monkeypatch,
+		events,
+		[("server", "ready"), ("web", "ready")],
+	)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "web1:ready" in events)
+	processes[1].exit(6)
+
+	assert await run_task == 6
+	assert "server1:close" in events
+
+
+@pytest.mark.asyncio
+async def test_vite_close_waits_for_process_exit_code(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	processes = install_process_script(
+		monkeypatch,
+		events,
+		[("server", "ready"), ("web", "ready")],
+	)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "web1:ready" in events)
+	assert supervisor.web_spec is not None
+	instance = supervisor.web_spec.env[ENV_PULSE_VITE_INSTANCE]
+	supervisor._notify_vite_lifecycle(  # pyright: ignore[reportPrivateUsage]
+		reload_mod._ViteLifecycleEvent(  # pyright: ignore[reportPrivateUsage]
+			instance, "closed", 3, 5173
+		)
+	)
+	await asyncio.sleep(0)
+	assert not run_task.done()
+
+	processes[1].exit(6)
+	assert await run_task == 6
+
+
+@pytest.mark.asyncio
+async def test_vite_close_without_exit_has_bounded_failure(
 	tmp_path: Path,
-) -> None:
-	live = tmp_path / "web" / "app" / "pulse"
-	stage = live.parent / ".pulse.pulse-reload" / "run-1" / "generation-2"
-	backup = stage.parents[1] / "live-backup"
-	(backup / "route.tsx").parent.mkdir(parents=True)
-	(backup / "route.tsx").write_text("last good")
-	(stage / "route.tsx").parent.mkdir(parents=True)
-	(stage / "route.tsx").write_text("new")
-
-	publish_staged_tree(stage, live)
-
-	assert (live / "route.tsx").read_text() == "new"
-	assert not backup.exists()
-
-
-def test_codegen_stage_does_not_touch_live_tree(
-	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-	web_root = tmp_path / "web"
-	live = web_root / "app" / "pulse"
-	stage = tmp_path / ".pulse" / "generation-1"
-	(live / "keep.ts").parent.mkdir(parents=True)
-	(live / "keep.ts").write_text("last good")
-	monkeypatch.setenv(ENV_PULSE_CODEGEN_OUTPUT, str(stage))
-	codegen = Codegen(
-		RouteTree([]),
-		CodegenConfig(web_dir=web_root, pulse_dir="pulse", base_dir=tmp_path),
-	)
-
-	codegen.generate_all("http://localhost:8000")
-
-	assert (live / "keep.ts").read_text() == "last good"
-	assert (stage / "routes.ts").exists()
-
-
-@pytest.mark.asyncio
-async def test_vite_commit_retries_500_and_accepts_idempotent_response() -> None:
-	# Response shapes mirror vite.ts exactly: a lost-success retry hits the
-	# plugin's equal-generation path, which replies 200 {status: "committed"}.
-	attempts = 0
-
-	async def commit(_request: web.Request) -> web.Response:
-		nonlocal attempts
-		attempts += 1
-		if attempts == 1:
-			return web.json_response({"status": "error"}, status=500)
-		return web.json_response({"status": "committed", "generation": 4})
-
-	runner, port = await start_http_server(commit)
-	supervisor = object.__new__(GenerationSupervisor)
-	supervisor.vite_port = port
-	supervisor.vite_secret = "test-secret"
-	try:
-		assert await supervisor._retry_vite(  # pyright: ignore[reportPrivateUsage]
-			"POST", "/__pulse/commit", 4
-		)
-	finally:
-		await runner.cleanup()
-
-	assert attempts == 2
-
-
-@pytest.mark.asyncio
-async def test_vite_commit_accepts_superseded_generation() -> None:
-	# vite.ts answers 409 {status: "stale"} with its latestGeneration, which is
-	# strictly greater than the posted one; supersession is success, not failure.
-	async def commit(_request: web.Request) -> web.Response:
-		return web.json_response({"status": "stale", "generation": 8}, status=409)
-
-	runner, port = await start_http_server(commit)
-	supervisor = object.__new__(GenerationSupervisor)
-	supervisor.vite_port = port
-	supervisor.vite_secret = "test-secret"
-	try:
-		assert await supervisor._retry_vite(  # pyright: ignore[reportPrivateUsage]
-			"POST", "/__pulse/commit", 7
-		)
-	finally:
-		await runner.cleanup()
-
-
-@pytest.mark.asyncio
-async def test_vite_health_without_plugin_fails_fast_with_instructions(
+	monkeypatch: pytest.MonkeyPatch,
 	capsys: pytest.CaptureFixture[str],
 ) -> None:
-	attempts = 0
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	install_process_script(
+		monkeypatch,
+		events,
+		[("server", "ready"), ("web", "ready")],
+	)
+	monkeypatch.setattr(reload_mod, "VITE_CLOSE_TIMEOUT", 0.02)
 
-	async def spa_fallback(_request: web.Request) -> web.Response:
-		nonlocal attempts
-		attempts += 1
-		return web.Response(
-			text="<!doctype html><html></html>", content_type="text/html"
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "web1:ready" in events)
+	assert supervisor.web_spec is not None
+	instance = supervisor.web_spec.env[ENV_PULSE_VITE_INSTANCE]
+	supervisor._notify_vite_lifecycle(  # pyright: ignore[reportPrivateUsage]
+		reload_mod._ViteLifecycleEvent(  # pyright: ignore[reportPrivateUsage]
+			instance, "closed", 3, 5173
 		)
+	)
 
-	runner, port = await start_http_server(spa_fallback)
-	supervisor = object.__new__(GenerationSupervisor)
-	supervisor.vite_port = port
-	supervisor.vite_secret = "test-secret"
-	try:
-		# Bounded well below VITE_DEADLINE: a missing plugin must not retry.
-		assert not await asyncio.wait_for(
-			supervisor._retry_vite(  # pyright: ignore[reportPrivateUsage]
-				"GET", "/__pulse/health", 1
-			),
-			timeout=2,
-		)
-	finally:
-		await runner.cleanup()
-
-	assert attempts == 1
-	assert "pulseVitePlugin" in capsys.readouterr().out
+	assert await run_task == 1
+	assert "Web dev server stopped listening." in capsys.readouterr().out
 
 
 @pytest.mark.asyncio
-async def test_vite_request_hang_is_bounded(
+async def test_vite_startup_failure_returns_its_exit_code(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	install_process_script(
+		monkeypatch,
+		events,
+		[("server", "ready"), ("web", "fail")],
+	)
+
+	assert await supervisor.run() == 1
+	assert "server1:close" in events
+
+
+@pytest.mark.asyncio
+async def test_missing_vite_plugin_fails_with_actionable_error(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	capsys: pytest.CaptureFixture[str],
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	install_process_script(
+		monkeypatch,
+		events,
+		[("server", "ready"), ("web", "stall")],
+	)
+	monkeypatch.setattr(reload_mod, "VITE_START_TIMEOUT", 0.02)
+
+	assert await supervisor.run() == 1
+	assert "Add pulseVitePlugin()" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_configured_vite_may_listen_slower_than_start_timeout(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	install_process_script(
+		monkeypatch,
+		events,
+		[("server", "ready"), ("web", "configured")],
+	)
+	monkeypatch.setattr(reload_mod, "VITE_START_TIMEOUT", 0.02)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "web1:configured" in events)
+	# Well past VITE_START_TIMEOUT: a configured Vite gets an unbounded,
+	# interruptible wait to listen instead of a hard failure.
+	await asyncio.sleep(0.1)
+	assert not run_task.done()
+	assert supervisor.web is not None
+
+	supervisor.shutdown.set()
+	assert await run_task == 130
+
+
+@pytest.mark.asyncio
+async def test_vite_lifecycle_endpoint_authenticates_and_validates() -> None:
+	events: list[reload_mod._ViteLifecycleEvent] = []  # pyright: ignore[reportPrivateUsage]
+	server = reload_mod._LifecycleServer(  # pyright: ignore[reportPrivateUsage]
+		events.append, lambda _event: None
+	)
+	environment: dict[str, str] = {}
+	await server.start()
+	try:
+		instance = server.configure_vite(environment)
+		url = environment[ENV_PULSE_VITE_LIFECYCLE_URL]
+		headers = {
+			"Authorization": "Bearer " + environment[ENV_PULSE_VITE_LIFECYCLE_SECRET]
+		}
+		async with ClientSession() as session:
+			response = await session.post(url, json={})
+			assert response.status == 401
+			response = await session.post(
+				url,
+				headers=headers,
+				json={
+					"event": "listening",
+					"instance": instance,
+					"sequence": True,
+					"port": 5173,
+				},
+			)
+			assert response.status == 400
+			response = await session.post(
+				url,
+				headers=headers,
+				json={
+					"event": "listening",
+					"instance": instance,
+					"sequence": 1,
+					"port": 5173,
+				},
+			)
+			assert response.status == 204
+		assert events == [
+			reload_mod._ViteLifecycleEvent(  # pyright: ignore[reportPrivateUsage]
+				instance, "listening", 1, 5173
+			)
+		]
+	finally:
+		await server.close()
+
+
+@pytest.mark.asyncio
+async def test_stale_lifecycle_events_cannot_retarget_relays(tmp_path: Path) -> None:
+	class RelaySpy:
+		def __init__(self) -> None:
+			self.target: tuple[str, int] | None = None
+
+		def set_target(self, host: str, port: int) -> None:
+			self.target = (host, port)
+
+	supervisor = supervisor_shell(tmp_path)
+	vite_relay = RelaySpy()
+	public_relay = RelaySpy()
+	supervisor.vite_relay = vite_relay  # pyright: ignore[reportAttributeAccessIssue]
+	supervisor.public_relay = public_relay  # pyright: ignore[reportAttributeAccessIssue]
+	loop = asyncio.get_running_loop()
+	supervisor._states["web"] = reload_mod._ProcessState(loop.create_future())  # pyright: ignore[reportPrivateUsage]
+	supervisor._states["server"] = reload_mod._ProcessState(loop.create_future())  # pyright: ignore[reportPrivateUsage]
+	supervisor._vite_instance = "vite-current"  # pyright: ignore[reportPrivateUsage]
+	supervisor._backend_instance = "backend-current"  # pyright: ignore[reportPrivateUsage]
+
+	supervisor._handle_event(  # pyright: ignore[reportPrivateUsage]
+		reload_mod._ViteLifecycleEvent("vite-old", "listening", 1, 5100)  # pyright: ignore[reportPrivateUsage]
+	)
+	supervisor._handle_event(  # pyright: ignore[reportPrivateUsage]
+		reload_mod._BackendLifecycleEvent("backend-old", "ready", [], 8100)  # pyright: ignore[reportPrivateUsage]
+	)
+	assert vite_relay.target is None
+	assert public_relay.target is None
+
+	supervisor._handle_event(  # pyright: ignore[reportPrivateUsage]
+		reload_mod._ViteLifecycleEvent("vite-current", "listening", 2, 5200)  # pyright: ignore[reportPrivateUsage]
+	)
+	supervisor._handle_event(  # pyright: ignore[reportPrivateUsage]
+		reload_mod._BackendLifecycleEvent("backend-current", "ready", [], 8200)  # pyright: ignore[reportPrivateUsage]
+	)
+	assert vite_relay.target == ("127.0.0.1", 5200)
+	assert public_relay.target == ("127.0.0.1", 8200)
+
+	supervisor._handle_event(  # pyright: ignore[reportPrivateUsage]
+		reload_mod._ViteLifecycleEvent("vite-current", "listening", 1, 5300)  # pyright: ignore[reportPrivateUsage]
+	)
+	assert vite_relay.target == ("127.0.0.1", 5200)
+
+
+@pytest.mark.asyncio
+async def test_backend_serve_failure_never_starts_vite(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	install_process_script(
+		monkeypatch,
+		events,
+		[("server", "serve_fail")],
+	)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "server1:close" in events)
+	assert not any(event.startswith("web") for event in events)
+	supervisor.shutdown.set()
+	assert await run_task == 130
+
+
+@pytest.mark.asyncio
+async def test_malformed_backend_protocol_does_not_start_vite(
+	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-	async def hang(_request: web.Request) -> web.Response:
-		await asyncio.sleep(0.2)
-		return web.json_response({"status": "ready"})
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	install_process_script(
+		monkeypatch,
+		events,
+		[("server", "malformed")],
+	)
 
-	runner, port = await start_http_server(hang)
-	supervisor = object.__new__(GenerationSupervisor)
-	supervisor.vite_port = port
-	supervisor.vite_secret = "test-secret"
-	monkeypatch.setattr(reload_mod, "VITE_DEADLINE", 0.08)
-	monkeypatch.setattr(reload_mod, "VITE_REQUEST_TIMEOUT", 0.02)
-	monkeypatch.setattr(reload_mod, "VITE_RETRY_DELAY", 0.01)
-	try:
-		assert not await asyncio.wait_for(
-			supervisor._retry_vite(  # pyright: ignore[reportPrivateUsage]
-				"GET", "/__pulse/health", 1
-			),
-			timeout=0.15,
-		)
-	finally:
-		await runner.cleanup()
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "server1:malformed" in events)
+	await asyncio.sleep(0)
+	assert not any(event.startswith("web") for event in events)
+	supervisor.shutdown.set()
+	assert await run_task == 130
 
 
-def test_worker_uvicorn_config_disables_reload_and_bounds_drain(
-	tmp_path: Path,
+@pytest.mark.asyncio
+async def test_partial_application_stdout_cannot_corrupt_backend_lifecycle(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+	app_file = tmp_path / "app.py"
+	app_file.write_text(
+		"\n".join(
+			[
+				'print("partial application log", end="", flush=True)',
+				"import pulse as ps",
+				"app = ps.App([])",
+			]
+		)
+	)
+	listen_socket = socket.socket()
+	listen_socket.bind(("127.0.0.1", 0))
+	port = listen_socket.getsockname()[1]
+	listen_socket.close()
+	ready = asyncio.Event()
+	worker_env = os.environ.copy()
+	worker_env[ENV_PULSE_REACT_SERVER_ADDRESS] = "http://127.0.0.1:5173"
+	backend = CommandSpec(
+		name="server",
+		args=[
+			sys.executable,
+			"-m",
+			"pulse.cli.dev_worker",
+			"--target",
+			f"{app_file}:app",
+			"--host",
+			"127.0.0.1",
+			"--port",
+			str(port),
+			"--bind-host",
+			"127.0.0.1",
+			"--bind-port",
+			"0",
+			"--plain",
+		],
+		cwd=tmp_path,
+		env=worker_env,
+		on_ready=ready.set,
+	)
+	supervisor = DevSupervisor(
+		backend=backend,
+		web=None,
+		watch_roots=(tmp_path,),
+		ignored_roots=(),
+		registered_sources=set(),
+		tag_mode="plain",
+	)
+
+	async def watch(_self: DevSupervisor) -> None:
+		await asyncio.Event().wait()
+
+	monkeypatch.setattr(DevSupervisor, "_watch", watch)
+	run_task = asyncio.create_task(supervisor.run())
+	await asyncio.wait_for(ready.wait(), timeout=5)
+	supervisor.shutdown.set()
+	assert await asyncio.wait_for(run_task, timeout=5) == 130
+
+
+def test_worker_uvicorn_config_disables_reload_and_bounds_drain() -> None:
 	async def app(scope: Scope, receive: Receive, send: Send) -> None:
 		return None
 
@@ -436,10 +852,10 @@ def test_worker_uvicorn_config_disables_reload_and_bounds_drain(
 		app,
 		WorkerConfig(
 			target="demo:app",
-			generation=1,
-			stage_path=tmp_path,
-			host="127.0.0.1",
-			port=8000,
+			public_host="localhost",
+			public_port=8000,
+			bind_host="127.0.0.1",
+			bind_port=0,
 			plain=True,
 			verbose=True,
 		),
@@ -448,18 +864,48 @@ def test_worker_uvicorn_config_disables_reload_and_bounds_drain(
 	assert config.reload is False
 	assert config.workers == 1
 	assert config.timeout_graceful_shutdown == DEVELOPMENT_GRACEFUL_TIMEOUT
+	# The relay makes every connection loopback, so forwarded headers must not
+	# be trusted (any client could spoof them).
+	assert config.proxy_headers is False
 
 
-@pytest.mark.asyncio
-async def test_app_begin_drain_quiesces_proxy_early() -> None:
-	app = App()
-	proxy = AsyncMock()
-	app._proxy = proxy  # pyright: ignore[reportPrivateUsage]
+def test_worker_watchdog_stops_server_on_supervisor_exit(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	server = SimpleNamespace(should_exit=False)
+	monkeypatch.setattr(sys, "stdin", io.StringIO("noise\n"))
 
-	await app.begin_drain()
-	await app.begin_drain()
+	_watch_supervisor(cast(uvicorn.Server, cast(object, server)))
 
-	assert proxy.close.await_count == 2
+	assert server.should_exit is True
+
+
+def test_managed_process_streams_output_accepts_input_and_reports_exit(
+	tmp_path: Path,
+) -> None:
+	lines: list[str] = []
+	exited = threading.Event()
+	process = ManagedProcess.start(
+		CommandSpec(
+			name="worker",
+			args=[
+				sys.executable,
+				"-c",
+				"import sys; print(sys.stdin.readline().strip(), flush=True)",
+			],
+			cwd=tmp_path,
+			env={},
+		),
+		lines.append,
+		lambda _code: exited.set(),
+	)
+
+	process.send_line("serve")
+	assert exited.wait(2)
+	process.close()
+
+	assert process.returncode == 0
+	assert lines == ["serve"]
 
 
 @pytest.mark.asyncio
@@ -509,252 +955,3 @@ async def test_uvicorn_worker_bounds_unfinished_http_response() -> None:
 	assert request_cancelled.is_set()
 	writer.close()
 	await writer.wait_closed()
-
-
-@pytest.mark.asyncio
-async def test_supervisor_supersedes_rapid_initial_edit_and_commits_generation_two(
-	tmp_path: Path,
-	monkeypatch: pytest.MonkeyPatch,
-	capsys: pytest.CaptureFixture[str],
-) -> None:
-	supervisor = supervisor_shell(tmp_path)
-	workers: dict[int, GenerationWorker] = {}
-	order: list[str] = []
-
-	async def watch(_self: GenerationSupervisor) -> None:
-		await asyncio.Event().wait()
-
-	def spawn(self: GenerationSupervisor, generation: int) -> GenerationWorker:
-		stage = self._stage_root / f"generation-{generation}"  # pyright: ignore[reportPrivateUsage]
-		stage.mkdir()
-		(stage / "routes.ts").write_text(f"generation {generation}")
-		worker = fake_worker(generation, stage)
-		workers[generation] = worker
-		order.append(f"spawn:{generation}")
-		return worker
-
-	async def wait_for(
-		self: GenerationSupervisor,
-		worker: GenerationWorker,
-		expected: set[str],
-	) -> dict[str, Any]:
-		if "prepared" in expected:
-			if worker.generation == 1:
-				self.desired += 1
-				self.changed.set()
-				return {"type": "stale", "generation": 1}
-			order.append("prepared:2")
-			return {"type": "prepared", "generation": 2, "sources": []}
-		order.append("ready:2")
-		return {"type": "ready", "generation": 2}
-
-	async def preflight(_self: GenerationSupervisor, worker: GenerationWorker) -> bool:
-		order.append(f"preflight:{worker.generation}")
-		return True
-
-	async def notify(
-		self: GenerationSupervisor,
-		worker: GenerationWorker,
-		published_files: list[Path],
-	) -> bool:
-		order.append(f"commit:{worker.generation}")
-		assert (self.live_path / "routes.ts").read_text() == "generation 2"
-		assert published_files == [self.live_path / "routes.ts"]
-		return True
-
-	monkeypatch.setattr(GenerationSupervisor, "_watch", watch)
-	monkeypatch.setattr(GenerationSupervisor, "_spawn", spawn)
-	monkeypatch.setattr(GenerationSupervisor, "_wait_for", wait_for)
-	monkeypatch.setattr(GenerationSupervisor, "_preflight_vite", preflight)
-	monkeypatch.setattr(GenerationSupervisor, "_notify_vite", notify)
-
-	run_task = asyncio.create_task(supervisor.run())
-	await wait_until(lambda: 2 in workers and supervisor.active is workers[2])
-	run_task.cancel()
-	assert await run_task == 130
-
-	assert order == [
-		"spawn:1",
-		"spawn:2",
-		"prepared:2",
-		"preflight:2",
-		"ready:2",
-		"commit:2",
-	]
-	assert workers[1].process.terminated
-	assert workers[1].control.closed
-	assert workers[2].control.sent == [
-		{"type": "serve", "generation": 2},
-		{"type": "drain", "generation": 2},
-	]
-	assert capsys.readouterr().out == "Pulse reload ready\n"
-	assert not supervisor._stage_parent.exists()  # pyright: ignore[reportPrivateUsage]
-
-
-def _install_happy_path(
-	monkeypatch: pytest.MonkeyPatch,
-	workers: dict[int, GenerationWorker],
-	*,
-	preflight_ok: Callable[[int], bool] = lambda generation: True,
-	notify_ok: Callable[[int], bool] = lambda generation: True,
-) -> None:
-	"""Stub worker phases so every generation prepares, serves, and publishes."""
-
-	async def watch(_self: GenerationSupervisor) -> None:
-		await asyncio.Event().wait()
-
-	def spawn(self: GenerationSupervisor, generation: int) -> GenerationWorker:
-		stage = self._stage_root / f"generation-{generation}"  # pyright: ignore[reportPrivateUsage]
-		stage.mkdir()
-		(stage / "routes.ts").write_text(f"generation {generation}")
-		worker = fake_worker(generation, stage)
-		workers[generation] = worker
-		return worker
-
-	async def wait_for(
-		_self: GenerationSupervisor,
-		worker: GenerationWorker,
-		expected: set[str],
-	) -> dict[str, Any]:
-		kind = "prepared" if "prepared" in expected else "ready"
-		message: dict[str, Any] = {"type": kind, "generation": worker.generation}
-		if kind == "prepared":
-			message["sources"] = []
-		return message
-
-	async def preflight(_self: GenerationSupervisor, worker: GenerationWorker) -> bool:
-		return preflight_ok(worker.generation)
-
-	async def notify(
-		_self: GenerationSupervisor,
-		worker: GenerationWorker,
-		_published_files: list[Path],
-	) -> bool:
-		return notify_ok(worker.generation)
-
-	monkeypatch.setattr(GenerationSupervisor, "_watch", watch)
-	monkeypatch.setattr(GenerationSupervisor, "_spawn", spawn)
-	monkeypatch.setattr(GenerationSupervisor, "_wait_for", wait_for)
-	monkeypatch.setattr(GenerationSupervisor, "_preflight_vite", preflight)
-	monkeypatch.setattr(GenerationSupervisor, "_notify_vite", notify)
-
-
-@pytest.mark.asyncio
-async def test_supervisor_survives_worker_crash_and_restarts_on_next_change(
-	tmp_path: Path,
-	monkeypatch: pytest.MonkeyPatch,
-	capsys: pytest.CaptureFixture[str],
-) -> None:
-	supervisor = supervisor_shell(tmp_path)
-	workers: dict[int, GenerationWorker] = {}
-	_install_happy_path(monkeypatch, workers)
-
-	run_task = asyncio.create_task(supervisor.run())
-	await wait_until(lambda: 1 in workers and supervisor.active is workers[1])
-
-	workers[1].process.exit(7)
-	await wait_until(lambda: supervisor.active is None)
-	assert not run_task.done()
-
-	supervisor.desired += 1
-	supervisor.changed.set()
-	await wait_until(lambda: 2 in workers and supervisor.active is workers[2])
-
-	run_task.cancel()
-	assert await run_task == 130
-	output = capsys.readouterr().out
-	assert "server exited with code 7" in output
-
-
-@pytest.mark.asyncio
-async def test_supervisor_keeps_serving_when_vite_commit_fails(
-	tmp_path: Path,
-	monkeypatch: pytest.MonkeyPatch,
-	capsys: pytest.CaptureFixture[str],
-) -> None:
-	supervisor = supervisor_shell(tmp_path)
-	supervisor.vite_port = 5199
-	supervisor.vite_secret = "test-secret"
-	workers: dict[int, GenerationWorker] = {}
-	_install_happy_path(monkeypatch, workers, notify_ok=lambda _generation: False)
-
-	run_task = asyncio.create_task(supervisor.run())
-	await wait_until(lambda: 1 in workers and supervisor.active is workers[1])
-
-	run_task.cancel()
-	assert await run_task == 130
-	output = capsys.readouterr().out
-	assert "Vite did not acknowledge generation 1" in output
-	assert "Pulse reload ready" in output
-
-
-@pytest.mark.asyncio
-async def test_supervisor_waits_for_changes_when_vite_preflight_fails(
-	tmp_path: Path,
-	monkeypatch: pytest.MonkeyPatch,
-	capsys: pytest.CaptureFixture[str],
-) -> None:
-	supervisor = supervisor_shell(tmp_path)
-	workers: dict[int, GenerationWorker] = {}
-	preflight_results = {1: False, 2: True}
-	_install_happy_path(
-		monkeypatch,
-		workers,
-		preflight_ok=lambda generation: preflight_results[generation],
-	)
-
-	run_task = asyncio.create_task(supervisor.run())
-	await wait_until(lambda: workers.get(1) is not None and workers[1].control.closed)
-	assert not run_task.done()
-	assert supervisor.active is None
-
-	supervisor.desired += 1
-	supervisor.changed.set()
-	await wait_until(lambda: 2 in workers and supervisor.active is workers[2])
-
-	run_task.cancel()
-	assert await run_task == 130
-	output = capsys.readouterr().out
-	assert "Vite is not ready" in output
-
-
-@pytest.mark.asyncio
-async def test_supervisor_cleans_candidate_when_cancelled(
-	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-	supervisor = supervisor_shell(tmp_path)
-	worker: GenerationWorker | None = None
-	waiting = asyncio.Event()
-
-	async def watch(_self: GenerationSupervisor) -> None:
-		await asyncio.Event().wait()
-
-	def spawn(self: GenerationSupervisor, generation: int) -> GenerationWorker:
-		nonlocal worker
-		stage = self._stage_root / f"generation-{generation}"  # pyright: ignore[reportPrivateUsage]
-		stage.mkdir()
-		worker = fake_worker(generation, stage)
-		return worker
-
-	async def wait_for(
-		_self: GenerationSupervisor,
-		_worker: GenerationWorker,
-		_expected: set[str],
-	) -> dict[str, Any]:
-		waiting.set()
-		await asyncio.Event().wait()
-		raise AssertionError("unreachable")
-
-	monkeypatch.setattr(GenerationSupervisor, "_watch", watch)
-	monkeypatch.setattr(GenerationSupervisor, "_spawn", spawn)
-	monkeypatch.setattr(GenerationSupervisor, "_wait_for", wait_for)
-
-	run_task = asyncio.create_task(supervisor.run())
-	await asyncio.wait_for(waiting.wait(), timeout=1)
-	run_task.cancel()
-
-	assert await run_task == 130
-	assert worker is not None
-	assert worker.process.terminated
-	assert worker.control.closed
-	assert not supervisor._stage_parent.exists()  # pyright: ignore[reportPrivateUsage]

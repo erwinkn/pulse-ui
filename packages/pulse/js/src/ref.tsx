@@ -14,7 +14,10 @@ type RefEntry = {
 	callback: (node: any) => void;
 };
 
-type ChannelBridgeProvider = (channelId: string) => ChannelBridge;
+type ChannelBridgeProvider = (channelId: string) => {
+	bridge: ChannelBridge;
+	release: () => void;
+};
 
 const ATTR_ALIASES: Record<string, string> = {
 	className: "class",
@@ -183,6 +186,7 @@ export class RefRegistry {
 	#getBridge: ChannelBridgeProvider;
 	#bridge: ChannelBridge | null = null;
 	#channelId: string | null = null;
+	#releaseChannel: (() => void) | null = null;
 	#entries: Map<string, RefEntry> = new Map();
 	#cleanup: Array<() => void> = [];
 
@@ -191,10 +195,12 @@ export class RefRegistry {
 	}
 
 	getCallback(channelId: string, refId: string): (node: any) => void {
-		this.#ensureChannel(channelId);
 		let entry = this.#entries.get(refId);
 		if (!entry) {
 			const callback = (node: any) => {
+				if (node != null) {
+					this.#ensureChannel(channelId);
+				}
 				this.#setNode(refId, node ?? null);
 			};
 			entry = { node: null, callback };
@@ -214,9 +220,11 @@ export class RefRegistry {
 			}
 			return;
 		}
-		const bridge = this.#getBridge(channelId);
+		const lease = this.#getBridge(channelId);
+		const bridge = lease.bridge;
 		this.#bridge = bridge;
 		this.#channelId = channelId;
+		this.#releaseChannel = lease.release;
 		this.#cleanup.push(
 			bridge.on("ref:call", (payload) => {
 				this.#handleCall(payload);
@@ -229,10 +237,12 @@ export class RefRegistry {
 
 	#teardown(): void {
 		for (const fn of this.#cleanup) fn();
+		this.#releaseChannel?.();
 		this.#cleanup = [];
 		this.#entries.clear();
 		this.#bridge = null;
 		this.#channelId = null;
+		this.#releaseChannel = null;
 	}
 
 	#setNode(refId: string, node: any): void {

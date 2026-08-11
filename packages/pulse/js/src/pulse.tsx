@@ -10,7 +10,12 @@ import {
 	useState,
 } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
-import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
+import {
+	type ChannelOwnership,
+	type ConnectionStatus,
+	type Directives,
+	PulseSocketIOClient,
+} from "./client";
 import type { RouteInfo } from "./helpers";
 import type { ServerError } from "./messages";
 import { VDOMRenderer } from "./renderer";
@@ -48,6 +53,7 @@ export type PulsePrerender = {
 const PulseClientContext = createContext<PulseSocketIOClient | null>(null);
 const PulsePrerenderContext = createContext<PulsePrerender | null>(null);
 const PulseDirectivesContext = createContext<RefObject<Directives> | null>(null);
+const PulseChannelOwnerContext = createContext<ChannelOwnership | undefined>(undefined);
 
 export const usePulseClient = () => {
 	const client = useContext(PulseClientContext);
@@ -73,6 +79,8 @@ export const usePulseDirectivesSource = () => {
 	const ref = useContext(PulseDirectivesContext);
 	return ref ? (() => ref.current) : undefined;
 };
+
+export const usePulseChannelOwner = () => useContext(PulseChannelOwnerContext);
 
 // =================================================================
 // Provider
@@ -206,6 +214,10 @@ export function PulseView({ path, registry }: PulseViewProps) {
 	);
 	const [tree, setTree] = useState<ReactNode>(() => renderer.init(initialView));
 	const [serverError, setServerError] = useState<ServerError | null>(null);
+	const channelOwnership = useMemo(
+		() => ({ token: path, attachPath: path }),
+		[path],
+	);
 
 	const location = useLocation();
 	const params = useParams();
@@ -289,7 +301,11 @@ export function PulseView({ path, registry }: PulseViewProps) {
 		return <ServerErrorPopup error={serverError} />;
 	}
 
-	return tree;
+	return (
+		<PulseChannelOwnerContext.Provider value={channelOwnership}>
+			{tree}
+		</PulseChannelOwnerContext.Provider>
+	);
 }
 
 function ServerErrorPopup({ error }: { error: ServerError }) {

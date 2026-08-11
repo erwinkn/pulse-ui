@@ -1,9 +1,10 @@
 // Public API surface for pulse-client
 
-export type { ChannelBridge } from "./channel";
+export type { ChannelBridge, ChannelLifetime } from "./channel";
 export { PulseChannelResetError, usePulseChannel } from "./channel";
 // Client implementation (types only - implementation is internal)
 export type {
+	ChannelOwnership,
 	ConnectionStatusListener,
 	MountedView,
 	PulseClient,
@@ -20,6 +21,8 @@ export type {
 	ClientAttachMessage,
 	ClientCallbackMessage,
 	ClientChannelMessage,
+	ClientChannelConnectMessage,
+	ClientChannelDisconnectMessage,
 	ClientChannelRequestMessage,
 	ClientChannelResponseMessage,
 	ClientDetachMessage,
@@ -27,6 +30,7 @@ export type {
 	ClientUpdateMessage,
 	ServerApiCallMessage,
 	ServerChannelMessage,
+	ServerChannelConnectAckMessage,
 	ServerChannelRequestMessage,
 	ServerChannelResponseMessage,
 	ServerError,
@@ -41,6 +45,7 @@ export type { PulseConfig, PulsePrerender, PulseProviderProps } from "./pulse";
 export {
 	PulseProvider,
 	PulseView,
+	usePulseChannelOwner,
 	usePulseClient,
 	usePulseDirectivesSource,
 } from "./pulse";

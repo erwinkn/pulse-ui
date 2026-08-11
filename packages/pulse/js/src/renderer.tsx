@@ -72,7 +72,14 @@ export class VDOMRenderer {
 		this.#callbackEntries = new Set();
 		this.#metaMap = new WeakMap();
 		this.#refRegistry = new RefRegistry((channelId) => {
-			return this.#client._ensureChannelEntry(channelId).bridge;
+			const bridge = this.#client.acquireChannel(channelId, {
+				token: this.#path,
+				attachPath: this.#path,
+			});
+			return {
+				bridge,
+				release: () => this.#client.releaseChannel(channelId, bridge),
+			};
 		});
 	}
 

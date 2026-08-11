@@ -55,6 +55,8 @@ const view = {
 	onServerError: vi.fn(),
 };
 
+const viewOwnership = { token: "view-owner", attachPath: "/view" };
+
 async function makeClient(
 	connectionStatus = {
 		initialConnectingDelay: 0,
@@ -149,6 +151,272 @@ describe("PulseSocketIOClient attach ack", () => {
 			"attach",
 			"detach",
 		]);
+	});
+
+	it("waits for the owning view to attach before subscribing", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+
+		const bridge = client.acquireChannel("navigated-channel", viewOwnership);
+		const queuedPayload = { values: [1] };
+		bridge.emit("queued-before-attach", queuedPayload);
+		queuedPayload.values.push(2);
+		expect(sentMessages()).toEqual([]);
+
+		client.attach("/view", view);
+		const attach = sentMessages()[0]!;
+		expect(attach).toMatchObject({ type: "attach", path: "/view" });
+		socket.trigger(
+			"message",
+			serialize({ type: "attach_ack", path: "/view", attachId: attach.attachId }),
+		);
+
+		const connect = sentMessages()[1]!;
+		expect(connect).toMatchObject({
+			type: "channel_connect",
+			channel: "navigated-channel",
+			owner: "view-owner",
+		});
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel_connect_ack",
+				channel: "navigated-channel",
+				subscriptionId: connect.subscriptionId,
+				accepted: true,
+			}),
+		);
+		expect(sentMessages().at(-1)).toMatchObject({
+			event: "queued-before-attach",
+			payload: { values: [1] },
+		});
+	});
+
+	it("coalesces acquire-release-acquire before connecting", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		client.attach("/view", view);
+		const first = client.acquireChannel("chan-1", viewOwnership);
+		first.emit("stale-event");
+		client.releaseChannel("chan-1", first);
+		const second = client.acquireChannel("chan-1", viewOwnership);
+		second.emit("current-event");
+
+		socket.trigger("connect");
+		await connected;
+
+		let messages = sentMessages();
+		expect(messages.map((message) => message.type)).toEqual(["attach"]);
+		socket.trigger(
+			"message",
+			serialize({
+				type: "attach_ack",
+				path: "/view",
+				attachId: messages[0].attachId,
+			}),
+		);
+		messages = sentMessages();
+		expect(messages).toHaveLength(2);
+		expect(messages[1]).toMatchObject({
+			type: "channel_connect",
+			channel: "chan-1",
+			owner: "view-owner",
+		});
+		expect(second).not.toBe(first);
+
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel_connect_ack",
+				channel: "chan-1",
+				subscriptionId: messages[1].subscriptionId,
+				accepted: true,
+			}),
+		);
+		expect(sentMessages().at(-1)).toMatchObject({
+			type: "channel_message",
+			event: "current-event",
+		});
+		expect(sentMessages().some((message) => message.event === "stale-event")).toBe(
+			false,
+		);
+	});
+
+	it("resubscribes live bridges after transport reconnect", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		client.attach("/view", view);
+		let attach = sentMessages().at(-1)!;
+		socket.trigger(
+			"message",
+			serialize({ type: "attach_ack", path: "/view", attachId: attach.attachId }),
+		);
+		const bridge = client.acquireChannel("chan-1", viewOwnership);
+		let connect = sentMessages().at(-1)!;
+		const firstSubscriptionId = connect.subscriptionId;
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel_connect_ack",
+				channel: "chan-1",
+				subscriptionId: connect.subscriptionId,
+				accepted: true,
+			}),
+		);
+		const pending = bridge.request("needs-response");
+
+		socket.trigger("disconnect");
+		await expect(pending).rejects.toThrow("Connection lost");
+		expect(bridge.closed).toBe(false);
+		await expect(bridge.request("must-not-replay")).rejects.toThrow(
+			"Channel is disconnected",
+		);
+		bridge.emit("offline-event");
+
+		socket.emitted = [];
+		socket.trigger("connect");
+		attach = sentMessages()[0]!;
+		expect(attach).toMatchObject({ type: "attach", path: "/view" });
+		expect(sentMessages()).toHaveLength(1);
+		socket.trigger(
+			"message",
+			serialize({ type: "attach_ack", path: "/view", attachId: attach.attachId }),
+		);
+		connect = sentMessages()[1]!;
+		expect(connect).toMatchObject({
+			type: "channel_connect",
+			channel: "chan-1",
+			owner: "view-owner",
+		});
+		expect(connect.subscriptionId).not.toBe(firstSubscriptionId);
+		expect(sentMessages()).toHaveLength(2);
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel_connect_ack",
+				channel: "chan-1",
+				subscriptionId: firstSubscriptionId,
+				accepted: false,
+				error: "stale rejection",
+			}),
+		);
+		expect(bridge.closed).toBe(false);
+
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel_connect_ack",
+				channel: "chan-1",
+				subscriptionId: connect.subscriptionId,
+				accepted: true,
+			}),
+		);
+		expect(sentMessages().at(-1)).toMatchObject({ event: "offline-event" });
+		expect(sentMessages().some((message) => message.event === "must-not-replay")).toBe(
+			false,
+		);
+		expect(() => bridge.emit("after-reconnect")).not.toThrow();
+	});
+
+	it("keeps only the newest 64 events while a channel is disconnected", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+
+		const bridge = client.acquireChannel("chan-1");
+		const connect = sentMessages().at(-1)!;
+		for (let index = 0; index < 65; index += 1) {
+			bridge.emit(`event-${index}`);
+		}
+
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel_connect_ack",
+				channel: "chan-1",
+				subscriptionId: connect.subscriptionId,
+				accepted: true,
+			}),
+		);
+
+		const events = sentMessages()
+			.filter((message) => message.type === "channel_message")
+			.map((message) => message.event);
+		expect(events).toEqual(
+			Array.from({ length: 64 }, (_, index) => `event-${index + 1}`),
+		);
+		expect(warn).toHaveBeenCalledTimes(1);
+		warn.mockRestore();
+	});
+
+	it("terminally closes only when the server rejects or closes a live bridge", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		const bridge = client.acquireChannel("chan-1");
+		const connect = sentMessages().at(-1)!;
+
+		socket.trigger("disconnect");
+		expect(bridge.closed).toBe(false);
+		socket.trigger("connect");
+		const reconnect = sentMessages().at(-1)!;
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel_connect_ack",
+				channel: "chan-1",
+				subscriptionId: reconnect.subscriptionId,
+				accepted: true,
+			}),
+		);
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel_message",
+				channel: "chan-1",
+				event: "__close__",
+				payload: { reason: "channel.close" },
+			}),
+		);
+		expect(bridge.closed).toBe(true);
+		expect(() => bridge.emit("after-close")).toThrow("Channel is closed");
+		expect(connect.subscriptionId).not.toBe(reconnect.subscriptionId);
+	});
+
+	it("drops queued events and closes a rejected subscription", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		const bridge = client.acquireChannel("missing");
+		bridge.emit("must-not-send");
+		const connect = sentMessages().at(-1)!;
+
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel_connect_ack",
+				channel: "missing",
+				subscriptionId: connect.subscriptionId,
+				accepted: false,
+				error: "Channel is unavailable",
+			}),
+		);
+
+		expect(bridge.closed).toBe(true);
+		expect(sentMessages().some((message) => message.event === "must-not-send")).toBe(
+			false,
+		);
+		const replacement = client.acquireChannel("missing");
+		expect(replacement).not.toBe(bridge);
+		expect(replacement.closed).toBe(false);
 	});
 
 	it("suspends hidden tabs without clearing active views and reattaches on resume", async () => {

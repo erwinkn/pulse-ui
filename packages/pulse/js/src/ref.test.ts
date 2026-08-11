@@ -42,7 +42,10 @@ class FakeBridge {
 describe("RefRegistry", () => {
 	it("emits mount and unmount", () => {
 		const bridge = new FakeBridge();
-		const registry = new RefRegistry(() => bridge as any);
+		const registry = new RefRegistry(() => ({
+			bridge: bridge as any,
+			release: () => {},
+		}));
 		const cb = registry.getCallback("chan-1", "ref-1");
 
 		cb({});
@@ -56,7 +59,10 @@ describe("RefRegistry", () => {
 
 	it("handles request ops", () => {
 		const bridge = new FakeBridge();
-		const registry = new RefRegistry(() => bridge as any);
+		const registry = new RefRegistry(() => ({
+			bridge: bridge as any,
+			release: () => {},
+		}));
 		const cb = registry.getCallback("chan-1", "ref-1");
 
 		const element = {
@@ -75,7 +81,10 @@ describe("RefRegistry", () => {
 
 	it("handles call ops", () => {
 		const bridge = new FakeBridge();
-		const registry = new RefRegistry(() => bridge as any);
+		const registry = new RefRegistry(() => ({
+			bridge: bridge as any,
+			release: () => {},
+		}));
 		const cb = registry.getCallback("chan-1", "ref-1");
 
 		const focus = vi.fn();
@@ -92,12 +101,31 @@ describe("RefRegistry", () => {
 
 	it("locks to a single channel until disposed", () => {
 		const bridge = new FakeBridge();
-		const registry = new RefRegistry(() => bridge as any);
-		registry.getCallback("chan-1", "ref-1");
-		expect(() => registry.getCallback("chan-2", "ref-2")).toThrow(
+		const registry = new RefRegistry(() => ({
+			bridge: bridge as any,
+			release: () => {},
+		}));
+		registry.getCallback("chan-1", "ref-1")({});
+		const secondChannelRef = registry.getCallback("chan-2", "ref-2");
+		expect(() => secondChannelRef({})).toThrow(
 			"[Pulse] Ref channel changed unexpectedly",
 		);
 		registry.dispose();
-		expect(() => registry.getCallback("chan-2", "ref-2")).not.toThrow();
+		expect(() => registry.getCallback("chan-2", "ref-2")({})).not.toThrow();
+	});
+
+	it("does not acquire a channel until a ref commits", () => {
+		const bridge = new FakeBridge();
+		const acquire = vi.fn(() => ({
+			bridge: bridge as any,
+			release: () => {},
+		}));
+		const registry = new RefRegistry(acquire);
+
+		const callback = registry.getCallback("chan-1", "ref-1");
+		expect(acquire).not.toHaveBeenCalled();
+
+		callback({});
+		expect(acquire).toHaveBeenCalledTimes(1);
 	});
 });

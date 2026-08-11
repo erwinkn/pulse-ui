@@ -20,14 +20,15 @@ describe("VDOMRenderer", () => {
 		const client: any = {
 			sendMessage,
 			invokeCallback,
-			_ensureChannelEntry: (id: string) => {
+			acquireChannel: (id: string) => {
 				let bridge = bridges.get(id);
 				if (!bridge) {
 					bridge = new ChannelBridge(client, id);
 					bridges.set(id, bridge);
 				}
-				return { bridge, refCount: 0 };
+				return bridge;
 			},
+			releaseChannel: vi.fn(),
 		};
 		return { client, invokeCallback, sent };
 	}

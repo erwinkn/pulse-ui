@@ -188,10 +188,10 @@ class NotificationsStore(ps.State):
 	queued_ids: list[str]
 
 	def __init__(self) -> None:
-		self._channel = ps.channel(NOTIFICATIONS_CHANNEL_ID)
 		self.registry = {}
 		self.visible_ids = []
 		self.queued_ids = []
+		self._channel = ps.channel(NOTIFICATIONS_CHANNEL_ID, lifetime="tab")
 		self._channel.on("stateSync", self._on_state_sync)
 
 	def show(self, kwargs: NotificationDataWithoutId) -> str:
@@ -304,6 +304,7 @@ def Notifications(
 	key: str | None = None,
 	**props: Unpack[NotificationsProps],
 ):
+	notifications_state()
 	return NotificationsInternal(
 		*children,
 		key=key,

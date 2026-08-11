@@ -235,20 +235,6 @@ class RepeatHandle:
     def cancel(self) -> None: ...
 ```
 
-### Disposable
-
-Base class for objects with cleanup:
-
-```python
-class Disposable(ABC):
-    __disposed__: bool = False
-
-    @abstractmethod
-    def dispose(self) -> None: ...
-```
-
-Subclasses get automatic double-dispose protection in dev mode.
-
 ## See Also
 
 - `reactive.md` - Effect with interval option

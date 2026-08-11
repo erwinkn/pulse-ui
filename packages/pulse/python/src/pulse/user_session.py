@@ -12,9 +12,9 @@ from fastapi import Response
 
 from pulse.cookies import SetCookie
 from pulse.env import env
-from pulse.helpers import Disposable
 from pulse.reactive import AsyncEffect, Effect
 from pulse.reactive_extensions import ReactiveDict, reactive, unwrap
+from pulse.resources import Resource
 
 if TYPE_CHECKING:
 	from pulse.app import App
@@ -24,7 +24,7 @@ Session = ReactiveDict[str, Any]
 logger = logging.getLogger(__name__)
 
 
-class UserSession(Disposable):
+class UserSession(Resource):
 	sid: str
 	data: Session
 	app: "App"

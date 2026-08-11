@@ -3,9 +3,10 @@ import logging
 from collections.abc import Callable, Mapping
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
-from typing import Any, Generic, Literal, TypeVar, override
+from typing import Any, Generic, Literal, TypeVar
 
-from pulse.helpers import Disposable, call_flexible
+from pulse.helpers import call_flexible
+from pulse.resources import ResourceOwner, ResourceScope
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +50,18 @@ class HookMetadata:
 	extra: Mapping[str, Any] | None = None
 
 
-class HookState(Disposable):
+class HookState(ResourceOwner):
 	"""Base class for hook state returned by hook factories.
 
 	Subclass this to create custom hook state that persists across renders.
 	Override lifecycle methods to respond to render events.
+
+	Each hook state owns a ResourceScope, created by the framework when the
+	factory runs. Resources created inside the factory are captured into it
+	automatically; resources created later can be attached with
+	``self.resources.own(...)``. The scope is disposed when the hook state is
+	discarded. Override ``on_dispose()`` for extra cleanup; ``dispose()``
+	itself cannot be overridden.
 
 	Attributes:
 		render_cycle: The current render cycle number.
@@ -68,7 +76,7 @@ class HookState(Disposable):
 	    def elapsed(self) -> float:
 	        return time.time() - self.start_time
 
-	    def dispose(self) -> None:
+	    def on_dispose(self) -> None:
 	        pass
 
 	_timer_hook = ps.hooks.create("my_app:timer", lambda: TimerHookState())
@@ -93,14 +101,6 @@ class HookState(Disposable):
 
 		Args:
 			render_cycle: The current render cycle number.
-		"""
-		...
-
-	@override
-	def dispose(self) -> None:
-		"""Called when the hook instance is discarded.
-
-		Override to clean up resources (close connections, cancel tasks, etc.).
 		"""
 		...
 
@@ -194,19 +194,24 @@ class HookNamespace(Generic[T]):
 		normalized = self._normalize_key(key)
 		state = self.states.get(normalized)
 		if state is None:
-			created = call_flexible(
-				self.hook.factory,
-				HookInit(definition=self.hook, render_cycle=ctx.render_cycle, key=key),
-			)
-			if inspect.isawaitable(created):
-				raise HookError(
-					f"Hook factory '{self.hook.name}' returned an awaitable; "
-					+ "async factories are not supported"
+			scope = ResourceScope(label=self.hook.name)
+			with scope:
+				created = call_flexible(
+					self.hook.factory,
+					HookInit(
+						definition=self.hook, render_cycle=ctx.render_cycle, key=key
+					),
 				)
-			if not isinstance(created, HookState):
-				raise HookError(
-					f"Hook factory '{self.hook.name}' must return a HookState instance"
-				)
+				if inspect.isawaitable(created):
+					raise HookError(
+						f"Hook factory '{self.hook.name}' returned an awaitable; "
+						+ "async factories are not supported"
+					)
+				if not isinstance(created, HookState):
+					raise HookError(
+						f"Hook factory '{self.hook.name}' must return a HookState instance"
+					)
+			created._resource_scope = scope  # pyright: ignore[reportPrivateUsage]
 			state = created
 			self.states[normalized] = state
 			state.on_render_start(ctx.render_cycle)

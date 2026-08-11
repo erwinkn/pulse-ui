@@ -22,6 +22,7 @@ from pulse.queries.store import QueryStore
 from pulse.reactive import REACTIVE_CONTEXT, Effect, Untrack, flush_effects
 from pulse.reactive_extensions import ReactiveDict
 from pulse.renderer import RenderTree
+from pulse.resources import suspend_resource_scope
 from pulse.routing import (
 	Layout,
 	Route,
@@ -760,7 +761,8 @@ class RenderSession:
 		"""Return a per-session singleton for the provided key."""
 		inst = self._global_states.get(key)
 		if inst is None:
-			inst = factory()
+			with suspend_resource_scope():
+				inst = factory()
 			self._global_states[key] = inst
 		return inst
 

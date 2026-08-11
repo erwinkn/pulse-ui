@@ -3,12 +3,50 @@ import inspect
 import re
 import sys
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, Callable, cast, override
 
 import pulse as ps
 import pytest
 from pulse import Component, HookContext
+from pulse.render_session import RenderSession
+from pulse.routing import Route, RouteContext, RouteInfo, RouteTree
 from pulse.transpiler import TranspileError
+
+
+class TrackedState(ps.State):
+	_dispose_calls: int
+
+	def __init__(self) -> None:
+		self._dispose_calls = 0
+
+	@override
+	def on_dispose(self) -> None:
+		self._dispose_calls += 1
+
+	@property
+	def dispose_calls(self) -> int:
+		return self._dispose_calls
+
+
+def make_render_context(
+	query_params: dict[str, str] | None = None,
+) -> tuple[ps.App, RenderSession, RouteContext]:
+	def render():
+		return ps.div()
+
+	route = Route("/", ps.component(render))
+	routes = RouteTree([route])
+	session = RenderSession("test", routes)
+	app = ps.App(routes=[route])
+	info: RouteInfo = {
+		"pathname": "/",
+		"hash": "",
+		"query": "",
+		"queryParams": query_params or {},
+		"pathParams": {},
+		"catchall": [],
+	}
+	return app, session, RouteContext(info, route, session)
 
 
 def test_init_block_runs_once_and_restores_locals():
@@ -408,3 +446,251 @@ def test_init_exception_does_not_save_partial_locals() -> None:
 		assert calls["count"] == 1
 		assert cast(int, cast(object, example.fn())) == 1
 		assert calls["count"] == 2
+
+
+def test_init_disposes_created_state_and_effect_on_unmount() -> None:
+	from pulse.reactive import Effect
+
+	states: list[TrackedState] = []
+	effects: list[Effect] = []
+	events: list[str] = []
+
+	def capture(state: TrackedState, effect: Effect) -> None:
+		states.append(state)
+		effects.append(effect)
+
+	@ps.component
+	def Example():
+		with ps.init():
+			state = TrackedState()
+
+			@ps.effect(immediate=True)
+			def mount_effect():
+				events.append("run")
+				return lambda: events.append("cleanup")
+
+			capture(state, mount_effect)
+		return state
+
+	ctx = HookContext()
+	with ctx:
+		assert Example.fn() is states[0]
+
+	assert events == ["run"]
+	assert states[0].dispose_calls == 0
+	assert not effects[0].__disposed__
+
+	ctx.unmount()
+
+	assert states[0].dispose_calls == 1
+	assert effects[0].__disposed__
+	assert events == ["run", "cleanup"]
+
+
+def test_init_key_change_disposes_query_param_state_before_replacement() -> None:
+	from pulse.reactive import Effect
+
+	class Filters(TrackedState):
+		q: ps.QueryParam[str] = ""
+
+	effects: list[Effect] = []
+	events: list[str] = []
+
+	def capture(effect: Effect) -> None:
+		effects.append(effect)
+
+	@ps.component
+	def Example(key: str):
+		with ps.init(key=key):
+			state = Filters()
+
+			@ps.effect(immediate=True)
+			def mount_effect():
+				events.append(f"run:{key}")
+				return lambda: events.append(f"cleanup:{key}")
+
+			capture(mount_effect)
+		return state
+
+	app, session, route_ctx = make_render_context({"q": "hello"})
+	ctx = HookContext()
+
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		with ctx:
+			first = cast(Filters, cast(object, Example.fn("first")))
+		with ctx:
+			second = cast(Filters, cast(object, Example.fn("second")))
+
+	assert first is not second
+	assert first.dispose_calls == 1
+	assert effects[0].__disposed__
+	assert second.dispose_calls == 0
+	assert not effects[1].__disposed__
+	assert second.q == "hello"
+	assert events == ["run:first", "cleanup:first", "run:second"]
+
+	ctx.unmount()
+	session.close()
+	assert first.dispose_calls == 1
+	assert second.dispose_calls == 1
+	assert events == [
+		"run:first",
+		"cleanup:first",
+		"run:second",
+		"cleanup:second",
+	]
+
+
+def test_init_rolls_back_created_state_and_effect_when_block_raises() -> None:
+	from pulse.reactive import Effect
+
+	states: list[TrackedState] = []
+	effects: list[Effect] = []
+	events: list[str] = []
+	should_raise = True
+
+	def capture_and_maybe_raise(state: TrackedState, effect: Effect) -> None:
+		nonlocal should_raise
+		states.append(state)
+		effects.append(effect)
+		if should_raise:
+			should_raise = False
+			raise RuntimeError("boom")
+
+	@ps.component
+	def Example():
+		with ps.init():
+			state = TrackedState()
+
+			@ps.effect(immediate=True)
+			def mount_effect():
+				events.append("run")
+				return lambda: events.append("cleanup")
+
+			capture_and_maybe_raise(state, mount_effect)
+		return state
+
+	ctx = HookContext()
+	with pytest.raises(RuntimeError, match="boom"):
+		with ctx:
+			Example.fn()
+
+	assert states[0].dispose_calls == 1
+	assert effects[0].__disposed__
+	assert events == ["run", "cleanup"]
+
+	with ctx:
+		recovered = cast(TrackedState, cast(object, Example.fn()))
+
+	assert recovered is states[1]
+	assert recovered.dispose_calls == 0
+	ctx.unmount()
+	assert states[0].dispose_calls == 1
+	assert recovered.dispose_calls == 1
+	assert events == ["run", "cleanup", "run", "cleanup"]
+
+
+def test_init_does_not_take_ownership_from_state_or_global_state() -> None:
+	global_accessor = ps.global_state(TrackedState, key="test-init-ownership")
+
+	@ps.component
+	def Example(key: str):
+		with ps.init(key=key):
+			factory_state = ps.state(TrackedState, key="factory")
+			direct_state = ps.state(TrackedState(), key="direct")
+			global_value = global_accessor()
+		return factory_state, direct_state, global_value
+
+	app, session, route_ctx = make_render_context()
+	ctx = HookContext()
+
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		with ctx:
+			first_factory, first_direct, first_global = cast(
+				tuple[TrackedState, TrackedState, TrackedState],
+				cast(object, Example.fn("first")),
+			)
+		with ctx:
+			second_factory, second_direct, second_global = cast(
+				tuple[TrackedState, TrackedState, TrackedState],
+				cast(object, Example.fn("second")),
+			)
+
+	assert second_factory is first_factory
+	assert second_direct is first_direct
+	assert second_global is first_global
+	assert first_factory.dispose_calls == 0
+	assert first_direct.dispose_calls == 0
+	assert first_global.dispose_calls == 0
+
+	ctx.unmount()
+	assert first_factory.dispose_calls == 1
+	assert first_direct.dispose_calls == 1
+	assert first_global.dispose_calls == 0
+
+	session.close()
+	assert first_global.dispose_calls == 1
+
+
+def test_init_parent_child_states_are_each_disposed_once() -> None:
+	class Parent(TrackedState):
+		def __init__(self, child: TrackedState) -> None:
+			super().__init__()
+			self._child: TrackedState = child
+
+	created: list[tuple[TrackedState, Parent]] = []
+
+	def capture(child: TrackedState, parent: Parent) -> None:
+		created.append((child, parent))
+
+	@ps.component
+	def Example():
+		with ps.init():
+			child = TrackedState()
+			parent = Parent(child)
+			capture(child, parent)
+		return parent
+
+	ctx = HookContext()
+	with ctx:
+		Example.fn()
+	ctx.unmount()
+
+	child, parent = created[0]
+	assert child.dispose_calls == 1
+	assert parent.dispose_calls == 1
+
+
+def test_init_disposes_all_entries_when_one_dispose_fails() -> None:
+	class FailingState(TrackedState):
+		@override
+		def on_dispose(self) -> None:
+			super().on_dispose()
+			raise RuntimeError("boom")
+
+	failing: list[FailingState] = []
+	tracked: list[TrackedState] = []
+
+	@ps.component
+	def First():
+		with ps.init():
+			bad = FailingState()
+			failing.append(bad)
+		return bad
+
+	@ps.component
+	def Second():
+		with ps.init():
+			good = TrackedState()
+			tracked.append(good)
+		return good
+
+	ctx = HookContext()
+	with ctx:
+		First.fn()
+		Second.fn()
+
+	ctx.unmount()
+
+	assert failing[0].dispose_calls == 1
+	assert tracked[0].dispose_calls == 1

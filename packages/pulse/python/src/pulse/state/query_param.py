@@ -22,10 +22,16 @@ from typing import (
 from urllib.parse import urlencode
 
 from pulse.context import PulseContext
-from pulse.helpers import Disposable, values_equal
+from pulse.helpers import values_equal
 from pulse.messages import ServerNavigateToMessage
 from pulse.reactive import Effect, Scope, Signal, Untrack
 from pulse.reactive_extensions import reactive, unwrap
+from pulse.resources import (
+	Resource,
+	ResourceOwner,
+	ResourceScope,
+	suspend_resource_scope,
+)
 from pulse.state.property import InitializableProperty, StateProperty
 
 T = TypeVar("T")
@@ -368,7 +374,7 @@ class QueryParamProperty(StateProperty, InitializableProperty):
 		self.__set__(state, value)
 
 	@override
-	def initialize(self, state: "State", name: str) -> "QueryParamSync":
+	def initialize(self, state: "State", name: str) -> "QueryParamRegistration":
 		ctx = PulseContext.get()
 		if ctx.render is None:
 			raise RuntimeError(
@@ -377,7 +383,7 @@ class QueryParamProperty(StateProperty, InitializableProperty):
 		sync = ctx.render.query_param_sync
 		registration = sync.register(state, name, self)
 		setattr(state, f"_query_param_reg_{name}", registration)
-		return sync
+		return registration
 
 
 @dataclass(eq=False)
@@ -398,7 +404,7 @@ class QueryParamBinding:
 		return self.prop.codec
 
 
-class QueryParamRegistration(Disposable):
+class QueryParamRegistration(Resource):
 	_sync: "QueryParamSync"
 	_binding: QueryParamBinding
 
@@ -406,12 +412,15 @@ class QueryParamRegistration(Disposable):
 		self._sync = sync
 		self._binding = binding
 
+	def prime(self) -> None:
+		self._sync.prime()
+
 	@override
 	def dispose(self) -> None:
 		self._sync.unregister(self._binding)
 
 
-class QueryParamSync(Disposable):
+class QueryParamSync(ResourceOwner):
 	"""Two-way sync between `QueryParam` state properties and the session URL.
 
 	Owned by the `RenderSession`, not by a mount: a binding lives as long as
@@ -436,6 +445,9 @@ class QueryParamSync(Disposable):
 		self._bindings = {}
 		self._route_effect = None
 		self._state_effect = None
+		self._resource_scope: ResourceScope | None = ResourceScope(
+			label="QueryParamSync"
+		)
 
 	def register(
 		self, state: "State", attr_name: str, prop: QueryParamProperty
@@ -489,19 +501,21 @@ class QueryParamSync(Disposable):
 
 	def _ensure_effects(self) -> None:
 		if self._route_effect is None or self._state_effect is None:
-			with Scope():
+			with suspend_resource_scope(), Scope():
 				if self._route_effect is None:
 					self._route_effect = Effect(
 						self._sync_from_route,
 						name="QueryParamSync:route",
 						lazy=True,
 					)
+					self.resources.own(self._route_effect)
 				if self._state_effect is None:
 					self._state_effect = Effect(
 						self._sync_to_route,
 						name="QueryParamSync:state",
 						lazy=True,
 					)
+					self.resources.own(self._state_effect)
 
 	def prime(self) -> None:
 		if self._route_effect and self._route_effect.runs == 0:
@@ -590,11 +604,7 @@ class QueryParamSync(Disposable):
 		)
 
 	@override
-	def dispose(self) -> None:
-		if self._route_effect:
-			self._route_effect.dispose()
-			self._route_effect = None
-		if self._state_effect:
-			self._state_effect.dispose()
-			self._state_effect = None
+	def on_dispose(self) -> None:
+		self._route_effect = None
+		self._state_effect = None
 		self._bindings.clear()

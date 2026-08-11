@@ -17,7 +17,6 @@ from typing import (
 from pulse.context import PULSE_CONTEXT
 from pulse.helpers import (
 	MISSING,
-	Disposable,
 	Missing,
 	call_flexible,
 	maybe_await,
@@ -36,6 +35,12 @@ from pulse.queries.common import (
 )
 from pulse.queries.effect import AsyncQueryEffect
 from pulse.reactive import Computed, Effect, Signal, Untrack
+from pulse.resources import (
+	Resource,
+	ResourceOwner,
+	ResourceScope,
+	suspend_resource_scope,
+)
 from pulse.scheduling import TimerHandleLike, create_task, is_pytest, later
 from pulse.state.property import InitializableProperty, StateMemberDescriptor
 from pulse.state.state import State
@@ -333,7 +338,7 @@ class SuspendableQuery:
 		raise NotImplementedError
 
 
-class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
+class KeyedQuery(Generic[T], ResourceOwner, SuspendableQuery):
 	"""
 	Query for keyed queries (shared across observers).
 	Uses direct task management without dependency tracking.
@@ -377,6 +382,9 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 		self._gc_handle = None
 		self._interval = None
 		self._interval_observer = None
+		self._resource_scope: ResourceScope | None = ResourceScope(
+			label=f"KeyedQuery({key})"
+		)
 		self._init_suspendable_query()
 
 	# --- Delegate signal access to state ---
@@ -558,12 +566,15 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 					initiator=observer,
 				)
 
-		return Effect(
-			interval_fn,
-			name=f"query_interval({self.key})",
-			interval=interval,
-			immediate=True,
-		)
+		with suspend_resource_scope():
+			effect = Effect(
+				interval_fn,
+				name=f"query_interval({self.key})",
+				interval=interval,
+				immediate=True,
+			)
+		self.resources.own(effect)
+		return effect
 
 	def _update_interval(self) -> None:
 		new_interval, new_observer = self._select_interval_observer()
@@ -676,7 +687,7 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 			self._gc_handle = None
 
 	@override
-	def dispose(self):
+	def on_dispose(self):
 		"""Clean up the query, cancelling any in-flight fetch."""
 		self.cancel_gc()
 		self.cancel()
@@ -685,7 +696,7 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 			self.cfg.on_dispose(self)
 
 
-class UnkeyedQueryResult(Generic[T], Disposable, SuspendableQuery):
+class UnkeyedQueryResult(Generic[T], Resource, SuspendableQuery):
 	"""
 	Query for unkeyed queries (single observer with dependency tracking).
 	Uses an AsyncEffect to track dependencies and re-run on changes.
@@ -939,7 +950,7 @@ class UnkeyedQueryResult(Generic[T], Disposable, SuspendableQuery):
 			self._on_dispose(self)
 
 
-class KeyedQueryResult(Generic[T], Disposable):
+class KeyedQueryResult(Generic[T], Resource):
 	"""
 	Observer wrapper for keyed queries.
 	Handles observation lifecycle, staleness tracking, and provides query operations.

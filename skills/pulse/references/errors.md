@@ -7,7 +7,7 @@ Exception classes, error propagation, and debugging in Pulse.
 ### Channel Errors
 
 ```python
-from pulse import ChannelClosed, ChannelTimeout
+from pulse import ChannelClosed, ChannelDisconnected, ChannelTimeout
 
 try:
     channel.emit("event", data)
@@ -22,8 +22,12 @@ except ChannelTimeout:
 
 **ChannelClosed** - Raised when:
 - Calling `emit()`, `request()`, or `on()` on a closed channel
-- User navigates away or disconnects
-- Component unmounts
+- Its owning route or render session is disposed
+- The server calls `channel.close()`
+
+**ChannelDisconnected** - Raised when:
+- `channel.request()` has no connected browser subscriber
+- A pending channel request loses its subscriber
 
 **ChannelTimeout** - Raised when:
 - `channel.request()` exceeds timeout waiting for client response

@@ -115,7 +115,7 @@ function Chat() {
 
 **Components**: `PulseProvider`, `PulseView`, `PulseForm`, `RenderLazy`
 
-**Hooks**: `usePulseClient()`, `usePulseChannel(name)`
+**Hooks**: `usePulseClient()`, `usePulseChannel(name, lifetime?)`
 
 **Functions**: `serialize`, `deserialize`, `extractServerRouteInfo`, `submitForm`
 

@@ -107,7 +107,10 @@ Hook to subscribe to a Pulse channel for bidirectional communication. Channels e
 ```ts
 import { usePulseChannel } from "pulse-ui-client";
 
-function usePulseChannel(channelId: string): ChannelBridge
+function usePulseChannel(
+  channelId: string,
+  lifetime: "route" | "tab" = "route",
+): ChannelBridge | null
 ```
 
 ### Parameters
@@ -115,10 +118,12 @@ function usePulseChannel(channelId: string): ChannelBridge
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `channelId` | `string` | Non-empty string identifying the channel |
+| `lifetime` | `"route" \| "tab"` | Must match the server channel lifetime. Defaults to `"route"`. |
 
 ### Returns
 
-Returns a `ChannelBridge` instance for sending and receiving messages.
+Returns `null` before the effect subscribes. It then returns a `ChannelBridge`
+for sending and receiving messages.
 
 ### Throws
 
@@ -131,7 +136,22 @@ The hook manages channel subscription automatically:
 
 1. On mount: acquires a reference to the channel
 2. On unmount: releases the reference
-3. When all references are released: channel closes
+3. When all references are released: the local bridge is removed and the client unsubscribes
+4. The server closes the channel only at its configured lifetime boundary or after `Channel.close()`
+
+If the transport or subscription is not ready, `emit()` buffers up to 64 events.
+It drops the oldest event when the buffer is full. `request()` fails immediately
+and is not replayed.
+
+Use the same lifetime on both sides:
+
+```python
+channel = ps.channel("notifications", lifetime="tab")
+```
+
+```ts
+const channel = usePulseChannel("notifications", "tab");
+```
 
 Multiple components can subscribe to the same channel. The channel stays open as long as at least one component is subscribed.
 

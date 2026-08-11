@@ -126,7 +126,9 @@ Channels enable real-time bidirectional communication between server and client.
 |--------|-------------|
 | `channel` | Create a bidirectional channel |
 | `Channel` | Channel instance type |
+| `ChannelLifetime` | Literal type: `"route"` or `"tab"` |
 | `ChannelClosed` | Exception for closed channel |
+| `ChannelDisconnected` | Exception for a request without a client subscriber |
 | `ChannelTimeout` | Exception for channel timeout |
 
 ## Serialization

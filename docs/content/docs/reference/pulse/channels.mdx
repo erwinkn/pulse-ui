@@ -10,17 +10,28 @@ Bidirectional communication channels for real-time messaging between server and 
 ### channel
 
 ```python
-def channel(identifier: str | None = None) -> Channel
+def channel(
+    identifier: str | None = None,
+    *,
+    lifetime: Literal["route", "tab"] = "route",
+) -> Channel
 ```
 
-Create a channel bound to the current render session.
+Create a channel for the current browser tab.
 
 **Parameters:**
 - `identifier` - Optional channel ID. Auto-generated UUID if not provided.
+- `lifetime` - Automatic cleanup boundary:
+  - `"route"` closes the channel when its route is destroyed. This is the default.
+  - `"tab"` keeps the channel across route changes and closes it with the render session.
 
 **Returns:** `Channel` instance.
 
-**Raises:** `RuntimeError` if called outside an active render session.
+**Raises:**
+
+- `RuntimeError` if called outside an active render session.
+- `RuntimeError` if a route-lifetime channel is created without an active route.
+- `ValueError` if `lifetime` is not `"route"` or `"tab"`.
 
 ```python
 import pulse as ps
@@ -37,6 +48,19 @@ def ChatRoom():
     return ps.div("Chat room")
 ```
 
+Use tab lifetime for state that survives route changes:
+
+```python
+class NotificationState(ps.State):
+    def __init__(self):
+        self.channel = ps.channel("notifications", lifetime="tab")
+```
+
+Either lifetime can end early with `channel.close()`. The render session is the
+hard upper boundary for all channels, so a tab channel is not shared with other
+tabs or users. A tab channel has no route owner, so its handlers run without a
+current route context.
+
 ## Classes
 
 ### Channel
@@ -50,8 +74,10 @@ Bidirectional communication channel bound to a render session.
 | `id` | `str` | Channel identifier |
 | `render_id` | `str` | Associated render session ID |
 | `session_id` | `str` | Associated user session ID |
+| `lifetime` | `Literal["route", "tab"]` | Automatic cleanup boundary |
 | `route_path` | `str \| None` | Route path this channel is bound to |
 | `closed` | `bool` | Whether the channel is closed |
+| `connected` | `bool` | Whether a browser bridge is currently subscribed |
 
 #### Methods
 
@@ -88,6 +114,10 @@ def emit(self, event: str, payload: Any = None) -> None
 
 Send a fire-and-forget event to the client.
 
+If no browser bridge is subscribed, Pulse buffers up to 64 events per channel. It
+flushes them in order when the client subscribes again and drops the oldest event
+when the buffer is full.
+
 **Parameters:**
 - `event` - Event name.
 - `payload` - Data to send (optional).
@@ -121,6 +151,7 @@ Send a request to the client and await the response.
 
 **Raises:**
 - `ChannelClosed` if channel is closed.
+- `ChannelDisconnected` if no browser bridge is subscribed.
 - `ChannelTimeout` if request times out.
 
 ```python
@@ -144,6 +175,15 @@ class ChannelClosed(RuntimeError)
 ```
 
 Raised when interacting with a channel that has been closed.
+
+### ChannelDisconnected
+
+```python
+class ChannelDisconnected(RuntimeError)
+```
+
+Raised when `request()` has no connected client subscriber. Requests fail
+immediately instead of waiting for a timeout.
 
 ### ChannelTimeout
 

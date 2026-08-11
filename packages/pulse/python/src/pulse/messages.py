@@ -92,6 +92,14 @@ class ServerChannelResponseMessage(TypedDict):
 	error: NotRequired[Any]
 
 
+class ServerChannelConnectAckMessage(TypedDict):
+	type: Literal["channel_connect_ack"]
+	channel: str
+	subscriptionId: str
+	accepted: bool
+	error: NotRequired[str]
+
+
 class ServerJsExecMessage(TypedDict):
 	"""Execute JavaScript expression on the client."""
 
@@ -156,6 +164,20 @@ class ClientChannelResponseMessage(TypedDict):
 	error: NotRequired[Any]
 
 
+class ClientChannelConnectMessage(TypedDict):
+	type: Literal["channel_connect"]
+	channel: str
+	subscriptionId: str
+	owner: NotRequired[str]
+
+
+class ClientChannelDisconnectMessage(TypedDict):
+	type: Literal["channel_disconnect"]
+	channel: str
+	subscriptionId: str
+	owner: NotRequired[str]
+
+
 class ClientJsResultMessage(TypedDict):
 	"""Result of client-side JS execution."""
 
@@ -174,6 +196,7 @@ ServerMessage = (
 	| ServerNavigateToMessage
 	| ServerReloadMessage
 	| ServerAttachAckMessage
+	| ServerChannelConnectAckMessage
 	| ServerChannelMessage
 	| ServerJsExecMessage
 )
@@ -187,7 +210,12 @@ ClientPulseMessage = (
 	| ClientApiResultMessage
 	| ClientJsResultMessage
 )
-ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage
+ClientChannelMessage = (
+	ClientChannelRequestMessage
+	| ClientChannelResponseMessage
+	| ClientChannelConnectMessage
+	| ClientChannelDisconnectMessage
+)
 ClientMessage = ClientPulseMessage | ClientChannelMessage
 
 

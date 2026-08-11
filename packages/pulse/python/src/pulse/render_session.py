@@ -383,6 +383,7 @@ class RenderSession:
 		"""WebSocket disconnected. Queue briefly, then suspend mounts on timeout."""
 		self._send_message = None
 		self.connected = False
+		self.channels.disconnect_all()
 		# Pause query interval refetching while nobody is watching
 		self.query_store.suspend_all()
 
@@ -593,14 +594,16 @@ class RenderSession:
 		try:
 			self.route_mounts.pop(path, None)
 			self._ref_channels_by_route.pop(path, None)
-			mount.dispose()
+			try:
+				mount.dispose()
+			finally:
+				self.channels.remove_route(path)
 		except Exception as e:
 			self.report_error(path, "unmount", e)
 
 	def detach(self, path: str):
 		"""Client route unmounted. Dispose immediately outside dev StrictMode replay."""
 		path = ensure_absolute_path(path)
-		self._ref_channels_by_route.pop(path, None)
 		mount = self.route_mounts.get(path)
 		if not mount:
 			return
@@ -714,11 +717,7 @@ class RenderSession:
 		for value in self._global_states.values():
 			value.dispose()
 		self._global_states.clear()
-		for channel_id in list(self.channels._channels.keys()):  # pyright: ignore[reportPrivateUsage]
-			channel = self.channels._channels.get(channel_id)  # pyright: ignore[reportPrivateUsage]
-			if channel:
-				channel.closed = True
-				self.channels.dispose_channel(channel, reason="render.close")
+		self.channels.close_all()
 		for fut in self._pending_api.values():
 			if not fut.done():
 				fut.cancel()
@@ -769,7 +768,7 @@ class RenderSession:
 		if ctx.route is None:
 			if self._ref_channel is not None and not self._ref_channel.closed:
 				return self._ref_channel
-			self._ref_channel = self.channels.create(bind_route=False)
+			self._ref_channel = self.channels.create(lifetime="tab")
 			return self._ref_channel
 
 		route_path = ctx.route.route_path
@@ -778,7 +777,7 @@ class RenderSession:
 			self._ref_channels_by_route.pop(route_path, None)
 			channel = None
 		if channel is None:
-			channel = self.channels.create(bind_route=True)
+			channel = self.channels.create(lifetime="route")
 			self._ref_channels_by_route[route_path] = channel
 		return channel
 

@@ -9,6 +9,7 @@ that updates from one session do not leak into the other.
 import asyncio
 import gc
 from collections.abc import Callable, Iterator
+from types import SimpleNamespace
 from typing import Any, cast, override
 
 import pulse as ps
@@ -1804,6 +1805,40 @@ async def test_detach_immediate_removes_mount_and_disposes_effect():
 	session.close()
 
 
+def test_detach_disposes_mount_before_closing_route_channels(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	routes = RouteTree([Route("a", simple_component)])
+	render = RenderSession("dispose-order", routes)
+	user_session: Any = SimpleNamespace(sid="dispose-order-user")
+
+	with ps.PulseContext.update(render=render, session=user_session):
+		render.prerender(["/a"])
+		render.attach("/a", make_route_info("/a"))
+	mount = render.get_route_mount("/a")
+	with ps.PulseContext.update(
+		render=render,
+		session=user_session,
+		route=mount.route,
+	):
+		channel = render.channels.create("dispose-order-channel")
+
+	original_dispose = mount.dispose
+	closed_during_dispose: list[bool] = []
+
+	def dispose() -> None:
+		closed_during_dispose.append(channel.closed)
+		channel.emit("cleanup")
+		original_dispose()
+
+	monkeypatch.setattr(mount, "dispose", dispose)
+	render.detach("/a")
+
+	assert closed_during_dispose == [False]
+	assert channel.closed is True
+	render.close()
+
+
 def test_dev_strict_mode_detach_replay_reuses_mount_without_reload():
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes, dev_strict_mode_detach_timeout=10.0)
@@ -1831,6 +1866,158 @@ def test_dev_strict_mode_detach_replay_reuses_mount_without_reload():
 	assert not [msg for msg in messages if msg["type"] == "reload"]
 
 	session.close()
+
+
+def test_dev_strict_mode_detach_reuses_route_ref_channel():
+	routes = RouteTree([Route("a", simple_component)])
+	render = RenderSession("strict-ref", routes, dev_strict_mode_detach_timeout=10.0)
+	user_session: Any = SimpleNamespace(sid="strict-ref-user")
+
+	with ps.PulseContext.update(render=render, session=user_session):
+		render.prerender(["/a"])
+		render.attach("/a", make_route_info("/a"))
+	mount = render.get_route_mount("/a")
+	with ps.PulseContext.update(
+		render=render,
+		session=user_session,
+		route=mount.route,
+	):
+		first_channel = render.get_ref_channel()
+
+	render.detach("/a")
+	with ps.PulseContext.update(
+		render=render,
+		session=user_session,
+		route=mount.route,
+	):
+		second_channel = render.get_ref_channel()
+
+	assert second_channel is first_channel
+	assert first_channel.closed is False
+	render.close()
+
+
+def test_dev_strict_mode_channel_unsubscribe_reacquire_keeps_server_channel():
+	routes = RouteTree([Route("a", simple_component)])
+	render = RenderSession(
+		"strict-channel", routes, dev_strict_mode_detach_timeout=10.0
+	)
+	messages: list[ServerMessage] = []
+	render.connect(messages.append)
+	user_session: Any = SimpleNamespace(sid="strict-user")
+
+	with ps.PulseContext.update(render=render, session=user_session):
+		render.prerender(["/a"])
+		render.attach("/a", make_route_info("/a"))
+	mount = render.get_route_mount("/a")
+	with ps.PulseContext.update(
+		render=render,
+		session=user_session,
+		route=mount.route,
+	):
+		channel = render.channels.create("strict-form-channel")
+
+	assert render.channels.handle_client_connect(
+		render=render,
+		session=user_session,
+		message={
+			"type": "channel_connect",
+			"channel": channel.id,
+			"subscriptionId": "strict-1",
+			"owner": "/a",
+		},
+	)
+	messages.clear()
+
+	render.detach("/a")
+	assert render.channels.handle_client_disconnect(
+		render=render,
+		session=user_session,
+		message={
+			"type": "channel_disconnect",
+			"channel": channel.id,
+			"subscriptionId": "strict-1",
+			"owner": "/a",
+		},
+	)
+	assert channel.closed is False
+	assert channel.connected is False
+
+	assert not render.channels.handle_client_connect(
+		render=render,
+		session=user_session,
+		message={
+			"type": "channel_connect",
+			"channel": channel.id,
+			"subscriptionId": "stale",
+			"owner": "/a",
+		},
+	)
+	assert channel.closed is False
+
+	with ps.PulseContext.update(render=render, session=user_session):
+		render.attach("/a", make_route_info("/a"))
+	assert render.channels.handle_client_connect(
+		render=render,
+		session=user_session,
+		message={
+			"type": "channel_connect",
+			"channel": channel.id,
+			"subscriptionId": "strict-2",
+			"owner": "/a",
+		},
+	)
+	assert channel.closed is False
+	assert channel.connected is True
+
+	render.close()
+
+
+@pytest.mark.asyncio
+async def test_dev_strict_mode_timeout_disposes_subscribed_route_channel():
+	routes = RouteTree([Route("a", simple_component)])
+	render = RenderSession(
+		"strict-timeout-channel", routes, dev_strict_mode_detach_timeout=0.01
+	)
+	messages: list[ServerMessage] = []
+	render.connect(messages.append)
+	user_session: Any = SimpleNamespace(sid="strict-timeout-user")
+
+	with ps.PulseContext.update(render=render, session=user_session):
+		render.prerender(["/a"])
+		render.attach("/a", make_route_info("/a"))
+	mount = render.get_route_mount("/a")
+	with ps.PulseContext.update(
+		render=render,
+		session=user_session,
+		route=mount.route,
+	):
+		channel = render.channels.create("strict-timeout-form")
+	assert render.channels.handle_client_connect(
+		render=render,
+		session=user_session,
+		message={
+			"type": "channel_connect",
+			"channel": channel.id,
+			"subscriptionId": "strict-timeout-1",
+			"owner": "/a",
+		},
+	)
+	messages.clear()
+
+	render.detach("/a")
+	await wait_for(lambda: channel.closed)
+
+	assert channel.id not in render.channels._channels  # pyright: ignore[reportPrivateUsage]
+	assert messages == [
+		{
+			"type": "channel_message",
+			"channel": channel.id,
+			"event": "__close__",
+			"payload": {"reason": "route.unmount"},
+		}
+	]
+	render.close()
 
 
 @pytest.mark.asyncio

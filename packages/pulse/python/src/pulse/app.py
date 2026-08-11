@@ -50,6 +50,8 @@ from pulse.helpers import (
 )
 from pulse.hooks.core import hooks
 from pulse.messages import (
+	ClientChannelConnectMessage,
+	ClientChannelDisconnectMessage,
 	ClientChannelMessage,
 	ClientChannelRequestMessage,
 	ClientChannelResponseMessage,
@@ -1099,10 +1101,21 @@ class App:
 			if render.connected:
 				self._cancel_render_cleanup(rid)
 			try:
-				if msg["type"] == "channel_message":
-					await self._handle_channel_message(render, session, msg)
+				if msg["type"] in (
+					"channel_message",
+					"channel_connect",
+					"channel_disconnect",
+				):
+					await self._handle_channel_message(
+						render,
+						session,
+						cast(ClientChannelMessage, msg),
+						socket_sid=sid,
+					)
 				else:
-					await self._handle_pulse_message(render, session, msg)
+					await self._handle_pulse_message(
+						render, session, cast(ClientPulseMessage, msg)
+					)
 			except Exception as e:
 				path = msg.get("path", "")
 				render.report_error(path, "server", e)
@@ -1128,7 +1141,6 @@ class App:
 				render.execute_callback(msg["path"], msg["callback"], msg["args"])
 			elif msg["type"] == "detach":
 				render.detach(msg["path"])
-				render.channels.remove_route(msg["path"])
 			elif msg["type"] == "api_result":
 				render.handle_api_result(dict(msg))
 			elif msg["type"] == "js_result":
@@ -1165,8 +1177,33 @@ class App:
 				)
 
 	async def _handle_channel_message(
-		self, render: RenderSession, session: UserSession, msg: ClientChannelMessage
+		self,
+		render: RenderSession,
+		session: UserSession,
+		msg: ClientChannelMessage,
+		*,
+		socket_sid: str | None = None,
 	) -> None:
+		if msg["type"] == "channel_disconnect":
+			lifecycle_msg = msg
+			await self._handle_channel_lifecycle(
+				render,
+				session,
+				lifecycle_msg,
+				event="__disconnect__",
+				socket_sid=socket_sid,
+			)
+			return
+		if msg["type"] == "channel_connect":
+			lifecycle_msg = msg
+			await self._handle_channel_lifecycle(
+				render,
+				session,
+				lifecycle_msg,
+				event="__connect__",
+				socket_sid=socket_sid,
+			)
+			return
 		if msg.get("responseTo"):
 			msg = cast(ClientChannelResponseMessage, msg)
 			render.channels.handle_client_response(msg)
@@ -1175,6 +1212,11 @@ class App:
 			msg = cast(ClientChannelRequestMessage, msg)
 
 			async def _next() -> Ok[None]:
+				if (
+					socket_sid is not None
+					and self._render_to_socket.get(render.id) != socket_sid
+				):
+					return Ok(None)
 				render.channels.handle_client_event(
 					render=render, session=session, message=msg
 				)
@@ -1200,6 +1242,83 @@ class App:
 			if isinstance(res, Deny):
 				if req_id := msg.get("requestId"):
 					render.channels.send_error(channel_id, req_id, "Denied")
+
+	async def _handle_channel_lifecycle(
+		self,
+		render: RenderSession,
+		session: UserSession,
+		msg: ClientChannelConnectMessage | ClientChannelDisconnectMessage,
+		*,
+		event: Literal["__connect__", "__disconnect__"],
+		socket_sid: str | None,
+	) -> None:
+		channel_id = str(msg.get("channel", ""))
+		handled = False
+
+		async def _next() -> Ok[None]:
+			nonlocal handled
+			if handled:
+				return Ok(None)
+			handled = True
+			if (
+				socket_sid is not None
+				and self._render_to_socket.get(render.id) != socket_sid
+			):
+				return Ok(None)
+			if msg["type"] == "channel_connect":
+				render.channels.handle_client_connect(
+					render=render,
+					session=session,
+					message=msg,
+				)
+			else:
+				render.channels.handle_client_disconnect(
+					render=render,
+					session=session,
+					message=msg,
+				)
+			return Ok(None)
+
+		try:
+			with PulseContext.update(session=session, render=render):
+				res = await self.middleware.channel(
+					channel_id=channel_id,
+					event=event,
+					payload=msg.get("owner"),
+					request_id=None,
+					session=session.data,
+					next=_next,
+				)
+		except Exception:
+			logger.exception("Error in channel lifecycle middleware")
+			if not handled:
+				if msg["type"] == "channel_connect":
+					render.channels.reject_client_connect(
+						msg, "Channel subscription failed"
+					)
+				else:
+					render.channels.handle_client_disconnect(
+						render=render,
+						session=session,
+						message=msg,
+					)
+			return
+
+		if handled:
+			return
+		if msg["type"] == "channel_connect":
+			error = (
+				"Denied"
+				if isinstance(res, Deny)
+				else "Channel subscription not accepted"
+			)
+			render.channels.reject_client_connect(msg, error)
+		else:
+			render.channels.handle_client_disconnect(
+				render=render,
+				session=session,
+				message=msg,
+			)
 
 	def get_route(self, path: str):
 		return self.routes.find(path)

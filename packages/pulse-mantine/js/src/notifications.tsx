@@ -97,7 +97,7 @@ function ConnectedNotifications({ channelId, ...props }: ConnectedNotificationsP
 			if (channelRef.current === channel) {
 				channelRef.current = null;
 			}
-			client.releaseChannel(channelId);
+			client.releaseChannel(channelId, channel);
 		};
 	}, [client, channelId, store]);
 

@@ -48,25 +48,30 @@ def build_context():
 	real_render = ps.RenderSession(
 		dummy_render.id, routes, server_address="http://localhost"
 	)
-	real_render.send = dummy_render.send  # pyright: ignore[reportAttributeAccessIssue]
+	route_info = cast(
+		RouteInfo,
+		cast(
+			object,
+			{
+				"pathname": "/",
+				"hash": "",
+				"query": "",
+				"queryParams": {},
+				"pathParams": {},
+				"catchall": [],
+			},
+		),
+	)
 	with ps.PulseContext(app=app):
-		real_render.prerender(
-			["/"],
-			cast(
-				RouteInfo,
-				cast(
-					object,
-					{
-						"pathname": "/",
-						"hash": "",
-						"query": "",
-						"queryParams": {},
-						"pathParams": {},
-						"catchall": [],
-					},
-				),
-			),
-		)
+		real_render.prerender(["/"], route_info)
+	with ps.PulseContext(
+		app=app,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		render=real_render,
+	):
+		real_render.connect(dummy_render.send)
+		real_render.attach("/", route_info)
+	dummy_render.sent.clear()
 	route_ctx = real_render.route_mounts["/"].route
 
 	app.render_sessions[dummy_render.id] = real_render
@@ -79,7 +84,7 @@ def client_channel_request(message: object) -> ClientChannelRequestMessage:
 	return cast(ClientChannelRequestMessage, message)
 
 
-def test_form_recreates_channel_after_client_release():
+def test_form_keeps_channel_after_client_unsubscribe_and_reconnect():
 	app, render, session, real_render, route_ctx = build_context()
 
 	with ps.PulseContext(
@@ -95,8 +100,27 @@ def test_form_recreates_channel_after_client_release():
 		)
 		first_channel_id = form._channel.id  # pyright: ignore[reportPrivateUsage]
 
-	assert real_render.channels.release_channel(first_channel_id)
-	assert form._channel.closed  # pyright: ignore[reportPrivateUsage]
+	assert real_render.channels.handle_client_connect(
+		render=real_render,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		message={
+			"type": "channel_connect",
+			"channel": first_channel_id,
+			"subscriptionId": "form-1",
+			"owner": "/",
+		},
+	)
+	render.sent.clear()
+	assert real_render.channels.handle_client_disconnect(
+		render=real_render,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		message={
+			"type": "channel_disconnect",
+			"channel": first_channel_id,
+			"subscriptionId": "form-1",
+			"owner": "/",
+		},
+	)
 
 	with ps.PulseContext(
 		app=app,
@@ -107,12 +131,23 @@ def test_form_recreates_channel_after_client_release():
 		form.reset()
 
 	assert not form._channel.closed  # pyright: ignore[reportPrivateUsage]
-	assert form._channel.id != first_channel_id  # pyright: ignore[reportPrivateUsage]
+	assert form._channel.id == first_channel_id  # pyright: ignore[reportPrivateUsage]
+	assert render.sent == []
+	assert real_render.channels.handle_client_connect(
+		render=real_render,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		message={
+			"type": "channel_connect",
+			"channel": first_channel_id,
+			"subscriptionId": "form-2",
+			"owner": "/",
+		},
+	)
 	assert render.sent[-1]["event"] == "reset"
 
 
 @pytest.mark.asyncio
-async def test_form_sync_handler_survives_channel_recreation():
+async def test_form_sync_handler_survives_unsubscribe_and_reconnect():
 	app, _render, session, real_render, route_ctx = build_context()
 
 	with ps.PulseContext(
@@ -124,7 +159,36 @@ async def test_form_sync_handler_survives_channel_recreation():
 		form = MantineForm(syncMode="change", initialValues={"query": ""})
 		first_channel_id = form._channel.id  # pyright: ignore[reportPrivateUsage]
 
-	assert real_render.channels.release_channel(first_channel_id)
+	assert real_render.channels.handle_client_connect(
+		render=real_render,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		message={
+			"type": "channel_connect",
+			"channel": first_channel_id,
+			"subscriptionId": "sync-1",
+			"owner": "/",
+		},
+	)
+	assert real_render.channels.handle_client_disconnect(
+		render=real_render,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		message={
+			"type": "channel_disconnect",
+			"channel": first_channel_id,
+			"subscriptionId": "sync-1",
+			"owner": "/",
+		},
+	)
+	assert real_render.channels.handle_client_connect(
+		render=real_render,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		message={
+			"type": "channel_connect",
+			"channel": first_channel_id,
+			"subscriptionId": "sync-2",
+			"owner": "/",
+		},
+	)
 
 	with ps.PulseContext(
 		app=app,

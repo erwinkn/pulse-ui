@@ -1,10 +1,13 @@
-import { describe, expect, it, mock } from "bun:test";
+import { beforeEach, describe, expect, it, mock } from "bun:test";
 import { MantineProvider } from "@mantine/core";
 import { fireEvent, render } from "@testing-library/react";
 import { useField } from "./connect";
 import { Checkbox, CheckboxGroup, MultiSelect, TagsInput, TextInput } from "./fields";
 
+class PulseChannelResetError extends Error {}
+
 const channel = {
+	closed: false,
 	on: () => () => {},
 	emit: mock(),
 };
@@ -21,12 +24,20 @@ const submitForm = mock(
 );
 
 mock.module("pulse-ui-client", () => ({
+	PulseChannelResetError,
 	submitForm,
+	usePulseChannelOwner: () => "/",
 	usePulseClient: () => client,
 	usePulseDirectivesSource: () => directivesSource,
 }));
 
 const { Form } = await import("./form");
+
+beforeEach(() => {
+	channel.closed = false;
+	channel.emit.mockClear();
+	channel.emit.mockImplementation(() => {});
+});
 
 type Sample = {
 	sample_id: string;
@@ -257,5 +268,97 @@ describe("MantineForm submit values", () => {
 			method: "post",
 			id: "record-1",
 		});
+	});
+});
+
+describe("MantineForm channel timer lifecycle", () => {
+	it("drops debounced sync and validation when the bridge is replaced", async () => {
+		const view = render(
+			<MantineProvider>
+				<Form
+					channelId="form-old"
+					initialValues={{ name: "" }}
+					syncMode="change"
+					debounceMs={10}
+					validateInputOnChange
+					validate={{
+						name: { $kind: "server", debounceMs: 10, runOn: "change" },
+					}}
+				>
+					<TextInput name="name" label="Name" />
+				</Form>
+			</MantineProvider>,
+		);
+		fireEvent.change(view.getByRole("textbox"), { target: { value: "Ada" } });
+
+		view.rerender(
+			<MantineProvider>
+				<Form channelId="form-new" initialValues={{ name: "Ada" }}>
+					<TextInput name="name" label="Name" />
+				</Form>
+			</MantineProvider>,
+		);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+
+		expect(channel.emit).not.toHaveBeenCalled();
+	});
+
+	it("contains reset errors from validation timer callbacks", async () => {
+		channel.emit.mockImplementation(() => {
+			throw new PulseChannelResetError("Channel is closed");
+		});
+		const view = render(
+			<MantineProvider>
+				<Form
+					channelId="form-reset"
+					initialValues={{ name: "" }}
+					debounceMs={1}
+					validateInputOnChange
+					validate={{
+						name: { $kind: "server", debounceMs: 1, runOn: "change" },
+					}}
+				>
+					<TextInput name="name" label="Name" />
+				</Form>
+			</MantineProvider>,
+		);
+
+		fireEvent.change(view.getByRole("textbox"), { target: { value: "Grace" } });
+		await new Promise((resolve) => setTimeout(resolve, 10));
+
+		expect(channel.emit).toHaveBeenCalledWith("serverValidate", {
+			path: "name",
+			value: "Grace",
+			values: { name: "Grace" },
+		});
+		view.unmount();
+	});
+
+	it("contains reset errors from sync timer callbacks", async () => {
+		channel.emit.mockImplementation(() => {
+			throw new PulseChannelResetError("Channel is closed");
+		});
+		const view = render(
+			<MantineProvider>
+				<Form
+					channelId="form-sync-reset"
+					initialValues={{ name: "" }}
+					syncMode="change"
+					debounceMs={1}
+				>
+					<TextInput name="name" label="Name" />
+				</Form>
+			</MantineProvider>,
+		);
+
+		fireEvent.change(view.getByRole("textbox"), { target: { value: "Lin" } });
+		await new Promise((resolve) => setTimeout(resolve, 10));
+
+		expect(channel.emit).toHaveBeenCalledWith("syncValues", {
+			path: "name",
+			reason: "change",
+			values: { name: "Lin" },
+		});
+		view.unmount();
 	});
 });

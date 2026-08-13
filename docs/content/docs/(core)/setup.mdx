@@ -67,8 +67,10 @@ bun install
 cd ..
 ```
 
-Register Pulse's Vite plugin in `web/vite.config.ts` so HMR works
-through the public port in single-server mode:
+Register Pulse's Vite plugin in `web/vite.config.ts`. Pulse waits for it
+to report that Vite is actually listening before serving traffic — hitting
+`:8000` too early is what used to throw those confusing first-load errors.
+The plugin also points HMR at the public port in single-server mode.
 
 ```ts
 import { reactRouter } from "@react-router/dev/vite";

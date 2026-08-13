@@ -225,7 +225,7 @@ def run(
 			port=web_port,
 			strict_port=True,
 			mode=app_instance.env,
-			ready_pattern=r"localhost:\d+",
+			ready_pattern=None if supervised_reload else r"localhost:\d+",
 			on_ready=mark_web_ready,
 			plain=plain,
 		)

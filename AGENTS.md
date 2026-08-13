@@ -60,3 +60,14 @@ Before writing or editing docs, read `docs/GUIDELINES.md` for tone, structure, a
 - Be conversational—write like you're explaining to a friend
 - Update `docs/content/docs/(core)/glossary.mdx` if introducing new terms
 - When changing behavior/APIs, update both `docs/` and `skills/` (if the feature is covered there)
+
+## Cursor Cloud specific instructions
+
+Env is pre-provisioned by the startup update script (`make sync`): `uv` (`~/.local/bin`) + `bun` (`~/.bun/bin`) on PATH, Python 3.12 venv at `.venv`, all workspace packages installed, JS client packages built. Standard commands live in the `## Commands` section, `Makefile`, and `CONTRIBUTING.md` — use those.
+
+Non-obvious caveats:
+- Run an app: `uv run pulse run examples/<app>.py` (e.g. `examples/todo.py`). Single-server mode: uvicorn backend on `:8000`, React Router (Vite) dev server on `:5173`. Open `:8000` (it proxies to the web server).
+- Vite dev cold-start: the very first page load right after `pulse run` can 504 on dynamically-imported modules while Vite pre-bundles deps. Not a real failure — wait a few seconds and reload once.
+- `pulse run` re-runs `bun install` in the app's `web/` dir and codegen on startup, so first boot is slower.
+- `bun run build` (part of `make sync`) builds the `pulse-ui-client` / `pulse-mantine` JS packages that apps depend on as `workspace:*`. If you edit those JS packages, rebuild before apps pick up changes.
+- `make test` runs `uv run pytest` then `bun test`. CDK tests are skipped by default (`-m 'not cdk'` in `pyproject.toml`); run with `uv run pytest -m cdk`.

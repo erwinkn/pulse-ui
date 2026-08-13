@@ -521,6 +521,8 @@ class DevSupervisor:
 			if result is not None:
 				return result, watch_task
 
+		assert self._starting is not None
+		self._publish_targets(self._starting)
 		return None, watch_task
 
 	async def _start_web(self, revision: int) -> _StackResult | None:
@@ -742,12 +744,10 @@ class DevSupervisor:
 				return
 			assert event.port is not None
 			state.port = event.port
-			if self.vite_relay is not None:
-				self.vite_relay.set_target("127.0.0.1", event.port)
-			# A listening server is definitionally configured, so older plugin
-			# builds that never report "configured" still pass the startup gate.
 			state.prepared = True
 			state.ready = True
+			if not self._defer_retarget(event.instance, web=True):
+				self._publish_vite(state.port)
 			return
 		if isinstance(event, _BackendLifecycleEvent):
 			state = self._backend_state(event.instance)
@@ -759,10 +759,32 @@ class DevSupervisor:
 			else:
 				assert event.port is not None
 				state.port = event.port
-				if self.public_relay is not None:
-					self.public_relay.set_target("127.0.0.1", event.port)
 				state.ready = True
+				if not self._defer_retarget(event.instance, web=False):
+					self._publish_backend(state.port)
 			return
+
+	def _defer_retarget(self, instance: str, *, web: bool) -> bool:
+		# Keep the live stack on the relays until the replacement is fully ready.
+		if self._current is None or self._starting is None:
+			return False
+		if web:
+			return self._starting.web_instance == instance
+		return self._starting.backend_instance == instance
+
+	def _publish_backend(self, port: int) -> None:
+		if self.public_relay is not None:
+			self.public_relay.set_target("127.0.0.1", port)
+
+	def _publish_vite(self, port: int) -> None:
+		if self.vite_relay is not None:
+			self.vite_relay.set_target("127.0.0.1", port)
+
+	def _publish_targets(self, stack: _Stack) -> None:
+		if stack.backend_state.port is not None:
+			self._publish_backend(stack.backend_state.port)
+		if stack.web_state is not None and stack.web_state.port is not None:
+			self._publish_vite(stack.web_state.port)
 
 	async def _stop_stack(self, stack: _Stack | None) -> None:
 		if stack is None:

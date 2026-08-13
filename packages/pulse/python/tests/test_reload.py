@@ -334,7 +334,8 @@ async def test_reload_starts_new_stack_before_stopping_old(
 	assert await run_task == 130
 
 	assert events.index("server2:start") < events.index("server1:stop")
-	assert events.index("web2:ready") < events.index("server1:stop")
+	assert events.index("web2:start") < events.index("server1:stop")
+	assert events.index("web2:configured") < events.index("server1:stop")
 	assert events.index("web1:stop") < events.index("server1:stop")
 	assert events.index("server2:accepted") < events.index("web2:start")
 

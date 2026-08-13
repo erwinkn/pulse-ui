@@ -90,7 +90,7 @@ def supervisor_shell(
 		backend=command("server", tmp_path),
 		web=command("web", tmp_path, "web ready"),
 		watch_roots=(tmp_path,),
-		ignored_roots=(tmp_path / "web" / "app" / "pulse",),
+		ignored_roots=(tmp_path / "web",),
 		registered_sources=set(),
 		tag_mode="plain",
 		listeners=listeners,
@@ -187,15 +187,17 @@ def test_watch_filter_accepts_python_and_exact_registered_sources(
 	tmp_path: Path,
 ) -> None:
 	app_root = tmp_path / "app"
-	generated = app_root / "web" / "app" / "pulse"
+	web = app_root / "web"
 	external = tmp_path / "shared" / "theme.css"
-	filter_ = PulseWatchFilter((app_root,), (generated,), {external})
+	in_web = web / "imported.css"
+	filter_ = PulseWatchFilter((app_root,), (web,), {external, in_web})
 
 	assert filter_(Change.modified, str(app_root / "main.py"))
 	assert filter_(Change.modified, str(external))
+	assert filter_(Change.modified, str(in_web))
 	assert not filter_(Change.modified, str(external.with_name("other.css")))
-	assert not filter_(Change.modified, str(generated / "route.py"))
-	assert not filter_(Change.modified, str(app_root / "web" / "app.tsx"))
+	assert not filter_(Change.modified, str(web / "app.tsx"))
+	assert not filter_(Change.modified, str(web / "server.py"))
 	assert not filter_(Change.modified, str(app_root / "node_modules" / "tool.py"))
 
 

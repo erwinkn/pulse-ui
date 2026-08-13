@@ -50,7 +50,7 @@ pulse run app.py --address 0.0.0.0 --port 8080
 pulse run app.py --server-only --react-server-address http://localhost:5173
 ```
 
-In dev mode, `pulse run` watches Python files and restarts only the Uvicorn worker on each save. The supervisor holds the public listen sockets for the lifetime of `pulse run` and hands those inherited fds to each new worker, so the port never goes idle. Vite starts once. Python saves regenerate routes under `web/app/pulse/` and Vite HMR picks those up; Node is not respawned. The previous worker is SIGKILL'd immediately — WebSockets die anyway, and graceful drain just delayed the next boot.
+In dev mode, `pulse run` watches Python files and restarts only the Uvicorn worker on each save. The supervisor holds the public listen sockets for the lifetime of `pulse run` and hands those inherited fds to each new worker, so the port never goes idle. Vite starts once. The Python watcher ignores `web/` — that's Vite's tree, including generated routes under `web/app/pulse/`. Files Pulse imported from Python (registered local assets) still retrigger a worker restart so codegen can recopy them. Everything else in `web/` is Vite HMR. The previous worker is SIGKILL'd immediately — WebSockets die anyway, and graceful drain just delayed the next boot.
 
 With `--find-port` (the default), Pulse binds the first available public port starting at `--port` (8000 by default). Vite uses the first free port from 5173 with `--strictPort`.
 

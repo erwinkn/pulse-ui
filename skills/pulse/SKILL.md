@@ -34,6 +34,10 @@ app = ps.App([ps.Route("/", App)])
 
 `pulse run app.py` → dev server on `:8000`
 
+Pulse owns Python development restarts. The supervisor holds the public listen sockets (first free port from `:8000`) and SIGKILLs the Uvicorn worker on each Python save. Vite starts once. In default single-server mode Vite stays on loopback behind the Uvicorn proxy; it is not publicly exposed on `:5173`. The browser reconnects and in-memory Pulse state resets. Frontend-only JS/TS/CSS changes remain Vite HMR.
+
+Add `pulseVitePlugin()` from `pulse-ui-client/vite` so HMR uses the public port in single-server mode. It is not a readiness protocol — Pulse infers Vite startup from log output.
+
 ## Quick Reference
 
 | Task | API | Section |
@@ -536,8 +540,13 @@ app = ps.App(
 uv run pulse run app.py          # Dev server :8000
 uv run pulse run app.py --port 3000
 uv run pulse run app.py --interrupt  # Stop existing dev instance first
+uv run pulse run app.py --no-reload  # Direct Uvicorn, no Python watcher
 make all                         # Format, lint, typecheck, test
 ```
+
+Python changes restart the Uvicorn worker. The supervisor keeps the first available public port from `:8000` bound and inherited across reloads. Vite stays running. In single-server mode Vite binds loopback behind the proxy instead of exposing `:5173` publicly. Pulse WebSocket connections and in-memory state reset. Frontend JavaScript, TypeScript, and CSS changes still use normal Vite HMR.
+
+Add `pulseVitePlugin()` from `pulse-ui-client/vite` so the HMR client uses the public port in single-server mode.
 
 ## Common Patterns
 

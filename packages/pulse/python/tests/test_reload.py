@@ -15,7 +15,7 @@ import uvicorn
 from pulse.cli.dev_worker import (
 	DEVELOPMENT_GRACEFUL_TIMEOUT,
 	WorkerConfig,
-	_watch_supervisor,
+	_watch_supervisor,  # pyright: ignore[reportPrivateUsage]
 	build_server_config,
 	inherit_listeners,
 )

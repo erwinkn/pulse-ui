@@ -63,7 +63,7 @@ Before writing or editing docs, read `docs/GUIDELINES.md` for tone, structure, a
 
 ## Cursor Cloud specific instructions
 
-Env is pre-provisioned by the startup update script (`make sync`): `uv` (`~/.local/bin`) + `bun` (`~/.bun/bin`) on PATH, Python 3.12 venv at `.venv`, all workspace packages installed, JS client packages built. Standard commands live in the `## Commands` section, `Makefile`, and `CONTRIBUTING.md` — use those.
+Env is pre-provisioned: `uv` + `bun` are installed in `$HOME` and exposed via `~/.bashrc` (same mechanism as the preinstalled `nvm`/`cargo`), and the startup update script runs `make sync` (Python 3.12 venv at `.venv`, all workspace packages installed, JS client packages built). Standard commands live in the `## Commands` section, `Makefile`, and `CONTRIBUTING.md` — use those.
 
 Non-obvious caveats:
 - Run an app: `uv run pulse run examples/<app>.py` (e.g. `examples/todo.py`). Single-server mode: uvicorn backend on `:8000`, React Router (Vite) dev server on `:5173`. Open `:8000` (it proxies to the web server).

@@ -360,8 +360,7 @@ type ClientMessage =
   | ClientUpdateMessage
   | ClientDetachMessage
   | ClientApiResultMessage
-  | ClientChannelRequestMessage
-  | ClientChannelResponseMessage;
+  | ClientChannelMessage;
 ```
 
 #### ClientAttachMessage
@@ -427,32 +426,57 @@ interface ClientApiResultMessage {
 }
 ```
 
-#### ClientChannelRequestMessage
+#### ClientChannelMessage
 
-Channel event sent to server.
+Unified channel envelope. Discriminated on `action`.
 
 ```ts
-interface ClientChannelRequestMessage {
-  type: "channel_message";
+interface ChannelMessageBase {
+  type: "channel";
   channel: string;
+}
+
+interface ChannelConnectMessage extends ChannelMessageBase {
+  action: "connect";
+  subscriptionId: string;
+  owner?: string;
+}
+
+interface ChannelDisconnectMessage extends ChannelMessageBase {
+  action: "disconnect";
+  subscriptionId: string;
+  owner?: string;
+}
+
+interface ChannelEventMessage extends ChannelMessageBase {
+  action: "event";
   event: string;
   payload?: any;
-  requestId?: string;
+  subscriptionId?: string;
 }
-```
 
-#### ClientChannelResponseMessage
+interface ChannelRequestMessage extends ChannelMessageBase {
+  action: "request";
+  event: string;
+  requestId: string;
+  payload?: any;
+  subscriptionId?: string;
+}
 
-Response to a server channel request.
-
-```ts
-interface ClientChannelResponseMessage {
-  type: "channel_message";
-  channel: string;
+interface ChannelResponseMessage extends ChannelMessageBase {
+  action: "response";
   responseTo: string;
   payload?: any;
   error?: any;
+  subscriptionId?: string;
 }
+
+type ClientChannelMessage =
+  | ChannelConnectMessage
+  | ChannelDisconnectMessage
+  | ChannelEventMessage
+  | ChannelRequestMessage
+  | ChannelResponseMessage;
 ```
 
 ### Server Messages
@@ -464,8 +488,7 @@ type ServerMessage =
   | ServerErrorMessage
   | ServerApiCallMessage
   | ServerNavigateToMessage
-  | ServerChannelRequestMessage
-  | ServerChannelResponseMessage;
+  | ServerChannelMessage;
 ```
 
 #### ServerInitMessage
@@ -542,32 +565,30 @@ interface ServerNavigateToMessage {
 }
 ```
 
-#### ServerChannelRequestMessage
+#### ServerChannelMessage
 
-Channel event from server.
-
-```ts
-interface ServerChannelRequestMessage {
-  type: "channel_message";
-  channel: string;
-  event: string;
-  payload?: any;
-  requestId?: string;
-}
-```
-
-#### ServerChannelResponseMessage
-
-Response to a client channel request.
+Unified channel envelope. Discriminated on `action`.
 
 ```ts
-interface ServerChannelResponseMessage {
-  type: "channel_message";
-  channel: string;
-  responseTo: string;
-  payload?: any;
-  error?: any;
+interface ChannelConnectAckMessage extends ChannelMessageBase {
+  action: "connect_ack";
+  subscriptionId: string;
+  accepted: boolean;
+  error?: string;
 }
+
+interface ChannelCloseMessage extends ChannelMessageBase {
+  action: "close";
+  subscriptionId: string;
+  reason?: string;
+}
+
+type ServerChannelMessage =
+  | ChannelConnectAckMessage
+  | ChannelCloseMessage
+  | ChannelEventMessage
+  | ChannelRequestMessage
+  | ChannelResponseMessage;
 ```
 
 ---

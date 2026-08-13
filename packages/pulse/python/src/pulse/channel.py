@@ -23,14 +23,13 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pulse.context import PulseContext
 from pulse.messages import (
-	ClientChannelConnectMessage,
-	ClientChannelDisconnectMessage,
-	ClientChannelRequestMessage,
-	ClientChannelResponseMessage,
-	ServerChannelConnectAckMessage,
-	ServerChannelMessage,
-	ServerChannelRequestMessage,
-	ServerChannelResponseMessage,
+	ChannelCloseMessage,
+	ChannelConnectAckMessage,
+	ChannelConnectMessage,
+	ChannelDisconnectMessage,
+	ChannelEventMessage,
+	ChannelRequestMessage,
+	ChannelResponseMessage,
 )
 from pulse.scheduling import create_future
 from pulse.serializer import deserialize, serialize
@@ -192,7 +191,7 @@ class ChannelsManager:
 		*,
 		render: "RenderSession",
 		session: "UserSession",
-		message: ClientChannelConnectMessage,
+		message: ChannelConnectMessage,
 	) -> bool:
 		channel_id = str(message.get("channel", ""))
 		subscription_id = str(message.get("subscriptionId", ""))
@@ -218,9 +217,7 @@ class ChannelsManager:
 		channel._flush_buffer()  # pyright: ignore[reportPrivateUsage]
 		return True
 
-	def reject_client_connect(
-		self, message: ClientChannelConnectMessage, error: str
-	) -> None:
+	def reject_client_connect(self, message: ChannelConnectMessage, error: str) -> None:
 		self._send_connect_ack(
 			str(message.get("channel", "")),
 			str(message.get("subscriptionId", "")),
@@ -236,8 +233,9 @@ class ChannelsManager:
 		accepted: bool,
 		error: str | None = None,
 	) -> None:
-		message = ServerChannelConnectAckMessage(
-			type="channel_connect_ack",
+		message = ChannelConnectAckMessage(
+			type="channel",
+			action="connect_ack",
 			channel=channel_id,
 			subscriptionId=subscription_id,
 			accepted=accepted,
@@ -251,7 +249,7 @@ class ChannelsManager:
 		*,
 		render: "RenderSession",
 		session: "UserSession",
-		message: ClientChannelDisconnectMessage,
+		message: ChannelDisconnectMessage,
 	) -> bool:
 		channel = self._channels.get(str(message.get("channel", "")))
 		if channel is None:
@@ -279,9 +277,18 @@ class ChannelsManager:
 			self.dispose_channel(channel, reason="render.close")
 
 	# ------------------------------------------------------------------
-	def handle_client_response(self, message: ClientChannelResponseMessage) -> None:
+	def handle_client_response(self, message: ChannelResponseMessage) -> None:
 		response_to = message.get("responseTo")
 		if not response_to:
+			return
+		channel = self._channels.get(str(message.get("channel", "")))
+		if channel is None:
+			return
+		incoming_subscription_id = message.get("subscriptionId")
+		if (
+			incoming_subscription_id is None
+			or incoming_subscription_id != channel._subscription_id  # pyright: ignore[reportPrivateUsage]
+		):
 			return
 
 		error = message.get("error")
@@ -295,12 +302,27 @@ class ChannelsManager:
 		*,
 		render: "RenderSession",
 		session: "UserSession",
-		message: ClientChannelRequestMessage,
+		message: ChannelEventMessage | ChannelRequestMessage,
 	) -> None:
 		channel_id = str(message.get("channel"))
 		channel = self._channels.get(channel_id)
-		if channel is None or channel.closed:
-			if request_id := message.get("requestId"):
+		request_id: str | None = None
+		if message.get("action") == "request":
+			request_id = cast(ChannelRequestMessage, message)["requestId"]
+		if channel is None:
+			if request_id:
+				self._send_error_response(channel_id, request_id, "Channel closed")
+			return
+
+		incoming_subscription_id = message.get("subscriptionId")
+		if (
+			incoming_subscription_id is None
+			or incoming_subscription_id != channel._subscription_id  # pyright: ignore[reportPrivateUsage]
+		):
+			return
+
+		if channel.closed:
+			if request_id:
 				self._send_error_response(channel_id, request_id, "Channel closed")
 			return
 
@@ -314,13 +336,13 @@ class ChannelsManager:
 			logger.warning(
 				"Ignoring channel message for mismatched context: %s", channel_id
 			)
-			if request_id := message.get("requestId"):
+			if request_id:
 				self._send_error_response(
 					channel_id, request_id, "Channel owner is unavailable"
 				)
 			return
 		if not channel.connected:
-			if request_id := message.get("requestId"):
+			if request_id:
 				self._send_error_response(
 					channel_id, request_id, "Channel is disconnected"
 				)
@@ -328,7 +350,6 @@ class ChannelsManager:
 
 		event = message["event"]
 		payload = message.get("payload")
-		request_id = message.get("requestId")
 
 		route_ctx, source_mount_id = owner
 
@@ -353,17 +374,22 @@ class ChannelsManager:
 				return
 
 			if request_id and channel.connected and not channel.closed:
-				msg = ServerChannelResponseMessage(
-					type="channel_message",
+				msg = ChannelResponseMessage(
+					type="channel",
+					action="response",
 					channel=channel.id,
-					event=None,
 					responseTo=request_id,
 					payload=result,
 				)
-				self.send_to_client(
-					channel=channel,
-					msg=msg,
+				subscription_id = (
+					channel._subscription_id  # pyright: ignore[reportPrivateUsage]
 				)
+				if subscription_id is not None:
+					msg["subscriptionId"] = subscription_id
+				try:
+					self.send_to_client(channel=channel, msg=msg)
+				except (ChannelDisconnected, ChannelClosed):
+					return
 
 		render.create_task(_invoke(), name=f"channel:{channel_id}:{event}")
 
@@ -401,14 +427,20 @@ class ChannelsManager:
 		self, channel_id: str, request_id: str, message: str
 	) -> None:
 		channel = self._channels.get(channel_id)
-		msg = ServerChannelResponseMessage(
-			type="channel_message",
+		msg = ChannelResponseMessage(
+			type="channel",
+			action="response",
 			channel=channel.id if channel is not None else channel_id,
-			event=None,
 			responseTo=request_id,
 			payload=None,
 			error=message,
 		)
+		if channel is not None:
+			subscription_id = (
+				channel._subscription_id  # pyright: ignore[reportPrivateUsage]
+			)
+			if subscription_id is not None:
+				msg["subscriptionId"] = subscription_id
 		self._render_session.send(msg)
 
 	def send_error(self, channel_id: str, request_id: str, message: str) -> None:
@@ -444,16 +476,18 @@ class ChannelsManager:
 		if channel.closed:
 			return
 		was_connected = channel.connected
+		subscription_id = channel._subscription_id  # pyright: ignore[reportPrivateUsage]
 		channel._finalize()  # pyright: ignore[reportPrivateUsage]
 		self._cleanup_channel_refs(channel)
 		self._cancel_pending_for_channel(channel.id)
 		self._channels.pop(channel.id, None)
-		if was_connected:
-			msg = ServerChannelRequestMessage(
-				type="channel_message",
+		if was_connected and subscription_id is not None:
+			msg = ChannelCloseMessage(
+				type="channel",
+				action="close",
 				channel=channel.id,
-				event="__close__",
-				payload={"reason": reason or "channel.close"},
+				subscriptionId=subscription_id,
+				reason=reason or "channel.close",
 			)
 			self._render_session.send(msg)
 
@@ -461,7 +495,7 @@ class ChannelsManager:
 		self,
 		*,
 		channel: "Channel",
-		msg: ServerChannelMessage,
+		msg: ChannelEventMessage | ChannelRequestMessage | ChannelResponseMessage,
 	) -> None:
 		if channel.closed:
 			raise ChannelClosed(f"Channel '{channel.id}' is closed")
@@ -509,7 +543,7 @@ class Channel:
 	lifetime: ChannelLifetime
 	_owner_token: object | None
 	_handlers: dict[str, list[ChannelHandler]]
-	_buffer: deque[ServerChannelRequestMessage]
+	_buffer: deque[ChannelEventMessage]
 	_subscription_id: str | None
 	closed: bool
 	connected: bool
@@ -605,8 +639,9 @@ class Channel:
 		"""
 
 		self._ensure_open()
-		msg = ServerChannelRequestMessage(
-			type="channel_message",
+		msg = ChannelEventMessage(
+			type="channel",
+			action="event",
 			channel=self.id,
 			event=event,
 			payload=payload,
@@ -617,10 +652,10 @@ class Channel:
 					"Dropping oldest buffered event for disconnected channel '%s'",
 					self.id,
 				)
-			self._buffer.append(
-				cast(ServerChannelRequestMessage, deserialize(serialize(msg)))
-			)
+			self._buffer.append(cast(ChannelEventMessage, deserialize(serialize(msg))))
 			return
+		if self._subscription_id is not None:
+			msg["subscriptionId"] = self._subscription_id
 		self._manager.send_to_client(
 			channel=self,
 			msg=msg,
@@ -659,13 +694,16 @@ class Channel:
 		request_id = uuid.uuid4().hex
 		fut = create_future()
 		self._manager.register_pending(request_id, fut, self.id)
-		msg = ServerChannelRequestMessage(
-			type="channel_message",
+		msg = ChannelRequestMessage(
+			type="channel",
+			action="request",
 			channel=self.id,
 			event=event,
 			payload=payload,
 			requestId=request_id,
 		)
+		if self._subscription_id is not None:
+			msg["subscriptionId"] = self._subscription_id
 		sent = False
 		try:
 			self._manager.send_to_client(
@@ -732,7 +770,10 @@ class Channel:
 
 	def _flush_buffer(self) -> None:
 		while self._buffer and self.connected and not self.closed:
-			self._manager.send_to_client(channel=self, msg=self._buffer.popleft())
+			msg = self._buffer.popleft()
+			if self._subscription_id is not None:
+				msg["subscriptionId"] = self._subscription_id
+			self._manager.send_to_client(channel=self, msg=msg)
 
 	def _finalize(self) -> None:
 		self.closed = True

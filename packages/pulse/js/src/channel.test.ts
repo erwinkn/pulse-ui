@@ -4,7 +4,7 @@ import React from "react";
 import { MemoryRouter } from "react-router";
 import { ChannelBridge, PulseChannelResetError, usePulseChannel } from "./channel";
 import { PulseSocketIOClient } from "./client";
-import type { ClientChannelMessage, ClientChannelRequestMessage } from "./messages";
+import type { ChannelRequestMessage, ClientChannelMessage } from "./messages";
 import { PulseProvider, PulseView } from "./pulse";
 
 function makeClient() {
@@ -22,9 +22,17 @@ describe("ChannelBridge", () => {
 		const { bridge, sent } = makeClient();
 		const pending = bridge.request("echo", { foo: 1 });
 		expect(sent).toHaveLength(1);
-		const requestId = (sent[0] as ClientChannelRequestMessage).requestId!;
+		const requestId = (sent[0] as ChannelRequestMessage).requestId;
+		expect(sent[0]).toMatchObject({
+			type: "channel",
+			action: "request",
+			channel: "chan-1",
+			event: "echo",
+			payload: { foo: 1 },
+		});
 		bridge.handleServerMessage({
-			type: "channel_message",
+			type: "channel",
+			action: "response",
 			channel: "chan-1",
 			responseTo: requestId,
 			payload: { foo: 2 },
@@ -37,7 +45,8 @@ describe("ChannelBridge", () => {
 		const handler = vi.fn();
 		bridge.on("ping", handler);
 		bridge.handleServerMessage({
-			type: "channel_message",
+			type: "channel",
+			action: "event",
 			channel: "chan-1",
 			event: "ping",
 			payload: { value: 42 },
@@ -49,7 +58,8 @@ describe("ChannelBridge", () => {
 		const { bridge, sendMessage } = makeClient();
 		bridge.on("compute", () => 99);
 		bridge.handleServerMessage({
-			type: "channel_message",
+			type: "channel",
+			action: "request",
 			channel: "chan-1",
 			event: "compute",
 			requestId: "req-1",
@@ -58,21 +68,18 @@ describe("ChannelBridge", () => {
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(sendMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
+				type: "channel",
+				action: "response",
 				responseTo: "req-1",
 				payload: 99,
-				event: undefined,
 			}),
 		);
 	});
 
-	it("rejects pending requests when closed", async () => {
+	it("rejects pending requests when disposed", async () => {
 		const { bridge } = makeClient();
 		const pending = bridge.request("close-me");
-		bridge.handleServerMessage({
-			type: "channel_message",
-			channel: "chan-1",
-			event: "__close__",
-		});
+		bridge.dispose(new PulseChannelResetError("Channel closed by server"));
 		await expect(pending).rejects.toBeInstanceOf(PulseChannelResetError);
 	});
 

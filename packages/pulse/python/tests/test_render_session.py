@@ -1943,7 +1943,7 @@ def test_dev_strict_mode_channel_unsubscribe_reacquire_keeps_server_channel():
 	assert channel.closed is False
 	assert channel.connected is False
 
-	assert not render.channels.handle_client_connect(
+	assert render.channels.handle_client_connect(
 		render=render,
 		session=user_session,
 		message={
@@ -1954,6 +1954,7 @@ def test_dev_strict_mode_channel_unsubscribe_reacquire_keeps_server_channel():
 		},
 	)
 	assert channel.closed is False
+	assert channel.connected is True
 
 	with ps.PulseContext.update(render=render, session=user_session):
 		render.attach("/a", make_route_info("/a"))
@@ -2365,3 +2366,194 @@ async def test_async_callback_error_reports_real_traceback():
 	assert "NoneType: None" not in err["stack"]
 
 	session.close()
+
+
+@pytest.mark.asyncio
+async def test_prerender_of_active_path_keeps_channel_subscription_live():
+	routes = RouteTree([Route("a", simple_component)])
+	render = RenderSession("channel-pending", routes)
+	messages: list[ServerMessage] = []
+	render.connect(messages.append)
+	user_session: Any = SimpleNamespace(sid="pending-user")
+
+	with ps.PulseContext.update(render=render, session=user_session):
+		render.prerender(["/a"])
+		render.attach("/a", make_route_info("/a"))
+	mount = render.get_route_mount("/a")
+	received: list[Any] = []
+	with ps.PulseContext.update(
+		render=render,
+		session=user_session,
+		route=mount.route,
+	):
+		channel = render.channels.create("layout-channel")
+		channel.on("syncValues", lambda payload: received.append(payload))
+		channel.on("ask", lambda payload: {"ok": True})
+
+	assert render.channels.handle_client_connect(
+		render=render,
+		session=user_session,
+		message={
+			"type": "channel_connect",
+			"channel": channel.id,
+			"subscriptionId": "sub-1",
+			"owner": "/a",
+		},
+	)
+	messages.clear()
+
+	with ps.PulseContext.update(render=render, session=user_session):
+		render.prerender(["/a"], make_route_info("/a"))
+	assert mount.state == "pending"
+	assert channel.closed is False
+	assert channel.connected is True
+
+	render.channels.handle_client_event(
+		render=render,
+		session=user_session,
+		message={
+			"type": "channel_message",
+			"channel": channel.id,
+			"event": "syncValues",
+			"payload": {"field": "x"},
+		},
+	)
+	await asyncio.sleep(0)
+	assert received == [{"field": "x"}]
+
+	render.channels.handle_client_event(
+		render=render,
+		session=user_session,
+		message={
+			"type": "channel_message",
+			"channel": channel.id,
+			"event": "ask",
+			"payload": {},
+			"requestId": "req-pending",
+		},
+	)
+	await asyncio.sleep(0)
+	responses = [
+		message
+		for message in messages
+		if message.get("type") == "channel_message"
+		and message.get("responseTo") == "req-pending"
+	]
+	assert len(responses) == 1
+	assert responses[0].get("payload") == {"ok": True}
+	assert "error" not in responses[0]
+
+	assert render.channels.handle_client_connect(
+		render=render,
+		session=user_session,
+		message={
+			"type": "channel_connect",
+			"channel": channel.id,
+			"subscriptionId": "sub-2",
+			"owner": "/a",
+		},
+	)
+	assert channel.connected is True
+	render.close()
+
+
+@pytest.mark.asyncio
+async def test_prerender_redirect_closes_route_channels():
+	should_redirect = {"on": False}
+
+	@ps.component
+	def maybe_redirect():
+		if should_redirect["on"]:
+			raise RedirectInterrupt("/other", replace=True)
+		return ps.div("ok")
+
+	routes = RouteTree([Route("a", maybe_redirect)])
+	render = RenderSession("redirect-channel", routes)
+	messages: list[ServerMessage] = []
+	render.connect(messages.append)
+	user_session: Any = SimpleNamespace(sid="redirect-user")
+
+	with ps.PulseContext.update(render=render, session=user_session):
+		render.prerender(["/a"])
+		render.attach("/a", make_route_info("/a"))
+	mount = render.get_route_mount("/a")
+	with ps.PulseContext.update(
+		render=render,
+		session=user_session,
+		route=mount.route,
+	):
+		channel = render.channels.create("redirect-form")
+	assert render.channels.handle_client_connect(
+		render=render,
+		session=user_session,
+		message={
+			"type": "channel_connect",
+			"channel": channel.id,
+			"subscriptionId": "sub-1",
+			"owner": "/a",
+		},
+	)
+	messages.clear()
+
+	should_redirect["on"] = True
+	with ps.PulseContext.update(render=render, session=user_session):
+		result = render.prerender(["/a"], make_route_info("/a"))["/a"]
+
+	assert result["type"] == "navigate_to"
+	assert "/a" not in render.route_mounts
+	assert channel.closed is True
+	assert any(
+		message.get("type") == "channel_message" and message.get("event") == "__close__"
+		for message in messages
+	)
+	render.close()
+
+
+@pytest.mark.asyncio
+async def test_dev_strict_mode_grace_channel_event_runs():
+	routes = RouteTree([Route("a", simple_component)])
+	render = RenderSession("strict-event", routes, dev_strict_mode_detach_timeout=10.0)
+	render.connect(lambda _message: None)
+	user_session: Any = SimpleNamespace(sid="strict-event-user")
+
+	with ps.PulseContext.update(render=render, session=user_session):
+		render.prerender(["/a"])
+		render.attach("/a", make_route_info("/a"))
+	mount = render.get_route_mount("/a")
+	received: list[Any] = []
+	with ps.PulseContext.update(
+		render=render,
+		session=user_session,
+		route=mount.route,
+	):
+		channel = render.channels.create("strict-event-channel")
+		channel.on("ping", lambda payload: received.append(payload))
+	assert render.channels.handle_client_connect(
+		render=render,
+		session=user_session,
+		message={
+			"type": "channel_connect",
+			"channel": channel.id,
+			"subscriptionId": "sub-1",
+			"owner": "/a",
+		},
+	)
+
+	render.detach("/a")
+	assert mount.state == "pending"
+	assert channel.closed is False
+	assert channel.connected is True
+
+	render.channels.handle_client_event(
+		render=render,
+		session=user_session,
+		message={
+			"type": "channel_message",
+			"channel": channel.id,
+			"event": "ping",
+			"payload": {"n": 1},
+		},
+	)
+	await asyncio.sleep(0)
+	assert received == [{"n": 1}]
+	render.close()

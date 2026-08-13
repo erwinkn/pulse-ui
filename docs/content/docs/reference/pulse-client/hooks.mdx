@@ -153,7 +153,9 @@ channel = ps.channel("notifications", lifetime="tab")
 const channel = usePulseChannel("notifications", "tab");
 ```
 
-Multiple components can subscribe to the same channel. The channel stays open as long as at least one component is subscribed.
+More than one component can subscribe to the same channel.
+If all client subscriptions stop, Pulse unsubscribes the bridge.
+This does not close the server channel.
 
 ### Example: Chat Room
 

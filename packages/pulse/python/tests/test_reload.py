@@ -340,6 +340,67 @@ async def test_reload_starts_new_stack_before_stopping_old(
 	assert events.index("server2:accepted") < events.index("web2:start")
 
 
+class RelaySpy:
+	def __init__(self) -> None:
+		self.target: tuple[str, int] | None = None
+		self.history: list[tuple[str, int] | None] = []
+
+	def set_target(self, host: str, port: int) -> None:
+		self.target = (host, port)
+		self.history.append(self.target)
+
+	def clear_target(self) -> None:
+		self.target = None
+		self.history.append(None)
+
+	async def start(self) -> None:
+		return None
+
+	async def close(self) -> None:
+		self.clear_target()
+
+
+@pytest.mark.asyncio
+async def test_current_dies_during_reload_parks_relays(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	"""If the live stack dies while a replacement is starting, relays must
+	stop pointing at the dead worker so new connections wait instead of RST."""
+	supervisor = supervisor_shell(tmp_path)
+	public_relay = RelaySpy()
+	vite_relay = RelaySpy()
+	supervisor.public_relay = public_relay  # pyright: ignore[reportAttributeAccessIssue]
+	supervisor.vite_relay = vite_relay  # pyright: ignore[reportAttributeAccessIssue]
+	events: list[str] = []
+	processes = install_process_script(
+		monkeypatch,
+		events,
+		[
+			("server", "ready"),
+			("web", "ready"),
+			("server", "ready"),
+			("web", "ready"),
+		],
+	)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "web1:ready" in events)
+	assert public_relay.target == ("127.0.0.1", 9001)
+
+	supervisor.desired += 1
+	supervisor.changed.set()
+	await wait_until(lambda: "server2:start" in events)
+	processes[0].exit(7)
+	await wait_until(lambda: None in public_relay.history)
+	await wait_until(lambda: "web2:ready" in events)
+	supervisor.shutdown.set()
+	assert await run_task == 130
+
+	park_at = public_relay.history.index(None)
+	assert public_relay.history[0] == ("127.0.0.1", 9001)
+	assert ("127.0.0.1", 9002) in public_relay.history[park_at + 1 :]
+
+
 @pytest.mark.asyncio
 async def test_failed_reload_keeps_the_previous_stack(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -734,13 +795,6 @@ async def test_vite_lifecycle_endpoint_authenticates_and_validates() -> None:
 
 @pytest.mark.asyncio
 async def test_stale_lifecycle_events_cannot_retarget_relays(tmp_path: Path) -> None:
-	class RelaySpy:
-		def __init__(self) -> None:
-			self.target: tuple[str, int] | None = None
-
-		def set_target(self, host: str, port: int) -> None:
-			self.target = (host, port)
-
 	supervisor = supervisor_shell(tmp_path)
 	vite_relay = RelaySpy()
 	public_relay = RelaySpy()

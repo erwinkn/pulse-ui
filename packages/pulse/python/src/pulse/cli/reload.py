@@ -638,6 +638,7 @@ class DevSupervisor:
 		if event.done() and not event.cancelled():
 			self._handle_event(event.result())
 			await self._drain_events()
+		self._park_relays_if_current_died()
 
 	async def _watch(self) -> None:
 		async for _changes in awatch(
@@ -707,6 +708,7 @@ class DevSupervisor:
 	async def _drain_events(self) -> None:
 		while not self._events.empty():
 			self._handle_event(self._events.get_nowait())
+		self._park_relays_if_current_died()
 
 	def _vite_state(self, instance: str) -> _ProcessState | None:
 		for stack in (self._starting, self._current):
@@ -723,6 +725,27 @@ class DevSupervisor:
 		if instance == self._backend_instance:
 			return self._states.get(self.backend_spec.name)
 		return None
+
+	def _park_relays_if_current_died(self) -> None:
+		# Overlap keeps the live target until the replacement publishes. If that
+		# live process dies first, new connections must wait rather than hit RST.
+		if self._current is None:
+			return
+		if (
+			self._current.backend_state.exited.done()
+			or not self._current.backend.is_alive()
+		) and self.public_relay is not None:
+			self.public_relay.clear_target()
+		if (
+			self._current.web is not None
+			and self._current.web_state is not None
+			and (
+				self._current.web_state.exited.done()
+				or not self._current.web.is_alive()
+			)
+			and self.vite_relay is not None
+		):
+			self.vite_relay.clear_target()
 
 	def _handle_event(self, event: _SupervisorEvent) -> None:
 		if isinstance(event, _ViteLifecycleEvent):
@@ -805,7 +828,7 @@ class DevSupervisor:
 			*(self._wait_until_stopped(process, KILL_TIMEOUT) for process in owned)
 		)
 		for process in owned:
-			process.close()
+			await asyncio.to_thread(process.close)
 		await self._drain_events()
 
 	async def _wait_until_stopped(

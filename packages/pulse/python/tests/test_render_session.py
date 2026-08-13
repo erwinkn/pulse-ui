@@ -2512,9 +2512,7 @@ async def test_prerender_redirect_closes_route_channels():
 @pytest.mark.asyncio
 async def test_dev_strict_mode_grace_channel_event_runs():
 	routes = RouteTree([Route("a", simple_component)])
-	render = RenderSession(
-		"strict-event", routes, dev_strict_mode_detach_timeout=10.0
-	)
+	render = RenderSession("strict-event", routes, dev_strict_mode_detach_timeout=10.0)
 	render.connect(lambda _message: None)
 	user_session: Any = SimpleNamespace(sid="strict-event-user")
 

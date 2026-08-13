@@ -3,22 +3,19 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import secrets
 import signal
 import socket
 import sys
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from enum import Enum, auto
 from pathlib import Path
-from typing import Any, cast, final
+from typing import Any, Literal, cast, final
 
 from watchfiles import Change, awatch
 
 from pulse.cli.logging import TagMode
 from pulse.cli.models import CommandSpec
 from pulse.cli.processes import ManagedProcess, write_tagged_line
-from pulse.env import ENV_PULSE_LISTEN_FDS, ENV_PULSE_READY_FD, ENV_PULSE_VITE_READY_URL
+from pulse.env import ENV_PULSE_LISTEN_FDS, ENV_PULSE_READY_FD, ENV_PULSE_VITE_READY_FD
 
 IGNORED_DIRECTORIES = frozenset(
 	{
@@ -39,6 +36,8 @@ IGNORED_DIRECTORIES = frozenset(
 PYTHON_EXTENSIONS = frozenset({".py", ".pyx", ".pyd"})
 VITE_PLUGIN_TIMEOUT = 15.0
 
+Wait = Literal["shutdown", "changed", "backend", "web", "ready"]
+
 
 @dataclass(slots=True)
 class PulseWatchFilter:
@@ -52,9 +51,6 @@ class PulseWatchFilter:
 		)
 		self.ignored_roots = tuple(path.resolve() for path in self.ignored_roots)
 		self.registered_sources = {path.resolve() for path in self.registered_sources}
-
-	def add_sources(self, sources: list[str]) -> None:
-		self.registered_sources.update(Path(source).resolve() for source in sources)
 
 	def __call__(self, _change: Change, raw_path: str) -> bool:
 		path = Path(raw_path).resolve()
@@ -75,14 +71,6 @@ class PulseWatchFilter:
 		)
 
 
-class _Wait(Enum):
-	CHANGED = auto()
-	SHUTDOWN = auto()
-	BACKEND_EXIT = auto()
-	WEB_EXIT = auto()
-	READY = auto()
-
-
 @final
 class DevSupervisor:
 	"""Own the public listen sockets. Restart only the Uvicorn worker on save."""
@@ -97,7 +85,6 @@ class DevSupervisor:
 		registered_sources: set[Path],
 		tag_mode: TagMode,
 		listeners: tuple[socket.socket, ...],
-		web_first: bool = False,
 		vite_plugin_timeout: float = VITE_PLUGIN_TIMEOUT,
 	) -> None:
 		self.backend_spec = backend
@@ -110,9 +97,7 @@ class DevSupervisor:
 		)
 		self.tag_mode: TagMode = tag_mode
 		self.listeners = listeners
-		self.web_first = web_first
 		self.vite_plugin_timeout = vite_plugin_timeout
-		self.desired = 0
 		self.changed = asyncio.Event()
 		self.shutdown = asyncio.Event()
 		self.backend: ManagedProcess | None = None
@@ -121,8 +106,8 @@ class DevSupervisor:
 		self._web_exit = asyncio.Event()
 		self._backend_code: int | None = None
 		self._web_code: int | None = None
-		self._ready_read: int | None = None
-		self.filter.add_sources([str(source) for source in registered_sources])
+		for listener in listeners:
+			listener.set_inheritable(False)
 
 	async def run(self) -> int:
 		loop = asyncio.get_running_loop()
@@ -137,21 +122,15 @@ class DevSupervisor:
 		watch_task: asyncio.Task[None] | None = None
 		try:
 			watch_task = asyncio.create_task(self._watch())
-			if self.web_spec is not None and self.web_first:
+			if self.web_spec is not None:
 				await self._start_web()
 				if self.shutdown.is_set():
 					return 130
 				if self._web_code is not None:
 					return self._web_code
-			self.desired = 1
-			self.changed.set()
 			while not self.shutdown.is_set():
-				await self._wait_until_changed()
-				if self.shutdown.is_set():
-					break
 				if self._web_code is not None:
 					return self._web_code
-				revision = self.desired
 				self.changed.clear()
 				started = await self._replace_backend()
 				if self.shutdown.is_set():
@@ -159,21 +138,16 @@ class DevSupervisor:
 				if self._web_code is not None:
 					return self._web_code
 				if not started:
-					if self.desired != revision:
-						self.changed.set()
+					await self._race("changed", "web")
 					continue
-				if self.web_spec is not None and self.web is None:
-					await self._start_web()
-					if self._web_code is not None:
-						return self._web_code
 				if self.backend_spec.on_ready is not None:
 					self.backend_spec.on_ready()
-				result = await self._wait_while_running(revision)
-				if result is _Wait.WEB_EXIT:
+				result = await self._race("changed", "backend", "web")
+				if result == "web":
 					return self._web_code or 1
-				if result is _Wait.SHUTDOWN:
+				if result == "shutdown":
 					break
-				if result is _Wait.BACKEND_EXIT and self.desired == revision:
+				if result == "backend" and not self.changed.is_set():
 					print(
 						"Reload error: backend exited"
 						+ (
@@ -184,6 +158,7 @@ class DevSupervisor:
 						+ " Waiting for changes to restart...",
 						flush=True,
 					)
+					await self._race("changed", "web")
 			return 130 if self.shutdown.is_set() else 0
 		finally:
 			if watch_task is not None:
@@ -194,7 +169,6 @@ class DevSupervisor:
 			self.backend = None
 			await self._stop(self.web)
 			self.web = None
-			self._close_ready()
 			for signum, handler in previous_handlers.items():
 				signal.signal(signum, cast(Any, handler))
 
@@ -215,13 +189,13 @@ class DevSupervisor:
 		ready_r, ready_w = os.pipe()
 		os.set_inheritable(ready_w, True)
 		os.set_inheritable(ready_r, False)
-		self._close_ready()
-		self._ready_read = ready_r
 		env = dict(self.backend_spec.env)
 		env[ENV_PULSE_LISTEN_FDS] = ",".join(
 			f"{listener.family}:{listener.fileno()}" for listener in self.listeners
 		)
 		env[ENV_PULSE_READY_FD] = str(ready_w)
+		for listener in self.listeners:
+			listener.set_inheritable(True)
 		pass_fds = tuple(listener.fileno() for listener in self.listeners) + (ready_w,)
 		loop = asyncio.get_running_loop()
 
@@ -230,11 +204,7 @@ class DevSupervisor:
 
 		def on_exit(code: int) -> None:
 			self._backend_code = code
-
-			def publish() -> None:
-				self._backend_exit.set()
-
-			loop.call_soon_threadsafe(publish)
+			loop.call_soon_threadsafe(self._backend_exit.set)
 
 		spec = CommandSpec(
 			name=self.backend_spec.name,
@@ -242,66 +212,59 @@ class DevSupervisor:
 			cwd=self.backend_spec.cwd,
 			env=env,
 		)
-		self.backend = ManagedProcess.start(spec, on_output, on_exit, pass_fds=pass_fds)
-		os.close(ready_w)
-		revision = self.desired
-		ready = asyncio.create_task(asyncio.to_thread(os.read, ready_r, 1))
+		ready: asyncio.Task[bytes] | None = None
 		try:
-			while True:
-				result = await self._wait_any(
-					changed=True,
-					backend=True,
-					web=True,
-					extra=ready,
+			try:
+				self.backend = ManagedProcess.start(
+					spec, on_output, on_exit, pass_fds=pass_fds
 				)
-				if result is _Wait.READY:
-					self._close_ready()
-					try:
-						return ready.result() == b"1"
-					except OSError:
-						return False
-				if result is _Wait.SHUTDOWN or result is _Wait.WEB_EXIT:
+			finally:
+				os.close(ready_w)
+				for listener in self.listeners:
+					listener.set_inheritable(False)
+			ready = asyncio.create_task(asyncio.to_thread(os.read, ready_r, 1))
+			result = await self._race("changed", "backend", "web", extra=ready)
+			if result == "ready":
+				try:
+					ok = ready.result() == b"1"
+				except OSError:
+					ok = False
+				if not ok:
 					await self._stop(self.backend)
 					self.backend = None
-					return False
-				if result is _Wait.BACKEND_EXIT:
-					self._close_ready()
-					await self._stop(self.backend)
-					self.backend = None
-					return False
-				if result is _Wait.CHANGED and self.desired != revision:
-					await self._stop(self.backend)
-					self.backend = None
-					return False
+				return ok
+			await self._stop(self.backend)
+			self.backend = None
+			return False
 		finally:
-			if not ready.done():
-				self._close_ready()
+			if ready is not None and not ready.done():
+				with contextlib.suppress(OSError):
+					os.close(ready_r)
 				with contextlib.suppress(Exception):
 					await ready
+			else:
+				with contextlib.suppress(OSError):
+					os.close(ready_r)
 
 	async def _start_web(self) -> None:
 		assert self.web_spec is not None
 		web_spec = self.web_spec
 		self._web_exit.clear()
 		self._web_code = None
+		ready_r, ready_w = os.pipe()
+		os.set_inheritable(ready_w, True)
+		os.set_inheritable(ready_r, False)
 		loop = asyncio.get_running_loop()
-		configured = asyncio.Event()
-		listening = asyncio.Event()
-		ready_url, close_ready = await _serve_vite_ready(configured, listening)
 
 		def on_output(line: str) -> None:
 			write_tagged_line(web_spec.name, line, self.tag_mode)
 
 		def on_exit(code: int) -> None:
 			self._web_code = code
-
-			def publish() -> None:
-				self._web_exit.set()
-
-			loop.call_soon_threadsafe(publish)
+			loop.call_soon_threadsafe(self._web_exit.set)
 
 		env = dict(web_spec.env)
-		env[ENV_PULSE_VITE_READY_URL] = ready_url
+		env[ENV_PULSE_VITE_READY_FD] = str(ready_w)
 		spec = CommandSpec(
 			name=web_spec.name,
 			args=[
@@ -314,18 +277,31 @@ class DevSupervisor:
 			cwd=web_spec.cwd,
 			env=env,
 		)
-		self.web = ManagedProcess.start(spec, on_output, on_exit)
-		first = asyncio.create_task(_first_event(configured, listening))
+		read_task: asyncio.Task[bytes] | None = None
 		try:
 			try:
-				result = await asyncio.wait_for(
-					self._wait_any(web=True, extra=first),
-					timeout=self.vite_plugin_timeout,
+				self.web = ManagedProcess.start(
+					spec, on_output, on_exit, pass_fds=(ready_w,)
 				)
+			finally:
+				os.close(ready_w)
+			buf = bytearray()
+			try:
+				async with asyncio.timeout(self.vite_plugin_timeout):
+					while b"c" not in buf:
+						read_task = asyncio.create_task(
+							asyncio.to_thread(os.read, ready_r, 8)
+						)
+						result = await self._race("web", extra=read_task)
+						if result != "ready":
+							return
+						chunk = read_task.result()
+						if not chunk:
+							return
+						buf.extend(chunk)
 			except TimeoutError:
 				if (
-					not configured.is_set()
-					and not listening.is_set()
+					b"c" not in buf
 					and not self.shutdown.is_set()
 					and self._web_code is None
 				):
@@ -338,92 +314,55 @@ class DevSupervisor:
 					await self._stop(self.web)
 					self.web = None
 					self._web_code = 1
-					return
-				result = _Wait.READY
-			if result is _Wait.SHUTDOWN or result is _Wait.WEB_EXIT:
-				if self._web_code is not None:
-					await self._stop(self.web)
-					self.web = None
 				return
-			if not listening.is_set():
-				wait_listening = asyncio.create_task(listening.wait())
-				result = await self._wait_any(web=True, extra=wait_listening)
-				if not wait_listening.done():
-					wait_listening.cancel()
-					with contextlib.suppress(asyncio.CancelledError):
-						await wait_listening
-				if result is _Wait.SHUTDOWN or result is _Wait.WEB_EXIT:
-					if self._web_code is not None:
-						await self._stop(self.web)
-						self.web = None
+			while b"1" not in buf:
+				read_task = asyncio.create_task(asyncio.to_thread(os.read, ready_r, 8))
+				result = await self._race("web", extra=read_task)
+				if result != "ready":
 					return
+				chunk = read_task.result()
+				if not chunk:
+					return
+				buf.extend(chunk)
 			if web_spec.on_ready is not None:
 				web_spec.on_ready()
 		finally:
-			if not first.done():
-				first.cancel()
-				with contextlib.suppress(asyncio.CancelledError):
-					await first
-			await close_ready()
+			with contextlib.suppress(OSError):
+				os.close(ready_r)
+			if read_task is not None and not read_task.done():
+				with contextlib.suppress(Exception):
+					await read_task
 
-	async def _wait_until_changed(self) -> None:
-		while not self.changed.is_set() and not self.shutdown.is_set():
-			result = await self._wait_any(changed=True, web=True)
-			if result is _Wait.WEB_EXIT or result is _Wait.SHUTDOWN:
-				return
-
-	async def _wait_while_running(self, revision: int) -> _Wait:
-		while True:
-			if self.shutdown.is_set():
-				return _Wait.SHUTDOWN
-			if self._web_code is not None:
-				return _Wait.WEB_EXIT
-			if self.desired != revision:
-				return _Wait.CHANGED
-			if self._backend_exit.is_set():
-				return _Wait.BACKEND_EXIT
-			result = await self._wait_any(changed=True, backend=True, web=True)
-			if result is not _Wait.CHANGED or self.desired != revision:
-				return result
-
-	async def _wait_any(
+	async def _race(
 		self,
-		*,
-		changed: bool = False,
-		backend: bool = False,
-		web: bool = False,
+		*names: str,
 		extra: asyncio.Task[Any] | None = None,
-	) -> _Wait:
-		tasks: list[asyncio.Task[Any]] = [
-			asyncio.create_task(self.shutdown.wait()),
-		]
-		kinds = [_Wait.SHUTDOWN]
-		if changed:
-			tasks.append(asyncio.create_task(self.changed.wait()))
-			kinds.append(_Wait.CHANGED)
-		if backend:
-			tasks.append(asyncio.create_task(self._backend_exit.wait()))
-			kinds.append(_Wait.BACKEND_EXIT)
-		if web:
-			tasks.append(asyncio.create_task(self._web_exit.wait()))
-			kinds.append(_Wait.WEB_EXIT)
+	) -> Wait:
+		waiters: dict[str, asyncio.Task[Any]] = {
+			"shutdown": asyncio.create_task(self.shutdown.wait()),
+		}
+		if "changed" in names:
+			waiters["changed"] = asyncio.create_task(self.changed.wait())
+		if "backend" in names and self.backend is not None:
+			waiters["backend"] = asyncio.create_task(self._backend_exit.wait())
+		if "web" in names and self.web is not None:
+			waiters["web"] = asyncio.create_task(self._web_exit.wait())
 		if extra is not None:
-			tasks.append(extra)
-			kinds.append(_Wait.READY)
+			waiters["ready"] = extra
 		try:
 			done, _pending = await asyncio.wait(
-				tasks, return_when=asyncio.FIRST_COMPLETED
+				waiters.values(), return_when=asyncio.FIRST_COMPLETED
 			)
 		finally:
-			owned = [task for task in tasks if task is not extra]
+			owned = [task for task in waiters.values() if task is not extra]
 			for task in owned:
 				if not task.done():
 					task.cancel()
 			await asyncio.gather(*owned, return_exceptions=True)
-		for task, kind in zip(tasks, kinds, strict=True):
+		for name, task in waiters.items():
 			if task in done and not task.cancelled():
-				return kind
-		return _Wait.SHUTDOWN
+				return cast(Wait, name)
+		return "shutdown"
 
 	async def _watch(self) -> None:
 		async for _changes in awatch(
@@ -432,7 +371,6 @@ class DevSupervisor:
 			debounce=300,
 			step=50,
 		):
-			self.desired += 1
 			message = "Changes detected, reloading..."
 			if self.tag_mode != "plain":
 				message = (
@@ -446,60 +384,3 @@ class DevSupervisor:
 			return
 		process.kill_tree()
 		await asyncio.to_thread(process.close)
-
-	def _close_ready(self) -> None:
-		if self._ready_read is not None:
-			with contextlib.suppress(OSError):
-				os.close(self._ready_read)
-			self._ready_read = None
-
-
-async def _first_event(*events: asyncio.Event) -> None:
-	tasks = [asyncio.create_task(event.wait()) for event in events]
-	try:
-		await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-	finally:
-		for task in tasks:
-			if not task.done():
-				task.cancel()
-		await asyncio.gather(*tasks, return_exceptions=True)
-
-
-async def _serve_vite_ready(
-	configured: asyncio.Event, listening: asyncio.Event
-) -> tuple[str, Callable[[], Awaitable[None]]]:
-	token = secrets.token_urlsafe(16)
-
-	async def client(
-		reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-	) -> None:
-		try:
-			data = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=2)
-		except (
-			TimeoutError,
-			asyncio.IncompleteReadError,
-			asyncio.LimitOverrunError,
-		):
-			writer.close()
-			return
-		line = data.split(b"\r\n", 1)[0].decode("ascii", "replace")
-		parts = line.split(" ")
-		path = parts[1] if len(parts) >= 2 else ""
-		if path == f"/{token}/configured":
-			configured.set()
-		elif path == f"/{token}/listening":
-			listening.set()
-		writer.write(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
-		with contextlib.suppress(ConnectionResetError, BrokenPipeError):
-			await writer.drain()
-		writer.close()
-
-	server = await asyncio.start_server(client, "127.0.0.1", 0)
-	port = server.sockets[0].getsockname()[1]
-	url = f"http://127.0.0.1:{port}/{token}"
-
-	async def close() -> None:
-		server.close()
-		await server.wait_closed()
-
-	return url, close

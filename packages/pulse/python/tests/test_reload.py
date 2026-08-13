@@ -4,9 +4,6 @@ import io
 import os
 import socket
 import sys
-import threading
-import urllib.error
-import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,16 +14,15 @@ import pytest
 import uvicorn
 from pulse.cli.dev_worker import (
 	DEVELOPMENT_GRACEFUL_TIMEOUT,
-	WorkerConfig,
 	_watch_supervisor,  # pyright: ignore[reportPrivateUsage]
-	build_server_config,
 	inherit_listeners,
+	worker_uvicorn_config,
 )
 from pulse.cli.models import CommandSpec
 from pulse.cli.ports import reserve_port
 from pulse.cli.processes import ManagedProcess
 from pulse.cli.reload import DevSupervisor, PulseWatchFilter
-from pulse.env import ENV_PULSE_LISTEN_FDS, ENV_PULSE_READY_FD, ENV_PULSE_VITE_READY_URL
+from pulse.env import ENV_PULSE_LISTEN_FDS, ENV_PULSE_READY_FD, ENV_PULSE_VITE_READY_FD
 from starlette.types import Receive, Scope, Send
 from watchfiles import Change
 
@@ -97,7 +93,6 @@ def supervisor_shell(
 		registered_sources=set(),
 		tag_mode="plain",
 		listeners=listeners,
-		web_first=True,
 	)
 
 
@@ -105,6 +100,10 @@ async def wait_until(predicate: Any) -> None:
 	async with asyncio.timeout(2):
 		while not predicate():
 			await asyncio.sleep(0.01)
+
+
+def _dup_ready(spec: CommandSpec, key: str) -> int:
+	return os.dup(int(spec.env[key]))
 
 
 def install_process_script(
@@ -132,8 +131,7 @@ def install_process_script(
 		processes.append(process)
 		events.append(f"{name}:start")
 		if spec.name == "server":
-			ready_fd = int(spec.env[ENV_PULSE_READY_FD])
-			child_w = os.dup(ready_fd)
+			child_w = _dup_ready(spec, ENV_PULSE_READY_FD)
 			process.ready_w = child_w
 			if outcome == "ready":
 				os.write(child_w, b"1")
@@ -144,12 +142,15 @@ def install_process_script(
 				process.ready_w = None
 				process.exit(1)
 		elif spec.name == "web":
+			child_w = _dup_ready(spec, ENV_PULSE_VITE_READY_FD)
+			process.ready_w = child_w
 			if outcome == "ready":
-				url = spec.env[ENV_PULSE_VITE_READY_URL]
-				threading.Thread(
-					target=_notify_vite_ready, args=(url,), daemon=True
-				).start()
+				os.write(child_w, b"c1")
+				os.close(child_w)
+				process.ready_w = None
 			elif outcome == "fail":
+				os.close(child_w)
+				process.ready_w = None
 				process.exit(1)
 		return process
 
@@ -159,15 +160,6 @@ def install_process_script(
 	monkeypatch.setattr(ManagedProcess, "start", classmethod(start))
 	monkeypatch.setattr(DevSupervisor, "_watch", watch)
 	return processes
-
-
-def _notify_vite_ready(url: str) -> None:
-	for event in ("configured", "listening"):
-		request = urllib.request.Request(f"{url}/{event}", method="POST", data=b"")
-		try:
-			urllib.request.urlopen(request, timeout=2).close()
-		except urllib.error.URLError:
-			return
 
 
 @pytest.mark.parametrize("plain", [True, False])
@@ -188,7 +180,6 @@ async def test_watch_announces_reload_with_semantic_formatting(
 	await supervisor._watch()  # pyright: ignore[reportPrivateUsage]
 
 	output = capsys.readouterr().out
-	assert supervisor.desired == 1
 	assert supervisor.changed.is_set()
 	if plain:
 		assert output == "Changes detected, reloading...\n"
@@ -241,7 +232,6 @@ async def test_reload_kills_backend_immediately_and_keeps_vite(
 
 	run_task = asyncio.create_task(supervisor.run())
 	await wait_until(lambda: "server1:start" in events)
-	supervisor.desired += 1
 	supervisor.changed.set()
 	await wait_until(lambda: "server2:start" in events)
 	supervisor.shutdown.set()
@@ -270,7 +260,6 @@ async def test_failed_backend_keeps_vite_and_waits_for_edit(
 	assert supervisor.web is not None
 	assert supervisor.web.is_alive()
 
-	supervisor.desired += 1
 	supervisor.changed.set()
 	await wait_until(lambda: "server2:start" in events)
 	supervisor.shutdown.set()
@@ -291,38 +280,12 @@ async def test_rapid_edit_kills_starting_backend(
 
 	run_task = asyncio.create_task(supervisor.run())
 	await wait_until(lambda: "server1:start" in events)
-	supervisor.desired += 1
 	supervisor.changed.set()
 	await wait_until(lambda: "server2:start" in events)
 	supervisor.shutdown.set()
 	assert await run_task == 130
 	assert "server1:kill" in events
 	assert events.index("server1:kill") < events.index("server2:start")
-
-
-@pytest.mark.asyncio
-async def test_reload_starts_backend_before_vite_when_not_web_first(
-	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-	supervisor = supervisor_shell(tmp_path)
-	supervisor.web_first = False
-	events: list[str] = []
-	install_process_script(
-		monkeypatch,
-		events,
-		[("server", "ready"), ("web", "ready"), ("server", "ready")],
-	)
-
-	run_task = asyncio.create_task(supervisor.run())
-	await wait_until(lambda: "web1:start" in events)
-	supervisor.desired += 1
-	supervisor.changed.set()
-	await wait_until(lambda: "server2:start" in events)
-	supervisor.shutdown.set()
-	assert await run_task == 130
-
-	assert events.index("server1:start") < events.index("web1:start")
-	assert "web2:start" not in events
 
 
 @pytest.mark.asyncio
@@ -467,15 +430,8 @@ def test_worker_uvicorn_config_disables_reload() -> None:
 	async def app(scope: Scope, receive: Receive, send: Send) -> None:
 		return None
 
-	config = build_server_config(
-		app,
-		WorkerConfig(
-			target="demo:app",
-			public_host="localhost",
-			public_port=8000,
-			plain=True,
-			verbose=True,
-		),
+	config = worker_uvicorn_config(
+		app, host="localhost", port=8000, plain=True, verbose=True
 	)
 
 	assert config.reload is False

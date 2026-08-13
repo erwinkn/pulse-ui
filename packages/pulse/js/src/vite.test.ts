@@ -20,6 +20,7 @@ const ENV_NAMES = [
 	"PULSE_VITE_LIFECYCLE_URL",
 	"PULSE_VITE_LIFECYCLE_SECRET",
 	"PULSE_VITE_INSTANCE",
+	"PULSE_HMR_CLIENT_PORT",
 ] as const;
 const originalEnv = Object.fromEntries(
 	ENV_NAMES.map((name) => [name, process.env[name]]),
@@ -397,6 +398,32 @@ export default {
 				port: 0,
 				strictPort: false,
 				hmr: { clientPort: 8000 },
+			},
+		});
+	});
+
+	it("merges Pulse HMR clientPort into the user's Vite hmr config", () => {
+		process.env.PULSE_HMR_CLIENT_PORT = "5173";
+		setLifecycleEnv("http://127.0.0.1:1234/vite");
+		const plugin = pulseVitePlugin();
+		expect(
+			hook(plugin.config).call(
+				{} as never,
+				{
+					server: { hmr: { protocol: "wss", host: "dev.example" } },
+				} as never,
+				{} as never,
+			),
+		).toEqual({
+			server: {
+				host: "127.0.0.1",
+				port: 0,
+				strictPort: false,
+				hmr: {
+					protocol: "wss",
+					host: "dev.example",
+					clientPort: 5173,
+				},
 			},
 		});
 	});

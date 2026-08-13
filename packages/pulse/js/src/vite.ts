@@ -198,15 +198,25 @@ export function pulseVitePlugin(): Plugin {
 		name: "pulse:lifecycle",
 		apply: "serve",
 		enforce: "post",
-		config() {
+		config(userConfig) {
 			if (!lifecycle) return;
 			const clientPort = hmrClientPort();
+			const existingHmr = userConfig.server?.hmr;
 			return {
 				server: {
 					host: "127.0.0.1",
 					port: 0,
 					strictPort: false,
-					...(clientPort === undefined ? {} : { hmr: { clientPort } }),
+					...(clientPort === undefined
+						? {}
+						: {
+								hmr: {
+									...(typeof existingHmr === "object" && existingHmr
+										? existingHmr
+										: {}),
+									clientPort,
+								},
+							}),
 				},
 			};
 		},

@@ -245,13 +245,13 @@ except ps.ChannelClosed:
 1. **Created** — `ps.channel()` in State `__init__`
 2. **Subscribed** — While a client bridge is listening
 3. **Disconnected** — The server channel stays alive and buffers emits
-4. **Closed** — Lifetime owner disposal or explicit `channel.close()`
+4. **Closed** — Pulse destroys the owner, or you call `channel.close()`
 
 Route channels close when Pulse destroys their route. Tab channels close when
-Pulse closes their render session. Incoming events run while the owner exists
-and a client is subscribed; they are not gated on mount transport state
-(pending vs active). Delivery is ordered and at-most-once; buffers drop the
-oldest event at 64.
+Pulse closes their render session.
+A subscribed client can send events while the channel is open.
+If no client is subscribed, Pulse keeps the last 64 events from emit().
+If there are more than 64 events, Pulse removes the oldest event.
 
 Always clean up handlers in `on_dispose()`:
 

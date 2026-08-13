@@ -153,8 +153,9 @@ channel = ps.channel("notifications", lifetime="tab")
 const channel = usePulseChannel("notifications", "tab");
 ```
 
-Multiple components can subscribe to the same channel. Releasing all client
-subscriptions unsubscribes the bridge; it does not close the server channel.
+More than one component can subscribe to the same channel.
+If all client subscriptions stop, Pulse unsubscribes the bridge.
+This does not close the server channel.
 
 ### Example: Chat Room
 

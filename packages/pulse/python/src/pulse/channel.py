@@ -1,18 +1,16 @@
 """Bidirectional channels with client subscription lifetimes.
 
-The server owns channel lifetime; clients only subscribe and unsubscribe. Server
-emits made without a subscriber are buffered per channel in a 64-item FIFO. Once
-the cap is reached, the oldest event is dropped. Buffered events flush in order
-after a subscription is acknowledged. Requests are never buffered and fail
-immediately while disconnected.
+The server keeps the channel. Clients subscribe and unsubscribe.
+If no client is subscribed, Pulse keeps the last 64 events from emit().
+If there are more than 64 events, Pulse removes the oldest event.
+Pulse sends the kept events in order when a client subscribes again.
+request() does not keep events. It fails immediately if no client is subscribed.
 
-Route-lifetime channels close with the route that created them. Tab-lifetime
-channels survive route changes and close with the browser tab's render session.
-Both lifetimes permit an earlier explicit ``Channel.close()``.
+A route channel closes when Pulse destroys its route.
+A tab channel stays across route changes. It closes with the browser tab.
+You can also call Channel.close() before that.
 
-Inbound events run while the channel exists and a client is subscribed. Route
-mount transport state (pending, active, suspended) is not a gate; owner
-disposal closes the channel.
+A subscribed client can send events while the channel is open.
 """
 
 import asyncio
@@ -169,7 +167,7 @@ class ChannelsManager:
 		session: "UserSession",
 		owner_token: object | None,
 	) -> tuple[Any | None, str | None] | None:
-		"""Validate identity and resolve route context. Mount state is not a gate."""
+		"""Check that this session owns the channel. Then get the route context."""
 		if channel.render_id != render.id or channel.session_id != session.sid:
 			return None
 		if channel._owner_token != owner_token:  # pyright: ignore[reportPrivateUsage]
@@ -182,7 +180,7 @@ class ChannelsManager:
 			mount = render.get_route_mount(owner_token)
 		except ValueError:
 			logger.error(
-				"Open channel '%s' has no mount for owner %r",
+				"Channel '%s' is open, but its route %r is gone",
 				channel.id,
 				owner_token,
 			)

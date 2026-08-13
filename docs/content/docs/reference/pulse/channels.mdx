@@ -61,10 +61,7 @@ hard upper boundary for all channels, so a tab channel is not shared with other
 tabs or users. A tab channel has no route owner, so its handlers run without a
 current route context.
 
-Inbound events run while the channel exists and a client is subscribed. Route
-mount transport state (pending, active, suspended) is not a gate. Delivery is
-ordered and at-most-once; disconnected `emit()` buffers drop the oldest event at
-64.
+A subscribed client can send events while the channel is open.
 
 ## Classes
 

@@ -7,14 +7,14 @@ Full-stack Python framework for interactive web apps. Runs on React with WebSock
 - Be extremely concise. Sacrifice grammar for the sake of concision.
 - Read the README.md in the relevant package before starting work
 - Always add tests when implementing a new feature. 
-- If dependencies are not installed, run `make sync`
+- If dependencies are not installed, run `make sync` (`bun run build` is part of it; rebuild after editing `packages/*/js` or apps won't pick up changes)
 - Run `make test` after implementing
 - Run `make all` before committing
 - Check `examples/` for usage patterns
 - Use `make bump` for changing package versions
 - When using a framework/library, do not make assumptions, fetch latest docs (using context7 for example)
 - Use `bun info ...` to get information about a JS package
-- Test examples by running them with `pulse run` in a background task and using the agent-browser CLI for interacting with the UI.
+- Test examples by running them with `pulse run` in a background task and using the agent-browser CLI for interacting with the UI. First page load after `pulse run` can 504 while Vite prebundles — reload once.
 - While debugging, feel free to add debug print statements, spin up test files, modify existing code, or anything else that would improve your feedback loop and accelerate the troubleshooting process. Remove those debug changes after fixing the issue.
 - Tests should never be used as a reason to keep aliases or dead code around.
 
@@ -60,14 +60,3 @@ Before writing or editing docs, read `docs/GUIDELINES.md` for tone, structure, a
 - Be conversational—write like you're explaining to a friend
 - Update `docs/content/docs/(core)/glossary.mdx` if introducing new terms
 - When changing behavior/APIs, update both `docs/` and `skills/` (if the feature is covered there)
-
-## Cursor Cloud specific instructions
-
-Env is defined in `.cursor/environment.json` (Dockerfile-based, `.cursor/Dockerfile`): Ubuntu 24.04 with Python 3.12, Node 22, and `uv` + `bun` installed into `/usr/local/bin` (on PATH for every shell — no profile hacks). The `install` step runs `make sync` (Python 3.12 venv at `.venv`, all workspace packages installed, JS client packages built). To change system tooling, edit `.cursor/Dockerfile`; to change dependency setup, edit the `install` command. Standard dev commands live in the `## Commands` section, `Makefile`, and `CONTRIBUTING.md` — use those.
-
-Non-obvious caveats:
-- Run an app: `uv run pulse run examples/<app>.py` (e.g. `examples/todo.py`). Single-server mode: uvicorn backend on `:8000`, React Router (Vite) dev server on `:5173`. Open `:8000` (it proxies to the web server).
-- Vite dev cold-start: the very first page load right after `pulse run` can 504 on dynamically-imported modules while Vite pre-bundles deps. Not a real failure — wait a few seconds and reload once.
-- `pulse run` re-runs `bun install` in the app's `web/` dir and codegen on startup, so first boot is slower.
-- `bun run build` (part of `make sync`) builds the `pulse-ui-client` / `pulse-mantine` JS packages that apps depend on as `workspace:*`. If you edit those JS packages, rebuild before apps pick up changes.
-- `make test` runs `uv run pytest` then `bun test`. CDK tests are skipped by default (`-m 'not cdk'` in `pyproject.toml`); run with `uv run pytest -m cdk`.

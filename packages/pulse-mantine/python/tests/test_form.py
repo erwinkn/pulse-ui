@@ -7,7 +7,7 @@ from typing import Any, cast
 import pulse as ps
 import pytest
 from fastapi import HTTPException
-from pulse.messages import ClientChannelRequestMessage
+from pulse.messages import ChannelEventMessage
 from pulse.routing import Route, RouteInfo, RouteTree
 from pulse.serializer import serialize
 from pulse.user_session import UserSession
@@ -80,8 +80,8 @@ def build_context():
 	return app, dummy_render, session, real_render, route_ctx
 
 
-def client_channel_request(message: object) -> ClientChannelRequestMessage:
-	return cast(ClientChannelRequestMessage, message)
+def client_channel_event(message: object) -> ChannelEventMessage:
+	return cast(ChannelEventMessage, message)
 
 
 def test_form_keeps_channel_after_client_unsubscribe_and_reconnect():
@@ -104,7 +104,8 @@ def test_form_keeps_channel_after_client_unsubscribe_and_reconnect():
 		render=real_render,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		message={
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": first_channel_id,
 			"subscriptionId": "form-1",
 			"owner": "/",
@@ -115,7 +116,8 @@ def test_form_keeps_channel_after_client_unsubscribe_and_reconnect():
 		render=real_render,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		message={
-			"type": "channel_disconnect",
+			"type": "channel",
+			"action": "disconnect",
 			"channel": first_channel_id,
 			"subscriptionId": "form-1",
 			"owner": "/",
@@ -137,7 +139,8 @@ def test_form_keeps_channel_after_client_unsubscribe_and_reconnect():
 		render=real_render,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		message={
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": first_channel_id,
 			"subscriptionId": "form-2",
 			"owner": "/",
@@ -163,7 +166,8 @@ async def test_form_sync_handler_survives_unsubscribe_and_reconnect():
 		render=real_render,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		message={
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": first_channel_id,
 			"subscriptionId": "sync-1",
 			"owner": "/",
@@ -173,7 +177,8 @@ async def test_form_sync_handler_survives_unsubscribe_and_reconnect():
 		render=real_render,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		message={
-			"type": "channel_disconnect",
+			"type": "channel",
+			"action": "disconnect",
 			"channel": first_channel_id,
 			"subscriptionId": "sync-1",
 			"owner": "/",
@@ -183,7 +188,8 @@ async def test_form_sync_handler_survives_unsubscribe_and_reconnect():
 		render=real_render,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		message={
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": first_channel_id,
 			"subscriptionId": "sync-2",
 			"owner": "/",
@@ -200,12 +206,14 @@ async def test_form_sync_handler_survives_unsubscribe_and_reconnect():
 		real_render.channels.handle_client_event(
 			render=real_render,
 			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
-			message=client_channel_request(
+			message=client_channel_event(
 				{
-					"type": "channel_message",
+					"type": "channel",
+					"action": "event",
 					"channel": form._channel.id,  # pyright: ignore[reportPrivateUsage]
 					"event": "syncValues",
 					"payload": {"values": {"query": "xrd"}},
+					"subscriptionId": "sync-2",
 				},
 			),
 		)

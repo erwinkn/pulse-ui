@@ -41,35 +41,72 @@ export interface ServerApiCallMessage {
 	credentials: "include" | "omit";
 }
 
-export interface ServerChannelRequestMessage {
-	type: "channel_message";
+export interface ChannelMessageBase {
+	type: "channel";
 	channel: string;
-	event: string;
-	payload?: any;
-	requestId?: string;
-	responseTo?: never;
-	error?: any;
 }
 
-export interface ServerChannelResponseMessage {
-	type: "channel_message";
-	channel: string;
-	event?: undefined;
-	responseTo: string;
-	payload?: any;
-	error?: any;
-	requestId?: never;
+export interface ChannelConnectMessage extends ChannelMessageBase {
+	action: "connect";
+	subscriptionId: string;
+	owner?: string;
 }
 
-export type ServerChannelMessage = ServerChannelRequestMessage | ServerChannelResponseMessage;
+export interface ChannelDisconnectMessage extends ChannelMessageBase {
+	action: "disconnect";
+	subscriptionId: string;
+	owner?: string;
+}
 
-export interface ServerChannelConnectAckMessage {
-	type: "channel_connect_ack";
-	channel: string;
+export interface ChannelConnectAckMessage extends ChannelMessageBase {
+	action: "connect_ack";
 	subscriptionId: string;
 	accepted: boolean;
 	error?: string;
 }
+
+export interface ChannelCloseMessage extends ChannelMessageBase {
+	action: "close";
+	subscriptionId: string;
+	reason?: string;
+}
+
+export interface ChannelEventMessage extends ChannelMessageBase {
+	action: "event";
+	event: string;
+	payload?: any;
+	subscriptionId?: string;
+}
+
+export interface ChannelRequestMessage extends ChannelMessageBase {
+	action: "request";
+	event: string;
+	requestId: string;
+	payload?: any;
+	subscriptionId?: string;
+}
+
+export interface ChannelResponseMessage extends ChannelMessageBase {
+	action: "response";
+	responseTo: string;
+	payload?: any;
+	error?: any;
+	subscriptionId?: string;
+}
+
+export type ClientChannelMessage =
+	| ChannelConnectMessage
+	| ChannelDisconnectMessage
+	| ChannelEventMessage
+	| ChannelRequestMessage
+	| ChannelResponseMessage;
+
+export type ServerChannelMessage =
+	| ChannelConnectAckMessage
+	| ChannelCloseMessage
+	| ChannelEventMessage
+	| ChannelRequestMessage
+	| ChannelResponseMessage;
 
 export interface ServerNavigateToMessage {
 	type: "navigate_to";
@@ -106,9 +143,7 @@ export type ServerMessage =
 	| ServerNavigateToMessage
 	| ServerReloadMessage
 	| ServerAttachAckMessage
-	| ServerChannelConnectAckMessage
-	| ServerChannelRequestMessage
-	| ServerChannelResponseMessage
+	| ServerChannelMessage
 	| ServerJsExecMessage;
 
 export interface ClientCallbackMessage {
@@ -142,46 +177,6 @@ export interface ClientApiResultMessage {
 	headers: Record<string, string>;
 	body: any | null;
 }
-
-export interface ClientChannelRequestMessage {
-	type: "channel_message";
-	channel: string;
-	event: string;
-	payload?: any;
-	requestId?: string;
-	responseTo?: never;
-	error?: any;
-}
-
-export interface ClientChannelResponseMessage {
-	type: "channel_message";
-	channel: string;
-	event?: undefined;
-	responseTo: string;
-	payload?: any;
-	error?: any;
-	requestId?: never;
-}
-
-export interface ClientChannelConnectMessage {
-	type: "channel_connect";
-	channel: string;
-	subscriptionId: string;
-	owner?: string;
-}
-
-export interface ClientChannelDisconnectMessage {
-	type: "channel_disconnect";
-	channel: string;
-	subscriptionId: string;
-	owner?: string;
-}
-
-export type ClientChannelMessage =
-	| ClientChannelRequestMessage
-	| ClientChannelResponseMessage
-	| ClientChannelConnectMessage
-	| ClientChannelDisconnectMessage;
 
 export interface ClientJsResultMessage {
 	type: "js_result";

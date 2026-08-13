@@ -175,22 +175,27 @@ describe("PulseSocketIOClient attach ack", () => {
 
 		const connect = sentMessages()[1]!;
 		expect(connect).toMatchObject({
-			type: "channel_connect",
+			type: "channel",
+			action: "connect",
 			channel: "navigated-channel",
 			owner: "view-owner",
 		});
 		socket.trigger(
 			"message",
 			serialize({
-				type: "channel_connect_ack",
+				type: "channel",
+				action: "connect_ack",
 				channel: "navigated-channel",
 				subscriptionId: connect.subscriptionId,
 				accepted: true,
 			}),
 		);
 		expect(sentMessages().at(-1)).toMatchObject({
+			type: "channel",
+			action: "event",
 			event: "queued-before-attach",
 			payload: { values: [1] },
+			subscriptionId: connect.subscriptionId,
 		});
 	});
 
@@ -220,7 +225,8 @@ describe("PulseSocketIOClient attach ack", () => {
 		messages = sentMessages();
 		expect(messages).toHaveLength(2);
 		expect(messages[1]).toMatchObject({
-			type: "channel_connect",
+			type: "channel",
+			action: "connect",
 			channel: "chan-1",
 			owner: "view-owner",
 		});
@@ -229,15 +235,18 @@ describe("PulseSocketIOClient attach ack", () => {
 		socket.trigger(
 			"message",
 			serialize({
-				type: "channel_connect_ack",
+				type: "channel",
+				action: "connect_ack",
 				channel: "chan-1",
 				subscriptionId: messages[1].subscriptionId,
 				accepted: true,
 			}),
 		);
 		expect(sentMessages().at(-1)).toMatchObject({
-			type: "channel_message",
+			type: "channel",
+			action: "event",
 			event: "current-event",
+			subscriptionId: messages[1].subscriptionId,
 		});
 		expect(sentMessages().some((message) => message.event === "stale-event")).toBe(
 			false,
@@ -261,7 +270,8 @@ describe("PulseSocketIOClient attach ack", () => {
 		socket.trigger(
 			"message",
 			serialize({
-				type: "channel_connect_ack",
+				type: "channel",
+				action: "connect_ack",
 				channel: "chan-1",
 				subscriptionId: connect.subscriptionId,
 				accepted: true,
@@ -288,7 +298,8 @@ describe("PulseSocketIOClient attach ack", () => {
 		);
 		connect = sentMessages()[1]!;
 		expect(connect).toMatchObject({
-			type: "channel_connect",
+			type: "channel",
+			action: "connect",
 			channel: "chan-1",
 			owner: "view-owner",
 		});
@@ -297,7 +308,8 @@ describe("PulseSocketIOClient attach ack", () => {
 		socket.trigger(
 			"message",
 			serialize({
-				type: "channel_connect_ack",
+				type: "channel",
+				action: "connect_ack",
 				channel: "chan-1",
 				subscriptionId: firstSubscriptionId,
 				accepted: false,
@@ -309,13 +321,19 @@ describe("PulseSocketIOClient attach ack", () => {
 		socket.trigger(
 			"message",
 			serialize({
-				type: "channel_connect_ack",
+				type: "channel",
+				action: "connect_ack",
 				channel: "chan-1",
 				subscriptionId: connect.subscriptionId,
 				accepted: true,
 			}),
 		);
-		expect(sentMessages().at(-1)).toMatchObject({ event: "offline-event" });
+		expect(sentMessages().at(-1)).toMatchObject({
+			type: "channel",
+			action: "event",
+			event: "offline-event",
+			subscriptionId: connect.subscriptionId,
+		});
 		expect(sentMessages().some((message) => message.event === "must-not-replay")).toBe(
 			false,
 		);
@@ -338,18 +356,22 @@ describe("PulseSocketIOClient attach ack", () => {
 		socket.trigger(
 			"message",
 			serialize({
-				type: "channel_connect_ack",
+				type: "channel",
+				action: "connect_ack",
 				channel: "chan-1",
 				subscriptionId: connect.subscriptionId,
 				accepted: true,
 			}),
 		);
 
-		const events = sentMessages()
-			.filter((message) => message.type === "channel_message")
-			.map((message) => message.event);
-		expect(events).toEqual(
+		const events = sentMessages().filter(
+			(message) => message.type === "channel" && message.action === "event",
+		);
+		expect(events.map((message) => message.event)).toEqual(
 			Array.from({ length: 64 }, (_, index) => `event-${index + 1}`),
+		);
+		expect(events.every((message) => message.subscriptionId === connect.subscriptionId)).toBe(
+			true,
 		);
 		expect(warn).toHaveBeenCalledTimes(1);
 		warn.mockRestore();
@@ -370,7 +392,8 @@ describe("PulseSocketIOClient attach ack", () => {
 		socket.trigger(
 			"message",
 			serialize({
-				type: "channel_connect_ack",
+				type: "channel",
+				action: "connect_ack",
 				channel: "chan-1",
 				subscriptionId: reconnect.subscriptionId,
 				accepted: true,
@@ -379,15 +402,106 @@ describe("PulseSocketIOClient attach ack", () => {
 		socket.trigger(
 			"message",
 			serialize({
-				type: "channel_message",
+				type: "channel",
+				action: "close",
 				channel: "chan-1",
-				event: "__close__",
-				payload: { reason: "channel.close" },
+				subscriptionId: reconnect.subscriptionId,
+				reason: "channel.close",
 			}),
 		);
 		expect(bridge.closed).toBe(true);
 		expect(() => bridge.emit("after-close")).toThrow("Channel is closed");
 		expect(connect.subscriptionId).not.toBe(reconnect.subscriptionId);
+		const afterClose = sentMessages().length;
+		client.releaseChannel("chan-1", bridge);
+		expect(sentMessages()).toHaveLength(afterClose);
+	});
+
+	it("ignores a late close for a previous subscription after reacquire", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+
+		const first = client.acquireChannel("chan-1");
+		const connectA = sentMessages().at(-1)!;
+		expect(connectA).toMatchObject({ type: "channel", action: "connect" });
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel",
+				action: "connect_ack",
+				channel: "chan-1",
+				subscriptionId: connectA.subscriptionId,
+				accepted: true,
+			}),
+		);
+
+		client.releaseChannel("chan-1", first);
+		const second = client.acquireChannel("chan-1");
+		const connectB = sentMessages().at(-1)!;
+		expect(connectB).toMatchObject({ type: "channel", action: "connect" });
+		expect(connectB.subscriptionId).not.toBe(connectA.subscriptionId);
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel",
+				action: "connect_ack",
+				channel: "chan-1",
+				subscriptionId: connectB.subscriptionId,
+				accepted: true,
+			}),
+		);
+
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel",
+				action: "close",
+				channel: "chan-1",
+				subscriptionId: connectA.subscriptionId,
+			}),
+		);
+		expect(second.closed).toBe(false);
+
+		const handler = vi.fn();
+		second.on("ping", handler);
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel",
+				action: "event",
+				channel: "chan-1",
+				event: "ping",
+				payload: { from: "A" },
+				subscriptionId: connectA.subscriptionId,
+			}),
+		);
+		expect(handler).not.toHaveBeenCalled();
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel",
+				action: "event",
+				channel: "chan-1",
+				event: "ping",
+				payload: { from: "B" },
+				subscriptionId: connectB.subscriptionId,
+			}),
+		);
+		expect(handler).toHaveBeenCalledWith({ from: "B" });
+		expect(() => second.emit("still-open")).not.toThrow();
+
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel",
+				action: "close",
+				channel: "chan-1",
+				subscriptionId: connectB.subscriptionId,
+			}),
+		);
+		expect(second.closed).toBe(true);
 	});
 
 	it("drops queued events and closes a rejected subscription", async () => {
@@ -402,7 +516,8 @@ describe("PulseSocketIOClient attach ack", () => {
 		socket.trigger(
 			"message",
 			serialize({
-				type: "channel_connect_ack",
+				type: "channel",
+				action: "connect_ack",
 				channel: "missing",
 				subscriptionId: connect.subscriptionId,
 				accepted: false,

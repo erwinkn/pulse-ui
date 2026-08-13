@@ -255,7 +255,6 @@ def run(
 				extra_args=server_args,
 				dev_secret=dev_secret,
 				server_only=server_only,
-				web_root=web_root,
 				verbose=verbose,
 				ready_pattern=r"Application startup complete",
 				on_ready=mark_server_ready,
@@ -295,7 +294,7 @@ def run(
 			if supervised_reload:
 				assert server_cmd is not None
 				watch_root = app_ctx.app_dir or app_ctx.server_cwd or Path.cwd()
-				generated_path = app_instance.codegen.cfg.pulse_path.resolve()
+				web_root_resolved = web_root.resolve()
 				registered_sources = {
 					asset.source_path.resolve() for asset in get_registered_assets()
 				}
@@ -308,7 +307,7 @@ def run(
 						backend=server_cmd,
 						web=web_cmd,
 						watch_roots=(watch_root,),
-						ignored_roots=(generated_path,),
+						ignored_roots=(web_root_resolved,),
 						registered_sources=registered_sources,
 						tag_mode=logger.get_tag_mode(),
 						listeners=public_port.sockets,
@@ -485,7 +484,6 @@ def build_uvicorn_command(
 	extra_args: Sequence[str],
 	dev_secret: str | None,
 	server_only: bool,
-	web_root: Path,
 	verbose: bool = False,
 	ready_pattern: str | None = None,
 	on_ready: Callable[[], None] | None = None,
@@ -516,14 +514,6 @@ def build_uvicorn_command(
 		args.extend(["--reload-include", "*.css"])
 		app_dir = app_ctx.app_dir or Path.cwd()
 		args.extend(["--reload-dir", str(app_dir)])
-		if web_root.exists():
-			args.extend(["--reload-dir", str(web_root)])
-			pulse_dir = str(app_ctx.app.codegen.cfg.pulse_dir)
-			pulse_app_dir = web_root / "app" / pulse_dir
-			rel_path = Path(os.path.relpath(pulse_app_dir, cwd))
-			if not rel_path.is_absolute():
-				args.extend(["--reload-exclude", str(rel_path)])
-				args.extend(["--reload-exclude", str(rel_path / "**")])
 
 	if app_ctx.app.env == "prod":
 		args.extend(production_flags())

@@ -360,6 +360,28 @@ class RelaySpy:
 		self.clear_target()
 
 
+def kill_server1_on_next_backend_start(
+	monkeypatch: pytest.MonkeyPatch, processes: list[FakeProcess]
+) -> None:
+	original_start = ManagedProcess.start
+
+	def start_and_kill_current(
+		_cls: type[ManagedProcess],
+		spec: CommandSpec,
+		on_output: Callable[[str], None],
+		on_exit: Callable[[int], None],
+	) -> FakeProcess:
+		process = cast(FakeProcess, original_start(spec, on_output, on_exit))
+		if spec.name == "server":
+			for existing in processes:
+				if existing.name == "server1" and existing.is_alive():
+					existing.exit(7)
+					break
+		return process
+
+	monkeypatch.setattr(ManagedProcess, "start", classmethod(start_and_kill_current))
+
+
 @pytest.mark.asyncio
 async def test_current_dies_during_reload_parks_relays(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -387,25 +409,7 @@ async def test_current_dies_during_reload_parks_relays(
 	await wait_until(lambda: "web1:ready" in events)
 	assert public_relay.target == ("127.0.0.1", 9001)
 
-	original_start = ManagedProcess.start
-
-	def start_and_kill_current(
-		_cls: type[ManagedProcess],
-		spec: CommandSpec,
-		on_output: Callable[[str], None],
-		on_exit: Callable[[int], None],
-	) -> FakeProcess:
-		process = original_start(spec, on_output, on_exit)
-		if spec.name == "server":
-			for existing in processes:
-				if existing.name == "server1" and existing.is_alive():
-					existing.exit(7)
-					break
-		return process
-
-	monkeypatch.setattr(
-		ManagedProcess, "start", classmethod(start_and_kill_current)
-	)
+	kill_server1_on_next_backend_start(monkeypatch, processes)
 
 	supervisor.desired += 1
 	supervisor.changed.set()
@@ -417,6 +421,32 @@ async def test_current_dies_during_reload_parks_relays(
 	park_at = public_relay.history.index(None)
 	assert public_relay.history[0] == ("127.0.0.1", 9001)
 	assert ("127.0.0.1", 9002) in public_relay.history[park_at + 1 :]
+
+
+@pytest.mark.asyncio
+async def test_failed_reload_abandons_a_dead_previous_stack(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	"""Keeping the previous stack is a lie if it already died mid-overlap."""
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	processes = install_process_script(
+		monkeypatch,
+		events,
+		[("server", "ready"), ("web", "ready"), ("server", "fail")],
+	)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "web1:ready" in events)
+	kill_server1_on_next_backend_start(monkeypatch, processes)
+	supervisor.desired += 1
+	supervisor.changed.set()
+	await wait_until(lambda: "web1:close" in events)
+	assert not processes[0].is_alive()
+	assert not processes[1].is_alive()
+	assert not run_task.done()
+	supervisor.shutdown.set()
+	assert await run_task == 130
 
 
 @pytest.mark.asyncio

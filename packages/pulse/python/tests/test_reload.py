@@ -370,8 +370,8 @@ def kill_server1_on_next_backend_start(
 		spec: CommandSpec,
 		on_output: Callable[[str], None],
 		on_exit: Callable[[int], None],
-	) -> FakeProcess:
-		process = cast(FakeProcess, original_start(spec, on_output, on_exit))
+	) -> ManagedProcess:
+		process = original_start(spec, on_output, on_exit)
 		if spec.name == "server":
 			for existing in processes:
 				if existing.name == "server1" and existing.is_alive():

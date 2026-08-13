@@ -192,3 +192,28 @@ def test_managed_process_preserves_io_and_target_exit_code(
 	assert lines == ["payload"]
 	assert exit_codes == [7]
 	assert process.returncode == 7
+
+
+def test_managed_process_keeps_last_output_line(tmp_path: Path) -> None:
+	lines: list[str] = []
+	exited = threading.Event()
+
+	process = ManagedProcess.start(
+		CommandSpec(
+			name="worker",
+			args=[
+				sys.executable,
+				"-c",
+				"import sys; print('traceback-tail', flush=True); raise SystemExit(3)",
+			],
+			cwd=tmp_path,
+			env=os.environ.copy(),
+		),
+		lines.append,
+		lambda _code: exited.set(),
+	)
+	assert exited.wait(5)
+	process.close()
+
+	assert process.returncode == 3
+	assert "traceback-tail" in lines

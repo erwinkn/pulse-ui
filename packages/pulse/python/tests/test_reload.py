@@ -306,7 +306,7 @@ def test_new_external_asset_adds_its_parent_watch_root(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_full_restart_stops_both_before_starting_backend(
+async def test_reload_starts_new_stack_before_stopping_old(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 	supervisor = supervisor_shell(tmp_path)
@@ -333,11 +333,146 @@ async def test_full_restart_stops_both_before_starting_backend(
 	supervisor.shutdown.set()
 	assert await run_task == 130
 
+	assert events.index("server2:start") < events.index("server1:stop")
+	assert events.index("web2:start") < events.index("server1:stop")
+	assert events.index("web2:configured") < events.index("server1:stop")
 	assert events.index("web1:stop") < events.index("server1:stop")
-	assert events.index("web1:exit") < events.index("server1:stop")
-	assert events.index("web1:close") < events.index("server2:start")
-	assert events.index("server1:close") < events.index("server2:start")
 	assert events.index("server2:accepted") < events.index("web2:start")
+
+
+class RelaySpy:
+	def __init__(self) -> None:
+		self.target: tuple[str, int] | None = None
+		self.history: list[tuple[str, int] | None] = []
+
+	def set_target(self, host: str, port: int) -> None:
+		self.target = (host, port)
+		self.history.append(self.target)
+
+	def clear_target(self) -> None:
+		self.target = None
+		self.history.append(None)
+
+	async def start(self) -> None:
+		return None
+
+	async def close(self) -> None:
+		self.clear_target()
+
+
+def kill_server1_on_next_backend_start(
+	monkeypatch: pytest.MonkeyPatch, processes: list[FakeProcess]
+) -> None:
+	original_start = ManagedProcess.start
+
+	def start_and_kill_current(
+		_cls: type[ManagedProcess],
+		spec: CommandSpec,
+		on_output: Callable[[str], None],
+		on_exit: Callable[[int], None],
+	) -> ManagedProcess:
+		process = original_start(spec, on_output, on_exit)
+		if spec.name == "server":
+			for existing in processes:
+				if existing.name == "server1" and existing.is_alive():
+					existing.exit(7)
+					break
+		return process
+
+	monkeypatch.setattr(ManagedProcess, "start", classmethod(start_and_kill_current))
+
+
+@pytest.mark.asyncio
+async def test_current_dies_during_reload_parks_relays(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	"""If the live stack dies while a replacement is starting, relays must
+	stop pointing at the dead worker so new connections wait instead of RST."""
+	supervisor = supervisor_shell(tmp_path)
+	public_relay = RelaySpy()
+	vite_relay = RelaySpy()
+	supervisor.public_relay = public_relay  # pyright: ignore[reportAttributeAccessIssue]
+	supervisor.vite_relay = vite_relay  # pyright: ignore[reportAttributeAccessIssue]
+	events: list[str] = []
+	processes = install_process_script(
+		monkeypatch,
+		events,
+		[
+			("server", "ready"),
+			("web", "ready"),
+			("server", "ready"),
+			("web", "ready"),
+		],
+	)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "web1:ready" in events)
+	assert public_relay.target == ("127.0.0.1", 9001)
+
+	kill_server1_on_next_backend_start(monkeypatch, processes)
+
+	supervisor.desired += 1
+	supervisor.changed.set()
+	await wait_until(lambda: None in public_relay.history)
+	await wait_until(lambda: "web2:ready" in events)
+	supervisor.shutdown.set()
+	assert await run_task == 130
+
+	park_at = public_relay.history.index(None)
+	assert public_relay.history[0] == ("127.0.0.1", 9001)
+	assert ("127.0.0.1", 9002) in public_relay.history[park_at + 1 :]
+
+
+@pytest.mark.asyncio
+async def test_failed_reload_abandons_a_dead_previous_stack(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	"""Keeping the previous stack is a lie if it already died mid-overlap."""
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	processes = install_process_script(
+		monkeypatch,
+		events,
+		[("server", "ready"), ("web", "ready"), ("server", "fail")],
+	)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "web1:ready" in events)
+	kill_server1_on_next_backend_start(monkeypatch, processes)
+	supervisor.desired += 1
+	supervisor.changed.set()
+	await wait_until(lambda: "web1:close" in events)
+	assert not processes[0].is_alive()
+	assert not processes[1].is_alive()
+	assert not run_task.done()
+	supervisor.shutdown.set()
+	assert await run_task == 130
+
+
+@pytest.mark.asyncio
+async def test_failed_reload_keeps_the_previous_stack(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	processes = install_process_script(
+		monkeypatch,
+		events,
+		[("server", "ready"), ("web", "ready"), ("server", "fail")],
+	)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "web1:ready" in events)
+	supervisor.desired += 1
+	supervisor.changed.set()
+	await wait_until(lambda: "server2:close" in events)
+	await asyncio.sleep(0)
+	assert processes[0].is_alive()
+	assert processes[1].is_alive()
+	assert not any(event.startswith("web2") for event in events)
+	assert not run_task.done()
+	supervisor.shutdown.set()
+	assert await run_task == 130
 
 
 @pytest.mark.asyncio
@@ -562,10 +697,9 @@ async def test_vite_close_waits_for_process_exit_code(
 
 
 @pytest.mark.asyncio
-async def test_vite_close_without_exit_has_bounded_failure(
+async def test_vite_close_without_exit_waits_for_listen_or_shutdown(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
-	capsys: pytest.CaptureFixture[str],
 ) -> None:
 	supervisor = supervisor_shell(tmp_path)
 	events: list[str] = []
@@ -574,7 +708,6 @@ async def test_vite_close_without_exit_has_bounded_failure(
 		events,
 		[("server", "ready"), ("web", "ready")],
 	)
-	monkeypatch.setattr(reload_mod, "VITE_CLOSE_TIMEOUT", 0.02)
 
 	run_task = asyncio.create_task(supervisor.run())
 	await wait_until(lambda: "web1:ready" in events)
@@ -585,9 +718,19 @@ async def test_vite_close_without_exit_has_bounded_failure(
 			instance, "closed", 3, 5173
 		)
 	)
+	await asyncio.sleep(0.05)
+	assert not run_task.done()
 
-	assert await run_task == 1
-	assert "Web dev server stopped listening." in capsys.readouterr().out
+	supervisor._notify_vite_lifecycle(  # pyright: ignore[reportPrivateUsage]
+		reload_mod._ViteLifecycleEvent(  # pyright: ignore[reportPrivateUsage]
+			instance, "listening", 4, 5173
+		)
+	)
+	await asyncio.sleep(0.05)
+	assert not run_task.done()
+
+	supervisor.shutdown.set()
+	assert await run_task == 130
 
 
 @pytest.mark.asyncio
@@ -700,13 +843,6 @@ async def test_vite_lifecycle_endpoint_authenticates_and_validates() -> None:
 
 @pytest.mark.asyncio
 async def test_stale_lifecycle_events_cannot_retarget_relays(tmp_path: Path) -> None:
-	class RelaySpy:
-		def __init__(self) -> None:
-			self.target: tuple[str, int] | None = None
-
-		def set_target(self, host: str, port: int) -> None:
-			self.target = (host, port)
-
 	supervisor = supervisor_shell(tmp_path)
 	vite_relay = RelaySpy()
 	public_relay = RelaySpy()

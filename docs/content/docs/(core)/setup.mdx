@@ -90,7 +90,7 @@ Now you're ready to start your Pulse app:
 uv run pulse run app.py
 ```
 
-The `pulse run` command starts the Python and React Router servers. Pulse keeps the public port reserved while you work, starting with 8000 and choosing the first available port. When you save Python, Pulse restarts both servers and regenerates the routes without handing that port between processes. Vite stays on loopback behind the proxy in single-server mode, then reloads the browser when the new stack is ready. In-memory Pulse state resets. JavaScript, TypeScript, and CSS changes still use Vite's normal HMR.
+The `pulse run` command starts the Python and React Router servers. Pulse keeps the public port reserved while you work, starting with 8000 and choosing the first available port. When you save Python, Pulse starts a new stack and only then stops the previous one, so the public port never goes idle. Vite stays on loopback behind the proxy in single-server mode, then reloads the browser when the new stack is ready. In-memory Pulse state resets. JavaScript, TypeScript, and CSS changes still use Vite's normal HMR.
 
 Open the URL shown in your terminal (usually `http://localhost:8000`) and you should see "Hello Pulse" displayed in your browser!
 

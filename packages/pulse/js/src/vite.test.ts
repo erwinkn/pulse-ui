@@ -20,6 +20,7 @@ const ENV_NAMES = [
 	"PULSE_VITE_LIFECYCLE_URL",
 	"PULSE_VITE_LIFECYCLE_SECRET",
 	"PULSE_VITE_INSTANCE",
+	"PULSE_HMR_CLIENT_PORT",
 ] as const;
 const originalEnv = Object.fromEntries(
 	ENV_NAMES.map((name) => [name, process.env[name]]),
@@ -342,5 +343,88 @@ export default {
 			await close(callback.server);
 			await rm(root, { force: true, recursive: true });
 		}
+	});
+
+	it("suppresses closed events from a reused plugin with a new HTTP server", async () => {
+		const callback = await callbackServer();
+		const first = createHttpServer();
+		const second = createHttpServer();
+		const instance = setLifecycleEnv(callback.url);
+		try {
+			const plugin = pulseVitePlugin();
+			const configureServer = hook(plugin.configureServer);
+			configureServer.call({} as never, viteServer(first));
+			await listen(first);
+			await waitFor(() => callback.requests.length === 2);
+
+			configureServer.call({} as never, viteServer(second));
+			await listen(second);
+			const secondPort = (second.address() as AddressInfo).port;
+			await waitFor(() => callback.requests.length === 4);
+
+			await close(first);
+			await Bun.sleep(25);
+			expect(callback.requests.map(({ body }) => body.event)).toEqual([
+				"configured",
+				"listening",
+				"configured",
+				"listening",
+			]);
+
+			await close(second);
+			await waitFor(() => callback.requests.length === 5);
+			expect(callback.requests[4]?.body).toEqual({
+				event: "closed",
+				instance,
+				sequence: 5,
+				port: secondPort,
+			});
+		} finally {
+			if (first.listening) await close(first);
+			if (second.listening) await close(second);
+			await close(callback.server);
+		}
+	});
+
+	it("forces loopback ephemeral bind and HMR client port when supervised", () => {
+		process.env.PULSE_HMR_CLIENT_PORT = "8000";
+		setLifecycleEnv("http://127.0.0.1:1234/vite");
+		const plugin = pulseVitePlugin();
+		expect(
+			hook(plugin.config).call({} as never, {} as never, {} as never),
+		).toEqual({
+			server: {
+				host: "127.0.0.1",
+				port: 0,
+				strictPort: false,
+				hmr: { clientPort: 8000 },
+			},
+		});
+	});
+
+	it("merges Pulse HMR clientPort into the user's Vite hmr config", () => {
+		process.env.PULSE_HMR_CLIENT_PORT = "5173";
+		setLifecycleEnv("http://127.0.0.1:1234/vite");
+		const plugin = pulseVitePlugin();
+		expect(
+			hook(plugin.config).call(
+				{} as never,
+				{
+					server: { hmr: { protocol: "wss", host: "dev.example" } },
+				} as never,
+				{} as never,
+			),
+		).toEqual({
+			server: {
+				host: "127.0.0.1",
+				port: 0,
+				strictPort: false,
+				hmr: {
+					protocol: "wss",
+					host: "dev.example",
+					clientPort: 5173,
+				},
+			},
+		});
 	});
 });

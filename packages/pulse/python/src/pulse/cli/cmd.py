@@ -34,6 +34,7 @@ from pulse.cli.secrets import resolve_dev_secret
 from pulse.cli.uvicorn_log_config import get_log_config
 from pulse.env import (
 	ENV_PULSE_DISABLE_CODEGEN,
+	ENV_PULSE_HMR_CLIENT_PORT,
 	ENV_PULSE_HOST,
 	ENV_PULSE_PORT,
 	ENV_PULSE_REACT_SERVER_ADDRESS,
@@ -221,26 +222,23 @@ def run(
 		web_port = (
 			vite_port.port if vite_port is not None else find_available_port(5173)
 		)
-		vite_bind_port: int | None = None
-		if supervised_reload:
-			# Give Vite an explicit private port so a user-configured strictPort
-			# cannot collide with the relay's reservation. Released immediately;
-			# without --strictPort Vite still scans upward if it gets stolen.
-			private_reservation = reserve_port("127.0.0.1", 0, find_port=False)
-			vite_bind_port = private_reservation.port
-			private_reservation.close()
 		web_cmd = build_web_command(
 			web_root=web_root,
 			extra_args=(
 				[*web_args, "--host", "127.0.0.1"] if supervised_reload else web_args
 			),
-			port=vite_bind_port if supervised_reload else web_port,
+			# The plugin binds port 0 when supervised. Passing a CLI --port would
+			# override that and reintroduce a reserve-and-release race.
+			port=None if supervised_reload else web_port,
 			strict_port=not supervised_reload,
 			mode=app_instance.env,
 			ready_pattern=None if supervised_reload else r"localhost:\d+",
 			on_ready=mark_web_ready,
 			plain=plain,
 		)
+		if supervised_reload:
+			hmr_port = port if is_single_server else web_port
+			web_cmd.env[ENV_PULSE_HMR_CLIENT_PORT] = str(hmr_port)
 		if not supervised_reload:
 			commands.append(web_cmd)
 		# Set env var so app can read the React server address (only used in single-server mode)

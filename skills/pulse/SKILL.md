@@ -34,7 +34,7 @@ app = ps.App([ps.Route("/", App)])
 
 `pulse run app.py` → dev server on `:8000`
 
-Pulse owns Python development restarts. Its supervisor retains the first available public port from `:8000` and forwards it to replaceable Uvicorn workers. A Python change stops Vite and Uvicorn, then a fresh backend worker regenerates routes. In default single-server mode Vite stays on loopback behind the Uvicorn proxy; it is not publicly exposed on `:5173`. The browser reloads and in-memory Pulse state resets. Frontend-only JS/TS/CSS changes remain Vite HMR.
+Pulse owns Python development restarts. Its supervisor retains the first available public port from `:8000` (and the first available Vite relay port from `:5173`) and forwards them to replaceable workers. A Python change starts a fresh backend worker to regenerate routes, then stops the previous stack. In default single-server mode Vite stays on loopback behind the Uvicorn proxy; it is not publicly exposed on `:5173`. The browser reloads and in-memory Pulse state resets. Frontend-only JS/TS/CSS changes remain Vite HMR.
 
 Supervised reload requires `pulseVitePlugin()` from `pulse-ui-client/vite` in the Vite config's `plugins` array. The plugin reports Vite's listening lifecycle directly; do not infer readiness from log output.
 

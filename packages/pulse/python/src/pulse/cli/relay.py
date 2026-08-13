@@ -194,12 +194,14 @@ class TcpRelay:
 					self._copy(target_reader, client_writer)
 				)
 				pipes = (upstream, downstream)
-				done, pending = await asyncio.wait(
-					pipes, return_when=asyncio.FIRST_COMPLETED
-				)
-				for pipe in pending:
-					pipe.cancel()
-				await asyncio.gather(*done, *pending, return_exceptions=True)
+				try:
+					await asyncio.gather(*pipes)
+				except OSError:
+					pass
+				finally:
+					for pipe in pipes:
+						pipe.cancel()
+					await asyncio.gather(*pipes, return_exceptions=True)
 			finally:
 				target_writer.close()
 				with contextlib.suppress(OSError):
@@ -214,6 +216,8 @@ class TcpRelay:
 	async def _wait_for_target(self) -> tuple[str, int] | None:
 		while not self._closed and self._target is None:
 			await self._target_set.wait()
+			if self._target is None and not self._closed and self._target_set.is_set():
+				self._target_set.clear()
 		if self._closed:
 			return None
 		return self._target

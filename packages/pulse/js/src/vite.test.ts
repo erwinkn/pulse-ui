@@ -389,7 +389,9 @@ export default {
 		process.env.PULSE_HMR_CLIENT_PORT = "8000";
 		setLifecycleEnv("http://127.0.0.1:1234/vite");
 		const plugin = pulseVitePlugin();
-		expect(hook(plugin.config)({} as never, {} as never)).toEqual({
+		expect(
+			hook(plugin.config).call({} as never, {} as never, {} as never),
+		).toEqual({
 			server: {
 				host: "127.0.0.1",
 				port: 0,

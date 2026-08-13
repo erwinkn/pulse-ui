@@ -197,6 +197,7 @@ export function pulseVitePlugin(): Plugin {
 	return {
 		name: "pulse:lifecycle",
 		apply: "serve",
+		enforce: "post",
 		config() {
 			if (!lifecycle) return;
 			const clientPort = hmrClientPort();

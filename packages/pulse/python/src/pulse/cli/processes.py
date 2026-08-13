@@ -275,11 +275,17 @@ class ManagedProcess:
 		if self.process.stdin is not None:
 			with contextlib.suppress(Exception):
 				self.process.stdin.close()
+		# Wait for death and drain stdout before closing the pipe, otherwise a
+		# traceback printed as the child exits can be swallowed.
+		self._wait_thread.join(timeout=1)
+		self._output_thread.join(timeout=1)
+		if self._output_thread.is_alive() and self.process.stdout is not None:
+			with contextlib.suppress(Exception):
+				self.process.stdout.close()
+			self._output_thread.join(timeout=1)
 		if self.process.stdout is not None:
 			with contextlib.suppress(Exception):
 				self.process.stdout.close()
-		self._output_thread.join(timeout=1)
-		self._wait_thread.join(timeout=1)
 		if self._job is not None:
 			self._job.close()
 			self._job = None

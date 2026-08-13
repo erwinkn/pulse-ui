@@ -71,7 +71,7 @@ class DevServer(uvicorn.Server):
 			port: object = address[1]
 			if not isinstance(port, int) or isinstance(port, bool) or port <= 0:
 				raise RuntimeError("Uvicorn reported an invalid TCP port")
-			report_lifecycle("ready", port=port)
+			await asyncio.to_thread(report_lifecycle, "ready", port=port)
 
 
 def report_lifecycle(

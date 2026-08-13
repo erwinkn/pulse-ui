@@ -50,7 +50,7 @@ pulse run app.py --address 0.0.0.0 --port 8080
 pulse run app.py --server-only --react-server-address http://localhost:5173
 ```
 
-In dev mode, `pulse run` watches Python files and restarts the development stack on each save. It stops Vite and Uvicorn, then starts a fresh backend worker to regenerate the routes. The supervisor keeps the selected public port for its entire lifetime and forwards it to each new Uvicorn worker, avoiding port handoff races. With `--find-port`, it binds the first available port starting at `--port` (8000 by default).
+In dev mode, `pulse run` watches Python files and restarts the development stack on each save. The supervisor keeps the selected public port for its entire lifetime and forwards it to each new Uvicorn worker. A Python save starts the new worker (and Vite) before stopping the old ones, so the public port stays live. With `--find-port` (the default, same as `pulse run` on previous releases), it binds the first available port starting at `--port` (8000 by default) and does the same for Vite's loopback relay from 5173.
 
 In the default single-server mode, Vite listens only on loopback behind Uvicorn's proxy; port 5173 is not exposed publicly. Pulse starts Vite first and Uvicorn last, then Vite's browser client reconnects and reloads the page. Pulse WebSocket connections and in-memory application state do not survive the restart.
 

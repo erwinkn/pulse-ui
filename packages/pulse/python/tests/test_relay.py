@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import socket
 
-import pulse.cli.relay as relay_mod
 import pytest
 from pulse.cli.relay import TcpRelay, reserve_port
 
@@ -48,10 +47,7 @@ def test_ephemeral_reservation_reports_actual_port() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tcp_relay_keeps_its_port_while_retargeting(
-	monkeypatch: pytest.MonkeyPatch,
-) -> None:
-	monkeypatch.setattr(relay_mod, "RELAY_TARGET_WAIT", 0.05)
+async def test_tcp_relay_keeps_its_port_while_retargeting() -> None:
 	loop = asyncio.get_running_loop()
 	loop_errors: list[dict[str, object]] = []
 	previous_handler = loop.get_exception_handler()
@@ -102,11 +98,19 @@ async def test_tcp_relay_keeps_its_port_while_retargeting(
 		await disconnected.wait_closed()
 		await asyncio.sleep(0.01)
 		relay.clear_target()
-		reader, writer = await asyncio.open_connection("127.0.0.1", relay.port)
-		assert await reader.read() == b""
-		writer.close()
-		await writer.wait_closed()
+		held_reader, held_writer = await asyncio.open_connection(
+			"127.0.0.1", relay.port
+		)
+		held_writer.write(b"held")
+		await held_writer.drain()
+		held_writer.write_eof()
+		held = asyncio.create_task(held_reader.read())
+		await asyncio.sleep(0.05)
+		assert not held.done()
 		relay.set_target("127.0.0.1", second_port)
+		assert await asyncio.wait_for(held, timeout=2) == b"second:held"
+		held_writer.close()
+		await held_writer.wait_closed()
 		assert await request(relay.port, b"two") == b"second:two"
 	finally:
 		await relay.close()

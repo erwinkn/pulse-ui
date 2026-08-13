@@ -5,7 +5,9 @@ import type { Logger, Plugin } from "vite";
 const URL_ENV = "PULSE_VITE_LIFECYCLE_URL";
 const SECRET_ENV = "PULSE_VITE_LIFECYCLE_SECRET";
 const INSTANCE_ENV = "PULSE_VITE_INSTANCE";
+const HMR_CLIENT_PORT_ENV = "PULSE_HMR_CLIENT_PORT";
 const STATE_KEY = Symbol.for("pulse.vite.lifecycle");
+const NOTIFY_TIMEOUT_MS = 5000;
 
 interface LifecycleConfig {
 	url: string;
@@ -132,6 +134,9 @@ function notify(
 				});
 			},
 		);
+		notification.setTimeout(NOTIFY_TIMEOUT_MS, () => {
+			notification.destroy(new Error("supervisor timed out"));
+		});
 		notification.once("error", reject);
 		notification.end(body);
 	});
@@ -158,8 +163,10 @@ function watchSupervisor() {
 	if (lifecycleState.watchingSupervisor) return;
 	// The supervisor always feeds us stdin through a pipe. Anything else
 	// (a TTY, /dev/null under a test runner) would hit EOF spuriously.
+	// Windows anonymous pipes often report as sockets rather than FIFOs.
 	try {
-		if (!fstatSync(0).isFIFO()) return;
+		const stat = fstatSync(0);
+		if (!stat.isFIFO() && !stat.isSocket()) return;
 	} catch {
 		return;
 	}
@@ -175,14 +182,33 @@ function watchSupervisor() {
 	process.stdin.unref();
 }
 
+function hmrClientPort(): number | undefined {
+	const raw = process.env[HMR_CLIENT_PORT_ENV];
+	if (raw === undefined || raw.trim() === "") return;
+	const port = Number(raw);
+	if (!Number.isInteger(port) || port <= 0) return;
+	return port;
+}
+
 export function pulseVitePlugin(): Plugin {
 	const lifecycle = lifecycleConfig();
 	const state = lifecycle ? stateFor(lifecycle.instance) : undefined;
-	let generation = 0;
 
 	return {
 		name: "pulse:lifecycle",
 		apply: "serve",
+		config() {
+			if (!lifecycle) return;
+			const clientPort = hmrClientPort();
+			return {
+				server: {
+					host: "127.0.0.1",
+					port: 0,
+					strictPort: false,
+					...(clientPort === undefined ? {} : { hmr: { clientPort } }),
+				},
+			};
+		},
 		configureServer(server) {
 			if (!lifecycle || !state) return;
 			watchSupervisor();
@@ -191,17 +217,15 @@ export function pulseVitePlugin(): Plugin {
 				throw new Error("Pulse lifecycle requires Vite to own an HTTP server");
 			}
 
-			if (generation === 0) generation = ++state.nextGeneration;
-			state.latestGeneration = generation;
-			// Report "configured" before the server listens so the supervisor can
-			// tell a missing plugin apart from a slow Vite start.
 			enqueue(state, lifecycle, "configured", undefined, server.config.logger);
 			const existing = state.registrations.get(httpServer);
 			if (existing) {
-				existing.generation = generation;
+				existing.generation = state.latestGeneration;
 				return;
 			}
 
+			const generation = ++state.nextGeneration;
+			state.latestGeneration = generation;
 			const registration: ServerRegistration = {
 				generation,
 				listening: false,

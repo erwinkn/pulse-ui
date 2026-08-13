@@ -154,7 +154,7 @@ def active_lock_info(
 def interrupt_active_dev_server(
 	web_root: Path,
 	*,
-	timeout: float = 5.0,
+	timeout: float = 15.0,
 	filename: str = DEFAULT_LOCK_FILENAME,
 ) -> LockInfo | None:
 	"""Interrupt the live Pulse dev server for a web root, if one exists."""

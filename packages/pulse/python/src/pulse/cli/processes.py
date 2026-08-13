@@ -185,15 +185,12 @@ class ManagedProcess:
 		kwargs: dict[str, object] = {}
 		if windows:
 			creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+			launcher = os.path.join(os.path.dirname(__file__), "_windows_launcher.py")
+			args = [sys.executable, "-I", launcher, *spec.args]
 			if pass_fds:
 				for fd in pass_fds:
 					os.set_inheritable(fd, True)
 				kwargs["close_fds"] = False
-			else:
-				launcher = os.path.join(
-					os.path.dirname(__file__), "_windows_launcher.py"
-				)
-				args = [sys.executable, "-I", launcher, *spec.args]
 		else:
 			kwargs["start_new_session"] = True
 			if pass_fds:
@@ -214,11 +211,10 @@ class ManagedProcess:
 		try:
 			if windows:
 				job = _WindowsJob(process)
-				if not pass_fds:
-					if process.stdin is None:
-						raise RuntimeError("launcher stdin is not available")
-					process.stdin.write("\0")
-					process.stdin.flush()
+				if process.stdin is None:
+					raise RuntimeError("launcher stdin is not available")
+				process.stdin.write("\0")
+				process.stdin.flush()
 		except BaseException:
 			if job is not None:
 				job.close()

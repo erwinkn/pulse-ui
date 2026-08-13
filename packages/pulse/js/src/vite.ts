@@ -1,8 +1,8 @@
-import { request as httpRequest } from "node:http";
+import { writeSync } from "node:fs";
 import type { Plugin, ViteDevServer } from "vite";
 
 const HMR_CLIENT_PORT_ENV = "PULSE_HMR_CLIENT_PORT";
-const READY_URL_ENV = "PULSE_VITE_READY_URL";
+const READY_FD_ENV = "PULSE_VITE_READY_FD";
 
 function hmrClientPort(): number | undefined {
 	const raw = process.env[HMR_CLIENT_PORT_ENV];
@@ -12,50 +12,20 @@ function hmrClientPort(): number | undefined {
 	return port;
 }
 
-function readyUrl(): string | undefined {
-	const raw = process.env[READY_URL_ENV];
+function readyFd(): number | undefined {
+	const raw = process.env[READY_FD_ENV];
 	if (raw === undefined || raw.trim() === "") return;
-	let url: URL;
-	try {
-		url = new URL(raw);
-	} catch {
-		throw new Error(`${READY_URL_ENV} must be an HTTP loopback URL`);
+	const fd = Number(raw);
+	if (!Number.isInteger(fd) || fd < 0) {
+		throw new Error(
+			`${READY_FD_ENV} must be a non-negative integer, got ${JSON.stringify(raw)}`,
+		);
 	}
-	if (url.protocol !== "http:" || url.username || url.password) {
-		throw new Error(`${READY_URL_ENV} must be an HTTP loopback URL`);
-	}
-	if (!["127.0.0.1", "localhost", "::1"].includes(url.hostname)) {
-		throw new Error(`${READY_URL_ENV} must be an HTTP loopback URL`);
-	}
-	return raw.replace(/\/$/, "");
-}
-
-function ping(base: string, event: "configured" | "listening", error: (msg: string) => void) {
-	const url = new URL(`${base}/${event}`);
-	const req = httpRequest(
-		{
-			hostname: url.hostname,
-			port: url.port,
-			path: `${url.pathname}${url.search}`,
-			method: "POST",
-		},
-		(response) => {
-			response.resume();
-			if (response.statusCode !== undefined && response.statusCode >= 400) {
-				error(
-					`Pulse could not report Vite ${event}: supervisor returned HTTP ${response.statusCode}`,
-				);
-			}
-		},
-	);
-	req.on("error", (cause) => {
-		error(`Pulse could not report Vite ${event}: ${cause.message}`);
-	});
-	req.end();
+	return fd;
 }
 
 export function pulseVitePlugin(): Plugin {
-	const ready = readyUrl();
+	const fd = readyFd();
 	return {
 		name: "pulse",
 		apply: "serve",
@@ -76,12 +46,9 @@ export function pulseVitePlugin(): Plugin {
 			};
 		},
 		configureServer(server) {
-			if (ready === undefined) return;
-			const logError = (message: string) => {
-				server.config.logger.error(message);
-			};
-			ping(ready, "configured", logError);
-			bindListening(server, () => ping(ready, "listening", logError));
+			if (fd === undefined) return;
+			writeSync(fd, "c");
+			bindListening(server, () => writeSync(fd, "1"));
 		},
 	};
 }

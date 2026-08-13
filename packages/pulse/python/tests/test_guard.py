@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
@@ -37,3 +38,27 @@ def test_guard_kills_child_when_stdin_closes(tmp_path: Path) -> None:
 	assert process.wait(timeout=5) != 0
 	time.sleep(0.2)
 	assert not still.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX pass_fds")
+def test_guard_child_inherits_passed_fds() -> None:
+	ready_r, ready_w = os.pipe()
+	os.set_inheritable(ready_w, True)
+	child = f"import os; os.write({ready_w}, b'ok')"
+	process = subprocess.Popen(
+		[sys.executable, "-m", "pulse.cli.guard", "--", sys.executable, "-c", child],
+		stdin=subprocess.PIPE,
+		stdout=subprocess.PIPE,
+		stderr=subprocess.PIPE,
+		pass_fds=(ready_w,),
+		start_new_session=True,
+	)
+	os.close(ready_w)
+	try:
+		assert os.read(ready_r, 2) == b"ok"
+		assert process.wait(timeout=5) == 0
+	finally:
+		os.close(ready_r)
+		if process.poll() is None:
+			process.kill()
+			process.wait(timeout=5)

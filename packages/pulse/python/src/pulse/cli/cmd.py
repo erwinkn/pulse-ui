@@ -311,7 +311,6 @@ def run(
 						registered_sources=registered_sources,
 						tag_mode=logger.get_tag_mode(),
 						listeners=public_port.sockets,
-						web_first=is_single_server,
 					).run()
 				)
 			else:

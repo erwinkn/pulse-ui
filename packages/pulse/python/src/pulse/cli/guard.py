@@ -17,7 +17,7 @@ def main() -> int:
 	args = sys.argv[sys.argv.index("--") + 1 :]
 	if not args:
 		return 2
-	process = subprocess.Popen(args)
+	process = subprocess.Popen(args, close_fds=False)
 
 	def on_eof() -> None:
 		sys.stdin.read()

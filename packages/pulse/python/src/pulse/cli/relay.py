@@ -8,9 +8,10 @@ import socket
 from dataclasses import dataclass
 from typing import final
 
-# How long an accepted connection waits for a relay target during a restart
-# window before giving up, so reloads look seamless instead of dropping.
-RELAY_TARGET_WAIT = 5.0
+# How long the relay waits for the private backend to accept a connection
+# after a target is selected. Waiters for a missing target stay parked until
+# set_target or close — first start and failed imports should not drop clients.
+RELAY_CONNECT_TIMEOUT = 2.0
 
 
 @dataclass(slots=True)
@@ -121,12 +122,19 @@ class TcpRelay:
 		self._connections: set[asyncio.Task[None]] = set()
 		self._target: tuple[str, int] | None = None
 		self._target_set = asyncio.Event()
+		self._closed = False
 
 	@property
 	def port(self) -> int:
 		return self._reservation.port
 
+	@property
+	def target(self) -> tuple[str, int] | None:
+		return self._target
+
 	def set_target(self, host: str, port: int) -> None:
+		if self._closed:
+			return
 		self._target = (host, port)
 		self._target_set.set()
 
@@ -143,7 +151,9 @@ class TcpRelay:
 			)
 
 	async def close(self) -> None:
-		self.clear_target()
+		self._closed = True
+		self._target = None
+		self._target_set.set()
 		for server in self._servers:
 			server.close()
 		for server in self._servers:
@@ -164,12 +174,19 @@ class TcpRelay:
 		if task is not None:
 			self._connections.add(task)
 		try:
+			sock = client_writer.get_extra_info("socket")
+			if sock is not None:
+				with contextlib.suppress(OSError):
+					sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
 			target = await self._wait_for_target()
 			if target is None:
 				return
 			try:
-				target_reader, target_writer = await asyncio.open_connection(*target)
-			except OSError:
+				target_reader, target_writer = await asyncio.wait_for(
+					asyncio.open_connection(*target),
+					timeout=RELAY_CONNECT_TIMEOUT,
+				)
+			except (OSError, TimeoutError):
 				return
 			try:
 				upstream = asyncio.create_task(self._copy(client_reader, target_writer))
@@ -177,14 +194,12 @@ class TcpRelay:
 					self._copy(target_reader, client_writer)
 				)
 				pipes = (upstream, downstream)
-				try:
-					await asyncio.gather(*pipes)
-				except OSError:
-					pass
-				finally:
-					for pipe in pipes:
-						pipe.cancel()
-					await asyncio.gather(*pipes, return_exceptions=True)
+				done, pending = await asyncio.wait(
+					pipes, return_when=asyncio.FIRST_COMPLETED
+				)
+				for pipe in pending:
+					pipe.cancel()
+				await asyncio.gather(*done, *pending, return_exceptions=True)
 			finally:
 				target_writer.close()
 				with contextlib.suppress(OSError):
@@ -197,11 +212,9 @@ class TcpRelay:
 				self._connections.discard(task)
 
 	async def _wait_for_target(self) -> tuple[str, int] | None:
-		try:
-			async with asyncio.timeout(RELAY_TARGET_WAIT):
-				while self._target is None:
-					await self._target_set.wait()
-		except TimeoutError:
+		while not self._closed and self._target is None:
+			await self._target_set.wait()
+		if self._closed:
 			return None
 		return self._target
 

@@ -306,7 +306,7 @@ def test_new_external_asset_adds_its_parent_watch_root(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_full_restart_stops_both_before_starting_backend(
+async def test_reload_starts_new_stack_before_stopping_old(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 	supervisor = supervisor_shell(tmp_path)
@@ -333,11 +333,36 @@ async def test_full_restart_stops_both_before_starting_backend(
 	supervisor.shutdown.set()
 	assert await run_task == 130
 
+	assert events.index("server2:start") < events.index("server1:stop")
+	assert events.index("web2:ready") < events.index("server1:stop")
 	assert events.index("web1:stop") < events.index("server1:stop")
-	assert events.index("web1:exit") < events.index("server1:stop")
-	assert events.index("web1:close") < events.index("server2:start")
-	assert events.index("server1:close") < events.index("server2:start")
 	assert events.index("server2:accepted") < events.index("web2:start")
+
+
+@pytest.mark.asyncio
+async def test_failed_reload_keeps_the_previous_stack(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	processes = install_process_script(
+		monkeypatch,
+		events,
+		[("server", "ready"), ("web", "ready"), ("server", "fail")],
+	)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "web1:ready" in events)
+	supervisor.desired += 1
+	supervisor.changed.set()
+	await wait_until(lambda: "server2:close" in events)
+	await asyncio.sleep(0)
+	assert processes[0].is_alive()
+	assert processes[1].is_alive()
+	assert not any(event.startswith("web2") for event in events)
+	assert not run_task.done()
+	supervisor.shutdown.set()
+	assert await run_task == 130
 
 
 @pytest.mark.asyncio
@@ -562,10 +587,9 @@ async def test_vite_close_waits_for_process_exit_code(
 
 
 @pytest.mark.asyncio
-async def test_vite_close_without_exit_has_bounded_failure(
+async def test_vite_close_without_exit_waits_for_listen_or_shutdown(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
-	capsys: pytest.CaptureFixture[str],
 ) -> None:
 	supervisor = supervisor_shell(tmp_path)
 	events: list[str] = []
@@ -574,7 +598,6 @@ async def test_vite_close_without_exit_has_bounded_failure(
 		events,
 		[("server", "ready"), ("web", "ready")],
 	)
-	monkeypatch.setattr(reload_mod, "VITE_CLOSE_TIMEOUT", 0.02)
 
 	run_task = asyncio.create_task(supervisor.run())
 	await wait_until(lambda: "web1:ready" in events)
@@ -585,9 +608,19 @@ async def test_vite_close_without_exit_has_bounded_failure(
 			instance, "closed", 3, 5173
 		)
 	)
+	await asyncio.sleep(0.05)
+	assert not run_task.done()
 
-	assert await run_task == 1
-	assert "Web dev server stopped listening." in capsys.readouterr().out
+	supervisor._notify_vite_lifecycle(  # pyright: ignore[reportPrivateUsage]
+		reload_mod._ViteLifecycleEvent(  # pyright: ignore[reportPrivateUsage]
+			instance, "listening", 4, 5173
+		)
+	)
+	await asyncio.sleep(0.05)
+	assert not run_task.done()
+
+	supervisor.shutdown.set()
+	assert await run_task == 130
 
 
 @pytest.mark.asyncio

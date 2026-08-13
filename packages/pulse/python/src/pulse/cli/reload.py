@@ -50,7 +50,7 @@ PYTHON_EXTENSIONS = frozenset({".py", ".pyx", ".pyd"})
 STOP_TIMEOUT = PROCESS_STOP_TIMEOUT
 KILL_TIMEOUT = PROCESS_KILL_TIMEOUT
 VITE_START_TIMEOUT = 15.0
-VITE_CLOSE_TIMEOUT = 2.0
+LIFECYCLE_MAX_BODY = 2 * 1024 * 1024
 
 
 @dataclass(slots=True)
@@ -109,7 +109,6 @@ class _ProcessState:
 	prepared: bool = False
 	ready: bool = False
 	vite_sequence: int = 0
-	vite_close_deadline: float | None = None
 	port: int | None = None
 	sources: list[str] = field(default_factory=list)
 
@@ -119,11 +118,14 @@ class _ProcessState:
 		return self.ready
 
 
-@dataclass(frozen=True, slots=True)
-class _OutputEvent:
-	token: object
-	spec: CommandSpec
-	line: str
+@dataclass(slots=True)
+class _Stack:
+	backend: ManagedProcess
+	backend_state: _ProcessState
+	backend_instance: str
+	web: ManagedProcess | None = None
+	web_state: _ProcessState | None = None
+	web_instance: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,9 +151,7 @@ class _BackendLifecycleEvent:
 	port: int | None
 
 
-type _SupervisorEvent = (
-	_OutputEvent | _ExitEvent | _ViteLifecycleEvent | _BackendLifecycleEvent
-)
+type _SupervisorEvent = _ExitEvent | _ViteLifecycleEvent | _BackendLifecycleEvent
 
 
 @final
@@ -168,7 +168,7 @@ class _LifecycleServer:
 		self.url: str | None = None
 
 	async def start(self) -> None:
-		app = aiohttp_web.Application(client_max_size=4096)
+		app = aiohttp_web.Application(client_max_size=LIFECYCLE_MAX_BODY)
 		app.router.add_post("/vite", self._handle_vite)
 		app.router.add_post("/backend", self._handle_backend)
 		self._runner = aiohttp_web.AppRunner(app, access_log=None)
@@ -177,7 +177,7 @@ class _LifecycleServer:
 		await site.start()
 		addresses = self._runner.addresses
 		if len(addresses) != 1:
-			raise RuntimeError("Expected one Vite lifecycle listener")
+			raise RuntimeError("Expected one lifecycle listener")
 		self.url = f"http://127.0.0.1:{addresses[0][1]}/vite"
 
 	async def close(self) -> None:
@@ -302,8 +302,10 @@ class DevSupervisor:
 		self.desired = 0
 		self.changed = asyncio.Event()
 		self.shutdown = asyncio.Event()
-		self.backend: ManagedProcess | None = None
-		self.web: ManagedProcess | None = None
+		self._kill_now = asyncio.Event()
+		self._interrupt_count = 0
+		self._current: _Stack | None = None
+		self._starting: _Stack | None = None
 		self._events: asyncio.Queue[_SupervisorEvent] = asyncio.Queue()
 		self._states: dict[str, _ProcessState] = {}
 		self._backend_instance: str | None = None
@@ -314,12 +316,23 @@ class DevSupervisor:
 		)
 		self._add_watch_sources([str(source) for source in registered_sources])
 
+	@property
+	def backend(self) -> ManagedProcess | None:
+		stack = self._starting or self._current
+		return None if stack is None else stack.backend
+
+	@property
+	def web(self) -> ManagedProcess | None:
+		stack = self._starting or self._current
+		return None if stack is None else stack.web
+
 	async def run(self) -> int:
 		loop = asyncio.get_running_loop()
 		previous_handlers: dict[int, object] = {}
 
 		def request_shutdown(_signum: int, _frame: object) -> None:
-			loop.call_soon_threadsafe(self.shutdown.set)
+			self._interrupt_count += 1
+			loop.call_soon_threadsafe(self._handle_interrupt)
 
 		for signum in (signal.SIGINT, signal.SIGTERM):
 			previous_handlers[signum] = signal.signal(signum, request_shutdown)
@@ -340,22 +353,60 @@ class DevSupervisor:
 					break
 				revision = self.desired
 				self.changed.clear()
-				await self._stop_stack()
-				if self.shutdown.is_set():
-					break
 				if self.desired != revision:
 					self.changed.set()
 					continue
 
-				result, watch_task = await self._run_stack(revision, watch_task)
+				result, watch_task = await self._start_stack(revision, watch_task)
+				if result is _StackResult.CHANGED:
+					await self._stop_stack(self._starting)
+					self._starting = None
+					self.changed.set()
+					continue
+				if result is _StackResult.SHUTDOWN:
+					break
+				if result is _StackResult.WEB_FAILED:
+					code = self._failed_code(self._starting, web=True)
+					await self._stop_stack(self._starting)
+					self._starting = None
+					if self._current is not None:
+						print(
+							"Reload error: web dev server failed to start. "
+							+ "Keeping the previous stack. Waiting for changes...",
+							flush=True,
+						)
+						continue
+					if code is None:
+						print("Web dev server stopped listening.", flush=True)
+					else:
+						print(f"Web dev server exited with code {code}.", flush=True)
+					return code or 1
+
+				if result is _StackResult.BACKEND_FAILED:
+					code = self._failed_code(self._starting, web=False)
+					await self._stop_stack(self._starting)
+					self._starting = None
+					print(
+						f"Reload error: backend exited with code {code}. "
+						+ "Waiting for changes to restart...",
+						flush=True,
+					)
+					continue
+
+				old = self._current
+				self._current = self._starting
+				self._starting = None
+				await self._stop_stack(old)
+
+				result = await self._wait_while_running(revision)
 				if result is _StackResult.CHANGED:
 					self.changed.set()
 					continue
 				if result is _StackResult.SHUTDOWN:
 					break
 				if result is _StackResult.WEB_FAILED:
-					assert self.web is not None
-					code = self.web.returncode
+					assert self._current is not None
+					code = self._current.web.returncode if self._current.web else None
 					if code is None:
 						print("Web dev server stopped listening.", flush=True)
 					else:
@@ -363,21 +414,32 @@ class DevSupervisor:
 					return code or 1
 
 				assert result is _StackResult.BACKEND_FAILED
-				assert self.backend is not None
-				code = self.backend.returncode
+				code = self._current.backend.returncode if self._current else None
 				print(
 					f"Reload error: backend exited with code {code}. "
 					+ "Waiting for changes to restart...",
 					flush=True,
 				)
-				await self._stop_stack()
+				if self.public_relay is not None:
+					self.public_relay.clear_target()
+				if self.vite_relay is not None:
+					self.vite_relay.clear_target()
+				await self._stop_stack(self._current)
+				self._current = None
 			return 130 if self.shutdown.is_set() else 0
 		finally:
 			if watch_task is not None:
 				watch_task.cancel()
 				with contextlib.suppress(asyncio.CancelledError):
 					await watch_task
-			await self._stop_stack()
+			if self.public_relay is not None:
+				self.public_relay.clear_target()
+			if self.vite_relay is not None:
+				self.vite_relay.clear_target()
+			await self._stop_stack(self._starting)
+			self._starting = None
+			await self._stop_stack(self._current)
+			self._current = None
 			if self.vite_relay is not None:
 				await self.vite_relay.close()
 			if self.public_relay is not None:
@@ -386,20 +448,45 @@ class DevSupervisor:
 			for signum, handler in previous_handlers.items():
 				signal.signal(signum, cast(Any, handler))
 
-	async def _run_stack(
+	def _handle_interrupt(self) -> None:
+		self.shutdown.set()
+		if self._interrupt_count >= 2:
+			self._kill_now.set()
+			self._kill_all_trees()
+
+	def _kill_all_trees(self) -> None:
+		for stack in (self._starting, self._current):
+			if stack is None:
+				continue
+			for process in (stack.web, stack.backend):
+				if process is not None:
+					process.kill_tree()
+
+	@staticmethod
+	def _failed_code(stack: _Stack | None, *, web: bool) -> int | None:
+		if stack is None:
+			return None
+		process = stack.web if web else stack.backend
+		return None if process is None else process.returncode
+
+	async def _start_stack(
 		self,
 		revision: int,
 		watch_task: asyncio.Task[None],
-	) -> tuple[_StackResult, asyncio.Task[None]]:
-		self._backend_instance = self._lifecycle.configure_backend(
-			self.backend_spec.env
+	) -> tuple[_StackResult | None, asyncio.Task[None]]:
+		backend_instance = self._lifecycle.configure_backend(self.backend_spec.env)
+		backend, backend_state = self._start(self.backend_spec)
+		self._backend_instance = backend_instance
+		self._starting = _Stack(
+			backend=backend,
+			backend_state=backend_state,
+			backend_instance=backend_instance,
 		)
-		self.backend, backend_state = self._start(self.backend_spec)
 		result = await self._wait_until(
 			backend_state,
 			revision,
 			_Marker.PREPARED,
-			((self.backend, backend_state, _StackResult.BACKEND_FAILED),),
+			self._live_processes(self._starting),
 		)
 		if result is not None:
 			return result, watch_task
@@ -413,7 +500,7 @@ class DevSupervisor:
 				return result, watch_task
 
 		try:
-			self.backend.send_line("serve")
+			backend.send_line("serve")
 		except OSError:
 			# The worker died between "prepared" and this write; its exit event
 			# may still be in flight.
@@ -422,7 +509,7 @@ class DevSupervisor:
 			backend_state,
 			revision,
 			_Marker.READY,
-			self._live_processes(),
+			self._live_processes(self._starting),
 		)
 		if result is not None:
 			return result, watch_task
@@ -434,12 +521,17 @@ class DevSupervisor:
 			if result is not None:
 				return result, watch_task
 
-		return await self._wait_while_running(revision), watch_task
+		return None, watch_task
 
 	async def _start_web(self, revision: int) -> _StackResult | None:
 		assert self.web_spec is not None
-		self._vite_instance = self._lifecycle.configure_vite(self.web_spec.env)
-		self.web, state = self._start(self.web_spec)
+		assert self._starting is not None
+		vite_instance = self._lifecycle.configure_vite(self.web_spec.env)
+		process, state = self._start(self.web_spec)
+		self._vite_instance = vite_instance
+		self._starting.web = process
+		self._starting.web_state = state
+		self._starting.web_instance = vite_instance
 		# The plugin reports "configured" as soon as Vite resolves its config, so
 		# only its absence is bounded by a timeout. A configured server may take
 		# arbitrarily long to listen (cold caches, slow machines); that wait is
@@ -450,7 +542,7 @@ class DevSupervisor:
 					state,
 					revision,
 					_Marker.PREPARED,
-					self._live_processes(),
+					self._live_processes(self._starting),
 				),
 				timeout=VITE_START_TIMEOUT,
 			)
@@ -468,7 +560,7 @@ class DevSupervisor:
 			state,
 			revision,
 			_Marker.READY,
-			self._live_processes(),
+			self._live_processes(self._starting),
 		)
 		if result is None and self.web_spec.on_ready is not None:
 			self.web_spec.on_ready()
@@ -490,23 +582,23 @@ class DevSupervisor:
 
 	async def _wait_while_running(self, revision: int) -> _StackResult:
 		while True:
-			if result := await self._terminal_result(revision, self._live_processes()):
+			if result := await self._terminal_result(
+				revision, self._live_processes(self._current)
+			):
 				return result
 			await self._wait_for_event()
 
 	def _live_processes(
 		self,
+		stack: _Stack | None,
 	) -> tuple[tuple[ManagedProcess, _ProcessState, _StackResult], ...]:
-		processes: list[tuple[ManagedProcess, _ProcessState, _StackResult]] = []
-		if self.backend is not None:
-			state = self._states.get(self.backend_spec.name)
-			if state is not None:
-				processes.append((self.backend, state, _StackResult.BACKEND_FAILED))
-		if self.web is not None:
-			assert self.web_spec is not None
-			state = self._states.get(self.web_spec.name)
-			if state is not None:
-				processes.append((self.web, state, _StackResult.WEB_FAILED))
+		if stack is None:
+			return ()
+		processes: list[tuple[ManagedProcess, _ProcessState, _StackResult]] = [
+			(stack.backend, stack.backend_state, _StackResult.BACKEND_FAILED)
+		]
+		if stack.web is not None and stack.web_state is not None:
+			processes.append((stack.web, stack.web_state, _StackResult.WEB_FAILED))
 		return tuple(processes)
 
 	async def _terminal_result(
@@ -522,14 +614,6 @@ class DevSupervisor:
 			if state.exited.done() or not process.is_alive():
 				await self._drain_events()
 				return result
-		if self.web_spec is not None:
-			web_state = self._states.get(self.web_spec.name)
-			if (
-				web_state is not None
-				and web_state.vite_close_deadline is not None
-				and asyncio.get_running_loop().time() >= web_state.vite_close_deadline
-			):
-				return _StackResult.WEB_FAILED
 		return None
 
 	async def _wait_for_restart(self) -> None:
@@ -540,29 +624,18 @@ class DevSupervisor:
 		event = asyncio.create_task(self._events.get())
 		changed = asyncio.create_task(self.changed.wait())
 		shutdown = asyncio.create_task(self.shutdown.wait())
-		tasks = (event, changed, shutdown)
+		kill_now = asyncio.create_task(self._kill_now.wait())
+		tasks = (event, changed, shutdown, kill_now)
 		try:
-			done, _pending = await asyncio.wait(
-				tasks,
-				timeout=self._vite_close_wait(),
-				return_when=asyncio.FIRST_COMPLETED,
-			)
+			await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
 		finally:
 			for task in tasks:
 				if not task.done():
 					task.cancel()
 			await asyncio.gather(*tasks, return_exceptions=True)
-		if event in done and not event.cancelled():
+		if event.done() and not event.cancelled():
 			self._handle_event(event.result())
 			await self._drain_events()
-
-	def _vite_close_wait(self) -> float | None:
-		if self.web_spec is None:
-			return None
-		state = self._states.get(self.web_spec.name)
-		if state is None or state.vite_close_deadline is None:
-			return None
-		return max(0.0, state.vite_close_deadline - asyncio.get_running_loop().time())
 
 	async def _watch(self) -> None:
 		async for _changes in awatch(
@@ -608,11 +681,7 @@ class DevSupervisor:
 		self._states[spec.name] = state
 
 		def on_output(line: str) -> None:
-			if not loop.is_closed():
-				loop.call_soon_threadsafe(
-					self._events.put_nowait,
-					_OutputEvent(state.token, spec, line),
-				)
+			write_tagged_line(spec.name, line, self.tag_mode)
 
 		def on_exit(code: int) -> None:
 			if not loop.is_closed():
@@ -637,14 +706,25 @@ class DevSupervisor:
 		while not self._events.empty():
 			self._handle_event(self._events.get_nowait())
 
+	def _vite_state(self, instance: str) -> _ProcessState | None:
+		for stack in (self._starting, self._current):
+			if stack is not None and stack.web_instance == instance:
+				return stack.web_state
+		if instance == self._vite_instance and self.web_spec is not None:
+			return self._states.get(self.web_spec.name)
+		return None
+
+	def _backend_state(self, instance: str) -> _ProcessState | None:
+		for stack in (self._starting, self._current):
+			if stack is not None and stack.backend_instance == instance:
+				return stack.backend_state
+		if instance == self._backend_instance:
+			return self._states.get(self.backend_spec.name)
+		return None
+
 	def _handle_event(self, event: _SupervisorEvent) -> None:
-		if isinstance(event, _OutputEvent):
-			self._handle_output(event.token, event.spec, event.line)
-			return
 		if isinstance(event, _ViteLifecycleEvent):
-			if event.instance != self._vite_instance or self.web_spec is None:
-				return
-			state = self._states.get(self.web_spec.name)
+			state = self._vite_state(event.instance)
 			if state is None or event.sequence <= state.vite_sequence:
 				return
 			state.vite_sequence = event.sequence
@@ -652,27 +732,25 @@ class DevSupervisor:
 				state.prepared = True
 				return
 			if event.event == "closed":
-				if self.vite_relay is not None:
-					self.vite_relay.clear_target()
-				state.vite_close_deadline = (
-					asyncio.get_running_loop().time() + VITE_CLOSE_TIMEOUT
-				)
 				state.ready = False
+				if (
+					self.vite_relay is not None
+					and state.port is not None
+					and self.vite_relay.target == ("127.0.0.1", state.port)
+				):
+					self.vite_relay.clear_target()
 				return
 			assert event.port is not None
 			state.port = event.port
 			if self.vite_relay is not None:
 				self.vite_relay.set_target("127.0.0.1", event.port)
-			state.vite_close_deadline = None
 			# A listening server is definitionally configured, so older plugin
 			# builds that never report "configured" still pass the startup gate.
 			state.prepared = True
 			state.ready = True
 			return
 		if isinstance(event, _BackendLifecycleEvent):
-			if event.instance != self._backend_instance:
-				return
-			state = self._states.get(self.backend_spec.name)
+			state = self._backend_state(event.instance)
 			if state is None:
 				return
 			if event.event == "prepared":
@@ -685,44 +763,28 @@ class DevSupervisor:
 					self.public_relay.set_target("127.0.0.1", event.port)
 				state.ready = True
 			return
-		return
 
-	def _handle_output(self, token: object, spec: CommandSpec, line: str) -> None:
-		state = self._states.get(spec.name)
-		if state is None or state.token is not token:
+	async def _stop_stack(self, stack: _Stack | None) -> None:
+		if stack is None:
 			return
-		write_tagged_line(spec.name, line, self.tag_mode)
-
-	async def _stop_stack(self) -> None:
-		if self.public_relay is not None:
-			self.public_relay.clear_target()
-		if self.vite_relay is not None:
-			self.vite_relay.clear_target()
-		processes = [process for process in (self.web, self.backend) if process]
-		# Stop in reverse startup order so the public process cannot outlive a
-		# dependency it proxies to.
+		owned = [process for process in (stack.web, stack.backend) if process]
 		stop_order = (
-			(self.backend, self.web) if self.web_first else (self.web, self.backend)
+			(stack.backend, stack.web) if self.web_first else (stack.web, stack.backend)
 		)
 		for process in stop_order:
 			if process is not None:
-				await self._stop_process(process)
-		for process in processes:
+				process.request_stop()
+		await asyncio.gather(
+			*(self._wait_until_stopped(process, STOP_TIMEOUT) for process in owned)
+		)
+		for process in owned:
+			process.kill_tree()
+		await asyncio.gather(
+			*(self._wait_until_stopped(process, KILL_TIMEOUT) for process in owned)
+		)
+		for process in owned:
 			process.close()
 		await self._drain_events()
-		self.web = None
-		self.backend = None
-		self._backend_instance = None
-		self._vite_instance = None
-		self._states.clear()
-
-	async def _stop_process(self, process: ManagedProcess) -> None:
-		process.request_stop()
-		await self._wait_until_stopped(process, STOP_TIMEOUT)
-		# Always terminate the owned group/job after the root exits so an orphaned
-		# descendant cannot survive the restart.
-		process.kill_tree()
-		await self._wait_until_stopped(process, KILL_TIMEOUT)
 
 	async def _wait_until_stopped(
 		self, process: ManagedProcess, timeout: float
@@ -730,8 +792,16 @@ class DevSupervisor:
 		loop = asyncio.get_running_loop()
 		deadline = loop.time() + timeout
 		while process.is_alive():
+			if self._kill_now.is_set():
+				return
 			remaining = deadline - loop.time()
 			if remaining <= 0:
 				return
-			await asyncio.sleep(min(0.01, remaining))
+			try:
+				await asyncio.wait_for(
+					self._kill_now.wait(), timeout=min(0.01, remaining)
+				)
+				return
+			except TimeoutError:
+				pass
 		await self._drain_events()

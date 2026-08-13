@@ -34,7 +34,7 @@ from pulse.cli.packages import (
 from pulse.cli.processes import execute_commands
 from pulse.cli.relay import PortReservation
 from pulse.cli.secrets import resolve_dev_secret
-from pulse.env import ENV_PULSE_REACT_SERVER_ADDRESS, env
+from pulse.env import ENV_PULSE_HMR_CLIENT_PORT, ENV_PULSE_REACT_SERVER_ADDRESS, env
 from pulse.transpiler.imports import Import, clear_import_registry
 from typer.testing import CliRunner
 
@@ -386,12 +386,9 @@ def test_run_supervisor_starts_backend_before_vite_without_bootstrap_codegen(
 	assert commands[0].env[ENV_PULSE_REACT_SERVER_ADDRESS] == "http://127.0.0.1:5173"
 	assert commands[1].args[:3] == ["bun", "run", "dev"]
 	assert commands[1].args[-2:] == ["--host", "127.0.0.1"]
-	# Vite gets an explicit private port so a user strictPort config cannot
-	# collide with the relay's reservation, but no --strictPort of our own so
-	# Vite can still scan if the released port gets stolen.
-	port_index = commands[1].args.index("--port")
-	assert commands[1].args[port_index + 1] == "49152"
+	assert "--port" not in commands[1].args
 	assert "--strictPort" not in commands[1].args
+	assert commands[1].env[ENV_PULSE_HMR_CLIENT_PORT] == "5173"
 
 
 def test_run_propagates_supervisor_exit_code(
@@ -405,6 +402,28 @@ def test_run_propagates_supervisor_exit_code(
 	result = runner.invoke(cmd_mod.cli, ["run", "demo.py", "--plain"])
 
 	assert result.exit_code == 7
+
+
+def test_run_finds_next_available_ports_by_default(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	reservations: list[tuple[str, int, bool]] = []
+
+	def reserve(host: str, port: int, *, find_port: bool) -> PortReservation:
+		reservations.append((host, port, find_port))
+		return PortReservation(port, ())
+
+	_patch_run_basics(monkeypatch, app_ctx)
+	monkeypatch.setattr(cmd_mod, "reserve_port", reserve)
+
+	result = runner.invoke(cmd_mod.cli, ["run", "demo.py", "--plain"])
+
+	assert result.exit_code == 0, result.output
+	assert ("localhost", 8000, True) in reservations
+	assert ("127.0.0.1", 5173, True) in reservations
 
 
 def test_run_no_reload_keeps_direct_uvicorn_and_initial_codegen(

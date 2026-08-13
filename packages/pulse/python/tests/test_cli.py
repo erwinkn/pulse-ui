@@ -46,9 +46,12 @@ def install_recording_supervisor(
 	commands: list[CommandSpec],
 	*,
 	exit_code: int = 0,
+	captured: dict[str, Any] | None = None,
 ) -> None:
 	class Supervisor:
 		def __init__(self, **kwargs: Any) -> None:
+			if captured is not None:
+				captured.update(kwargs)
 			commands.append(kwargs["backend"])
 			if kwargs["web"] is not None:
 				commands.append(kwargs["web"])
@@ -319,6 +322,7 @@ def _patch_run_basics(
 	app_ctx: AppLoadResult,
 	*,
 	supervisor_exit_code: int = 0,
+	captured: dict[str, Any] | None = None,
 ) -> tuple[list[CommandSpec], list[list[str]]]:
 	"""Stub `run`'s side effects, capturing launched commands and install calls."""
 	commands: list[CommandSpec] = []
@@ -350,7 +354,9 @@ def _patch_run_basics(
 	monkeypatch.setattr(cmd_mod, "prepare_web_dependencies", prepare)
 	monkeypatch.setattr(cmd_mod, "_run_dependency_plan", run_plan)
 	monkeypatch.setattr(cmd_mod, "execute_commands", execute)
-	install_recording_supervisor(monkeypatch, commands, exit_code=supervisor_exit_code)
+	install_recording_supervisor(
+		monkeypatch, commands, exit_code=supervisor_exit_code, captured=captured
+	)
 	return commands, installed
 
 
@@ -363,14 +369,15 @@ def test_run_supervisor_keeps_vite_on_loopback_in_single_server(
 	vite_config.write_text(VITE_CONFIG)
 	app_ctx = _make_run_app_ctx(tmp_path, web_root)
 	app = cast(Any, app_ctx.app)
-
-	commands, installed = _patch_run_basics(monkeypatch, app_ctx)
+	captured: dict[str, Any] = {}
+	commands, installed = _patch_run_basics(monkeypatch, app_ctx, captured=captured)
 
 	result = runner.invoke(
 		cmd_mod.cli, ["run", "demo.py", "--plain", "--no-find-port", "--port", "8000"]
 	)
 
 	assert result.exit_code == 0, result.output
+	assert captured["ignored_roots"] == (web_root.resolve(),)
 	assert vite_config.read_text() == VITE_CONFIG
 	assert installed == [["bun", "i"]]
 	assert app.codegen_calls == []

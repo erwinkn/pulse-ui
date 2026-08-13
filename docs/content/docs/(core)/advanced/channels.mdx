@@ -196,12 +196,16 @@ The `usePulseChannel` hook returns a bridge object with three methods:
 By default, channels are tied to the route where they are created. Pulse closes
 them when it destroys that route.
 
-Unmounting only the JavaScript consumer unsubscribes its bridge; it does not close
-the server channel. If the WebSocket reconnects, live bridges subscribe again.
-While no bridge is subscribed, server `emit()` calls buffer up to 64 events and
-flush them in order after reconnecting. Client bridge `emit()` calls use the same
-64-event limit while the bridge waits for a subscription. Both buffers drop the
-oldest event at the limit.
+If you unmount only the JavaScript consumer, Pulse unsubscribes the bridge.
+This does not close the server channel.
+If the WebSocket connects again, live bridges subscribe again.
+A subscribed client can send events while the route is still there.
+
+If no bridge is subscribed, Pulse keeps the last 64 events from emit().
+Pulse sends them in order when the client subscribes again.
+Client `emit()` uses the same limit while it waits to subscribe.
+If there are more than 64 events, Pulse removes the oldest event.
+If Pulse removes an event, your handler does not receive it.
 
 Use a tab-lifetime channel for state that persists across route changes:
 

@@ -27,8 +27,8 @@ from pulse.cli.helpers import load_app_from_target
 from pulse.cli.lock import FolderLock, active_lock_info, interrupt_active_dev_server
 from pulse.cli.logging import CLILogger
 from pulse.cli.models import AppLoadResult, CommandSpec
-from pulse.cli.processes import execute_commands
 from pulse.cli.ports import PortReservation, reserve_port
+from pulse.cli.processes import execute_commands
 from pulse.cli.reload import DevSupervisor
 from pulse.cli.secrets import resolve_dev_secret
 from pulse.cli.uvicorn_log_config import get_log_config

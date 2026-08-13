@@ -31,8 +31,8 @@ from pulse.cli.packages import (
 	resolve_versions,
 	spec_satisfies,
 )
-from pulse.cli.processes import execute_commands
 from pulse.cli.ports import PortReservation
+from pulse.cli.processes import execute_commands
 from pulse.cli.secrets import resolve_dev_secret
 from pulse.env import ENV_PULSE_HMR_CLIENT_PORT, ENV_PULSE_REACT_SERVER_ADDRESS, env
 from pulse.transpiler.imports import Import, clear_import_registry

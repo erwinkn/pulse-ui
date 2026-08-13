@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import re
+import secrets
 import signal
 import socket
 import sys
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
@@ -16,8 +17,8 @@ from watchfiles import Change, awatch
 
 from pulse.cli.logging import TagMode
 from pulse.cli.models import CommandSpec
-from pulse.cli.processes import ANSI_ESCAPE, ManagedProcess, write_tagged_line
-from pulse.env import ENV_PULSE_LISTEN_FDS, ENV_PULSE_READY_FD
+from pulse.cli.processes import ManagedProcess, write_tagged_line
+from pulse.env import ENV_PULSE_LISTEN_FDS, ENV_PULSE_READY_FD, ENV_PULSE_VITE_READY_URL
 
 IGNORED_DIRECTORIES = frozenset(
 	{
@@ -36,6 +37,7 @@ IGNORED_DIRECTORIES = frozenset(
 	}
 )
 PYTHON_EXTENSIONS = frozenset({".py", ".pyx", ".pyd"})
+VITE_PLUGIN_TIMEOUT = 15.0
 
 
 @dataclass(slots=True)
@@ -96,6 +98,7 @@ class DevSupervisor:
 		tag_mode: TagMode,
 		listeners: tuple[socket.socket, ...],
 		web_first: bool = False,
+		vite_plugin_timeout: float = VITE_PLUGIN_TIMEOUT,
 	) -> None:
 		self.backend_spec = backend
 		self.web_spec = web
@@ -108,6 +111,7 @@ class DevSupervisor:
 		self.tag_mode: TagMode = tag_mode
 		self.listeners = listeners
 		self.web_first = web_first
+		self.vite_plugin_timeout = vite_plugin_timeout
 		self.desired = 0
 		self.changed = asyncio.Event()
 		self.shutdown = asyncio.Event()
@@ -281,29 +285,23 @@ class DevSupervisor:
 		self._web_exit.clear()
 		self._web_code = None
 		loop = asyncio.get_running_loop()
-		ready = asyncio.Event()
+		configured = asyncio.Event()
+		listening = asyncio.Event()
+		ready_url, close_ready = await _serve_vite_ready(configured, listening)
 
 		def on_output(line: str) -> None:
 			write_tagged_line(web_spec.name, line, self.tag_mode)
-			if (
-				web_spec.ready_pattern
-				and not ready.is_set()
-				and _matches_ready(web_spec.ready_pattern, line)
-			):
-				ready.set()
-				if web_spec.on_ready is not None:
-					web_spec.on_ready()
 
 		def on_exit(code: int) -> None:
 			self._web_code = code
 
 			def publish() -> None:
 				self._web_exit.set()
-				if not ready.is_set():
-					ready.set()
 
 			loop.call_soon_threadsafe(publish)
 
+		env = dict(web_spec.env)
+		env[ENV_PULSE_VITE_READY_URL] = ready_url
 		spec = CommandSpec(
 			name=web_spec.name,
 			args=[
@@ -314,23 +312,59 @@ class DevSupervisor:
 				*web_spec.args,
 			],
 			cwd=web_spec.cwd,
-			env=web_spec.env,
+			env=env,
 		)
 		self.web = ManagedProcess.start(spec, on_output, on_exit)
-		ready_task = asyncio.create_task(ready.wait())
+		first = asyncio.create_task(_first_event(configured, listening))
 		try:
-			while not ready.is_set() and not self.shutdown.is_set():
-				result = await self._wait_any(web=True, extra=ready_task)
+			try:
+				result = await asyncio.wait_for(
+					self._wait_any(web=True, extra=first),
+					timeout=self.vite_plugin_timeout,
+				)
+			except TimeoutError:
+				if (
+					not configured.is_set()
+					and not listening.is_set()
+					and not self.shutdown.is_set()
+					and self._web_code is None
+				):
+					print(
+						"Vite did not load pulseVitePlugin() within "
+						+ f"{self.vite_plugin_timeout:g}s. Add it to the plugins "
+						+ "array in vite.config.ts.",
+						flush=True,
+					)
+					await self._stop(self.web)
+					self.web = None
+					self._web_code = 1
+					return
+				result = _Wait.READY
+			if result is _Wait.SHUTDOWN or result is _Wait.WEB_EXIT:
+				if self._web_code is not None:
+					await self._stop(self.web)
+					self.web = None
+				return
+			if not listening.is_set():
+				wait_listening = asyncio.create_task(listening.wait())
+				result = await self._wait_any(web=True, extra=wait_listening)
+				if not wait_listening.done():
+					wait_listening.cancel()
+					with contextlib.suppress(asyncio.CancelledError):
+						await wait_listening
 				if result is _Wait.SHUTDOWN or result is _Wait.WEB_EXIT:
-					break
+					if self._web_code is not None:
+						await self._stop(self.web)
+						self.web = None
+					return
+			if web_spec.on_ready is not None:
+				web_spec.on_ready()
 		finally:
-			if not ready_task.done():
-				ready_task.cancel()
+			if not first.done():
+				first.cancel()
 				with contextlib.suppress(asyncio.CancelledError):
-					await ready_task
-		if self._web_code is not None and web_spec.ready_pattern is not None:
-			await self._stop(self.web)
-			self.web = None
+					await first
+			await close_ready()
 
 	async def _wait_until_changed(self) -> None:
 		while not self.changed.is_set() and not self.shutdown.is_set():
@@ -420,5 +454,52 @@ class DevSupervisor:
 			self._ready_read = None
 
 
-def _matches_ready(pattern: str, line: str) -> bool:
-	return bool(re.search(pattern, ANSI_ESCAPE.sub("", line)))
+async def _first_event(*events: asyncio.Event) -> None:
+	tasks = [asyncio.create_task(event.wait()) for event in events]
+	try:
+		await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+	finally:
+		for task in tasks:
+			if not task.done():
+				task.cancel()
+		await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _serve_vite_ready(
+	configured: asyncio.Event, listening: asyncio.Event
+) -> tuple[str, Callable[[], Awaitable[None]]]:
+	token = secrets.token_urlsafe(16)
+
+	async def client(
+		reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+	) -> None:
+		try:
+			data = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=2)
+		except (
+			TimeoutError,
+			asyncio.IncompleteReadError,
+			asyncio.LimitOverrunError,
+		):
+			writer.close()
+			return
+		line = data.split(b"\r\n", 1)[0].decode("ascii", "replace")
+		parts = line.split(" ")
+		path = parts[1] if len(parts) >= 2 else ""
+		if path == f"/{token}/configured":
+			configured.set()
+		elif path == f"/{token}/listening":
+			listening.set()
+		writer.write(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+		with contextlib.suppress(ConnectionResetError, BrokenPipeError):
+			await writer.drain()
+		writer.close()
+
+	server = await asyncio.start_server(client, "127.0.0.1", 0)
+	port = server.sockets[0].getsockname()[1]
+	url = f"http://127.0.0.1:{port}/{token}"
+
+	async def close() -> None:
+		server.close()
+		await server.wait_closed()
+
+	return url, close

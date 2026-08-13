@@ -4,6 +4,9 @@ import io
 import os
 import socket
 import sys
+import threading
+import urllib.error
+import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,7 +26,7 @@ from pulse.cli.models import CommandSpec
 from pulse.cli.ports import reserve_port
 from pulse.cli.processes import ManagedProcess
 from pulse.cli.reload import DevSupervisor, PulseWatchFilter
-from pulse.env import ENV_PULSE_LISTEN_FDS, ENV_PULSE_READY_FD
+from pulse.env import ENV_PULSE_LISTEN_FDS, ENV_PULSE_READY_FD, ENV_PULSE_VITE_READY_URL
 from starlette.types import Receive, Scope, Send
 from watchfiles import Change
 
@@ -142,7 +145,10 @@ def install_process_script(
 				process.exit(1)
 		elif spec.name == "web":
 			if outcome == "ready":
-				on_output("web ready")
+				url = spec.env[ENV_PULSE_VITE_READY_URL]
+				threading.Thread(
+					target=_notify_vite_ready, args=(url,), daemon=True
+				).start()
 			elif outcome == "fail":
 				process.exit(1)
 		return process
@@ -153,6 +159,15 @@ def install_process_script(
 	monkeypatch.setattr(ManagedProcess, "start", classmethod(start))
 	monkeypatch.setattr(DevSupervisor, "_watch", watch)
 	return processes
+
+
+def _notify_vite_ready(url: str) -> None:
+	for event in ("configured", "listening"):
+		request = urllib.request.Request(f"{url}/{event}", method="POST", data=b"")
+		try:
+			urllib.request.urlopen(request, timeout=2).close()
+		except urllib.error.URLError:
+			return
 
 
 @pytest.mark.parametrize("plain", [True, False])
@@ -327,6 +342,20 @@ async def test_vite_crash_returns_its_exit_code(
 	processes[0].exit(6)
 	assert await run_task == 6
 	assert "server1:kill" in events
+
+
+@pytest.mark.asyncio
+async def test_missing_vite_plugin_exits(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	supervisor.vite_plugin_timeout = 0.2
+	events: list[str] = []
+	install_process_script(monkeypatch, events, [("web", "hang")])
+
+	assert await supervisor.run() == 1
+	assert "pulseVitePlugin()" in capsys.readouterr().out
+	assert "web1:kill" in events
 
 
 @pytest.mark.asyncio

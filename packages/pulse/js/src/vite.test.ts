@@ -1,15 +1,12 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import {
-	createServer as createHttpServer,
-	type IncomingMessage,
-	type Server,
-	type ServerResponse,
-} from "node:http";
-import type { AddressInfo } from "node:net";
+import { closeSync, openSync, readFileSync, unlinkSync } from "node:fs";
+import { createServer as createHttpServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ViteDevServer } from "vite";
 import { pulseVitePlugin } from "./vite";
 
-const ENV_NAMES = ["PULSE_HMR_CLIENT_PORT", "PULSE_VITE_READY_URL"] as const;
+const ENV_NAMES = ["PULSE_HMR_CLIENT_PORT", "PULSE_VITE_READY_FD"] as const;
 const originalEnv = Object.fromEntries(
 	ENV_NAMES.map((name) => [name, process.env[name]]),
 ) as Record<(typeof ENV_NAMES)[number], string | undefined>;
@@ -42,34 +39,11 @@ async function close(server: Server) {
 	});
 }
 
-async function waitFor(check: () => boolean) {
-	for (let attempt = 0; attempt < 100; attempt++) {
-		if (check()) return;
-		await Bun.sleep(10);
-	}
-	throw new Error("Timed out waiting for condition");
-}
-
-function viteServer(httpServer: Server, error = (_message: string) => {}) {
+function viteServer(httpServer: Server) {
 	return {
-		config: { logger: { error } },
+		config: { logger: { error: (_message: string) => {} } },
 		httpServer,
 	} as unknown as ViteDevServer;
-}
-
-async function readyCallback() {
-	const paths: string[] = [];
-	const server = createHttpServer(
-		(request: IncomingMessage, response: ServerResponse) => {
-			paths.push(request.url ?? "");
-			response.writeHead(204).end();
-		},
-	);
-	await listen(server);
-	const port = (server.address() as AddressInfo).port;
-	const token = "ready-token";
-	process.env.PULSE_VITE_READY_URL = `http://127.0.0.1:${port}/${token}`;
-	return { server, paths, token };
 }
 
 describe("pulseVitePlugin", () => {
@@ -90,9 +64,9 @@ describe("pulseVitePlugin", () => {
 		}
 	});
 
-	it("rejects non-loopback ready URLs", () => {
-		process.env.PULSE_VITE_READY_URL = "http://192.168.1.5:9/x";
-		expect(() => pulseVitePlugin()).toThrow("HTTP loopback URL");
+	it("rejects a non-integer ready fd", () => {
+		process.env.PULSE_VITE_READY_FD = "nope";
+		expect(() => pulseVitePlugin()).toThrow("non-negative integer");
 	});
 
 	it("sets HMR clientPort from the supervisor", () => {
@@ -129,24 +103,26 @@ describe("pulseVitePlugin", () => {
 		});
 	});
 
-	it("posts configured then listening to the supervisor", async () => {
-		const callback = await readyCallback();
+	it("writes configured then listening to the ready fd", async () => {
+		const path = join(tmpdir(), `pulse-vite-ready-${process.pid}-${Date.now()}`);
+		const fd = openSync(path, "w");
+		process.env.PULSE_VITE_READY_FD = String(fd);
 		const viteHttp = createHttpServer();
 		try {
 			hook(pulseVitePlugin().configureServer).call(
 				{} as never,
 				viteServer(viteHttp),
 			);
-			await waitFor(() => callback.paths.includes(`/${callback.token}/configured`));
 			await listen(viteHttp);
-			await waitFor(() => callback.paths.includes(`/${callback.token}/listening`));
-			expect(callback.paths).toEqual([
-				`/${callback.token}/configured`,
-				`/${callback.token}/listening`,
-			]);
+			closeSync(fd);
+			expect(readFileSync(path, "utf8")).toBe("c1");
 		} finally {
 			if (viteHttp.listening) await close(viteHttp);
-			await close(callback.server);
+			try {
+				unlinkSync(path);
+			} catch {
+				// already gone
+			}
 		}
 	});
 });

@@ -9,6 +9,10 @@ immediately while disconnected.
 Route-lifetime channels close with the route that created them. Tab-lifetime
 channels survive route changes and close with the browser tab's render session.
 Both lifetimes permit an earlier explicit ``Channel.close()``.
+
+Inbound events run while the channel exists and a client is subscribed. Route
+mount transport state (pending, active, suspended) is not a gate; owner
+disposal closes the channel.
 """
 
 import asyncio
@@ -164,9 +168,8 @@ class ChannelsManager:
 		render: "RenderSession",
 		session: "UserSession",
 		owner_token: object | None,
-		require_active: bool = True,
 	) -> tuple[Any | None, str | None] | None:
-		"""Validate channel ownership and resolve its route context in one place."""
+		"""Validate identity and resolve route context. Mount state is not a gate."""
 		if channel.render_id != render.id or channel.session_id != session.sid:
 			return None
 		if channel._owner_token != owner_token:  # pyright: ignore[reportPrivateUsage]
@@ -178,8 +181,11 @@ class ChannelsManager:
 		try:
 			mount = render.get_route_mount(owner_token)
 		except ValueError:
-			return None
-		if require_active and mount.state != "active":
+			logger.error(
+				"Open channel '%s' has no mount for owner %r",
+				channel.id,
+				owner_token,
+			)
 			return None
 		return (mount.route, mount.mount_id)
 
@@ -258,7 +264,6 @@ class ChannelsManager:
 				render=render,
 				session=session,
 				owner_token=message.get("owner"),
-				require_active=False,
 			)
 			is None
 		):
@@ -296,7 +301,7 @@ class ChannelsManager:
 	) -> None:
 		channel_id = str(message.get("channel"))
 		channel = self._channels.get(channel_id)
-		if channel is None:
+		if channel is None or channel.closed:
 			if request_id := message.get("requestId"):
 				self._send_error_response(channel_id, request_id, "Channel closed")
 			return
@@ -313,7 +318,7 @@ class ChannelsManager:
 			)
 			if request_id := message.get("requestId"):
 				self._send_error_response(
-					channel_id, request_id, "Channel owner is inactive"
+					channel_id, request_id, "Channel owner is unavailable"
 				)
 			return
 		if not channel.connected:

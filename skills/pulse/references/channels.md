@@ -248,7 +248,10 @@ except ps.ChannelClosed:
 4. **Closed** — Lifetime owner disposal or explicit `channel.close()`
 
 Route channels close when Pulse destroys their route. Tab channels close when
-Pulse closes their render session.
+Pulse closes their render session. Incoming events run while the owner exists
+and a client is subscribed; they are not gated on mount transport state
+(pending vs active). Delivery is ordered and at-most-once; buffers drop the
+oldest event at 64.
 
 Always clean up handlers in `on_dispose()`:
 

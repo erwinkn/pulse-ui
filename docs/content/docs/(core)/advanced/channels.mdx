@@ -198,10 +198,15 @@ them when it destroys that route.
 
 Unmounting only the JavaScript consumer unsubscribes its bridge; it does not close
 the server channel. If the WebSocket reconnects, live bridges subscribe again.
+Route channels stay open while the route exists, including while Pulse is
+buffering VDOM for a prerender or reconnect. Incoming events still run. Pulse
+closes them when it destroys the route.
+
 While no bridge is subscribed, server `emit()` calls buffer up to 64 events and
 flush them in order after reconnecting. Client bridge `emit()` calls use the same
 64-event limit while the bridge waits for a subscription. Both buffers drop the
-oldest event at the limit.
+oldest event at the limit. Delivery is ordered and at-most-once; handlers must
+tolerate gaps.
 
 Use a tab-lifetime channel for state that persists across route changes:
 

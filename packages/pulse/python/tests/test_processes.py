@@ -238,7 +238,9 @@ def test_windows_start_with_pass_fds_still_uses_launcher(
 			os.close(ready_w)
 
 	assert events.index("assigned") < events.index("write:\0")
-	assert captured["args"][1:3] == [
+	args = captured["args"]
+	assert isinstance(args, list)
+	assert args[1:3] == [
 		"-I",
 		str(Path(process_module.__file__).with_name("_windows_launcher.py")),
 	]

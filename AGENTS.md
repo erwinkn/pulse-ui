@@ -63,7 +63,7 @@ Before writing or editing docs, read `docs/GUIDELINES.md` for tone, structure, a
 
 ## Cursor Cloud specific instructions
 
-Env is pre-provisioned: `uv` + `bun` are installed in `$HOME` and exposed via `~/.bashrc` (same mechanism as the preinstalled `nvm`/`cargo`), and the startup update script runs `make sync` (Python 3.12 venv at `.venv`, all workspace packages installed, JS client packages built). Standard commands live in the `## Commands` section, `Makefile`, and `CONTRIBUTING.md` — use those.
+Env is defined in `.cursor/environment.json` (Dockerfile-based, `.cursor/Dockerfile`): Ubuntu 24.04 with Python 3.12, Node 22, and `uv` + `bun` installed into `/usr/local/bin` (on PATH for every shell — no profile hacks). The `install` step runs `make sync` (Python 3.12 venv at `.venv`, all workspace packages installed, JS client packages built). To change system tooling, edit `.cursor/Dockerfile`; to change dependency setup, edit the `install` command. Standard dev commands live in the `## Commands` section, `Makefile`, and `CONTRIBUTING.md` — use those.
 
 Non-obvious caveats:
 - Run an app: `uv run pulse run examples/<app>.py` (e.g. `examples/todo.py`). Single-server mode: uvicorn backend on `:8000`, React Router (Vite) dev server on `:5173`. Open `:8000` (it proxies to the web server).

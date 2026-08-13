@@ -10,7 +10,7 @@ from pulse.channel import (
 	ChannelClosed,
 	ChannelDisconnected,
 )
-from pulse.messages import ClientChannelResponseMessage
+from pulse.messages import ChannelResponseMessage
 from pulse.user_session import UserSession
 
 
@@ -34,7 +34,8 @@ def connect_channel(
 	subscription_id: str = "subscription-1",
 ) -> bool:
 	message: dict[str, Any] = {
-		"type": "channel_connect",
+		"type": "channel",
+		"action": "connect",
 		"channel": channel.id,
 		"subscriptionId": subscription_id,
 	}
@@ -151,10 +152,12 @@ async def test_channel_emit_sends_message():
 
 	assert len(render.sent) == 1
 	message = render.sent[0]
-	assert message["type"] == "channel_message"
+	assert message["type"] == "channel"
+	assert message["action"] == "event"
 	assert message["channel"] == "form-channel"
 	assert message["event"] == "setValues"
 	assert message["payload"] == {"values": {"a": 1}}
+	assert message["subscriptionId"] == "subscription-1"
 
 
 @pytest.mark.asyncio
@@ -192,14 +195,16 @@ async def test_channel_request_resolves_on_response():
 
 	real_render.channels.handle_client_response(
 		message=cast(
-			ClientChannelResponseMessage,
+			ChannelResponseMessage,
 			cast(
 				object,
 				{
-					"type": "channel_message",
+					"type": "channel",
+					"action": "response",
 					"channel": "req-channel",
 					"responseTo": request_id,
 					"payload": {"x": 2},
+					"subscriptionId": "subscription-1",
 				},
 			),
 		)
@@ -247,10 +252,12 @@ async def test_channel_event_dispatch():
 			render=real_render,
 			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 			message={
-				"type": "channel_message",
+				"type": "channel",
+				"action": "event",
 				"channel": "event-channel",
 				"event": "ping",
 				"payload": {"value": 42},
+				"subscriptionId": "subscription-1",
 			},
 		)
 
@@ -295,7 +302,8 @@ def test_disconnect_and_reconnect_preserve_channel_and_flush_buffer():
 	assert connect_channel(render, session, channel)
 	assert sent == [
 		{
-			"type": "channel_connect_ack",
+			"type": "channel",
+			"action": "connect_ack",
 			"channel": channel.id,
 			"subscriptionId": "subscription-1",
 			"accepted": True,
@@ -307,7 +315,8 @@ def test_disconnect_and_reconnect_preserve_channel_and_flush_buffer():
 		render=render,
 		session=session,
 		message={
-			"type": "channel_disconnect",
+			"type": "channel",
+			"action": "disconnect",
 			"channel": channel.id,
 			"subscriptionId": "subscription-1",
 		},
@@ -327,16 +336,19 @@ def test_disconnect_and_reconnect_preserve_channel_and_flush_buffer():
 	)
 	assert sent == [
 		{
-			"type": "channel_connect_ack",
+			"type": "channel",
+			"action": "connect_ack",
 			"channel": channel.id,
 			"subscriptionId": "subscription-2",
 			"accepted": True,
 		},
 		{
-			"type": "channel_message",
+			"type": "channel",
+			"action": "event",
 			"channel": channel.id,
 			"event": "queued",
 			"payload": {"value": 1},
+			"subscriptionId": "subscription-2",
 		},
 	]
 
@@ -349,10 +361,12 @@ def test_disconnected_emit_snapshots_payload_at_emit_time():
 
 	assert connect_channel(render, session, channel)
 	assert sent[-1] == {
-		"type": "channel_message",
+		"type": "channel",
+		"action": "event",
 		"channel": channel.id,
 		"event": "queued",
 		"payload": {"items": [1]},
+		"subscriptionId": "subscription-1",
 	}
 
 
@@ -369,7 +383,7 @@ def test_disconnected_emit_buffer_is_capped_and_drops_oldest():
 		channel.emit("value", value)
 
 	assert connect_channel(render, session, channel)
-	flushed = [message for message in sent if message["type"] == "channel_message"]
+	flushed = [message for message in sent if message.get("action") == "event"]
 	assert len(flushed) == DISCONNECTED_EMIT_BUFFER_CAP
 	assert flushed[0]["payload"] == 3
 	assert flushed[-1]["payload"] == DISCONNECTED_EMIT_BUFFER_CAP + 2
@@ -430,7 +444,8 @@ def test_server_close_is_the_only_remote_terminal_notification():
 		render=render,
 		session=session,
 		message={
-			"type": "channel_disconnect",
+			"type": "channel",
+			"action": "disconnect",
 			"channel": channel.id,
 			"subscriptionId": "subscription-1",
 		},
@@ -450,10 +465,11 @@ def test_server_close_is_the_only_remote_terminal_notification():
 	assert channel.closed is True
 	assert sent == [
 		{
-			"type": "channel_message",
+			"type": "channel",
+			"action": "close",
 			"channel": channel.id,
-			"event": "__close__",
-			"payload": {"reason": "channel.close"},
+			"subscriptionId": "subscription-2",
+			"reason": "channel.close",
 		}
 	]
 
@@ -465,7 +481,8 @@ def test_connect_rejects_missing_channel_with_correlated_ack():
 		render=render,
 		session=session,
 		message={
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": "missing-channel",
 			"subscriptionId": "missing-subscription",
 		},
@@ -474,7 +491,8 @@ def test_connect_rejects_missing_channel_with_correlated_ack():
 	assert accepted is False
 	assert sent == [
 		{
-			"type": "channel_connect_ack",
+			"type": "channel",
+			"action": "connect_ack",
 			"channel": "missing-channel",
 			"subscriptionId": "missing-subscription",
 			"accepted": False,
@@ -490,7 +508,8 @@ def test_connect_requires_matching_opaque_owner_token():
 		render=render,
 		session=session,
 		message={
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": channel.id,
 			"subscriptionId": "wrong-owner",
 			"owner": "/other",
@@ -501,7 +520,8 @@ def test_connect_requires_matching_opaque_owner_token():
 	assert channel.closed is False
 	assert channel.connected is False
 	assert sent[-1] == {
-		"type": "channel_connect_ack",
+		"type": "channel",
+		"action": "connect_ack",
 		"channel": channel.id,
 		"subscriptionId": "wrong-owner",
 		"accepted": False,
@@ -523,7 +543,7 @@ async def test_middleware_denied_connect_rejects_without_closing_channel():
 			session: dict[str, Any],
 			next: Any,
 		):
-			if event == "__connect__":
+			if event == "connect":
 				return ps.Deny()
 			return await next()
 
@@ -542,7 +562,8 @@ async def test_middleware_denied_connect_rejects_without_closing_channel():
 		render,
 		session,
 		{
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": channel.id,
 			"subscriptionId": "denied-subscription",
 		},
@@ -552,7 +573,8 @@ async def test_middleware_denied_connect_rejects_without_closing_channel():
 	assert channel.connected is False
 	assert sent == [
 		{
-			"type": "channel_connect_ack",
+			"type": "channel",
+			"action": "connect_ack",
 			"channel": channel.id,
 			"subscriptionId": "denied-subscription",
 			"accepted": False,
@@ -575,7 +597,7 @@ async def test_middleware_short_circuit_rejects_connect_instead_of_stranding_it(
 			session: dict[str, Any],
 			next: Any,
 		):
-			if event == "__connect__":
+			if event == "connect":
 				return ps.Ok(None)
 			return await next()
 
@@ -594,7 +616,8 @@ async def test_middleware_short_circuit_rejects_connect_instead_of_stranding_it(
 		render,
 		session,
 		{
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": channel.id,
 			"subscriptionId": "short-circuit-subscription",
 		},
@@ -603,7 +626,8 @@ async def test_middleware_short_circuit_rejects_connect_instead_of_stranding_it(
 	assert channel.connected is False
 	assert sent == [
 		{
-			"type": "channel_connect_ack",
+			"type": "channel",
+			"action": "connect_ack",
 			"channel": channel.id,
 			"subscriptionId": "short-circuit-subscription",
 			"accepted": False,
@@ -626,7 +650,7 @@ async def test_middleware_error_rejects_connect_without_stranding_bridge():
 			session: dict[str, Any],
 			next: Any,
 		):
-			if event == "__connect__":
+			if event == "connect":
 				raise RuntimeError("middleware failed")
 			return await next()
 
@@ -645,7 +669,8 @@ async def test_middleware_error_rejects_connect_without_stranding_bridge():
 		render,
 		session,
 		{
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": channel.id,
 			"subscriptionId": "error-subscription",
 		},
@@ -654,7 +679,8 @@ async def test_middleware_error_rejects_connect_without_stranding_bridge():
 	assert channel.connected is False
 	assert sent == [
 		{
-			"type": "channel_connect_ack",
+			"type": "channel",
+			"action": "connect_ack",
 			"channel": channel.id,
 			"subscriptionId": "error-subscription",
 			"accepted": False,
@@ -680,7 +706,7 @@ async def test_connect_does_not_complete_after_originating_socket_is_replaced():
 			session: dict[str, Any],
 			next: Any,
 		):
-			if event == "__connect__":
+			if event == "connect":
 				started.set()
 				await resume.wait()
 			return await next()
@@ -702,7 +728,8 @@ async def test_connect_does_not_complete_after_originating_socket_is_replaced():
 			render,
 			session,
 			{
-				"type": "channel_connect",
+				"type": "channel",
+				"action": "connect",
 				"channel": channel.id,
 				"subscriptionId": "old-subscription",
 			},
@@ -716,3 +743,227 @@ async def test_connect_does_not_complete_after_originating_socket_is_replaced():
 
 	assert channel.connected is False
 	assert sent == []
+
+
+def test_close_includes_the_live_subscription_id():
+	render, session, channel, sent = make_global_channel("close-live-sub")
+	assert connect_channel(render, session, channel, subscription_id="live-sub")
+	sent.clear()
+	channel.close()
+
+	assert sent == [
+		{
+			"type": "channel",
+			"action": "close",
+			"channel": channel.id,
+			"subscriptionId": "live-sub",
+			"reason": "channel.close",
+		}
+	]
+
+
+@pytest.mark.asyncio
+async def test_incoming_event_with_wrong_subscription_id_is_ignored():
+	render, session, channel, sent = make_global_channel("stale-event")
+	assert connect_channel(render, session, channel)
+	received: list[Any] = []
+	channel.on("ping", lambda payload: received.append(payload))
+	sent.clear()
+
+	render.channels.handle_client_event(
+		render=render,
+		session=session,
+		message={
+			"type": "channel",
+			"action": "event",
+			"channel": channel.id,
+			"event": "ping",
+			"payload": {"stale": True},
+			"subscriptionId": "not-the-live-sub",
+		},
+	)
+	render.channels.handle_client_event(
+		render=render,
+		session=session,
+		message={
+			"type": "channel",
+			"action": "event",
+			"channel": channel.id,
+			"event": "ping",
+			"payload": {"missing": True},
+		},
+	)
+	await asyncio.sleep(0)
+	assert received == []
+	assert sent == []
+
+	render.channels.handle_client_event(
+		render=render,
+		session=session,
+		message={
+			"type": "channel",
+			"action": "event",
+			"channel": channel.id,
+			"event": "ping",
+			"payload": {"live": True},
+			"subscriptionId": "subscription-1",
+		},
+	)
+	await asyncio.sleep(0)
+	assert received == [{"live": True}]
+
+
+@pytest.mark.asyncio
+async def test_incoming_request_with_wrong_subscription_id_is_ignored():
+	render, session, channel, sent = make_global_channel("stale-request")
+	assert connect_channel(render, session, channel)
+	received: list[Any] = []
+	channel.on("ask", lambda payload: received.append(payload) or {"ok": True})
+	sent.clear()
+
+	render.channels.handle_client_event(
+		render=render,
+		session=session,
+		message={
+			"type": "channel",
+			"action": "request",
+			"channel": channel.id,
+			"event": "ask",
+			"requestId": "stale-req",
+			"payload": {},
+			"subscriptionId": "not-the-live-sub",
+		},
+	)
+	render.channels.handle_client_event(
+		render=render,
+		session=session,
+		message={
+			"type": "channel",
+			"action": "request",
+			"channel": channel.id,
+			"event": "ask",
+			"requestId": "missing-sub-req",
+			"payload": {},
+		},
+	)
+	await asyncio.sleep(0)
+	assert received == []
+	assert sent == []
+
+	render.channels.handle_client_event(
+		render=render,
+		session=session,
+		message={
+			"type": "channel",
+			"action": "request",
+			"channel": channel.id,
+			"event": "ask",
+			"requestId": "live-req",
+			"payload": {},
+			"subscriptionId": "subscription-1",
+		},
+	)
+	await asyncio.sleep(0)
+	assert received == [{}]
+	assert sent == [
+		{
+			"type": "channel",
+			"action": "response",
+			"channel": channel.id,
+			"responseTo": "live-req",
+			"payload": {"ok": True},
+			"subscriptionId": "subscription-1",
+		}
+	]
+
+
+@pytest.mark.asyncio
+async def test_incoming_response_with_wrong_subscription_id_is_ignored():
+	render, session, channel, sent = make_global_channel("stale-response")
+	assert connect_channel(render, session, channel)
+	sent.clear()
+	pending = asyncio.create_task(channel.request("get"))
+	await asyncio.sleep(0)
+	request_id = sent[0]["requestId"]
+
+	render.channels.handle_client_response(
+		message=cast(
+			ChannelResponseMessage,
+			cast(
+				object,
+				{
+					"type": "channel",
+					"action": "response",
+					"channel": channel.id,
+					"responseTo": request_id,
+					"payload": {"stale": True},
+					"subscriptionId": "not-the-live-sub",
+				},
+			),
+		)
+	)
+	assert pending.done() is False
+
+	render.channels.handle_client_response(
+		message=cast(
+			ChannelResponseMessage,
+			cast(
+				object,
+				{
+					"type": "channel",
+					"action": "response",
+					"channel": channel.id,
+					"responseTo": request_id,
+					"payload": {"live": True},
+					"subscriptionId": "subscription-1",
+				},
+			),
+		)
+	)
+	assert await pending == {"live": True}
+
+
+@pytest.mark.asyncio
+async def test_invoke_response_send_after_disconnect_does_not_raise_unhandled(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	render, session, channel, _sent = make_global_channel("invoke-send-race")
+	assert connect_channel(render, session, channel)
+	channel.on("ask", lambda _payload: {"ok": True})
+	original_send = render.channels.send_to_client
+
+	def disconnect_before_send(*, channel: Channel, msg: Any) -> None:
+		render.channels.disconnect_all()
+		original_send(channel=channel, msg=msg)
+
+	monkeypatch.setattr(render.channels, "send_to_client", disconnect_before_send)
+
+	loop = asyncio.get_running_loop()
+	prev_handler = loop.get_exception_handler()
+	unhandled: list[dict[str, Any]] = []
+
+	def handler(_loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+		unhandled.append(context)
+
+	loop.set_exception_handler(handler)
+	try:
+		render.channels.handle_client_event(
+			render=render,
+			session=session,
+			message={
+				"type": "channel",
+				"action": "request",
+				"channel": channel.id,
+				"event": "ask",
+				"requestId": "req-race",
+				"payload": None,
+				"subscriptionId": "subscription-1",
+			},
+		)
+		await asyncio.sleep(0)
+		await asyncio.sleep(0)
+		assert unhandled == []
+		assert channel.closed is False
+		assert channel.connected is False
+	finally:
+		loop.set_exception_handler(prev_handler)

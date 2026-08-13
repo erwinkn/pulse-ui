@@ -387,10 +387,28 @@ async def test_current_dies_during_reload_parks_relays(
 	await wait_until(lambda: "web1:ready" in events)
 	assert public_relay.target == ("127.0.0.1", 9001)
 
+	original_start = ManagedProcess.start
+
+	def start_and_kill_current(
+		_cls: type[ManagedProcess],
+		spec: CommandSpec,
+		on_output: Callable[[str], None],
+		on_exit: Callable[[int], None],
+	) -> FakeProcess:
+		process = original_start(spec, on_output, on_exit)
+		if spec.name == "server":
+			for existing in processes:
+				if existing.name == "server1" and existing.is_alive():
+					existing.exit(7)
+					break
+		return process
+
+	monkeypatch.setattr(
+		ManagedProcess, "start", classmethod(start_and_kill_current)
+	)
+
 	supervisor.desired += 1
 	supervisor.changed.set()
-	await wait_until(lambda: "server2:start" in events)
-	processes[0].exit(7)
 	await wait_until(lambda: None in public_relay.history)
 	await wait_until(lambda: "web2:ready" in events)
 	supervisor.shutdown.set()

@@ -238,9 +238,7 @@ class DevSupervisor:
 			cwd=self.backend_spec.cwd,
 			env=env,
 		)
-		self.backend = ManagedProcess.start(
-			spec, on_output, on_exit, pass_fds=pass_fds
-		)
+		self.backend = ManagedProcess.start(spec, on_output, on_exit, pass_fds=pass_fds)
 		os.close(ready_w)
 		revision = self.desired
 		ready = asyncio.create_task(asyncio.to_thread(os.read, ready_r, 1))

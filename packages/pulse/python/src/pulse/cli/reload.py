@@ -369,6 +369,13 @@ class DevSupervisor:
 					code = self._failed_code(self._starting, web=True)
 					await self._stop_stack(self._starting)
 					self._starting = None
+					if await self._abandon_dead_current():
+						print(
+							"Reload error: web dev server failed to start, and "
+							+ "the previous stack is gone. Waiting for changes...",
+							flush=True,
+						)
+						continue
 					if self._current is not None:
 						print(
 							"Reload error: web dev server failed to start. "
@@ -386,6 +393,7 @@ class DevSupervisor:
 					code = self._failed_code(self._starting, web=False)
 					await self._stop_stack(self._starting)
 					self._starting = None
+					await self._abandon_dead_current()
 					print(
 						f"Reload error: backend exited with code {code}. "
 						+ "Waiting for changes to restart...",
@@ -731,21 +739,39 @@ class DevSupervisor:
 		# live process dies first, new connections must wait rather than hit RST.
 		if self._current is None:
 			return
-		if (
+		if self._current_backend_dead() and self.public_relay is not None:
+			self.public_relay.clear_target()
+		if self._current_web_dead() and self.vite_relay is not None:
+			self.vite_relay.clear_target()
+
+	def _current_backend_dead(self) -> bool:
+		return self._current is not None and (
 			self._current.backend_state.exited.done()
 			or not self._current.backend.is_alive()
-		) and self.public_relay is not None:
-			self.public_relay.clear_target()
-		if (
-			self._current.web is not None
+		)
+
+	def _current_web_dead(self) -> bool:
+		return (
+			self._current is not None
+			and self._current.web is not None
 			and self._current.web_state is not None
 			and (
 				self._current.web_state.exited.done()
 				or not self._current.web.is_alive()
 			)
-			and self.vite_relay is not None
-		):
+		)
+
+	async def _abandon_dead_current(self) -> bool:
+		# "Keep the previous stack" is wrong if that stack already died.
+		if not self._current_backend_dead():
+			return False
+		if self.public_relay is not None:
+			self.public_relay.clear_target()
+		if self.vite_relay is not None:
 			self.vite_relay.clear_target()
+		await self._stop_stack(self._current)
+		self._current = None
+		return True
 
 	def _handle_event(self, event: _SupervisorEvent) -> None:
 		if isinstance(event, _ViteLifecycleEvent):

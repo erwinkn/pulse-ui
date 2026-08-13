@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import pulse as ps
 import pytest
-from pulse.messages import ClientChannelResponseMessage
+from pulse.messages import ChannelResponseMessage
 from pulse.user_session import UserSession
 from pulse_mantine.core.combobox.combobox import Combobox, ComboboxStore
 
@@ -66,7 +66,8 @@ def connect_store(
 		render=real_render,
 		session=session,
 		message={
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": store._channel.id,  # pyright: ignore[reportPrivateUsage]
 			"subscriptionId": "combobox-test",
 			"owner": store._channel.route_path,  # pyright: ignore[reportPrivateUsage]
@@ -149,14 +150,16 @@ async def test_combobox_store_request_roundtrip():
 
 	real_render.channels.handle_client_response(
 		message=cast(
-			ClientChannelResponseMessage,
+			ChannelResponseMessage,
 			cast(
 				object,
 				{
-					"type": "channel_message",
+					"type": "channel",
+					"action": "response",
 					"channel": request_message["channel"],
 					"responseTo": request_id,
 					"payload": True,
+					"subscriptionId": "combobox-test",
 				},
 			),
 		)
@@ -197,10 +200,12 @@ async def test_combobox_store_callbacks():
 			render=real_render,
 			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 			message={
-				"type": "channel_message",
+				"type": "channel",
+				"action": "event",
 				"channel": store._channel.id,
 				"event": "openedChange",
 				"payload": {"opened": True},
+				"subscriptionId": "combobox-test",
 				"owner": store._channel.route_path,
 			},
 		)
@@ -208,10 +213,12 @@ async def test_combobox_store_callbacks():
 			render=real_render,
 			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 			message={
-				"type": "channel_message",
+				"type": "channel",
+				"action": "event",
 				"channel": store._channel.id,
 				"event": "dropdownOpen",
 				"payload": {"eventSource": "mouse"},
+				"subscriptionId": "combobox-test",
 				"owner": store._channel.route_path,
 			},
 		)
@@ -219,10 +226,12 @@ async def test_combobox_store_callbacks():
 			render=real_render,
 			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 			message={
-				"type": "channel_message",
+				"type": "channel",
+				"action": "event",
 				"channel": store._channel.id,
 				"event": "dropdownClose",
 				"payload": {"eventSource": "keyboard"},
+				"subscriptionId": "combobox-test",
 				"owner": store._channel.route_path,
 			},
 		)

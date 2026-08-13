@@ -1921,7 +1921,8 @@ def test_dev_strict_mode_channel_unsubscribe_reacquire_keeps_server_channel():
 		render=render,
 		session=user_session,
 		message={
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": channel.id,
 			"subscriptionId": "strict-1",
 			"owner": "/a",
@@ -1934,7 +1935,8 @@ def test_dev_strict_mode_channel_unsubscribe_reacquire_keeps_server_channel():
 		render=render,
 		session=user_session,
 		message={
-			"type": "channel_disconnect",
+			"type": "channel",
+			"action": "disconnect",
 			"channel": channel.id,
 			"subscriptionId": "strict-1",
 			"owner": "/a",
@@ -1947,7 +1949,8 @@ def test_dev_strict_mode_channel_unsubscribe_reacquire_keeps_server_channel():
 		render=render,
 		session=user_session,
 		message={
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": channel.id,
 			"subscriptionId": "stale",
 			"owner": "/a",
@@ -1962,7 +1965,8 @@ def test_dev_strict_mode_channel_unsubscribe_reacquire_keeps_server_channel():
 		render=render,
 		session=user_session,
 		message={
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": channel.id,
 			"subscriptionId": "strict-2",
 			"owner": "/a",
@@ -1998,7 +2002,8 @@ async def test_dev_strict_mode_timeout_disposes_subscribed_route_channel():
 		render=render,
 		session=user_session,
 		message={
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": channel.id,
 			"subscriptionId": "strict-timeout-1",
 			"owner": "/a",
@@ -2012,10 +2017,11 @@ async def test_dev_strict_mode_timeout_disposes_subscribed_route_channel():
 	assert channel.id not in render.channels._channels  # pyright: ignore[reportPrivateUsage]
 	assert messages == [
 		{
-			"type": "channel_message",
+			"type": "channel",
+			"action": "close",
 			"channel": channel.id,
-			"event": "__close__",
-			"payload": {"reason": "route.unmount"},
+			"subscriptionId": "strict-timeout-1",
+			"reason": "route.unmount",
 		}
 	]
 	render.close()
@@ -2394,7 +2400,8 @@ async def test_prerender_of_active_path_keeps_channel_subscription_live():
 		render=render,
 		session=user_session,
 		message={
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": channel.id,
 			"subscriptionId": "sub-1",
 			"owner": "/a",
@@ -2412,10 +2419,12 @@ async def test_prerender_of_active_path_keeps_channel_subscription_live():
 		render=render,
 		session=user_session,
 		message={
-			"type": "channel_message",
+			"type": "channel",
+			"action": "event",
 			"channel": channel.id,
 			"event": "syncValues",
 			"payload": {"field": "x"},
+			"subscriptionId": "sub-1",
 		},
 	)
 	await asyncio.sleep(0)
@@ -2425,18 +2434,20 @@ async def test_prerender_of_active_path_keeps_channel_subscription_live():
 		render=render,
 		session=user_session,
 		message={
-			"type": "channel_message",
+			"type": "channel",
+			"action": "request",
 			"channel": channel.id,
 			"event": "ask",
 			"payload": {},
 			"requestId": "req-pending",
+			"subscriptionId": "sub-1",
 		},
 	)
 	await asyncio.sleep(0)
 	responses = [
 		message
 		for message in messages
-		if message.get("type") == "channel_message"
+		if message.get("action") == "response"
 		and message.get("responseTo") == "req-pending"
 	]
 	assert len(responses) == 1
@@ -2447,7 +2458,8 @@ async def test_prerender_of_active_path_keeps_channel_subscription_live():
 		render=render,
 		session=user_session,
 		message={
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": channel.id,
 			"subscriptionId": "sub-2",
 			"owner": "/a",
@@ -2487,7 +2499,8 @@ async def test_prerender_redirect_closes_route_channels():
 		render=render,
 		session=user_session,
 		message={
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": channel.id,
 			"subscriptionId": "sub-1",
 			"owner": "/a",
@@ -2503,7 +2516,7 @@ async def test_prerender_redirect_closes_route_channels():
 	assert "/a" not in render.route_mounts
 	assert channel.closed is True
 	assert any(
-		message.get("type") == "channel_message" and message.get("event") == "__close__"
+		message.get("action") == "close" and message.get("subscriptionId") == "sub-1"
 		for message in messages
 	)
 	render.close()
@@ -2532,7 +2545,8 @@ async def test_dev_strict_mode_grace_channel_event_runs():
 		render=render,
 		session=user_session,
 		message={
-			"type": "channel_connect",
+			"type": "channel",
+			"action": "connect",
 			"channel": channel.id,
 			"subscriptionId": "sub-1",
 			"owner": "/a",
@@ -2548,10 +2562,12 @@ async def test_dev_strict_mode_grace_channel_event_runs():
 		render=render,
 		session=user_session,
 		message={
-			"type": "channel_message",
+			"type": "channel",
+			"action": "event",
 			"channel": channel.id,
 			"event": "ping",
 			"payload": {"n": 1},
+			"subscriptionId": "sub-1",
 		},
 	)
 	await asyncio.sleep(0)

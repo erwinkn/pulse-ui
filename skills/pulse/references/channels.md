@@ -247,6 +247,12 @@ except ps.ChannelClosed:
 3. **Disconnected** — The server channel stays alive and buffers emits
 4. **Closed** — Pulse destroys the owner, or you call `channel.close()`
 
+Wire: every channel message is `{ type: "channel", action, channel, ... }`. `subscriptionId` keys generations.
+
+- Subscribe → `action: "connect"`
+- Unsubscribe → `action: "disconnect"` (does not destroy the server channel)
+- Server destroy → `action: "close"` (not a `__close__` event)
+
 Route channels close when Pulse destroys their route. Tab channels close when
 Pulse closes their render session.
 A subscribed client can send events while the channel is open.

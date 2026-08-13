@@ -105,11 +105,15 @@ describe("VDOMRenderer", () => {
 			(input.props as any).ref({});
 		}
 		const mounted = sent.filter(
-			(message) => message.type === "channel_message" && message.event === "ref:mounted",
+			(message) =>
+				message.type === "channel" &&
+				message.action === "event" &&
+				message.event === "ref:mounted",
 		);
 		expect(mounted).toEqual([
 			{
-				type: "channel_message",
+				type: "channel",
+				action: "event",
 				channel: "chan-1",
 				event: "ref:mounted",
 				payload: { refId: "ref-1" },
@@ -170,7 +174,12 @@ describe("VDOMRenderer", () => {
 		elB.props.ref({});
 
 		const mountedChannels = shared.sent
-			.filter((message) => message.type === "channel_message" && message.event === "ref:mounted")
+			.filter(
+				(message) =>
+					message.type === "channel" &&
+					message.action === "event" &&
+					message.event === "ref:mounted",
+			)
 			.map((message) => message.channel);
 
 		expect(mountedChannels).toEqual(["chan-a", "chan-b"]);

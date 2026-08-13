@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import io
 import os
 import subprocess
@@ -154,6 +155,94 @@ def test_windows_start_assigns_job_before_releasing_launcher(
 	assert captured["cwd"] == Path("workdir")
 	assert captured["env"] == {"KEY": "value"}
 	assert exit_codes == [0]
+
+
+def test_windows_start_with_pass_fds_still_uses_launcher(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	events: list[str] = []
+	captured: dict[str, object] = {}
+	exited = threading.Event()
+	ready_r, ready_w = os.pipe()
+
+	class Input(io.StringIO):
+		@override
+		def write(self, value: str) -> int:
+			events.append(f"write:{value}")
+			return super().write(value)
+
+		@override
+		def flush(self) -> None:
+			events.append("flush")
+			super().flush()
+
+	@final
+	class Process:
+		pid = 42
+		stdin = Input()
+		stdout = io.StringIO()
+
+		def wait(self) -> int:
+			return 0
+
+		def poll(self) -> int:
+			return 0
+
+		def kill(self) -> None:
+			return None
+
+	@final
+	class Job:
+		def __init__(self, _process: object) -> None:
+			events.append("assigned")
+
+		def terminate(self) -> None:
+			return None
+
+		def close(self) -> None:
+			return None
+
+	def popen(args: Sequence[str], **kwargs: object) -> Process:
+		events.append("popen")
+		captured["args"] = list(args)
+		captured.update(kwargs)
+		return Process()
+
+	monkeypatch.setattr(process_module, "os_family", lambda: "windows")
+	monkeypatch.setattr(process_module, "_WindowsJob", Job)
+	monkeypatch.setattr(subprocess, "Popen", popen)
+	monkeypatch.setattr(
+		subprocess,
+		"CREATE_NEW_PROCESS_GROUP",
+		0x00000200,
+		raising=False,
+	)
+
+	try:
+		managed = ManagedProcess.start(
+			CommandSpec(
+				name="worker",
+				args=["target"],
+				cwd=Path("workdir"),
+				env={"KEY": "value"},
+			),
+			lambda _line: None,
+			lambda _code: exited.set(),
+			pass_fds=(ready_w,),
+		)
+		assert exited.wait(1)
+		managed.close()
+	finally:
+		os.close(ready_r)
+		with contextlib.suppress(OSError):
+			os.close(ready_w)
+
+	assert events.index("assigned") < events.index("write:\0")
+	assert captured["args"][1:3] == [
+		"-I",
+		str(Path(process_module.__file__).with_name("_windows_launcher.py")),
+	]
+	assert captured["close_fds"] is False
 
 
 def test_managed_process_preserves_io_and_target_exit_code(

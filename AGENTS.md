@@ -7,14 +7,14 @@ Full-stack Python framework for interactive web apps. Runs on React with WebSock
 - Be extremely concise. Sacrifice grammar for the sake of concision.
 - Read the README.md in the relevant package before starting work
 - Always add tests when implementing a new feature. 
-- If dependencies are not installed, run `make sync`
+- If dependencies are not installed, run `make sync` (`bun run build` is part of it; rebuild after editing `packages/*/js` or apps won't pick up changes)
 - Run `make test` after implementing
 - Run `make all` before committing
 - Check `examples/` for usage patterns
 - Use `make bump` for changing package versions
 - When using a framework/library, do not make assumptions, fetch latest docs (using context7 for example)
 - Use `bun info ...` to get information about a JS package
-- Test examples by running them with `pulse run` in a background task and using the agent-browser CLI for interacting with the UI.
+- Test examples by running them with `pulse run` in a background task and using the agent-browser CLI for interacting with the UI. First page load after `pulse run` can 504 while Vite prebundles — reload once.
 - While debugging, feel free to add debug print statements, spin up test files, modify existing code, or anything else that would improve your feedback loop and accelerate the troubleshooting process. Remove those debug changes after fixing the issue.
 - Tests should never be used as a reason to keep aliases or dead code around.
 

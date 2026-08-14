@@ -24,7 +24,7 @@ function readyFd(): number | undefined {
 	return fd;
 }
 
-export function pulseVitePlugin(): Plugin {
+export function pulse(): Plugin {
 	const fd = readyFd();
 	return {
 		name: "pulse",

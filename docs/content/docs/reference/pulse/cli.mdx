@@ -54,7 +54,7 @@ In dev mode, `pulse run` watches Python files and restarts only the Uvicorn work
 
 With `--find-port` (the default), Pulse binds the first available public port starting at `--port` (8000 by default). Vite uses the first free port from 5173 with `--strictPort`.
 
-In the default single-server mode, Vite listens on loopback behind Uvicorn's proxy; port 5173 is not exposed publicly. `pulseVitePlugin()` from `pulse-ui-client/vite` tells Pulse when Vite is actually listening (not just when it printed a URL) and points the HMR client at the public port. Split/subdomain apps bind Vite to `--address` instead.
+In the default single-server mode, Vite listens on loopback behind Uvicorn's proxy; port 5173 is not exposed publicly. `pulse()` from `pulse-ui-client/vite` tells Pulse when Vite is actually listening (not just when it printed a URL) and points the HMR client at the public port. Split/subdomain apps bind Vite to `--address` instead.
 
 If Python import, codegen, or startup fails, Vite keeps running and Pulse waits for the next save. If Vite itself exits, `pulse run` exits with Vite's code. JavaScript, TypeScript, and CSS changes still use Vite's normal HMR without restarting Python.
 

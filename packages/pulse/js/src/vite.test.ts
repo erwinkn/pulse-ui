@@ -4,7 +4,7 @@ import { createServer as createHttpServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ViteDevServer } from "vite";
-import { pulseVitePlugin } from "./vite";
+import { pulse } from "./vite";
 
 const ENV_NAMES = ["PULSE_HMR_CLIENT_PORT", "PULSE_VITE_READY_FD"] as const;
 const originalEnv = Object.fromEntries(
@@ -46,10 +46,10 @@ function viteServer(httpServer: Server) {
 	} as unknown as ViteDevServer;
 }
 
-describe("pulseVitePlugin", () => {
+describe("pulse", () => {
 	it("is a no-op without supervisor env", () => {
 		for (const name of ENV_NAMES) delete process.env[name];
-		const plugin = pulseVitePlugin();
+		const plugin = pulse();
 		const server = createHttpServer();
 		try {
 			expect(
@@ -66,12 +66,12 @@ describe("pulseVitePlugin", () => {
 
 	it("rejects a non-integer ready fd", () => {
 		process.env.PULSE_VITE_READY_FD = "nope";
-		expect(() => pulseVitePlugin()).toThrow("non-negative integer");
+		expect(() => pulse()).toThrow("non-negative integer");
 	});
 
 	it("sets HMR clientPort from the supervisor", () => {
 		process.env.PULSE_HMR_CLIENT_PORT = "8000";
-		const plugin = pulseVitePlugin();
+		const plugin = pulse();
 		expect(
 			hook(plugin.config).call({} as never, {} as never, {} as never),
 		).toEqual({
@@ -83,7 +83,7 @@ describe("pulseVitePlugin", () => {
 
 	it("merges clientPort into the user's Vite hmr config", () => {
 		process.env.PULSE_HMR_CLIENT_PORT = "5173";
-		const plugin = pulseVitePlugin();
+		const plugin = pulse();
 		expect(
 			hook(plugin.config).call(
 				{} as never,
@@ -109,7 +109,7 @@ describe("pulseVitePlugin", () => {
 		process.env.PULSE_VITE_READY_FD = String(fd);
 		const viteHttp = createHttpServer();
 		try {
-			hook(pulseVitePlugin().configureServer).call(
+			hook(pulse().configureServer).call(
 				{} as never,
 				viteServer(viteHttp),
 			);

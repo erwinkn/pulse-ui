@@ -380,7 +380,7 @@ def test_run_supervisor_keeps_vite_on_loopback_in_single_server(
 	assert captured["ignored_roots"] == (web_root.resolve(),)
 	assert vite_config.read_text() == VITE_CONFIG
 	assert installed == [["bun", "i"]]
-	assert app.codegen_calls == []
+	assert app.codegen_calls == ["http://localhost:8000"]
 	assert [c.name for c in commands] == ["server", "web"]
 	assert commands[0].args[1:3] == ["-m", "pulse.cli.dev_worker"]
 	assert commands[0].args[commands[0].args.index("--host") + 1] == "localhost"

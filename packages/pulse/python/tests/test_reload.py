@@ -24,6 +24,7 @@ from pulse.cli.processes import ManagedProcess
 from pulse.cli.reload import DevSupervisor, PulseWatchFilter
 from pulse.env import ENV_PULSE_LISTEN_FDS, ENV_PULSE_READY_FD, ENV_PULSE_VITE_READY_FD
 from starlette.types import Receive, Scope, Send
+from uvicorn.config import LOGGING_CONFIG
 from watchfiles import Change
 
 
@@ -437,13 +438,13 @@ def test_worker_uvicorn_config_disables_reload() -> None:
 	assert config.reload is False
 	assert config.workers == 1
 	assert config.timeout_graceful_shutdown == DEVELOPMENT_GRACEFUL_TIMEOUT
-	assert config.log_config is uvicorn.config.LOGGING_CONFIG
+	assert config.log_config is LOGGING_CONFIG
 
 	filtered = worker_uvicorn_config(
 		app, host="localhost", port=8000, plain=True, verbose=False
 	)
 	assert filtered.log_config is not None
-	assert filtered.log_config is not uvicorn.config.LOGGING_CONFIG
+	assert filtered.log_config is not LOGGING_CONFIG
 
 
 def test_worker_watchdog_force_exits_on_supervisor_exit(

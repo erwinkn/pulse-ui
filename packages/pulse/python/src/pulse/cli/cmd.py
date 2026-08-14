@@ -266,8 +266,6 @@ def run(
 	exit_code = 1
 	try:
 		with FolderLock(web_root, address=address, port=port):
-			# Install before launching Vite. The backend worker regenerates
-			# routes on each start; skip a duplicate bootstrap codegen.
 			if env.pulse_env == "dev" and not server_only:
 				try:
 					dep_plan = prepare_web_dependencies(
@@ -282,14 +280,13 @@ def run(
 				except subprocess.CalledProcessError:
 					logger.error("Failed to install web dependencies with Bun.")
 					raise typer.Exit(1) from None
-				if not supervised_reload:
-					logger.print("Generating routes")
-					try:
-						app_instance.run_codegen(local_server_url(address, port))
-					except Exception:
-						logger.error("Failed to generate routes")
-						logger.print_exception()
-						raise typer.Exit(1) from None
+				logger.print("Generating routes")
+				try:
+					app_instance.run_codegen(local_server_url(address, port))
+				except Exception:
+					logger.error("Failed to generate routes")
+					logger.print_exception()
+					raise typer.Exit(1) from None
 
 			if supervised_reload:
 				assert server_cmd is not None

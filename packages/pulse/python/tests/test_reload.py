@@ -317,7 +317,7 @@ async def test_missing_vite_plugin_exits(
 	install_process_script(monkeypatch, events, [("web", "hang")])
 
 	assert await supervisor.run() == 1
-	assert "pulseVitePlugin()" in capsys.readouterr().out
+	assert "pulse()" in capsys.readouterr().out
 	assert "web1:kill" in events
 
 

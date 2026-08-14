@@ -306,7 +306,7 @@ class DevSupervisor:
 					and self._web_code is None
 				):
 					print(
-						"Vite did not load pulseVitePlugin() within "
+						"Vite did not load pulse() within "
 						+ f"{self.vite_plugin_timeout:g}s. Add it to the plugins "
 						+ "array in vite.config.ts.",
 						flush=True,

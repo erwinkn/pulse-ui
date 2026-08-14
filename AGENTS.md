@@ -14,10 +14,13 @@ Full-stack Python framework for interactive web apps. Runs on React with WebSock
 - Use `make bump` for changing package versions
 - When using a framework/library, do not make assumptions, fetch latest docs (using context7 for example)
 - Use `bun info ...` to get information about a JS package
-- Test examples by running them with `pulse run` in a background task and using the agent-browser CLI for interacting with the UI. First page load after `pulse run` can 504 while Vite prebundles — reload once.
+- Test examples by running them with `pulse run` in a background task. First page load after `pulse run` can 504 while Vite prebundles — reload once. Local CLI agents (Codex, etc.): use the agent-browser CLI for the UI. Cursor: see Cursor instructions.
 - While debugging, feel free to add debug print statements, spin up test files, modify existing code, or anything else that would improve your feedback loop and accelerate the troubleshooting process. Remove those debug changes after fixing the issue.
 - Tests should never be used as a reason to keep aliases or dead code around.
 
+## Cursor instructions
+
+- Built-in browser for UI testing. Do not install or use `agent-browser` — that's for local CLI agents like Codex.
 
 ## Code Style
 

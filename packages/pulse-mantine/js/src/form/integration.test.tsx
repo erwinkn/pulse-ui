@@ -4,17 +4,25 @@ import { fireEvent, render } from "@testing-library/react";
 import { useField } from "./connect";
 import { Checkbox, CheckboxGroup, MultiSelect, TagsInput, TextInput } from "./fields";
 
-class PulseChannelResetError extends Error {}
+const channels = new Map<
+	string,
+	{ closed: boolean; on: () => () => void; emit: ReturnType<typeof mock> }
+>();
 
-const channel = {
-	closed: false,
-	on: () => () => {},
-	emit: mock(),
-};
-const client = {
-	acquireChannel: () => channel,
-	releaseChannel: () => {},
-};
+function channelFor(id: string) {
+	let channel = channels.get(id);
+	if (!channel) {
+		channel = {
+			closed: false,
+			on: () => () => {},
+			emit: mock(() => {}),
+		};
+		channels.set(id, channel);
+	}
+	return channel;
+}
+
+const usePulseChannel = mock((id: string) => channelFor(id));
 let currentDirectives = {
 	query: { pulse_deployment: "prod-old" },
 };
@@ -24,19 +32,15 @@ const submitForm = mock(
 );
 
 mock.module("pulse-ui-client", () => ({
-	PulseChannelResetError,
 	submitForm,
-	usePulseChannelOwner: () => "/",
-	usePulseClient: () => client,
+	usePulseChannel,
 	usePulseDirectivesSource: () => directivesSource,
 }));
 
 const { Form } = await import("./form");
 
 beforeEach(() => {
-	channel.closed = false;
-	channel.emit.mockClear();
-	channel.emit.mockImplementation(() => {});
+	channels.clear();
 });
 
 type Sample = {
@@ -109,7 +113,6 @@ describe("MantineForm list-valued fields", () => {
 		"reproduces custom useField list commit for %s rows",
 		(_label, rows) => {
 			submitForm.mockClear();
-			channel.emit.mockClear();
 			const view = render(
 				<MantineProvider>
 					<Form
@@ -126,7 +129,7 @@ describe("MantineForm list-valued fields", () => {
 			);
 
 			fireEvent.click(view.getByRole("button", { name: "Commit rows" }));
-			const sync = channel.emit.mock.calls.find(
+			const sync = channelFor("form-custom-list-repro").emit.mock.calls.find(
 				([event]) => event === "syncValues",
 			)?.[1];
 			expect(sync?.values).toEqual({ samples: rows });
@@ -139,7 +142,6 @@ describe("MantineForm list-valued fields", () => {
 
 	it.each(listFields)("submits %s values as a list", (_label, Field) => {
 		submitForm.mockClear();
-		channel.emit.mockClear();
 		const view = render(
 			<MantineProvider>
 				<Form
@@ -171,7 +173,7 @@ describe("MantineForm list-valued fields", () => {
 			fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
 		}
 
-		expect(channel.emit).toHaveBeenCalledWith("syncValues", {
+		expect(channelFor("form-list-fields").emit).toHaveBeenCalledWith("syncValues", {
 			reason: "change",
 			path: "tags",
 			values: { tags: ["react", "vue"] },
@@ -184,7 +186,6 @@ describe("MantineForm list-valued fields", () => {
 
 	it("submits CheckboxGroup values as a list", () => {
 		submitForm.mockClear();
-		channel.emit.mockClear();
 		const view = render(
 			<MantineProvider>
 				<Form
@@ -205,7 +206,7 @@ describe("MantineForm list-valued fields", () => {
 			true,
 		);
 		fireEvent.click(view.getByRole("checkbox", { name: "Editor" }));
-		expect(channel.emit).toHaveBeenCalledWith("syncValues", {
+		expect(channelFor("form-checkbox-group").emit).toHaveBeenCalledWith("syncValues", {
 			reason: "change",
 			path: "privileges",
 			values: { privileges: ["admin", "editor"] },
@@ -300,13 +301,10 @@ describe("MantineForm channel timer lifecycle", () => {
 		);
 		await new Promise((resolve) => setTimeout(resolve, 20));
 
-		expect(channel.emit).not.toHaveBeenCalled();
+		expect(channelFor("form-old").emit).not.toHaveBeenCalled();
 	});
 
-	it("contains reset errors from validation timer callbacks", async () => {
-		channel.emit.mockImplementation(() => {
-			throw new PulseChannelResetError("Channel is closed");
-		});
+	it("fires server validation after the debounce", async () => {
 		const view = render(
 			<MantineProvider>
 				<Form
@@ -326,7 +324,7 @@ describe("MantineForm channel timer lifecycle", () => {
 		fireEvent.change(view.getByRole("textbox"), { target: { value: "Grace" } });
 		await new Promise((resolve) => setTimeout(resolve, 10));
 
-		expect(channel.emit).toHaveBeenCalledWith("serverValidate", {
+		expect(channelFor("form-reset").emit).toHaveBeenCalledWith("serverValidate", {
 			path: "name",
 			value: "Grace",
 			values: { name: "Grace" },
@@ -334,10 +332,7 @@ describe("MantineForm channel timer lifecycle", () => {
 		view.unmount();
 	});
 
-	it("contains reset errors from sync timer callbacks", async () => {
-		channel.emit.mockImplementation(() => {
-			throw new PulseChannelResetError("Channel is closed");
-		});
+	it("fires value sync after the debounce", async () => {
 		const view = render(
 			<MantineProvider>
 				<Form
@@ -354,7 +349,7 @@ describe("MantineForm channel timer lifecycle", () => {
 		fireEvent.change(view.getByRole("textbox"), { target: { value: "Lin" } });
 		await new Promise((resolve) => setTimeout(resolve, 10));
 
-		expect(channel.emit).toHaveBeenCalledWith("syncValues", {
+		expect(channelFor("form-sync-reset").emit).toHaveBeenCalledWith("syncValues", {
 			path: "name",
 			reason: "change",
 			values: { name: "Lin" },

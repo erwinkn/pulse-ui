@@ -110,7 +110,7 @@ import { usePulseChannel } from "pulse-ui-client";
 function usePulseChannel(
   channelId: string,
   lifetime: "route" | "tab" = "route",
-): ChannelBridge | null
+): ChannelBridge
 ```
 
 ### Parameters
@@ -122,8 +122,8 @@ function usePulseChannel(
 
 ### Returns
 
-Returns `null` before the effect subscribes. It then returns a `ChannelBridge`
-for sending and receiving messages.
+Returns a `ChannelBridge` on the first render. The hook interns the bridge
+immediately and subscribes after commit.
 
 ### Throws
 
@@ -134,14 +134,14 @@ for sending and receiving messages.
 
 The hook manages channel subscription automatically:
 
-1. On mount: acquires a reference to the channel
-2. On unmount: releases the reference
-3. When all references are released: the local bridge is removed and the client unsubscribes
+1. On render: intern a stable `ChannelBridge` for this channel id
+2. On mount: subscribe to the server
+3. On unmount: unsubscribe. This does not close the bridge.
 4. The server closes the channel only at its configured lifetime boundary or after `Channel.close()`
 
-If the transport or subscription is not ready, `emit()` buffers up to 64 events.
-It drops the oldest event when the buffer is full. `request()` fails immediately
-and is not replayed.
+`emit()` queues up to 64 events while the subscription is not ready.
+It no-ops after the server closes the channel. `request()` fails immediately
+when the channel is disconnected or closed and is not replayed.
 
 Use the same lifetime on both sides:
 

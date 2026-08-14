@@ -1,12 +1,9 @@
 import type { UseFormInput, UseFormReturnType } from "@mantine/form";
 import { useForm } from "@mantine/form";
 import {
-	PulseChannelResetError,
 	submitForm,
-	usePulseChannelOwner,
-	usePulseClient,
+	usePulseChannel,
 	usePulseDirectivesSource,
-	type ChannelBridge,
 } from "pulse-ui-client";
 import {
 	type ComponentPropsWithoutRef,
@@ -66,10 +63,8 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 	cascadeUpdates,
 	...formProps
 }: MantineFormProps<TValues>) {
-	const client = usePulseClient();
-	const owner = usePulseChannelOwner();
+	const channel = usePulseChannel(channelId);
 	const directives = usePulseDirectivesSource();
-	const channelRef = useRef<ChannelBridge | null>(null);
 	const formRef = useRef<UseFormReturnType<TValues> | null>(null);
 	// Timers for server-validation per path
 	const serverTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -94,16 +89,18 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 		>;
 	}, [validate]);
 
-	const emitChannel = useCallback((event: string, payload?: any) => {
-		const channel = channelRef.current;
-		if (!channel || channel.closed) return;
-		try {
-			channel.emit(event, payload);
-		} catch (error) {
-			if (!(error instanceof PulseChannelResetError)) throw error;
-			if (channelRef.current === channel) channelRef.current = null;
-		}
-	}, []);
+	const sendSync = useCallback(
+		(reason: "change" | "blur", path?: string) => {
+			const values = formRef.current?.getValues();
+			if (!values) return;
+			channel.emit("syncValues", {
+				reason,
+				path,
+				values: stripFilesForSync(values),
+			});
+		},
+		[channel],
+	);
 
 	const clearPendingTimers = useCallback(() => {
 		serverTimersRef.current.forEach(clearTimeout);
@@ -111,19 +108,6 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 		syncTimersRef.current.forEach(clearTimeout);
 		syncTimersRef.current.clear();
 	}, []);
-
-	const sendSync = useCallback(
-		(reason: "change" | "blur", path?: string) => {
-			const values = formRef.current?.getValues();
-			if (!values) return;
-			emitChannel("syncValues", {
-				reason,
-				path,
-				values: stripFilesForSync(values),
-			});
-		},
-		[emitChannel],
-	);
 
 	const getValueAtPath = useCallback((source: any, path?: string) => {
 		if (!source || !path) return undefined;
@@ -215,7 +199,7 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 						const latestValues = formRef.current?.getValues();
 						if (!latestValues) return;
 						const value = getValueAtPath(latestValues, path);
-						emitChannel("serverValidate", {
+						channel.emit("serverValidate", {
 							value: stripFilesForSync(value),
 							values: stripFilesForSync(latestValues),
 							path,
@@ -232,7 +216,7 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 			sendSync,
 			serverRulesByPath,
 			shouldValidateOnChange,
-			emitChannel,
+			channel,
 		],
 	);
 
@@ -278,13 +262,13 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 			const latestValues = formRef.current?.getValues();
 			if (!latestValues) return;
 			const value = getValueAtPath(latestValues, path);
-			emitChannel("serverValidate", {
+			channel.emit("serverValidate", {
 				value: stripFilesForSync(value),
 				values: stripFilesForSync(latestValues),
 				path,
 			});
 		},
-		[getValueAtPath, syncMode, sendSync, serverRulesByPath, shouldValidateOnBlur, emitChannel],
+		[getValueAtPath, syncMode, sendSync, serverRulesByPath, shouldValidateOnBlur, channel],
 	);
 
 	const form = useForm<any>({
@@ -309,8 +293,9 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 	}, [clearPendingTimers]);
 
 	useEffect(() => {
-		const channel = client.acquireChannel(channelId, owner);
-		channelRef.current = channel;
+		if (channel.closed) {
+			return;
+		}
 		const cleanups = [
 			channel.on("setValues", (payload: { values: TValues }) => {
 				const currentForm = formRef.current;
@@ -399,12 +384,8 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 		return () => {
 			clearPendingTimers();
 			for (const dispose of cleanups) dispose();
-			if (channelRef.current === channel) {
-				channelRef.current = null;
-			}
-			client.releaseChannel(channelId, channel);
 		};
-	}, [client, channelId, owner, sendSync, clearPendingTimers]);
+	}, [channel, sendSync, clearPendingTimers]);
 
 	const submitHandler = useMemo(
 		() =>

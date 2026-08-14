@@ -204,6 +204,7 @@ A subscribed client can send events while the route is still there.
 If no bridge is subscribed, Pulse keeps the last 64 events from emit().
 Pulse sends them in order when the client subscribes again.
 Client `emit()` uses the same limit while it waits to subscribe.
+After the server closes the channel, client `emit()` does nothing.
 If there are more than 64 events, Pulse removes the oldest event.
 If Pulse removes an event, your handler does not receive it.
 

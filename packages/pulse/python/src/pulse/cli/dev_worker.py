@@ -12,6 +12,7 @@ from typing import Any, override
 
 import click
 import uvicorn
+from uvicorn.config import LOGGING_CONFIG
 
 from pulse.cli.helpers import load_app_from_target
 from pulse.cli.uvicorn_log_config import get_log_config
@@ -45,6 +46,7 @@ def inherit_listeners() -> list[socket.socket]:
 def worker_uvicorn_config(
 	app: Any, *, host: str, port: int, plain: bool, verbose: bool
 ) -> uvicorn.Config:
+	log_config: dict[str, Any] = LOGGING_CONFIG if verbose else get_log_config()
 	return uvicorn.Config(
 		app=app,
 		host=host,
@@ -52,7 +54,7 @@ def worker_uvicorn_config(
 		reload=False,
 		workers=1,
 		timeout_graceful_shutdown=DEVELOPMENT_GRACEFUL_TIMEOUT,
-		log_config=None if verbose else get_log_config(),
+		log_config=log_config,
 		use_colors=not plain,
 	)
 

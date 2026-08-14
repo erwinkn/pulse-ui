@@ -74,11 +74,11 @@ The plugin also points HMR at the public port in single-server mode.
 
 ```ts
 import { reactRouter } from "@react-router/dev/vite";
-import { pulseVitePlugin } from "pulse-ui-client/vite";
+import { pulse } from "pulse-ui-client/vite";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  plugins: [reactRouter(), pulseVitePlugin()],
+  plugins: [reactRouter(), pulse()],
 });
 ```
 

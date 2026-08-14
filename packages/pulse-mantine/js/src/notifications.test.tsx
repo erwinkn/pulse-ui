@@ -7,19 +7,17 @@ const channel = {
 	on: mock(() => () => {}),
 	emit: mock(() => {}),
 };
-const acquireChannel = mock((_id: string) => channel);
-const releaseChannel = mock(() => {});
-const usePulseChannelOwner = mock(() => ({
-	token: "/current-route",
-	attachPath: "/current-route",
-}));
-class PulseChannelResetError extends Error {}
+const usePulseChannel = mock((_id: string, _lifetime?: string) => channel);
 
 mock.module("pulse-ui-client", () => ({
-	PulseChannelResetError,
+	PulseChannelResetError: class PulseChannelResetError extends Error {},
 	submitForm: mock(() => {}),
-	usePulseChannelOwner,
-	usePulseClient: () => ({ acquireChannel, releaseChannel }),
+	usePulseChannel,
+	usePulseChannelOwner: mock(() => ({
+		token: "/current-route",
+		attachPath: "/current-route",
+	})),
+	usePulseClient: () => ({}),
 	usePulseDirectivesSource: () => undefined,
 }));
 
@@ -32,9 +30,7 @@ it("subscribes to its tab channel without route ownership", () => {
 		</MantineProvider>,
 	);
 
-	expect(acquireChannel.mock.calls).toEqual([["notifications-tab"]]);
-	expect(usePulseChannelOwner).not.toHaveBeenCalled();
+	expect(usePulseChannel.mock.calls).toEqual([["notifications-tab", "tab"]]);
 
 	view.unmount();
-	expect(releaseChannel).toHaveBeenCalledWith("notifications-tab", channel);
 });

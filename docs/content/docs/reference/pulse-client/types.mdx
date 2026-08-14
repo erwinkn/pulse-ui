@@ -713,6 +713,7 @@ Type for the channel bridge class.
 ```ts
 interface ChannelBridge {
   readonly id: string;
+  readonly closed: boolean;
   emit(event: string, payload?: any): void;
   request(event: string, payload?: any): Promise<any>;
   on(event: string, handler: ChannelEventHandler): () => void;

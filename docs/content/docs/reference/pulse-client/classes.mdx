@@ -16,6 +16,7 @@ Manages bidirectional communication over a Pulse channel. You get a ChannelBridg
 ```ts
 class ChannelBridge {
   readonly id: string;
+  readonly closed: boolean;
 
   emit(event: string, payload?: any): void;
   request(event: string, payload?: any): Promise<any>;
@@ -30,12 +31,16 @@ type ChannelEventHandler = (payload: any) => any | Promise<any>;
 | Property | Type | Description |
 |----------|------|-------------|
 | `id` | `string` | The channel identifier |
+| `closed` | `boolean` | `true` after the server closes the channel |
 
 ### Methods
 
 #### emit
 
 Sends a fire-and-forget event to the server. The server receives the event but does not send a response.
+
+Queues up to 64 events while the client is not subscribed. Drops the oldest
+event at the cap. Does nothing if the channel is closed.
 
 ```ts
 emit(event: string, payload?: any): void
@@ -73,7 +78,8 @@ request(event: string, payload?: any): Promise<any>
 
 **Returns:** Promise resolving to the server's response.
 
-**Throws:** `PulseChannelResetError` if the channel closes before the response arrives.
+**Throws:** `PulseChannelResetError` if the channel is closed, not subscribed, or
+closes before the response arrives. Requests are not queued.
 
 **Example:**
 

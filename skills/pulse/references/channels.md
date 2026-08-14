@@ -41,8 +41,10 @@ self.channel.emit("server:notify", {"type": "update", "data": {...}})
 ```
 
 Disconnected emits are buffered in a 64-event FIFO. Pulse flushes them when the
-client subscribes again and drops the oldest event at the cap. Client bridge
-emits use the same policy while the subscription is not ready.
+client subscribes again and drops the oldest event at the cap. Client
+`emit()` uses the same queue before the hook has subscribed and while the
+socket is down. After the server closes the channel, client `emit()` is a
+no-op.
 
 ### Request (with response)
 
@@ -127,8 +129,9 @@ For a tab-lifetime server channel, use `usePulseChannel(channelId, "tab")`.
 ### Client Bridge API
 
 ```typescript
-bridge.emit(event: string, payload?: any): void
-bridge.request(event: string, payload?: any): Promise<any>
+bridge.closed: boolean
+bridge.emit(event: string, payload?: any): void  // queues while unsubscribed; no-op if closed
+bridge.request(event: string, payload?: any): Promise<any>  // throws if closed or unsubscribed
 bridge.on(event: string, handler: (payload) => any): () => void
 ```
 

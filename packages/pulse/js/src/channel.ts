@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo } from "react";
 import type { PulseSocketIOClient } from "./client";
 import type {
 	ChannelEventMessage,
@@ -55,7 +55,9 @@ export class ChannelBridge {
 	}
 
 	emit(event: string, payload?: any): void {
-		this.ensureOpen();
+		if (this._closed) {
+			return;
+		}
 		this.client.sendMessage({
 			type: "channel",
 			action: "event",
@@ -234,36 +236,35 @@ export class ChannelBridge {
 		this.pending.clear();
 		this.handlers.clear();
 		this.backlog = [];
-		// No-op: owning client manages registry lifecycle.
 	}
 }
 
 export function usePulseChannel(
 	channelId: string,
 	lifetime: ChannelLifetime = "route",
-): ChannelBridge | null {
+): ChannelBridge {
 	const client = usePulseClient();
 	const routeOwner = usePulseChannelOwner();
 	const ownerToken = lifetime === "route" ? routeOwner?.token : undefined;
 	const attachPath = lifetime === "route" ? routeOwner?.attachPath : undefined;
 
-	const [bridge, setBridge] = useState<ChannelBridge | null>(null);
-
-	useEffect(() => {
+	const bridge = useMemo(() => {
 		if (!channelId) {
 			throw new Error("usePulseChannel requires a non-empty channelId");
 		}
+		return client.ensureChannel(channelId);
+	}, [client, channelId]);
+
+	useEffect(() => {
 		const ownership =
 			ownerToken === undefined && attachPath === undefined
 				? undefined
 				: { token: ownerToken, attachPath };
-		const acquired = client.acquireChannel(channelId, ownership);
-		setBridge(acquired);
+		client.subscribeChannel(bridge, ownership);
 		return () => {
-			setBridge((current) => (current === acquired ? null : current));
-			client.releaseChannel(channelId, acquired);
+			client.unsubscribeChannel(bridge);
 		};
-	}, [client, channelId, lifetime, ownerToken, attachPath]);
+	}, [client, bridge, ownerToken, attachPath]);
 
 	return bridge;
 }

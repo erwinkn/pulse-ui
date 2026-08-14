@@ -613,18 +613,33 @@ export class PulseSocketIOClient {
 		this.sendMessage(msg);
 	}
 
-	public acquireChannel(id: string, ownership?: ChannelOwnership): ChannelBridge {
-		let entry = this.#channels.get(id);
-		if (
-			entry &&
-			!entry.bridge.closed &&
-			(entry.ownerToken !== ownership?.token || entry.attachPath !== ownership?.attachPath)
-		) {
-			throw new Error(`Pulse channel '${id}' is already acquired by another owner`);
+	public ensureChannel(id: string): ChannelBridge {
+		const entry = this.#channels.get(id);
+		if (entry && !entry.bridge.closed) {
+			return entry.bridge;
 		}
-		if (!entry || entry.bridge.closed) {
+		const bridge = new ChannelBridge(this, id);
+		this.#channels.set(id, {
+			bridge,
+			queue: [],
+			refCount: 0,
+			subscribed: false,
+			subscriptionId: null,
+		});
+		return bridge;
+	}
+
+	public subscribeChannel(bridge: ChannelBridge, ownership?: ChannelOwnership): void {
+		if (bridge.closed) {
+			return;
+		}
+		let entry = this.#channels.get(bridge.id);
+		if (!entry || entry.bridge !== bridge) {
+			if (entry && !entry.bridge.closed) {
+				throw new Error(`Pulse channel '${bridge.id}' is already acquired by another owner`);
+			}
 			entry = {
-				bridge: new ChannelBridge(this, id),
+				bridge,
 				ownerToken: ownership?.token,
 				attachPath: ownership?.attachPath,
 				queue: [],
@@ -632,28 +647,46 @@ export class PulseSocketIOClient {
 				subscribed: false,
 				subscriptionId: null,
 			};
-			this.#channels.set(id, entry);
-			if (this.isConnected()) {
-				this.#connectChannelIfReady(entry, this.#socket!);
-			}
+			this.#channels.set(bridge.id, entry);
+		} else if (
+			entry.refCount > 0 &&
+			(entry.ownerToken !== ownership?.token || entry.attachPath !== ownership?.attachPath)
+		) {
+			throw new Error(`Pulse channel '${bridge.id}' is already acquired by another owner`);
+		} else if (entry.refCount === 0) {
+			entry.ownerToken = ownership?.token;
+			entry.attachPath = ownership?.attachPath;
 		}
 		entry.refCount += 1;
-		return entry.bridge;
+		if (this.isConnected()) {
+			this.#connectChannelIfReady(entry, this.#socket!);
+		}
 	}
 
-	public releaseChannel(id: string, bridge: ChannelBridge): void {
-		const entry = this.#channels.get(id);
+	public unsubscribeChannel(bridge: ChannelBridge): void {
+		const entry = this.#channels.get(bridge.id);
 		if (!entry || entry.bridge !== bridge) {
 			return;
 		}
 		entry.refCount = Math.max(0, entry.refCount - 1);
 		if (entry.refCount === 0) {
-			entry.bridge.dispose(new PulseChannelResetError("Channel released"));
 			if (this.isConnected() && entry.subscriptionId !== null) {
 				this.#sendChannelDisconnect(entry, this.#socket!);
 			}
-			this.#channels.delete(id);
+			entry.subscribed = false;
+			entry.subscriptionId = null;
+			entry.queue = [];
 		}
+	}
+
+	public acquireChannel(id: string, ownership?: ChannelOwnership): ChannelBridge {
+		const bridge = this.ensureChannel(id);
+		this.subscribeChannel(bridge, ownership);
+		return bridge;
+	}
+
+	public releaseChannel(_id: string, bridge: ChannelBridge): void {
+		this.unsubscribeChannel(bridge);
 	}
 
 	#routeChannelMessage(
@@ -711,6 +744,7 @@ export class PulseSocketIOClient {
 			entry.bridge.dispose(
 				new PulseChannelResetError(message.error ?? "Channel subscription rejected"),
 			);
+			this.#channels.delete(message.channel);
 			return;
 		}
 		if (!this.isConnected() || entry.bridge.closed) return;
@@ -729,13 +763,11 @@ export class PulseSocketIOClient {
 		const entry = this.#channels.get(message.channel);
 		if (!entry || entry.subscriptionId !== message.subscriptionId) return;
 		entry.bridge.dispose(new PulseChannelResetError("Channel closed by server"));
-		entry.subscriptionId = null;
-		entry.subscribed = false;
-		entry.queue = [];
+		this.#channels.delete(message.channel);
 	}
 
 	#connectChannelIfReady(entry: ChannelEntry, socket: Socket): void {
-		if (entry.bridge.closed || entry.subscriptionId !== null) return;
+		if (entry.bridge.closed || entry.subscriptionId !== null || entry.refCount === 0) return;
 		if (entry.attachPath !== undefined && !this.#isAttachAcked(entry.attachPath)) return;
 		this.#sendChannelConnect(entry, socket);
 	}

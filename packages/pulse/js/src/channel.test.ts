@@ -96,7 +96,7 @@ describe("ChannelBridge", () => {
 		expect(sent.at(-1)).toMatchObject({ event: "after-reconnect" });
 	});
 
-	it("reacquires a fresh bridge after release closes a channel", () => {
+	it("does not close the bridge on release and reuses it on reacquire", () => {
 		const client = new PulseSocketIOClient(
 			"http://pulse.test",
 			{},
@@ -111,11 +111,19 @@ describe("ChannelBridge", () => {
 		const first = client.acquireChannel("chan-1");
 		client.releaseChannel("chan-1", first);
 
-		expect(() => first.on("event", vi.fn())).toThrow(PulseChannelResetError);
+		expect(first.closed).toBe(false);
+		expect(() => first.on("event", vi.fn())).not.toThrow();
 
 		const second = client.acquireChannel("chan-1");
-		expect(second).not.toBe(first);
-		expect(() => second.on("event", vi.fn())).not.toThrow();
+		expect(second).toBe(first);
+		expect(() => second.emit("after-release")).not.toThrow();
+	});
+
+	it("no-ops emit after the server closes the bridge", () => {
+		const { bridge, sent } = makeClient();
+		bridge.dispose(new PulseChannelResetError("Channel closed by server"));
+		expect(() => bridge.emit("after-close")).not.toThrow();
+		expect(sent).toHaveLength(0);
 	});
 });
 
@@ -124,21 +132,21 @@ describe("usePulseChannel", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("uses route ownership only for route-lifetime channels and releases each exact bridge", () => {
+	it("returns a bridge on the first render and subscribes with the matching owner", () => {
 		const path = "/current-route";
 		const fakeClient = { sendMessage: vi.fn() } as any;
-		const acquiredBridges: ChannelBridge[] = [];
 		vi.spyOn(PulseSocketIOClient.prototype, "connect").mockResolvedValue();
-		const acquireChannel = vi
-			.spyOn(PulseSocketIOClient.prototype, "acquireChannel")
-			.mockImplementation((id) => {
-				const bridge = new ChannelBridge(fakeClient, id);
-				acquiredBridges.push(bridge);
-				return bridge;
-			});
-		const releaseChannel = vi
-			.spyOn(PulseSocketIOClient.prototype, "releaseChannel")
+		const ensureChannel = vi
+			.spyOn(PulseSocketIOClient.prototype, "ensureChannel")
+			.mockImplementation((id) => new ChannelBridge(fakeClient, id));
+		const subscribeChannel = vi
+			.spyOn(PulseSocketIOClient.prototype, "subscribeChannel")
 			.mockImplementation(() => {});
+		const unsubscribeChannel = vi
+			.spyOn(PulseSocketIOClient.prototype, "unsubscribeChannel")
+			.mockImplementation(() => {});
+
+		const firstRender: Array<ChannelBridge | null> = [];
 
 		function Probe({
 			channelId,
@@ -147,7 +155,8 @@ describe("usePulseChannel", () => {
 			channelId: string;
 			lifetime: "route" | "tab";
 		}) {
-			usePulseChannel(channelId, lifetime);
+			const bridge = usePulseChannel(channelId, lifetime);
+			firstRender.push(bridge);
 			return null;
 		}
 
@@ -194,20 +203,34 @@ describe("usePulseChannel", () => {
 			{ reactStrictMode: true },
 		);
 
-		expect(acquireChannel.mock.calls).toEqual([
-			["route-channel", { token: path, attachPath: path }],
-			["tab-channel", undefined],
-			["route-channel", { token: path, attachPath: path }],
-			["tab-channel", undefined],
+		expect(firstRender.length).toBeGreaterThan(0);
+		expect(firstRender.every((bridge) => bridge instanceof ChannelBridge)).toBe(true);
+
+		expect([...new Set(ensureChannel.mock.calls.map(([id]) => id))].sort()).toEqual([
+			"route-channel",
+			"tab-channel",
 		]);
+		expect(
+			subscribeChannel.mock.calls.some(
+				([bridge, ownership]) =>
+					bridge.id === "route-channel" &&
+					ownership?.token === path &&
+					ownership?.attachPath === path,
+			),
+		).toBe(true);
+		expect(
+			subscribeChannel.mock.calls.some(
+				([bridge, ownership]) => bridge.id === "tab-channel" && ownership === undefined,
+			),
+		).toBe(true);
 
 		view.unmount();
 
-		expect(releaseChannel.mock.calls).toEqual([
-			["route-channel", acquiredBridges[0]],
-			["tab-channel", acquiredBridges[1]],
-			["route-channel", acquiredBridges[2]],
-			["tab-channel", acquiredBridges[3]],
-		]);
+		expect(
+			unsubscribeChannel.mock.calls.some(([bridge]) => bridge.id === "route-channel"),
+		).toBe(true);
+		expect(
+			unsubscribeChannel.mock.calls.some(([bridge]) => bridge.id === "tab-channel"),
+		).toBe(true);
 	});
 });

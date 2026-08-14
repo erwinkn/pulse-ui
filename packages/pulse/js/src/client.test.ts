@@ -230,7 +230,7 @@ describe("PulseSocketIOClient attach ack", () => {
 			channel: "chan-1",
 			owner: "view-owner",
 		});
-		expect(second).not.toBe(first);
+		expect(second).toBe(first);
 
 		socket.trigger(
 			"message",
@@ -410,7 +410,8 @@ describe("PulseSocketIOClient attach ack", () => {
 			}),
 		);
 		expect(bridge.closed).toBe(true);
-		expect(() => bridge.emit("after-close")).toThrow("Channel is closed");
+		expect(() => bridge.emit("after-close")).not.toThrow();
+		expect(sentMessages().some((message) => message.event === "after-close")).toBe(false);
 		expect(connect.subscriptionId).not.toBe(reconnect.subscriptionId);
 		const afterClose = sentMessages().length;
 		client.releaseChannel("chan-1", bridge);
@@ -502,6 +503,41 @@ describe("PulseSocketIOClient attach ack", () => {
 			}),
 		);
 		expect(second.closed).toBe(true);
+	});
+
+	it("queues emits from ensureChannel until the bridge is subscribed", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+
+		const bridge = client.ensureChannel("chan-1");
+		bridge.emit("before-subscribe");
+		expect(sentMessages()).toEqual([]);
+
+		client.subscribeChannel(bridge);
+		const connect = sentMessages().at(-1)!;
+		expect(connect).toMatchObject({
+			type: "channel",
+			action: "connect",
+			channel: "chan-1",
+		});
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel",
+				action: "connect_ack",
+				channel: "chan-1",
+				subscriptionId: connect.subscriptionId,
+				accepted: true,
+			}),
+		);
+		expect(sentMessages().at(-1)).toMatchObject({
+			type: "channel",
+			action: "event",
+			event: "before-subscribe",
+			subscriptionId: connect.subscriptionId,
+		});
 	});
 
 	it("drops queued events and closes a rejected subscription", async () => {

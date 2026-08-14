@@ -437,6 +437,13 @@ def test_worker_uvicorn_config_disables_reload() -> None:
 	assert config.reload is False
 	assert config.workers == 1
 	assert config.timeout_graceful_shutdown == DEVELOPMENT_GRACEFUL_TIMEOUT
+	assert config.log_config is uvicorn.config.LOGGING_CONFIG
+
+	filtered = worker_uvicorn_config(
+		app, host="localhost", port=8000, plain=True, verbose=False
+	)
+	assert filtered.log_config is not None
+	assert filtered.log_config is not uvicorn.config.LOGGING_CONFIG
 
 
 def test_worker_watchdog_force_exits_on_supervisor_exit(

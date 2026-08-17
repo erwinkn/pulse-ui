@@ -47,15 +47,27 @@ export function pulse(): Plugin {
 		},
 		configureServer(server) {
 			if (fd === undefined) return;
-			writeSync(fd, "c");
-			bindListening(server, () => writeSync(fd, "1"));
+			notify(fd, "c");
+			bindListening(server, () => notify(fd, "1"));
 		},
 	};
 }
 
+function notify(fd: number, payload: string) {
+	try {
+		writeSync(fd, payload);
+	} catch {
+		// Supervisor closed the pipe (shutdown) or the write end is stale.
+	}
+}
+
 function bindListening(server: ViteDevServer, onListening: () => void) {
 	const httpServer = server.httpServer;
-	if (!httpServer) return;
+	if (!httpServer) {
+		throw new Error(
+			"Pulse Vite plugin requires an HTTP server. Middleware mode is not supported.",
+		);
+	}
 	if (httpServer.listening) {
 		onListening();
 		return;

@@ -106,6 +106,10 @@ class DevSupervisor:
 		self._web_exit = asyncio.Event()
 		self._backend_code: int | None = None
 		self._web_code: int | None = None
+		self._vite_configured = asyncio.Event()
+		self._vite_listening = asyncio.Event()
+		self._vite_ready_r: int | None = None
+		self._vite_drain: asyncio.Task[None] | None = None
 		for listener in listeners:
 			listener.set_inheritable(False)
 
@@ -169,6 +173,7 @@ class DevSupervisor:
 			self.backend = None
 			await self._stop(self.web)
 			self.web = None
+			await self._await_vite_drain()
 			for signum, handler in previous_handlers.items():
 				signal.signal(signum, cast(Any, handler))
 
@@ -246,6 +251,56 @@ class DevSupervisor:
 				with contextlib.suppress(OSError):
 					os.close(ready_r)
 
+	def _close_vite_ready_fd(self) -> None:
+		fd = self._vite_ready_r
+		self._vite_ready_r = None
+		if fd is not None:
+			os.close(fd)
+
+	async def _drain_vite_ready(self) -> None:
+		ready_r = self._vite_ready_r
+		if ready_r is None:
+			return
+		try:
+			while True:
+				try:
+					chunk = await asyncio.to_thread(os.read, ready_r, 8)
+				except OSError:
+					return
+				if not chunk:
+					return
+				if b"c" in chunk:
+					self._vite_configured.set()
+				if b"1" in chunk:
+					self._vite_listening.set()
+		finally:
+			self._close_vite_ready_fd()
+
+	async def _await_vite_drain(self) -> None:
+		drain = self._vite_drain
+		self._vite_drain = None
+		if drain is not None:
+			await drain
+			return
+		self._close_vite_ready_fd()
+
+	async def _wait_vite_signal(
+		self, event: asyncio.Event, *, timeout: float | None
+	) -> bool:
+		waiter = asyncio.create_task(event.wait())
+		try:
+			if timeout is None:
+				result = await self._race("web", extra=waiter)
+			else:
+				async with asyncio.timeout(timeout):
+					result = await self._race("web", extra=waiter)
+			return result == "ready"
+		finally:
+			if not waiter.done():
+				waiter.cancel()
+				with contextlib.suppress(asyncio.CancelledError):
+					await waiter
+
 	async def _start_web(self) -> None:
 		assert self.web_spec is not None
 		web_spec = self.web_spec
@@ -254,6 +309,7 @@ class DevSupervisor:
 		ready_r, ready_w = os.pipe()
 		os.set_inheritable(ready_w, True)
 		os.set_inheritable(ready_r, False)
+		self._vite_ready_r = ready_r
 		loop = asyncio.get_running_loop()
 
 		def on_output(line: str) -> None:
@@ -277,61 +333,38 @@ class DevSupervisor:
 			cwd=web_spec.cwd,
 			env=env,
 		)
-		read_task: asyncio.Task[bytes] | None = None
 		try:
-			try:
-				self.web = ManagedProcess.start(
-					spec, on_output, on_exit, pass_fds=(ready_w,)
-				)
-			finally:
-				os.close(ready_w)
-			buf = bytearray()
-			try:
-				async with asyncio.timeout(self.vite_plugin_timeout):
-					while b"c" not in buf:
-						read_task = asyncio.create_task(
-							asyncio.to_thread(os.read, ready_r, 8)
-						)
-						result = await self._race("web", extra=read_task)
-						if result != "ready":
-							return
-						chunk = read_task.result()
-						if not chunk:
-							return
-						buf.extend(chunk)
-			except TimeoutError:
-				if (
-					b"c" not in buf
-					and not self.shutdown.is_set()
-					and self._web_code is None
-				):
-					print(
-						"Vite did not load pulse() within "
-						+ f"{self.vite_plugin_timeout:g}s. Add it to the plugins "
-						+ "array in vite.config.ts.",
-						flush=True,
-					)
-					await self._stop(self.web)
-					self.web = None
-					self._web_code = 1
-				return
-			while b"1" not in buf:
-				read_task = asyncio.create_task(asyncio.to_thread(os.read, ready_r, 8))
-				result = await self._race("web", extra=read_task)
-				if result != "ready":
-					return
-				chunk = read_task.result()
-				if not chunk:
-					return
-				buf.extend(chunk)
-			if web_spec.on_ready is not None:
-				web_spec.on_ready()
+			self.web = ManagedProcess.start(
+				spec, on_output, on_exit, pass_fds=(ready_w,)
+			)
+		except BaseException:
+			self._close_vite_ready_fd()
+			raise
 		finally:
-			with contextlib.suppress(OSError):
-				os.close(ready_r)
-			if read_task is not None and not read_task.done():
-				with contextlib.suppress(Exception):
-					await read_task
+			os.close(ready_w)
+		self._vite_drain = asyncio.create_task(self._drain_vite_ready())
+		try:
+			got = await self._wait_vite_signal(
+				self._vite_configured, timeout=self.vite_plugin_timeout
+			)
+		except TimeoutError:
+			if not self.shutdown.is_set() and self._web_code is None:
+				print(
+					"Vite did not load pulse() within "
+					+ f"{self.vite_plugin_timeout:g}s. Add it to the plugins "
+					+ "array in vite.config.ts.",
+					flush=True,
+				)
+				await self._stop(self.web)
+				self.web = None
+				self._web_code = 1
+			return
+		if not got:
+			return
+		if not await self._wait_vite_signal(self._vite_listening, timeout=None):
+			return
+		if web_spec.on_ready is not None:
+			web_spec.on_ready()
 
 	async def _race(
 		self,

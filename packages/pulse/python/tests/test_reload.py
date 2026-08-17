@@ -149,6 +149,8 @@ def install_process_script(
 				os.write(child_w, b"c1")
 				os.close(child_w)
 				process.ready_w = None
+			elif outcome == "ready_open":
+				os.write(child_w, b"c1")
 			elif outcome == "fail":
 				os.close(child_w)
 				process.ready_w = None
@@ -306,6 +308,51 @@ async def test_vite_crash_returns_its_exit_code(
 	processes[0].exit(6)
 	assert await run_task == 6
 	assert "server1:kill" in events
+
+
+@pytest.mark.asyncio
+async def test_vite_bytes_after_ready_are_ignored(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	processes = install_process_script(
+		monkeypatch,
+		events,
+		[("web", "ready_open"), ("server", "ready")],
+	)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "server1:start" in events)
+	assert processes[0].ready_w is not None
+	os.write(processes[0].ready_w, b"c1")
+	await asyncio.sleep(0.05)
+	assert "server2:start" not in events
+	assert supervisor.web is not None
+	assert supervisor.web.is_alive()
+	supervisor.shutdown.set()
+	assert await run_task == 130
+
+
+@pytest.mark.asyncio
+async def test_vite_ready_pipe_eof_after_ready_is_inert(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	install_process_script(
+		monkeypatch,
+		events,
+		[("web", "ready"), ("server", "ready")],
+	)
+
+	run_task = asyncio.create_task(supervisor.run())
+	await wait_until(lambda: "server1:start" in events)
+	assert supervisor.web is not None
+	assert supervisor.web.is_alive()
+	assert "server1:kill" not in events
+	supervisor.shutdown.set()
+	assert await run_task == 130
 
 
 @pytest.mark.asyncio

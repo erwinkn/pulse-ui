@@ -35,9 +35,7 @@ def _bind_render(
 	app._socket_to_render[socket_sid] = render.id  # pyright: ignore[reportPrivateUsage]
 
 
-async def _send(
-	app: ps.App, socket_sid: str, message: dict[str, object]
-) -> None:
+async def _send(app: ps.App, socket_sid: str, message: dict[str, object]) -> None:
 	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
 		socket_sid, serialize(message)
 	)
@@ -193,7 +191,7 @@ async def test_decide_on_one_path_does_not_serialize_other_path_or_completion():
 
 	@ps.component
 	def PageA():
-		return ps.div["a"]
+		return ps.div()["a"]
 
 	@ps.component
 	def PageB():

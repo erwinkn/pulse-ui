@@ -1157,7 +1157,7 @@ class App:
 				return
 
 			if isinstance(res, Deny):
-				path = cast(str, msg.get("path", "api_response"))
+				path = msg.get("path", "api_response")
 				render.report_error(
 					path,
 					"server",

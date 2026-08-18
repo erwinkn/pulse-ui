@@ -9,6 +9,7 @@ from pulse.messages import ClientMessage, ClientPulseMessage
 from pulse.middleware import Deny, Ok, PulseMiddleware
 from pulse.render_session import RenderSession
 from pulse.serializer import serialize
+from pulse.test_helpers import wait_for
 from pulse.user_session import UserSession
 
 
@@ -36,7 +37,17 @@ def _bind_render(
 
 
 async def _send(app: ps.App, socket_sid: str, message: dict[str, object]) -> None:
+	"""Live ingress: replies resolve inline, commands detach."""
 	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+		socket_sid, serialize(message)
+	)
+
+
+async def _send_serial(
+	app: ps.App, socket_sid: str, message: dict[str, object]
+) -> None:
+	"""Drain-style: await the command so Apply has finished."""
+	await app._process_socket_message(  # pyright: ignore[reportPrivateUsage]
 		socket_sid, serialize(message)
 	)
 
@@ -84,14 +95,14 @@ async def test_completion_applies_while_other_message_is_in_decide():
 	channel_fut: asyncio.Future[object] = asyncio.get_running_loop().create_future()
 	render.channels.register_pending("req-1", channel_fut, "ch-1")
 
-	gated = asyncio.create_task(
-		_send(
-			app,
-			"socket-1",
-			{"type": "attach", "path": "/", "routeInfo": _route_info("/")},
-		)
+	# Live handler returns immediately; attach Decide is a detached task.
+	await _send(
+		app,
+		"socket-1",
+		{"type": "attach", "path": "/", "routeInfo": _route_info("/")},
 	)
 	await middleware.started.wait()
+	assert not middleware.release.is_set()
 	assert not api_fut.done()
 	assert not js_fut.done()
 	assert not channel_fut.done()
@@ -135,7 +146,7 @@ async def test_completion_applies_while_other_message_is_in_decide():
 	assert channel_fut.result() == "pong"
 
 	middleware.release.set()
-	await gated
+	await asyncio.sleep(0)
 	render.close()
 
 
@@ -163,14 +174,15 @@ async def test_same_path_attach_then_callback_apply_in_order():
 	assert render.route_mounts["/"].state == "pending"
 	callback_key = next(iter(render.route_mounts["/"].tree.callbacks))
 
-	# Sequential inbound messages, no yield between Apply of attach and callback.
-	# Same-path Apply is sync, so the callback lookup sees the mount.
-	await _send(
+	# Sequential Decides (connect-drain path). Apply is sync, so the
+	# callback lookup sees the mount. Live ingress does not promise this
+	# once middleware parks — callback Decide must not wait for attach Decide.
+	await _send_serial(
 		app,
 		"socket-1",
 		{"type": "attach", "path": "/", "routeInfo": _route_info("/")},
 	)
-	await _send(
+	await _send_serial(
 		app,
 		"socket-1",
 		{"type": "callback", "path": "/", "callback": callback_key, "args": []},
@@ -215,12 +227,10 @@ async def test_decide_on_one_path_does_not_serialize_other_path_or_completion():
 	api_fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
 	render._pending_api["corr-b"] = api_fut  # pyright: ignore[reportPrivateUsage]
 
-	gated = asyncio.create_task(
-		_send(
-			app,
-			"socket-1",
-			{"type": "attach", "path": "/a", "routeInfo": _route_info("/a")},
-		)
+	await _send(
+		app,
+		"socket-1",
+		{"type": "attach", "path": "/a", "routeInfo": _route_info("/a")},
 	)
 	await middleware.started.wait()
 	assert render.route_mounts["/a"].state == "pending"
@@ -230,11 +240,13 @@ async def test_decide_on_one_path_does_not_serialize_other_path_or_completion():
 		"socket-1",
 		{"type": "attach", "path": "/b", "routeInfo": _route_info("/b")},
 	)
+	assert await wait_for(lambda: render.route_mounts["/b"].state == "active")
 	await _send(
 		app,
 		"socket-1",
 		{"type": "callback", "path": "/b", "callback": callback_key, "args": []},
 	)
+	assert await wait_for(lambda: clicked == ["active"])
 	await _send(
 		app,
 		"socket-1",
@@ -248,15 +260,12 @@ async def test_decide_on_one_path_does_not_serialize_other_path_or_completion():
 		},
 	)
 
-	assert render.route_mounts["/b"].state == "active"
-	assert clicked == ["active"]
 	assert api_fut.done()
 	assert render.route_mounts["/a"].state == "pending"
 	assert not middleware.release.is_set()
 
 	middleware.release.set()
-	await gated
-	assert render.route_mounts["/a"].state == "active"
+	assert await wait_for(lambda: render.route_mounts["/a"].state == "active")
 	render.close()
 
 

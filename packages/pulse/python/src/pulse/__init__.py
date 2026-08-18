@@ -26,7 +26,13 @@ from pulse.channel import (
 	Channel as Channel,
 )
 from pulse.channel import (
-	ChannelClosed as ChannelClosed,
+	ChannelDetached as ChannelDetached,
+)
+from pulse.channel import (
+	ChannelDisconnected as ChannelDisconnected,
+)
+from pulse.channel import (
+	ChannelRemoteError as ChannelRemoteError,
 )
 from pulse.channel import (
 	ChannelTimeout as ChannelTimeout,

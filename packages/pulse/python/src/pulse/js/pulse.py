@@ -4,7 +4,7 @@ Pulse UI client bindings for channel communication.
 Usage:
 
 ```python
-from pulse.js.pulse import usePulseChannel, ChannelBridge, PulseChannelResetError
+from pulse.js.pulse import usePulseChannel, ChannelBridge
 
 @ps.javascript(jsx=True)
 def MyChannelComponent(*, channel_id: str):
@@ -12,19 +12,16 @@ def MyChannelComponent(*, channel_id: str):
 
     # Subscribe to events
     useEffect(
-        lambda: bridge and bridge.on("server:notify", lambda payload: console.log(payload)),
+        lambda: bridge.on("server:notify", lambda payload: console.log(payload)),
         [bridge],
     )
 
     # Emit events to server
     def send_ping():
-        if bridge:
-            bridge.emit("client:ping", {"message": "hello"})
+        bridge.emit("client:ping", {"message": "hello"})
 
     # Make requests to server
     async def send_request():
-        if not bridge:
-            return
         response = await bridge.request("client:request", {"data": 123})
         console.log(response)
 
@@ -45,18 +42,26 @@ from pulse.transpiler.js_module import JsModule
 T = _TypeVar("T")
 
 
-class PulseChannelResetError(Exception):
-	"""Error raised when a channel is closed or reset."""
+class PulseChannelDetachedError(Exception):
+	"""Raised when `on()` is called on a detached handle."""
+
+	pass
+
+
+class PulseChannelDisconnectedError(Exception):
+	"""Raised when a request cannot complete because the socket is down."""
+
+	pass
+
+
+class PulseChannelRemoteError(Exception):
+	"""Raised when the peer responds with an error."""
 
 	pass
 
 
 class ChannelBridge:
-	"""A bridge for bidirectional communication between client and server.
-
-	Provides methods for emitting events, making requests, and subscribing
-	to server events on a specific channel.
-	"""
+	"""A local handle on a mailbox. Messages route by `id`."""
 
 	@property
 	def id(self) -> str:
@@ -99,17 +104,17 @@ class ChannelBridge:
 		...
 
 
-def usePulseChannel(channel_id: str) -> ChannelBridge | None:
-	"""React hook to connect to a Pulse channel.
+def usePulseChannel(channel_id: str) -> ChannelBridge:
+	"""React hook to attach a handle to a Pulse mailbox.
 
-	Must be called from within a React component. The channel connection
-	is automatically managed based on component lifecycle.
+	Must be called from within a React component. Client lifetime is React
+	placement (route component vs layout).
 
 	Args:
-	    channel_id: The unique identifier for the channel to connect to.
+	    channel_id: The mailbox identifier.
 
 	Returns:
-	    A ChannelBridge instance for interacting with the channel.
+	    A ChannelBridge handle for that mailbox.
 	"""
 	...
 

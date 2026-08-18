@@ -50,6 +50,7 @@ from pulse.helpers import (
 )
 from pulse.hooks.core import hooks
 from pulse.messages import (
+	ClientChannelEventMessage,
 	ClientChannelMessage,
 	ClientChannelRequestMessage,
 	ClientChannelResponseMessage,
@@ -1099,7 +1100,7 @@ class App:
 			if render.connected:
 				self._cancel_render_cleanup(rid)
 			try:
-				if msg["type"] == "channel_message":
+				if msg["type"] == "channel":
 					await self._handle_channel_message(render, session, msg)
 				else:
 					await self._handle_pulse_message(render, session, msg)
@@ -1128,7 +1129,7 @@ class App:
 				render.execute_callback(msg["path"], msg["callback"], msg["args"])
 			elif msg["type"] == "detach":
 				render.detach(msg["path"])
-				render.channels.remove_route(msg["path"])
+				render.channels.detach_route(msg["path"])
 			elif msg["type"] == "api_result":
 				render.handle_api_result(dict(msg))
 			elif msg["type"] == "js_result":
@@ -1167,39 +1168,50 @@ class App:
 	async def _handle_channel_message(
 		self, render: RenderSession, session: UserSession, msg: ClientChannelMessage
 	) -> None:
-		if msg.get("responseTo"):
-			msg = cast(ClientChannelResponseMessage, msg)
-			render.channels.handle_client_response(msg)
-		else:
-			channel_id = str(msg.get("channel", ""))
-			msg = cast(ClientChannelRequestMessage, msg)
+		action = msg.get("action")
+		if action == "response":
+			render.channels.handle_response(cast(ClientChannelResponseMessage, msg))
+			return
+		if action not in ("event", "request"):
+			logger.warning("Unknown channel action received: %s", msg)
+			return
 
-			async def _next() -> Ok[None]:
-				render.channels.handle_client_event(
-					render=render, session=session, message=msg
+		inbound = (
+			cast(ClientChannelEventMessage, msg)
+			if action == "event"
+			else cast(ClientChannelRequestMessage, msg)
+		)
+		channel_id = inbound["channel"]
+		event = inbound["event"]
+		request_id = inbound.get("requestId") if action == "request" else None
+
+		async def _next() -> Ok[None]:
+			if action == "event":
+				render.channels.handle_event(cast(ClientChannelEventMessage, inbound))
+			else:
+				await render.channels.handle_request(
+					cast(ClientChannelRequestMessage, inbound)
 				)
-				return Ok(None)
+			return Ok(None)
 
-			def _normalize_message_response(res: Any) -> Ok[None] | Deny:
-				if isinstance(res, (Ok, Deny)):
-					return res  # type: ignore[return-value]
-				# Treat any other value as allow
-				return Ok(None)
+		def _normalize_message_response(res: Any) -> Ok[None] | Deny:
+			if isinstance(res, (Ok, Deny)):
+				return res  # type: ignore[return-value]
+			return Ok(None)
 
-			with PulseContext.update(session=session, render=render):
-				res = await self.middleware.channel(
-					channel_id=channel_id,
-					event=msg.get("event", ""),
-					payload=msg.get("payload"),
-					request_id=msg.get("requestId"),
-					session=session.data,
-					next=_next,
-				)
-				res = _normalize_message_response(res)
+		with PulseContext.update(session=session, render=render):
+			res = await self.middleware.channel(
+				channel_id=channel_id,
+				event=event,
+				payload=inbound.get("payload"),
+				request_id=request_id,
+				session=session.data,
+				next=_next,
+			)
+			res = _normalize_message_response(res)
 
-			if isinstance(res, Deny):
-				if req_id := msg.get("requestId"):
-					render.channels.send_error(channel_id, req_id, "Denied")
+		if isinstance(res, Deny) and action == "request" and request_id:
+			render.channels.send_error(channel_id, request_id, "denied", "Denied")
 
 	def get_route(self, path: str):
 		return self.routes.find(path)

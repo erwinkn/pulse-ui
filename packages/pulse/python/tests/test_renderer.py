@@ -1286,14 +1286,14 @@ async def test_ref_on_mount_uses_route_context():
 		render.prerender(["/"])
 
 	assert handle is not None
-	render.channels.handle_client_event(
-		render=render,
-		session=session,
-		message={
+	render.channels.handle_event(
+		{
+			"type": "channel",
+			"action": "event",
 			"channel": handle.channel_id,
 			"event": "ref:mounted",
 			"payload": {"refId": handle.id},
-		},
+		}
 	)
 	await asyncio.wait_for(mounted.wait(), timeout=1)
 	assert seen.get("path") == "/"

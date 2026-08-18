@@ -119,7 +119,6 @@ class RefHandle(Disposable, Generic[T]):
 		"_mount_waiters",
 		"_mount_handlers",
 		"_unmount_handlers",
-		"_owns_channel",
 		"_remove_mount",
 		"_remove_unmount",
 	)
@@ -130,7 +129,6 @@ class RefHandle(Disposable, Generic[T]):
 	_mount_waiters: list[asyncio.Future[None]]
 	_mount_handlers: list[Callable[[], Any]]
 	_unmount_handlers: list[Callable[[], Any]]
-	_owns_channel: bool
 	_remove_mount: Callable[[], None] | None
 	_remove_unmount: Callable[[], None] | None
 
@@ -139,7 +137,6 @@ class RefHandle(Disposable, Generic[T]):
 		channel: Channel,
 		*,
 		ref_id: str | None = None,
-		owns_channel: bool = True,
 	) -> None:
 		self._channel = channel
 		self.id = ref_id or uuid.uuid4().hex
@@ -147,7 +144,6 @@ class RefHandle(Disposable, Generic[T]):
 		self._mount_waiters = []
 		self._mount_handlers = []
 		self._unmount_handlers = []
-		self._owns_channel = owns_channel
 		self._remove_mount = self._channel.on("ref:mounted", self._on_mounted)
 		self._remove_unmount = self._channel.on("ref:unmounted", self._on_unmounted)
 
@@ -758,8 +754,6 @@ class RefHandle(Disposable, Generic[T]):
 		self._mount_waiters.clear()
 		self._mount_handlers.clear()
 		self._unmount_handlers.clear()
-		if self._owns_channel:
-			self._channel.close()
 
 	@override
 	def __repr__(self) -> str:
@@ -818,12 +812,12 @@ class RefHookState(HookState):
 				)
 			return existing, False
 
-		if self._channel is None or self._channel.closed:
+		if self._channel is None or self._channel.is_detached():
 			ctx = PulseContext.get()
 			if ctx.render is None:
 				raise RuntimeError("ref() requires an active render session")
 			self._channel = ctx.render.get_ref_channel()
-		handle = RefHandle(self._channel, owns_channel=False)
+		handle = RefHandle(self._channel)
 		self.instances[full_identity] = handle
 		return handle, True
 

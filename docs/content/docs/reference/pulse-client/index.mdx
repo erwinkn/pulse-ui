@@ -85,14 +85,16 @@ The package exports several categories of APIs:
 ### Hooks
 
 - **usePulseClient** - Access the Pulse client instance
-- **usePulseChannel** - Subscribe to bidirectional channels
+- **usePulseChannel** - Attach a handle to a mailbox
 - **usePulsePrerender** - Access prerendered view data
 
 ### Classes
 
 - **ChannelBridge** - Bidirectional communication over channels
 - **VDOMRenderer** - Converts VDOM to React elements
-- **PulseChannelResetError** - Error for channel failures
+- **PulseChannelDisconnectedError** - Request failed because the socket is down
+- **PulseChannelRemoteError** - Peer responded with an error
+- **PulseChannelDetachedError** - `on()` called on a detached handle
 
 ### Utilities
 

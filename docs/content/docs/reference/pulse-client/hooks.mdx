@@ -102,7 +102,7 @@ Most of these are used internally by `PulseView`. The most useful for app code a
 
 ## usePulseChannel
 
-Hook to subscribe to a Pulse channel for bidirectional communication. Channels enable real-time messaging patterns like chat, notifications, or streaming data.
+Hook that returns a handle on a mailbox. Client lifetime is React placement: a route component detaches on navigation, a layout keeps the handle for the tab.
 
 ```ts
 import { usePulseChannel } from "pulse-ui-client";
@@ -127,13 +127,9 @@ Returns a `ChannelBridge` instance for sending and receiving messages.
 
 ### Lifecycle
 
-The hook manages channel subscription automatically:
+The hook memoizes one `ChannelBridge` per hook instance (`[client, id]`) and attach/detaches that same object. StrictMode reuses it. Two hooks on the same id are two handles, one mailbox.
 
-1. On mount: acquires a reference to the channel
-2. On unmount: releases the reference
-3. When all references are released: channel closes
-
-Multiple components can subscribe to the same channel. The channel stays open as long as at least one component is subscribed.
+There is no `lifetime` argument. Put the hook in a layout if listeners should survive route changes.
 
 ### Example: Chat Room
 

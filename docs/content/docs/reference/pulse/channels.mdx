@@ -1,39 +1,42 @@
 ---
 title: "Channels"
-description: "Realtime channels"
+description: "Realtime mailboxes"
 ---
 
-Bidirectional communication channels for real-time messaging between server and client.
+A channel id is a mailbox name scoped to a render session. Messages route by id. The only lifecycle is local listener attach/detach — the mailbox is not created or destroyed on the wire.
 
 ## Functions
 
 ### channel
 
 ```python
-def channel(identifier: str | None = None) -> Channel
+def channel(
+    identifier: str | None = None,
+    *,
+    lifetime: Literal["route", "tab"] = "route",
+) -> Channel
 ```
 
-Create a channel bound to the current render session.
+Return a handle on a mailbox.
 
 **Parameters:**
-- `identifier` - Optional channel ID. Auto-generated UUID if not provided.
+- `identifier` — Mailbox name. `None` generates a UUID. Empty string raises `ValueError`.
+- `lifetime` — When this handle auto-detaches. `"route"` (default) detaches on that route/component unmount. `"tab"` lives until the render session ends or you call `detach()`.
 
-**Returns:** `Channel` instance.
+**Returns:** `Channel` handle.
 
-**Raises:** `RuntimeError` if called outside an active render session.
+**Raises:** `RuntimeError` if called outside an active render session. `ValueError` if `identifier` is empty.
+
+During a live route mount, `ps.channel("foo")` returns the same handle. After that handle auto-detaches, the next `ps.channel("foo")` is a new handle on the same mailbox.
 
 ```python
 import pulse as ps
 
 @ps.component
 def ChatRoom():
-    ch = ps.channel("chat")
-
-    @ch.on("message")
-    def handle_message(payload):
-        # Handle incoming message from client
-        ch.emit("broadcast", payload)
-
+    with ps.init():
+        ch = ps.channel("chat")
+        ch.on("message", lambda payload: ch.emit("echo", payload))
     return ps.div("Chat room")
 ```
 
@@ -41,17 +44,14 @@ def ChatRoom():
 
 ### Channel
 
-Bidirectional communication channel bound to a render session.
+A local handle on a mailbox. Messages still route by `id` after detach.
 
 #### Attributes
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `id` | `str` | Channel identifier |
-| `render_id` | `str` | Associated render session ID |
-| `session_id` | `str` | Associated user session ID |
-| `route_path` | `str \| None` | Route path this channel is bound to |
-| `closed` | `bool` | Whether the channel is closed |
+| `id` | `str` | Mailbox name |
+| `lifetime` | `Literal["route", "tab"]` | Handle auto-detach policy |
 
 #### Methods
 
@@ -61,24 +61,9 @@ Bidirectional communication channel bound to a render session.
 def on(self, event: str, handler: ChannelHandler) -> Callable[[], None]
 ```
 
-Register a handler for an incoming event.
+Register a handler on this handle.
 
-**Parameters:**
-- `event` - Event name to listen for.
-- `handler` - Callback function `(payload: Any) -> Any | Awaitable[Any]`.
-
-**Returns:** Callable that removes the handler when invoked.
-
-**Raises:** `ChannelClosed` if channel is closed.
-
-```python
-ch = ps.channel()
-
-def cleanup():
-    remove_handler()
-
-remove_handler = ch.on("data", lambda payload: print(payload))
-```
+**Raises:** `ChannelDetached` if this handle has been detached.
 
 ##### emit
 
@@ -86,17 +71,7 @@ remove_handler = ch.on("data", lambda payload: print(payload))
 def emit(self, event: str, payload: Any = None) -> None
 ```
 
-Send a fire-and-forget event to the client.
-
-**Parameters:**
-- `event` - Event name.
-- `payload` - Data to send (optional).
-
-**Raises:** `ChannelClosed` if channel is closed.
-
-```python
-ch.emit("notification", {"message": "Hello"})
-```
+Send a fire-and-forget event to the mailbox. Still works after detach. If the WebSocket is down, the message uses the session's global queue.
 
 ##### request
 
@@ -110,48 +85,46 @@ async def request(
 ) -> Any
 ```
 
-Send a request to the client and await the response.
-
-**Parameters:**
-- `event` - Event name.
-- `payload` - Data to send (optional).
-- `timeout` - Timeout in seconds (optional).
-
-**Returns:** Response payload from client.
+Send a request and await the peer's response.
 
 **Raises:**
-- `ChannelClosed` if channel is closed.
-- `ChannelTimeout` if request times out.
+- `ChannelDisconnected` if there is no socket, or it dies mid-flight
+- `ChannelRemoteError` if the peer responds with `no_handler`, `denied`, or `handler_error`
+- `ChannelTimeout` if `timeout` elapses
+
+A request with no handler NACKs immediately (`no_handler`). Requests are never queued while the socket is down.
+
+##### detach
 
 ```python
-result = await ch.request("get_value", timeout=5.0)
+def detach(self) -> None
 ```
 
-##### close
-
-```python
-def close(self) -> None
-```
-
-Close the channel and clean up resources.
+Detach this handle's listeners. Idempotent. Does not destroy the mailbox. `on()` after detach raises `ChannelDetached`. `emit` / `request` still address the mailbox name.
 
 ## Exceptions
 
-### ChannelClosed
+### ChannelDetached
+
+Raised when `on()` is called on a detached handle.
+
+### ChannelDisconnected
+
+Raised when a request cannot complete because the socket is down or died.
+
+### ChannelRemoteError
 
 ```python
-class ChannelClosed(RuntimeError)
+class ChannelRemoteError(Exception):
+    code: Literal["no_handler", "denied", "handler_error"]
+    message: str
 ```
 
-Raised when interacting with a channel that has been closed.
+Raised when the peer responds with an error.
 
 ### ChannelTimeout
 
-```python
-class ChannelTimeout(asyncio.TimeoutError)
-```
-
-Raised when a channel request times out waiting for a response.
+Raised when a request exceeds `timeout`.
 
 ## Type Aliases
 
@@ -160,5 +133,3 @@ Raised when a channel request times out waiting for a response.
 ```python
 ChannelHandler = Callable[[Any], Any | Awaitable[Any]]
 ```
-
-Handler function for channel events. Can be sync or async.

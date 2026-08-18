@@ -1055,7 +1055,19 @@ class App:
 		if sid in self._connecting_sockets:
 			self._queue_pending_socket_message(sid, data)
 			return
-		await self._process_socket_message(sid, data)
+		inbound = self._resolve_socket_inbound(sid, data)
+		if inbound is None:
+			return
+		render, session, msg = inbound
+		if self._is_inbound_reply(msg):
+			self._apply_inbound_reply(render, msg)
+			return
+		# Command handling is async (middleware). Detach it so this Socket.IO
+		# handler can return — replies on this socket must not sit behind Decide.
+		self._tasks.create_task(
+			self._dispatch_inbound_command(render, session, msg),
+			name=f"inbound:{render.id}:{msg['type']}",
+		)
 
 	def _queue_pending_socket_message(self, sid: str, data: Serialized) -> None:
 		queue = self._pending_socket_messages.setdefault(sid, [])
@@ -1071,48 +1083,80 @@ class App:
 		try:
 			while pending := self._pending_socket_messages.pop(sid, []):
 				for data in pending:
+					# Connect replay stays ordered: await each command. Replies
+					# still resolve inline when we reach them.
 					await self._process_socket_message(sid, data)
 		finally:
 			self._connecting_sockets.discard(sid)
 
-	async def _process_socket_message(self, sid: str, data: Serialized) -> None:
+	def _resolve_socket_inbound(
+		self, sid: str, data: Serialized
+	) -> tuple[RenderSession, UserSession, ClientMessage] | None:
 		rid = self._socket_to_render.get(sid)
 		if not rid:
-			return
+			return None
 		msg = cast(ClientMessage, deserialize(data))
 		render = self.render_sessions.get(rid)
 		if render is None:
-			return
+			return None
 		owner_sid = self._render_to_user.get(rid)
 		if owner_sid is None:
-			return
+			return None
 		session = self.user_sessions.get(owner_sid)
 		if session is None:
-			return
+			return None
 		# Cancel any leftover cleanup for connected sessions. Never cancel
 		# for disconnected renders: nothing would reschedule it and the
 		# session would survive past its timeout.
 		if render.connected:
 			self._cancel_render_cleanup(rid)
-		try:
-			if msg["type"] == "channel_message":
-				await self._handle_channel_message(render, session, msg)
-			else:
-				await self._handle_pulse_message(render, session, msg)
-		except Exception as e:
-			path = msg.get("path", "")
-			render.report_error(path, "server", e)
+		return render, session, msg
 
-	async def _handle_pulse_message(
-		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
-	) -> None:
-		# Completions Apply immediately. They are not policy-gated — a
-		# pending call_api / run_js future must not sit behind unrelated Decide.
+	def _is_inbound_reply(self, msg: ClientMessage) -> bool:
+		if msg["type"] == "api_result" or msg["type"] == "js_result":
+			return True
+		return msg["type"] == "channel_message" and bool(msg.get("responseTo"))
+
+	def _apply_inbound_reply(self, render: RenderSession, msg: ClientMessage) -> None:
 		if msg["type"] == "api_result":
 			render.handle_api_result(dict(msg))
 			return
 		if msg["type"] == "js_result":
 			render.handle_js_result(dict(msg))
+			return
+		render.channels.handle_client_response(cast(ClientChannelResponseMessage, msg))
+
+	async def _dispatch_inbound_command(
+		self, render: RenderSession, session: UserSession, msg: ClientMessage
+	) -> None:
+		try:
+			if msg["type"] == "channel_message":
+				await self._handle_channel_message(
+					render, session, cast(ClientChannelMessage, msg)
+				)
+			else:
+				await self._handle_pulse_message(
+					render, session, cast(ClientPulseMessage, msg)
+				)
+		except Exception as e:
+			path = msg.get("path", "")
+			render.report_error(path, "server", e)
+
+	async def _process_socket_message(self, sid: str, data: Serialized) -> None:
+		inbound = self._resolve_socket_inbound(sid, data)
+		if inbound is None:
+			return
+		render, session, msg = inbound
+		if self._is_inbound_reply(msg):
+			self._apply_inbound_reply(render, msg)
+			return
+		await self._dispatch_inbound_command(render, session, msg)
+
+	async def _handle_pulse_message(
+		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
+	) -> None:
+		if self._is_inbound_reply(msg):
+			self._apply_inbound_reply(render, msg)
 			return
 
 		async def _next() -> Ok[None]:
@@ -1169,9 +1213,7 @@ class App:
 		self, render: RenderSession, session: UserSession, msg: ClientChannelMessage
 	) -> None:
 		if msg.get("responseTo"):
-			# Completions Apply immediately — never sit behind channel Decide.
-			msg = cast(ClientChannelResponseMessage, msg)
-			render.channels.handle_client_response(msg)
+			self._apply_inbound_reply(render, msg)
 		else:
 			channel_id = str(msg.get("channel", ""))
 			msg = cast(ClientChannelRequestMessage, msg)

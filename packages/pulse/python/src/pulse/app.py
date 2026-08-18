@@ -1129,7 +1129,6 @@ class App:
 				render.execute_callback(msg["path"], msg["callback"], msg["args"])
 			elif msg["type"] == "detach":
 				render.detach(msg["path"])
-				render.channels.detach_route(msg["path"])
 			elif msg["type"] == "api_result":
 				render.handle_api_result(dict(msg))
 			elif msg["type"] == "js_result":
@@ -1188,10 +1187,24 @@ class App:
 		async def _next() -> Ok[None]:
 			if action == "event":
 				render.channels.handle_event(cast(ClientChannelEventMessage, inbound))
-			else:
-				await render.channels.handle_request(
-					cast(ClientChannelRequestMessage, inbound)
-				)
+				return Ok(None)
+			request_msg = cast(ClientChannelRequestMessage, inbound)
+
+			def _on_done(task: asyncio.Task[Any]) -> None:
+				if task.cancelled():
+					return
+				try:
+					exc = task.exception()
+				except asyncio.CancelledError:
+					return
+				if exc is not None:
+					render.report_error("/", "channel", exc)
+
+			render.create_task(
+				render.channels.handle_request(request_msg),
+				name=f"channel-request:{channel_id}:{event}",
+				on_done=_on_done,
+			)
 			return Ok(None)
 
 		def _normalize_message_response(res: Any) -> Ok[None] | Deny:
@@ -1199,16 +1212,24 @@ class App:
 				return res  # type: ignore[return-value]
 			return Ok(None)
 
-		with PulseContext.update(session=session, render=render):
-			res = await self.middleware.channel(
-				channel_id=channel_id,
-				event=event,
-				payload=inbound.get("payload"),
-				request_id=request_id,
-				session=session.data,
-				next=_next,
-			)
-			res = _normalize_message_response(res)
+		try:
+			with PulseContext.update(session=session, render=render):
+				res = await self.middleware.channel(
+					channel_id=channel_id,
+					event=event,
+					payload=inbound.get("payload"),
+					request_id=request_id,
+					session=session.data,
+					next=_next,
+				)
+				res = _normalize_message_response(res)
+		except Exception as e:
+			if action == "request" and request_id:
+				render.channels.send_error(
+					channel_id, request_id, "handler_error", "Channel handler failed"
+				)
+			render.report_error("/", "channel", e)
+			return
 
 		if isinstance(res, Deny) and action == "request" and request_id:
 			render.channels.send_error(channel_id, request_id, "denied", "Denied")

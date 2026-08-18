@@ -27,7 +27,23 @@ export class PulseChannelRemoteError extends Error {
 	}
 }
 
+export class PulseChannelTimeoutError extends Error {
+	timeout: number;
+	event: string;
+
+	constructor(timeout: number, event: string) {
+		super(`Channel request timed out after ${timeout}ms: ${event}`);
+		this.name = "PulseChannelTimeoutError";
+		this.timeout = timeout;
+		this.event = event;
+	}
+}
+
 export type ChannelEventHandler = (payload: any) => any | Promise<any>;
+
+export type ChannelRequestOptions = {
+	timeout?: number;
+};
 
 export function createRandomId(): string {
 	if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -79,7 +95,7 @@ export class ChannelBridge {
 		this.client.sendMessage(message);
 	}
 
-	request(event: string, payload?: any): Promise<any> {
+	request(event: string, payload?: any, options?: ChannelRequestOptions): Promise<any> {
 		if (!this.client.isConnected()) {
 			return Promise.reject(new PulseChannelDisconnectedError("No render session is connected"));
 		}
@@ -101,13 +117,10 @@ export class ChannelBridge {
 		if (payload !== undefined) {
 			message.payload = payload;
 		}
-		return this.client.requestChannel(requestId, message);
+		return this.client.requestChannel(requestId, message, options?.timeout);
 	}
 
 	on(event: string, handler: ChannelEventHandler): () => void {
-		if (this.#detached) {
-			throw new PulseChannelDetachedError(`Channel ${this.id} is detached`);
-		}
 		let bucket = this.#handlers.get(event);
 		if (!bucket) {
 			bucket = new Set();
@@ -161,11 +174,15 @@ export class ChannelBridge {
 }
 
 export function useChannel(channelId: string): ChannelBridge {
-	const client = usePulseClient();
 	if (!channelId) {
 		throw new Error("useChannel requires a non-empty channelId");
 	}
+	const client = usePulseClient();
 	const bridge = useMemo(() => client.channel(channelId), [client, channelId]);
+	// Register during render so a live-socket emit in the same turn is not dropped
+	// waiting for useEffect. Effect cleanup still detaches; the next render/effect
+	// re-attaches the same handle.
+	bridge.attach();
 	useEffect(() => {
 		bridge.attach();
 		return () => {

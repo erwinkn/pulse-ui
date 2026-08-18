@@ -5,8 +5,10 @@ export {
 	PulseChannelDetachedError,
 	PulseChannelDisconnectedError,
 	PulseChannelRemoteError,
+	PulseChannelTimeoutError,
 	useChannel,
 } from "./channel";
+export type { ChannelRequestOptions } from "./channel";
 // Client implementation (types only - implementation is internal)
 export type {
 	ConnectionStatusListener,

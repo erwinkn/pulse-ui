@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "bun:test";
 import {
 	ChannelBridge,
-	PulseChannelDetachedError,
 	PulseChannelDisconnectedError,
+	PulseChannelTimeoutError,
 } from "./channel";
 import type { ClientChannelMessage } from "./messages";
 
@@ -16,9 +16,16 @@ function makeBridgeClient(connected = true) {
 		}),
 		attachHandle: vi.fn(),
 		detachHandle: vi.fn(),
-		requestChannel(requestId: string, message: ClientChannelMessage) {
+		requestChannel(requestId: string, message: ClientChannelMessage, timeout?: number) {
 			return new Promise((resolve, reject) => {
 				pending.set(requestId, { resolve, reject });
+				if (timeout !== undefined) {
+					setTimeout(() => {
+						if (!pending.has(requestId)) return;
+						pending.delete(requestId);
+						reject(new PulseChannelTimeoutError(timeout, (message as { event: string }).event));
+					}, timeout);
+				}
 				client.sendMessage(message);
 			});
 		},
@@ -32,7 +39,7 @@ function makeBridgeClient(connected = true) {
 }
 
 describe("ChannelBridge", () => {
-	it("emits mailbox events without lifecycle traffic", () => {
+	it("emits channel events without lifecycle traffic", () => {
 		const { bridge, sent } = makeBridgeClient();
 		bridge.emit("ping", { foo: 1 });
 		expect(sent).toEqual([
@@ -66,10 +73,18 @@ describe("ChannelBridge", () => {
 		expect(sent).toEqual([]);
 	});
 
-	it("raises on() after detach and still emits", () => {
+	it("times out an optional request timeout", async () => {
+		const { bridge } = makeBridgeClient();
+		await expect(bridge.request("echo", undefined, { timeout: 1 })).rejects.toBeInstanceOf(
+			PulseChannelTimeoutError,
+		);
+	});
+
+	it("keeps on() legal after detach and still emits", () => {
 		const { bridge, sent } = makeBridgeClient();
+		const handler = vi.fn();
 		bridge.detach();
-		expect(() => bridge.on("event", vi.fn())).toThrow(PulseChannelDetachedError);
+		expect(() => bridge.on("event", handler)).not.toThrow();
 		bridge.emit("still-routes", 1);
 		expect(sent[0]).toMatchObject({
 			type: "channel",
@@ -83,10 +98,18 @@ describe("ChannelBridge", () => {
 		const handler = vi.fn();
 		bridge.on("ping", handler);
 		bridge.detach();
-		expect(() => bridge.on("other", vi.fn())).toThrow(PulseChannelDetachedError);
-		bridge.attach();
 		expect(() => bridge.on("other", vi.fn())).not.toThrow();
+		bridge.attach();
 		bridge.dispatchEvent("ping", 1);
 		expect(handler).toHaveBeenCalledWith(1);
+	});
+
+	it("registers the same handler only once", () => {
+		const { bridge } = makeBridgeClient();
+		const handler = vi.fn();
+		bridge.on("ping", handler);
+		bridge.on("ping", handler);
+		bridge.dispatchEvent("ping", 1);
+		expect(handler).toHaveBeenCalledTimes(1);
 	});
 });

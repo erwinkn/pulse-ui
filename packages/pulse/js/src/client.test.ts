@@ -551,6 +551,26 @@ describe("PulseSocketIOClient channels", () => {
 		});
 	});
 
+	it("does not flush RPC after a disconnected request", async () => {
+		const { PulseChannelDisconnectedError } = await import("./channel");
+		const client = await makeClient();
+		const bridge = client.acquireChannel("rpc");
+		bridge.emit("ping", { n: 1 });
+		await expect(bridge.request("echo")).rejects.toBeInstanceOf(PulseChannelDisconnectedError);
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		expect(sentMessages().filter((message) => message.type === "channel")).toEqual([
+			{
+				type: "channel",
+				action: "event",
+				channel: "rpc",
+				event: "ping",
+				payload: { n: 1 },
+			},
+		]);
+	});
+
 	it("attach and detach send no wire messages", async () => {
 		const client = await makeClient();
 		const connected = client.connect();

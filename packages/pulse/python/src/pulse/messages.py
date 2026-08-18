@@ -20,7 +20,15 @@ class ServerUpdateMessage(TypedDict):
 
 
 ServerErrorPhase = Literal[
-	"render", "callback", "mount", "unmount", "navigate", "server", "effect", "connect"
+	"render",
+	"callback",
+	"mount",
+	"unmount",
+	"navigate",
+	"server",
+	"effect",
+	"connect",
+	"channel",
 ]
 
 

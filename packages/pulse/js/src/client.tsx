@@ -5,6 +5,7 @@ import {
 	createRandomId,
 	PulseChannelDisconnectedError,
 	PulseChannelRemoteError,
+	PulseChannelTimeoutError,
 } from "./channel";
 import type { RouteInfo } from "./helpers";
 import { pulseFetch } from "./http";
@@ -87,7 +88,7 @@ export class PulseSocketIOClient {
 	#socket: Socket | null = null;
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
-	#mailboxes: Map<string, Set<ChannelBridge>> = new Map();
+	#handles: Map<string, Set<ChannelBridge>> = new Map();
 	#pending = new Map<string, { resolve: (value: any) => void; reject: (error: any) => void }>();
 	#url: string;
 	#frameworkNavigate: NavigateFunction;
@@ -287,12 +288,13 @@ export class PulseSocketIOClient {
 
 	public sendMessage(payload: ClientMessage) {
 		if (this.isConnected()) {
-			// console.log("[SocketIOTransport] Sending:", payload);
 			this.#socket!.emit("message", serialize(payload as any));
-		} else {
-			// console.log("[SocketIOTransport] Queuing message:", payload);
-			this.#messageQueue.push(payload);
+			return;
 		}
+		if (payload.type === "channel" && (payload.action === "request" || payload.action === "response")) {
+			return;
+		}
+		this.#messageQueue.push(payload);
 	}
 
 	public attach(path: string, view: MountedView) {
@@ -354,8 +356,8 @@ export class PulseSocketIOClient {
 		this.#ackedAttachIds.clear();
 		this.#pendingCallbacks.clear();
 		this.#failPending(new PulseChannelDisconnectedError("Client disconnected"));
-		const leftover = [...this.#mailboxes.values()].flatMap((handles) => [...handles]);
-		this.#mailboxes.clear();
+		const leftover = [...this.#handles.values()].flatMap((handles) => [...handles]);
+		this.#handles.clear();
 		for (const bridge of leftover) {
 			bridge.detach();
 		}
@@ -558,31 +560,51 @@ export class PulseSocketIOClient {
 		return bridge;
 	}
 
-	public releaseChannel(bridge: ChannelBridge): void {
-		bridge.detach();
-	}
-
 	attachHandle(bridge: ChannelBridge): void {
-		let mailbox = this.#mailboxes.get(bridge.id);
-		if (!mailbox) {
-			mailbox = new Set();
-			this.#mailboxes.set(bridge.id, mailbox);
+		let handles = this.#handles.get(bridge.id);
+		if (!handles) {
+			handles = new Set();
+			this.#handles.set(bridge.id, handles);
 		}
-		mailbox.add(bridge);
+		handles.add(bridge);
 	}
 
 	detachHandle(bridge: ChannelBridge): void {
-		const mailbox = this.#mailboxes.get(bridge.id);
-		if (!mailbox) return;
-		mailbox.delete(bridge);
-		if (mailbox.size === 0) {
-			this.#mailboxes.delete(bridge.id);
+		const handles = this.#handles.get(bridge.id);
+		if (!handles) return;
+		handles.delete(bridge);
+		if (handles.size === 0) {
+			this.#handles.delete(bridge.id);
 		}
 	}
 
-	requestChannel(requestId: string, message: ClientChannelRequestMessage): Promise<any> {
+	requestChannel(
+		requestId: string,
+		message: ClientChannelRequestMessage,
+		timeout?: number,
+	): Promise<any> {
+		if (!this.isConnected()) {
+			return Promise.reject(new PulseChannelDisconnectedError("No render session is connected"));
+		}
 		return new Promise((resolve, reject) => {
-			this.#pending.set(requestId, { resolve, reject });
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const finish = (fn: (value: any) => void, value: any) => {
+				if (timer !== undefined) {
+					clearTimeout(timer);
+				}
+				fn(value);
+			};
+			this.#pending.set(requestId, {
+				resolve: (value) => finish(resolve, value),
+				reject: (error) => finish(reject, error),
+			});
+			if (timeout !== undefined) {
+				timer = setTimeout(() => {
+					if (!this.#pending.has(requestId)) return;
+					this.#pending.delete(requestId);
+					reject(new PulseChannelTimeoutError(timeout, message.event));
+				}, timeout);
+			}
 			this.sendMessage(message);
 		});
 	}
@@ -607,11 +629,11 @@ export class PulseSocketIOClient {
 			pending.resolve(message.payload);
 			return;
 		}
-		const handles = [...(this.#mailboxes.get(message.channel) ?? [])];
+		const handles = [...(this.#handles.get(message.channel) ?? [])];
 		if (message.action === "event") {
 			if (handles.length === 0) {
 				console.debug(
-					`[Pulse] Dropping event ${message.event} on mailbox ${message.channel} (no listeners)`,
+					`[Pulse] Dropping event ${message.event} on channel ${message.channel} (no listeners)`,
 				);
 				return;
 			}

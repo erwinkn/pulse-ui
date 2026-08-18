@@ -196,20 +196,20 @@ In Pulse, an isolated execution context per browser tab. Each tab has its own co
 **WebSocket**
 A persistent, bidirectional connection between browser and server. Unlike HTTP request/response, either side can send messages anytime. Pulse uses WebSockets for all UI updates.
 
-**Channel / mailbox**
-A string id scoped to a render session. Messages route by that name. The mailbox is not created or destroyed on the wire — handles only attach and detach local listeners.
+**Channel**
+A string id scoped to a render session. Messages route by that name. The name is not created or destroyed on the wire — handles only attach and detach local listeners.
 
 **Handle**
-A local object (`Channel` on the server, `ChannelBridge` on the client) with its own `on()` set. Two handles can share one mailbox; events fan out.
+A local object (`Channel` on the server, `ChannelBridge` on the client) with its own `on()` set. Two handles can share one channel id; events fan out.
 
 **Emit**
-Sending a fire-and-forget event to a mailbox. The sender doesn't wait for a response.
+Sending a fire-and-forget event to a channel. The sender doesn't wait for a response.
 
 **Listen**
-Registering a handler on a handle. When an event arrives on that mailbox, every attached handle with a matching listener runs.
+Registering a handler on a handle. When an event arrives on that channel, every attached handle with a matching listener runs.
 
 **Detach**
-Drop this handle's listeners. The mailbox name still accepts `emit` / `request`.
+Drop this handle's listeners. The channel name still accepts `emit` / `request`.
 
 ## JavaScript Interop
 

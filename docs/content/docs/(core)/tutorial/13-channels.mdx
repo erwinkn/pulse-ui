@@ -2,14 +2,14 @@
 title: "Channels"
 ---
 
-Sometimes your app needs to talk to the browser without a re-render: chat, live notifications, asking the client for viewport size. A channel id is a mailbox name in the current render session. Messages route by that name. Nothing is created or destroyed on the wire — you just attach and detach local listeners.
+Sometimes your app needs to talk to the browser without a re-render: chat, live notifications, asking the client for viewport size. A channel id is a name in the current render session. Messages route by that name. Nothing is created or destroyed on the wire — you just attach and detach local listeners.
 
-## What is a mailbox?
+## What is a channel?
 
 - **State** is for data that belongs to one user's session and drives the UI
 - **Channels** are for events and RPC between Python and the browser
 
-`ps.channel("chat")` returns a **handle**. During a live route mount, calling it again with the same id returns the same handle. After that handle detaches, the next call is a new handle on the same mailbox.
+`ps.channel("chat")` returns a **handle**. During a live route mount, calling it again with the same id returns the same handle. After that handle detaches, the next call is a new handle on the same name.
 
 ## Server handle
 
@@ -65,7 +65,7 @@ def ChatWidget(*, channelId: str):
     ]
 ```
 
-`useChannel` always returns a bridge. There is no `lifetime` argument — put the hook in a layout if listeners should outlive the route.
+`useChannel` always returns a bridge. There is no `lifetime` argument — put the hook in a layout if listeners should outlive the route. It registers the handle during render, so an emit after the client has rendered this hook is delivered. Emit during prerender / before the first client render is dropped — nothing is listening yet.
 
 ## Request / response
 

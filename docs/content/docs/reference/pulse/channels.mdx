@@ -1,9 +1,9 @@
 ---
 title: "Channels"
-description: "Realtime mailboxes"
+description: "Realtime channels"
 ---
 
-A channel id is a mailbox name scoped to a render session. Messages route by id. The only lifecycle is local listener attach/detach — the mailbox is not created or destroyed on the wire.
+A channel id is a session-scoped name. Messages route by id. The only lifecycle is local listener attach/detach — the name is not created or destroyed on the wire.
 
 ## Functions
 
@@ -17,17 +17,17 @@ def channel(
 ) -> Channel
 ```
 
-Return a handle on a mailbox.
+Return a handle on a channel name.
 
 **Parameters:**
-- `identifier` — Mailbox name. `None` generates a UUID. Empty string raises `ValueError`.
-- `lifetime` — When this handle auto-detaches. `"route"` (default) detaches on that route/component unmount. `"tab"` lives until the render session ends or you call `detach()`.
+- `identifier` — Channel name. `None` generates a UUID. Empty string raises `ValueError`.
+- `lifetime` — When this handle auto-detaches. `"route"` (default) detaches on that route's real unmount and requires a route context. `"tab"` lives until the render session ends or you call `detach()`.
 
 **Returns:** `Channel` handle.
 
-**Raises:** `RuntimeError` if called outside an active render session. `ValueError` if `identifier` is empty.
+**Raises:** `RuntimeError` if called outside an active render session, or if `lifetime="route"` has no route context. `ValueError` if `identifier` is empty.
 
-During a live route mount, `ps.channel("foo")` returns the same handle. After that handle auto-detaches, the next `ps.channel("foo")` is a new handle on the same mailbox.
+During a live route mount, `ps.channel("foo")` returns the same handle. `on(event, handler)` is idempotent for that triple. After that handle auto-detaches, the next `ps.channel("foo")` is a new handle on the same name.
 
 ```python
 import pulse as ps
@@ -44,13 +44,13 @@ def ChatRoom():
 
 ### Channel
 
-A local handle on a mailbox. Messages still route by `id` after detach.
+A local handle on a channel name. Messages still route by `id` after detach.
 
 #### Attributes
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `id` | `str` | Mailbox name |
+| `id` | `str` | Channel name |
 | `lifetime` | `Literal["route", "tab"]` | Handle auto-detach policy |
 
 #### Methods
@@ -61,7 +61,7 @@ A local handle on a mailbox. Messages still route by `id` after detach.
 def on(self, event: str, handler: ChannelHandler) -> Callable[[], None]
 ```
 
-Register a handler on this handle.
+Register a handler on this handle. Idempotent for the same `(event, handler)`.
 
 **Raises:** `ChannelDetached` if this handle has been detached.
 
@@ -71,7 +71,7 @@ Register a handler on this handle.
 def emit(self, event: str, payload: Any = None) -> None
 ```
 
-Send a fire-and-forget event to the mailbox. Still works after detach. If the WebSocket is down, the message uses the session's global queue.
+Send a fire-and-forget event to the channel. Still works after detach. If the WebSocket is down, the message uses the session's global queue. Events emitted before the client has rendered `useChannel` are dropped.
 
 ##### request
 
@@ -100,7 +100,7 @@ A request with no handler NACKs immediately (`no_handler`). Requests are never q
 def detach(self) -> None
 ```
 
-Detach this handle's listeners. Idempotent. Does not destroy the mailbox. `on()` after detach raises `ChannelDetached`. `emit` / `request` still address the mailbox name.
+Detach this handle's listeners. Idempotent. Does not destroy the channel name. `on()` after detach raises `ChannelDetached`. `emit` / `request` still address the name.
 
 ## Exceptions
 

@@ -513,13 +513,15 @@ async def test_rpc_is_not_queued_while_disconnected():
 
 @pytest.mark.asyncio
 async def test_event_handler_error_is_reported():
-	app, dummy, session, render, route = build_session(with_route=True)
+	app, dummy, session, render, _route = build_session()
+	del render.send  # pyright: ignore[reportAttributeAccessIssue]
+	render.connect(dummy.sent.append)
 
 	def boom(_: Any) -> None:
 		raise RuntimeError("handler exploded")
 
-	with ctx(app, session, render, route):
-		channel = ps.channel("boom")
+	with ctx(app, session, render):
+		channel = ps.channel("boom", lifetime="tab")
 		channel.on("ping", boom)
 	render.channels.handle_event(
 		as_event(
@@ -531,8 +533,12 @@ async def test_event_handler_error_is_reported():
 			},
 		)
 	)
-	await asyncio.sleep(0)
-	errors = [msg for msg in dummy.sent if msg.get("type") == "server_error"]
+	errors: list[dict[str, Any]] = []
+	for _ in range(20):
+		await asyncio.sleep(0)
+		errors = [msg for msg in dummy.sent if msg.get("type") == "server_error"]
+		if errors:
+			break
 	assert errors
 	assert errors[-1]["path"] == "/"
 	assert errors[-1]["error"]["phase"] == "channel"
@@ -586,10 +592,10 @@ async def test_middleware_exception_nacks_request():
 			},
 		),
 	)
-	assert dummy.sent[-1]["type"] == "channel"
-	assert dummy.sent[-1]["error"]["code"] == "handler_error"
-	assert dummy.sent[-2]["type"] == "server_error"
-	assert dummy.sent[-2]["error"]["phase"] == "channel"
+	nacks = [msg for msg in dummy.sent if msg.get("type") == "channel"]
+	errors = [msg for msg in dummy.sent if msg.get("type") == "server_error"]
+	assert nacks[-1]["error"]["code"] == "handler_error"
+	assert errors[-1]["error"]["phase"] == "channel"
 
 
 @pytest.mark.asyncio

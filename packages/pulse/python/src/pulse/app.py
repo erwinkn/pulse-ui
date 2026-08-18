@@ -1131,13 +1131,9 @@ class App:
 	) -> None:
 		try:
 			if msg["type"] == "channel_message":
-				await self._handle_channel_message(
-					render, session, cast(ClientChannelMessage, msg)
-				)
+				await self._handle_channel_message(render, session, msg)
 			else:
-				await self._handle_pulse_message(
-					render, session, cast(ClientPulseMessage, msg)
-				)
+				await self._handle_pulse_message(render, session, msg)
 		except Exception as e:
 			path = msg.get("path", "")
 			render.report_error(path, "server", e)

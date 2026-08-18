@@ -193,7 +193,7 @@ async def message(
 
 ### `channel`
 
-Called when channel messages are received. Authorize by channel, event, or payload.
+Called for inbound channel events and requests only — never responses. Mailbox names are guessable; gate messages. `Deny` on an event drops it. `Deny` on a request sends a `denied` error response.
 
 ```python
 from typing import Any

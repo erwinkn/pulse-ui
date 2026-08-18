@@ -11,7 +11,7 @@ Core classes for Pulse client functionality.
 
 ## ChannelBridge
 
-Manages bidirectional communication over a Pulse channel. You get a ChannelBridge instance from the `usePulseChannel` hook.
+A local handle on a mailbox. You get a `ChannelBridge` from `usePulseChannel`. Messages route by `id`. Detach only drops this handle's listeners.
 
 ```ts
 class ChannelBridge {
@@ -73,7 +73,7 @@ request(event: string, payload?: any): Promise<any>
 
 **Returns:** Promise resolving to the server's response.
 
-**Throws:** `PulseChannelResetError` if the channel closes before the response arrives.
+**Throws:** `PulseChannelDisconnectedError` if the socket is down or dies mid-flight. `PulseChannelRemoteError` if the peer NACKs (`no_handler`, `denied`, `handler_error`).
 
 **Example:**
 
@@ -130,14 +130,12 @@ useEffect(() => {
 }, [channel]);
 ```
 
-### Event Backlog
-
-If an event arrives before any handler is registered, it's queued in a backlog. Once a handler is registered for that event, backlogged events are delivered immediately. This prevents race conditions during component mounting.
+Events with no listener are dropped. Requests with no handler NACKs immediately.
 
 ### Complete Example
 
 ```tsx
-import { usePulseChannel, PulseChannelResetError } from "pulse-ui-client";
+import { usePulseChannel, PulseChannelDisconnectedError } from "pulse-ui-client";
 import { useState, useEffect } from "react";
 
 function LiveAuction({ auctionId }: { auctionId: string }) {
@@ -160,7 +158,7 @@ function LiveAuction({ auctionId }: { auctionId: string }) {
         setError(result.error);
       }
     } catch (e) {
-      if (e instanceof PulseChannelResetError) {
+      if (e instanceof PulseChannelDisconnectedError) {
         setError("Connection lost. Please refresh.");
       }
     }
@@ -180,39 +178,34 @@ function LiveAuction({ auctionId }: { auctionId: string }) {
 
 ---
 
-## PulseChannelResetError
+## PulseChannelDisconnectedError
 
-Error thrown when a channel operation fails due to channel closure or disconnection.
+Thrown when a request cannot complete because the socket is down or died.
 
 ```ts
-class PulseChannelResetError extends Error {
-  name: "PulseChannelResetError";
+class PulseChannelDisconnectedError extends Error {
+  name: "PulseChannelDisconnectedError";
 }
 ```
 
-### When It's Thrown
+## PulseChannelRemoteError
 
-- Channel is closed by the server
-- WebSocket connection is lost
-- `request()` is pending when the channel closes
-- Attempting to use a closed channel
-
-### Example
+Thrown when the peer responds with `no_handler`, `denied`, or `handler_error`.
 
 ```ts
-import { PulseChannelResetError } from "pulse-ui-client";
+class PulseChannelRemoteError extends Error {
+  name: "PulseChannelRemoteError";
+  code: "no_handler" | "denied" | "handler_error";
+}
+```
 
-async function fetchData(channel: ChannelBridge) {
-  try {
-    return await channel.request("get_data");
-  } catch (error) {
-    if (error instanceof PulseChannelResetError) {
-      // Handle channel closure gracefully
-      console.log("Channel closed:", error.message);
-      return null;
-    }
-    throw error;
-  }
+## PulseChannelDetachedError
+
+Thrown when `on()` is called on a detached handle. `emit` and `request` still address the mailbox.
+
+```ts
+class PulseChannelDetachedError extends Error {
+  name: "PulseChannelDetachedError";
 }
 ```
 

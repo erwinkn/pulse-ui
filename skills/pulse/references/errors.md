@@ -7,27 +7,30 @@ Exception classes, error propagation, and debugging in Pulse.
 ### Channel Errors
 
 ```python
-from pulse import ChannelClosed, ChannelTimeout
+from pulse import ChannelDetached, ChannelDisconnected, ChannelRemoteError, ChannelTimeout
 
 try:
-    channel.emit("event", data)
-except ChannelClosed:
-    print("Channel was closed")
+    channel.on("event", handler)
+except ChannelDetached:
+    print("This handle's listeners were detached")
 
 try:
     result = await channel.request("get_data", timeout=5.0)
 except ChannelTimeout:
     print("Request timed out")
+except ChannelDisconnected:
+    print("Socket is down")
+except ChannelRemoteError as exc:
+    print(exc.code, exc.message)
 ```
 
-**ChannelClosed** - Raised when:
-- Calling `emit()`, `request()`, or `on()` on a closed channel
-- User navigates away or disconnects
-- Component unmounts
+**ChannelDetached** - `on()` on a detached handle. `emit` / `request` still work.
 
-**ChannelTimeout** - Raised when:
-- `channel.request()` exceeds timeout waiting for client response
-- Subclass of `asyncio.TimeoutError`
+**ChannelDisconnected** - No socket, socket died mid-flight, or the session ended.
+
+**ChannelRemoteError** - Peer responded with `no_handler`, `denied`, or `handler_error`.
+
+**ChannelTimeout** - `channel.request()` exceeded `timeout`.
 
 ### JavaScript Execution Errors
 

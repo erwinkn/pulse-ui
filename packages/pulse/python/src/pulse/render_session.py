@@ -277,8 +277,6 @@ class RenderSession:
 	_send_message: Callable[[ServerMessage], Any] | None
 	_pending_api: dict[str, asyncio.Future[dict[str, Any]]]
 	_pending_js_results: dict[str, asyncio.Future[Any]]
-	_ref_channel: Channel | None
-	_ref_channels_by_route: dict[str, Channel]
 	_global_states: dict[str, State]
 	_global_queue: list[ServerMessage]
 	_tasks: TaskRegistry
@@ -320,8 +318,6 @@ class RenderSession:
 		self.forms = FormRegistry(self)
 		self._pending_api = {}
 		self._pending_js_results = {}
-		self._ref_channel = None
-		self._ref_channels_by_route = {}
 		self._tasks = TaskRegistry(name=f"render:{id}")
 		self._timers = TimerRegistry(tasks=self._tasks, name=f"render:{id}")
 		self.query_store = QueryStore()
@@ -383,6 +379,7 @@ class RenderSession:
 		"""WebSocket disconnected. Queue briefly, then suspend mounts on timeout."""
 		self._send_message = None
 		self.connected = False
+		self.channels.fail_pending()
 		# Pause query interval refetching while nobody is watching
 		self.query_store.suspend_all()
 
@@ -592,7 +589,7 @@ class RenderSession:
 			return
 		try:
 			self.route_mounts.pop(path, None)
-			self._ref_channels_by_route.pop(path, None)
+			self.channels.detach_route(path)
 			mount.dispose()
 		except Exception as e:
 			self.report_error(path, "unmount", e)
@@ -600,7 +597,7 @@ class RenderSession:
 	def detach(self, path: str):
 		"""Client route unmounted. Dispose immediately outside dev StrictMode replay."""
 		path = ensure_absolute_path(path)
-		self._ref_channels_by_route.pop(path, None)
+		self.channels.detach_route(path)
 		mount = self.route_mounts.get(path)
 		if not mount:
 			return
@@ -714,11 +711,7 @@ class RenderSession:
 		for value in self._global_states.values():
 			value.dispose()
 		self._global_states.clear()
-		for channel_id in list(self.channels._channels.keys()):  # pyright: ignore[reportPrivateUsage]
-			channel = self.channels._channels.get(channel_id)  # pyright: ignore[reportPrivateUsage]
-			if channel:
-				channel.closed = True
-				self.channels.dispose_channel(channel, reason="render.close")
+		self.channels.reset()
 		for fut in self._pending_api.values():
 			if not fut.done():
 				fut.cancel()
@@ -727,8 +720,6 @@ class RenderSession:
 			if not fut.done():
 				fut.cancel()
 		self._pending_js_results.clear()
-		self._ref_channel = None
-		self._ref_channels_by_route.clear()
 		# Close any timer that may have been scheduled during cleanup (ex: query GC)
 		self._timers.cancel_all()
 		self._global_queue = []
@@ -767,20 +758,10 @@ class RenderSession:
 	def get_ref_channel(self) -> Channel:
 		ctx = PulseContext.get()
 		if ctx.route is None:
-			if self._ref_channel is not None and not self._ref_channel.closed:
-				return self._ref_channel
-			self._ref_channel = self.channels.create(bind_route=False)
-			return self._ref_channel
-
-		route_path = ctx.route.route_path
-		channel = self._ref_channels_by_route.get(route_path)
-		if channel is not None and channel.closed:
-			self._ref_channels_by_route.pop(route_path, None)
-			channel = None
-		if channel is None:
-			channel = self.channels.create(bind_route=True)
-			self._ref_channels_by_route[route_path] = channel
-		return channel
+			return self.channels.acquire("__pulse_ref__", lifetime="tab")
+		return self.channels.acquire(
+			f"__pulse_ref__:{ctx.route.route_path}", lifetime="route"
+		)
 
 	def flush(self):
 		with PulseContext.update(render=self):

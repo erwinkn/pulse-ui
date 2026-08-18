@@ -151,7 +151,7 @@ async def test_replies_resolve_while_command_middleware_is_parked():
 
 
 @pytest.mark.asyncio
-async def test_same_path_attach_then_callback_apply_in_order():
+async def test_awaited_attach_then_callback_sees_mount():
 	seen: list[str] = []
 
 	@ps.component

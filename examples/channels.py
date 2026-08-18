@@ -11,7 +11,7 @@ import pulse as ps
 from pulse.js import Math, obj
 from pulse.js.date import Date
 from pulse.js.json import stringify
-from pulse.js.pulse import usePulseChannel
+from pulse.js.pulse import useChannel
 from pulse.js.react import useEffect, useState
 
 
@@ -19,10 +19,10 @@ from pulse.js.react import useEffect, useState
 def ChannelTester(*, channelId: str, label: str):
 	"""Client-side channel tester component.
 
-	This component runs entirely in the browser and uses the usePulseChannel
+	This component runs entirely in the browser and uses the useChannel
 	hook to communicate with the server-side channel.
 	"""
-	bridge = usePulseChannel(channelId)
+	bridge = useChannel(channelId)
 
 	# State for logs and counters
 	logs, setLogs = useState([])

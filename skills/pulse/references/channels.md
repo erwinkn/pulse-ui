@@ -66,11 +66,11 @@ cleanup()
 ## Client-side
 
 ```python
-from pulse.js.pulse import usePulseChannel
+from pulse.js.pulse import useChannel
 
 @ps.javascript(jsx=True)
 def ChatClient(*, channel_id: str):
-    bridge = usePulseChannel(channel_id)
+    bridge = useChannel(channel_id)
 
     def sendMessage(text: str):
         bridge.emit("client:message", {"text": text})

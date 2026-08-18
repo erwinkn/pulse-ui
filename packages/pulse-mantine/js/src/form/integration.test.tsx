@@ -24,7 +24,7 @@ const submitForm = mock(
 mock.module("pulse-ui-client", () => ({
 	submitForm,
 	usePulseClient: () => client,
-	usePulseChannel: () => channel,
+	useChannel: () => channel,
 	usePulseDirectivesSource: () => directivesSource,
 }));
 

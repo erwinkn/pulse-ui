@@ -1,5 +1,5 @@
 import { Tree as MantineTree, useTree } from "@mantine/core";
-import { usePulseChannel } from "pulse-ui-client";
+import { useChannel } from "pulse-ui-client";
 import { type ComponentPropsWithoutRef, useEffect, useRef } from "react";
 
 type ExpandedState = Record<string, boolean>;
@@ -59,7 +59,7 @@ function ConnectedTree({
 	autoSync = true,
 	...rest
 }: ConnectedTreeProps) {
-	const channel = usePulseChannel(channelId);
+	const channel = useChannel(channelId);
 	const channelRef = useRef(channel);
 	channelRef.current = channel;
 

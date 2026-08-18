@@ -47,12 +47,12 @@ def chat_room():
 ## Client handle
 
 ```python
-from pulse.js.pulse import usePulseChannel
+from pulse.js.pulse import useChannel
 from pulse.js.react import useEffect, useState
 
 @ps.javascript(jsx=True)
 def ChatWidget(*, channelId: str):
-    bridge = usePulseChannel(channelId)
+    bridge = useChannel(channelId)
     draft, setDraft = useState("")
 
     def send():
@@ -65,7 +65,7 @@ def ChatWidget(*, channelId: str):
     ]
 ```
 
-`usePulseChannel` always returns a bridge. There is no `lifetime` argument — put the hook in a layout if listeners should outlive the route.
+`useChannel` always returns a bridge. There is no `lifetime` argument — put the hook in a layout if listeners should outlive the route.
 
 ## Request / response
 

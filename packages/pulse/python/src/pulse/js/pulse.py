@@ -4,11 +4,11 @@ Pulse UI client bindings for channel communication.
 Usage:
 
 ```python
-from pulse.js.pulse import usePulseChannel, ChannelBridge
+from pulse.js.pulse import useChannel, ChannelBridge
 
 @ps.javascript(jsx=True)
 def MyChannelComponent(*, channel_id: str):
-    bridge = usePulseChannel(channel_id)
+    bridge = useChannel(channel_id)
 
     # Subscribe to events
     useEffect(
@@ -104,7 +104,7 @@ class ChannelBridge:
 		...
 
 
-def usePulseChannel(channel_id: str) -> ChannelBridge:
+def useChannel(channel_id: str) -> ChannelBridge:
 	"""React hook to attach a handle to a Pulse mailbox.
 
 	Must be called from within a React component. Client lifetime is React

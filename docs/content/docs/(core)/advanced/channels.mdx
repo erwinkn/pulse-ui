@@ -155,14 +155,14 @@ The `timeout` parameter prevents your code from waiting forever if the client do
 
 When you need custom client-side logic to interact with a channel, you'll write JavaScript code that runs in the browser. Pulse provides the `@ps.javascript` decorator for embedding JavaScript in your Python code.
 
-`usePulseChannel(channelId)` returns a handle. Client lifetime is where you put the hook (route vs layout):
+`useChannel(channelId)` returns a handle. Client lifetime is where you put the hook (route vs layout):
 
 ```python
-from pulse.js.pulse import usePulseChannel
+from pulse.js.pulse import useChannel
 
 @ps.javascript(jsx=True)
 def ChatClient(*, channelId: str):
-    bridge = usePulseChannel(channelId)
+    bridge = useChannel(channelId)
 
     # Listen for events from the server
     def on_new_message(payload):
@@ -183,7 +183,7 @@ def ChatClient(*, channelId: str):
 
 A note on `@ps.javascript`: This decorator lets you write JavaScript logic that runs in the browser. The code inside looks like Python but transpiles to JavaScript. This is useful when you need browser APIs (like `localStorage`, `window`, or DOM manipulation) or want to optimize performance by keeping some logic client-side.
 
-The `usePulseChannel` hook returns a bridge object with three methods:
+The `useChannel` hook returns a bridge object with three methods:
 - `on(event, handler)` - Listen for events from the server
 - `emit(event, payload)` - Send events to the server (fire-and-forget)
 - `request(event, payload)` - Send a request and await the server's response
@@ -199,7 +199,7 @@ A channel id is just a mailbox name. Nothing is created or destroyed on the wire
 
 After a route handle detaches, `on()` raises `ChannelDetached`. `emit` and `request` still address the mailbox name.
 
-On the client, lifetime is React placement: put `usePulseChannel(id)` in a route component to drop listeners on navigation, or in a layout to keep them for the tab. There is no `lifetime` argument on the hook.
+On the client, lifetime is React placement: put `useChannel(id)` in a route component to drop listeners on navigation, or in a layout to keep them for the tab. There is no `lifetime` argument on the hook.
 
 ```python
 chat.detach()

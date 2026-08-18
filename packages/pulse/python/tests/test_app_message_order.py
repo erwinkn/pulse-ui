@@ -47,14 +47,12 @@ class GatingMessageMiddleware(PulseMiddleware):
 	started: asyncio.Event
 	release: asyncio.Event
 	gate_paths: set[str] | None
-	seen: list[str]
 
 	def __init__(self, gate_paths: set[str] | None = None) -> None:
 		super().__init__()
 		self.started = asyncio.Event()
 		self.release = asyncio.Event()
 		self.gate_paths = gate_paths
-		self.seen = []
 
 	@override
 	async def message(
@@ -68,7 +66,6 @@ class GatingMessageMiddleware(PulseMiddleware):
 		if self.gate_paths is None or path in self.gate_paths:
 			self.started.set()
 			await self.release.wait()
-		self.seen.append(f"{data['type']}:{path}")
 		return await next()
 
 

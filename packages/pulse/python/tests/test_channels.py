@@ -62,6 +62,18 @@ def as_response(message: object) -> ClientChannelResponseMessage:
 	return cast(ClientChannelResponseMessage, message)
 
 
+@ps.component
+def _leaky_redirect_page():
+	channel = ps.channel("leaky")
+	channel.on("ping", lambda _: None)
+	raise ps.RedirectInterrupt("/other", replace=True)
+
+
+@ps.component
+def _other_page():
+	return ps.div()
+
+
 def build_session(*, connected: bool = False, with_route: bool = False):
 	def page():
 		return ps.div()
@@ -126,6 +138,14 @@ async def test_route_lifetime_requires_route_context():
 		handle = ps.channel("x", lifetime="tab")
 	assert handle.lifetime == "tab"
 	assert handle is not None
+
+
+@pytest.mark.asyncio
+async def test_invalid_lifetime_raises():
+	app, _dummy, session, render, route = build_session(with_route=True)
+	with ctx(app, session, render, route):
+		with pytest.raises(ValueError, match="lifetime"):
+			ps.channel("x", lifetime=cast(Any, "typo"))
 
 
 @pytest.mark.asyncio
@@ -702,3 +722,70 @@ async def test_inbound_request_does_not_hold_session_lock():
 		"responseTo": "from-client",
 		"payload": "pong",
 	}
+
+
+@pytest.mark.asyncio
+async def test_stale_on_remover_does_not_drop_new_handler():
+	app, _dummy, session, render, route = build_session(with_route=True)
+	seen: list[str] = []
+	with ctx(app, session, render, route):
+		channel = ps.channel("once")
+		remove_first = channel.on("ping", lambda _: seen.append("first"))
+		remove_first()
+		channel.on("ping", lambda _: seen.append("second"))
+		remove_first()
+	render.channels.handle_event(
+		as_event(
+			{
+				"type": "channel",
+				"action": "event",
+				"channel": "once",
+				"event": "ping",
+			},
+		)
+	)
+	await asyncio.sleep(0)
+	assert seen == ["second"]
+
+
+@pytest.mark.asyncio
+async def test_prerender_redirect_detaches_route_handles():
+	route = Route("/", _leaky_redirect_page)
+	app = ps.App(routes=[route, Route("/other", _other_page)])
+	session = SimpleNamespace(sid="session-1", data={})
+	render = ps.RenderSession("render-redirect", app.routes)
+	with ctx(app, session, render):
+		result = render.prerender(["/"], _route_info())["/"]
+	assert result["type"] == "navigate_to"
+	assert "/" not in render.route_mounts
+	assert render.channels._handles_for("leaky") == []  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
+async def test_unserializable_request_result_nacks():
+	from pulse.serializer import serialize as wire_serialize
+
+	app, dummy, session, render, route = build_session(with_route=True)
+	del render.send  # pyright: ignore[reportAttributeAccessIssue]
+
+	def send(message: dict[str, Any]) -> None:
+		wire_serialize(message)
+		dummy.sent.append(message)
+
+	render.connect(send)  # pyright: ignore[reportArgumentType]
+	with ctx(app, session, render, route):
+		channel = ps.channel("bad")
+		channel.on("get", lambda _: object)
+	await render.channels.handle_request(
+		as_request(
+			{
+				"type": "channel",
+				"action": "request",
+				"channel": "bad",
+				"event": "get",
+				"requestId": "req-bad",
+			},
+		)
+	)
+	nacks = [msg for msg in dummy.sent if msg.get("type") == "channel"]
+	assert nacks[-1]["error"]["code"] == "handler_error"

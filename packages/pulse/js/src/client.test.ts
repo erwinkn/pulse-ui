@@ -454,3 +454,113 @@ describe("PulseProvider connection handling", () => {
 		consoleError.mockRestore();
 	});
 });
+
+describe("PulseSocketIOClient channels", () => {
+	beforeEach(() => {
+		io.mockClear();
+	});
+
+	it("fans events out to two attached handles", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		const a = client.acquireChannel("shared");
+		const b = client.acquireChannel("shared");
+		const seen: string[] = [];
+		a.on("ping", () => seen.push("a"));
+		b.on("ping", () => seen.push("b"));
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel",
+				action: "event",
+				channel: "shared",
+				event: "ping",
+			}),
+		);
+		expect(seen).toEqual(["a", "b"]);
+	});
+
+	it("NACKs requests with no handler", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		client.acquireChannel("empty");
+		const before = sentMessages().length;
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel",
+				action: "request",
+				channel: "empty",
+				event: "missing",
+				requestId: "req-1",
+			}),
+		);
+		expect(sentMessages().slice(before)).toEqual([
+			{
+				type: "channel",
+				action: "response",
+				channel: "empty",
+				responseTo: "req-1",
+				error: {
+					code: "no_handler",
+					message: "No handler for 'missing' on channel 'empty'",
+				},
+			},
+		]);
+	});
+
+	it("rejects pending RPC on transport drop and stays silent on reconnect", async () => {
+		const { PulseChannelDisconnectedError } = await import("./channel");
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		const firstSocket = socket;
+		const bridge = client.acquireChannel("rpc");
+		const pending = bridge.request("echo");
+		const channelTraffic = sentMessages().filter((message) => message.type === "channel");
+		expect(channelTraffic).toEqual([
+			expect.objectContaining({ action: "request", event: "echo" }),
+		]);
+		firstSocket.trigger("disconnect");
+		await expect(pending).rejects.toBeInstanceOf(PulseChannelDisconnectedError);
+
+		firstSocket.trigger("connect");
+		expect(sentMessages().filter((message) => message.type === "channel")).toEqual(
+			channelTraffic,
+		);
+	});
+
+	it("queues emit while disconnected on the global client queue", async () => {
+		const client = await makeClient();
+		const bridge = client.acquireChannel("queued");
+		bridge.emit("ping", { n: 1 });
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		expect(sentMessages()).toContainEqual({
+			type: "channel",
+			action: "event",
+			channel: "queued",
+			event: "ping",
+			payload: { n: 1 },
+		});
+	});
+
+	it("attach and detach send no wire messages", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		const before = sentMessages().length;
+		const bridge = client.channel("silent");
+		bridge.attach();
+		bridge.detach();
+		bridge.attach();
+		expect(sentMessages().slice(before)).toEqual([]);
+	});
+});

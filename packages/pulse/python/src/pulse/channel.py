@@ -96,6 +96,10 @@ class Channel:
 	def lifetime(self) -> ChannelLifetime:
 		return self._lifetime
 
+	@property
+	def route_path(self) -> str | None:
+		return self._route_path
+
 	def _assert_attached(self) -> None:
 		if self._detached:
 			raise ChannelDetached(f"Channel {self._id} is detached")
@@ -231,7 +235,7 @@ class ChannelsManager:
 		return route.route_path if route is not None else None
 
 	def _intern_key(self, handle: Channel) -> ChannelInternKey:
-		return (handle.lifetime, handle.id, handle._route_path)
+		return (handle.lifetime, handle.id, handle.route_path)
 
 	def _register(self, handle: Channel) -> None:
 		self._intern[self._intern_key(handle)] = handle
@@ -255,9 +259,7 @@ class ChannelsManager:
 		existing = self._intern.get(key)
 		if existing is not None and not existing.is_detached():
 			return existing
-		handle = Channel(
-			self._session, channel_id, lifetime, route_path=route_path
-		)
+		handle = Channel(self._session, channel_id, lifetime, route_path=route_path)
 		self._register(handle)
 		return handle
 
@@ -277,7 +279,7 @@ class ChannelsManager:
 		handles = [
 			handle
 			for handle in self._intern.values()
-			if handle.lifetime == "route" and handle._route_path == route_path
+			if handle.lifetime == "route" and handle.route_path == route_path
 		]
 		for handle in handles:
 			handle.detach()

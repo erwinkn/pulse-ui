@@ -348,7 +348,7 @@ Adds artificial latency for testing:
 ```python
 app = ps.App(
     routes=[...],
-    middleware=[ps.LatencyMiddleware()],  # Dev only
+    middleware=[ps.LatencyMiddleware()],  # Dev only; includes api_ms
 )
 ```
 

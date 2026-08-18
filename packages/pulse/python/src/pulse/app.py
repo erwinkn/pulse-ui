@@ -9,7 +9,7 @@ import asyncio
 import logging
 import os
 from collections import defaultdict
-from collections.abc import Awaitable, Sequence
+from collections.abc import Awaitable, Coroutine, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import IntEnum
@@ -21,7 +21,7 @@ import uvicorn
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, request_response
 from socketio.exceptions import ConnectionRefusedError as SocketIOConnectionRefusedError
 from starlette.types import ASGIApp
 from starlette.websockets import WebSocket
@@ -166,6 +166,37 @@ class FastAPIConfig:
 	openapi_external_docs: dict[str, Any] | None = None
 
 
+def _wrap_user_api_handler(
+	original: Callable[[Request], Coroutine[Any, Any, Response]],
+) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+	async def handler(request: Request) -> Response:
+		app = getattr(request.app.state, "pulse_app", None)
+		if app is None:
+			return await original(request)
+
+		ctx = PULSE_CONTEXT.get()
+		session = (
+			ctx.session.data if ctx is not None and ctx.session is not None else {}
+		)
+
+		async def _next() -> Response:
+			return await original(request)
+
+		response = await app.middleware.api(
+			request=PulseRequest.from_fastapi(request),
+			session=session,
+			next=_next,
+		)
+		if not isinstance(response, Response):
+			raise TypeError(
+				"PulseMiddleware.api() must return a Response, "
+				+ f"got {type(response).__name__}"
+			)
+		return response
+
+	return handler
+
+
 class PulseAPIRoute(APIRoute):
 	"""FastAPI route class for user-defined Pulse API endpoints.
 
@@ -175,7 +206,7 @@ class PulseAPIRoute(APIRoute):
 	are not intercepted.
 	"""
 
-	_intercept_user_api = True
+	_intercept_user_api: bool = True
 
 	def __init__(
 		self,
@@ -186,50 +217,36 @@ class PulseAPIRoute(APIRoute):
 		super().__init__(path, _wrap_fastapi_endpoint(endpoint), **kwargs)
 
 	@override
-	def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
+	def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
 		original = super().get_route_handler()
 		if not self._intercept_user_api:
 			return original
-
-		async def handler(request: Request) -> Response:
-			app = getattr(request.app.state, "pulse_app", None)
-			if app is None:
-				return await original(request)
-
-			ctx = PULSE_CONTEXT.get()
-			session = (
-				ctx.session.data if ctx is not None and ctx.session is not None else {}
-			)
-
-			async def _next() -> Response:
-				return await original(request)
-
-			response = await app.middleware.api(
-				request=PulseRequest.from_fastapi(request),
-				session=session,
-				next=_next,
-			)
-			if not isinstance(response, Response):
-				raise TypeError(
-					"PulseMiddleware.api() must return a Response, "
-					+ f"got {type(response).__name__}"
-				)
-			return response
-
-		return handler
+		return _wrap_user_api_handler(original)
 
 
 class PulseFrameworkAPIRoute(PulseAPIRoute):
 	"""Route class for Pulse framework and plugin FastAPI endpoints."""
 
-	_intercept_user_api = False
+	_intercept_user_api: bool = False
 
 
 class PulseFastAPI(FastAPI):
 	@override
 	def include_router(self, router: APIRouter, **kwargs: Any) -> None:
 		_wrap_router_endpoints(router)
+		# FastAPI copies included routes with the source route class, so
+		# user routers stay as APIRoute unless we wrap them here.
+		before = {id(route) for route in self.router.routes}
 		super().include_router(router, **kwargs)
+		if self.router.route_class is PulseFrameworkAPIRoute:
+			return
+		for route in self.router.routes:
+			if id(route) in before:
+				continue
+			if isinstance(route, APIRoute) and not isinstance(route, PulseAPIRoute):
+				route.app = request_response(
+					_wrap_user_api_handler(route.get_route_handler())
+				)
 
 
 def _wrap_router_endpoints(router: APIRouter) -> None:

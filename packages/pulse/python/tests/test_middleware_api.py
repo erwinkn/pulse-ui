@@ -88,6 +88,14 @@ class PluginRoutePlugin(Plugin):
 		def plugin_route() -> dict[str, bool]:  # pyright: ignore[reportUnusedFunction]
 			return {"plugin": True}
 
+		router = APIRouter()
+
+		@router.get("/included")
+		def plugin_included() -> dict[str, bool]:  # pyright: ignore[reportUnusedFunction]
+			return {"plugin": True}
+
+		app.fastapi.include_router(router, prefix="/plugin")
+
 
 @ps.component
 def prerender_home():
@@ -184,7 +192,10 @@ async def test_api_middleware_can_catch_user_route_exceptions():
 	def boom() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]
 		raise RuntimeError("user api failed")
 
-	async with _client(app) as client:
+	transport = httpx.ASGITransport(app=app.fastapi, raise_app_exceptions=False)
+	async with httpx.AsyncClient(
+		transport=transport, base_url="http://testserver"
+	) as client:
 		response = await client.get("/api/boom")
 
 	assert response.status_code == 500
@@ -244,12 +255,15 @@ async def test_api_middleware_skips_plugin_on_setup_routes():
 
 	try:
 		async with _client(app) as client:
-			response = await client.get("/plugin-route")
+			direct = await client.get("/plugin-route")
+			included = await client.get("/plugin/included")
 	finally:
 		await app.close()
 
-	assert response.status_code == 200
-	assert response.json() == {"plugin": True}
+	assert direct.status_code == 200
+	assert direct.json() == {"plugin": True}
+	assert included.status_code == 200
+	assert included.json() == {"plugin": True}
 	assert mw.paths == []
 
 
@@ -268,18 +282,28 @@ async def test_api_middleware_runs_for_user_routes_after_setup():
 	def after() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]
 		return {"when": "after"}
 
+	router = APIRouter()
+
+	@router.get("/included")
+	def included() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]
+		return {"when": "after-include"}
+
+	app.fastapi.include_router(router, prefix="/api")
+
 	try:
 		async with _client(app) as client:
 			before_res = await client.get("/api/before")
 			after_res = await client.get("/api/after")
+			included_res = await client.get("/api/included")
 			health = await client.get("/_pulse/health")
 	finally:
 		await app.close()
 
 	assert before_res.json() == {"when": "before"}
 	assert after_res.json() == {"when": "after"}
+	assert included_res.json() == {"when": "after-include"}
 	assert health.status_code == 200
-	assert mw.paths == ["/api/before", "/api/after"]
+	assert mw.paths == ["/api/before", "/api/after", "/api/included"]
 
 
 @pytest.mark.asyncio
@@ -361,7 +385,7 @@ async def test_api_middleware_rejects_non_response_return():
 			session: dict[str, Any],
 			next: Callable[[], Awaitable[ApiResponse]],
 		) -> ApiResponse:
-			return {"not": "a response"}  # type: ignore[return-value]
+			return {"not": "a response"}  # pyright: ignore[reportReturnType]
 
 	app = ps.App(routes=[], middleware=BadMiddleware())
 
@@ -369,7 +393,10 @@ async def test_api_middleware_rejects_non_response_return():
 	def hello() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]
 		return {"hello": "world"}
 
-	async with _client(app) as client:
+	transport = httpx.ASGITransport(app=app.fastapi, raise_app_exceptions=False)
+	async with httpx.AsyncClient(
+		transport=transport, base_url="http://testserver"
+	) as client:
 		response = await client.get("/api/hello")
 
 	assert response.status_code == 500

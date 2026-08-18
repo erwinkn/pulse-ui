@@ -1,11 +1,17 @@
 import type { NavigateFunction } from "react-router";
 import { io, type Socket } from "socket.io-client";
-import { ChannelBridge, createRandomId, PulseChannelResetError } from "./channel";
+import {
+	ChannelBridge,
+	createRandomId,
+	PulseChannelDisconnectedError,
+	PulseChannelRemoteError,
+} from "./channel";
 import type { RouteInfo } from "./helpers";
 import { pulseFetch } from "./http";
 import type {
 	ClientApiResultMessage,
 	ClientCallbackMessage,
+	ClientChannelRequestMessage,
 	ClientJsResultMessage,
 	ClientMessage,
 	ServerApiCallMessage,
@@ -81,7 +87,8 @@ export class PulseSocketIOClient {
 	#socket: Socket | null = null;
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
-	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
+	#mailboxes: Map<string, Set<ChannelBridge>> = new Map();
+	#pending = new Map<string, { resolve: (value: any) => void; reject: (error: any) => void }>();
 	#url: string;
 	#frameworkNavigate: NavigateFunction;
 	#directives: Directives;
@@ -346,10 +353,12 @@ export class PulseSocketIOClient {
 		this.#activeAttachIds.clear();
 		this.#ackedAttachIds.clear();
 		this.#pendingCallbacks.clear();
-		for (const { bridge } of this.#channels.values()) {
-			bridge.dispose(new PulseChannelResetError("Client disconnected"));
+		this.#failPending(new PulseChannelDisconnectedError("Client disconnected"));
+		const leftover = [...this.#mailboxes.values()].flatMap((handles) => [...handles]);
+		this.#mailboxes.clear();
+		for (const bridge of leftover) {
+			bridge.detach();
 		}
-		this.#channels.clear();
 		this.#currentStatus = "ok";
 		this.#hasConnectedOnce = false;
 	}
@@ -443,7 +452,7 @@ export class PulseSocketIOClient {
 				this.#handleAttachAck(message.path, message.attachId);
 				break;
 			}
-			case "channel_message": {
+			case "channel": {
 				this.#routeChannelMessage(message);
 				break;
 			}
@@ -539,58 +548,123 @@ export class PulseSocketIOClient {
 		this.sendMessage(msg);
 	}
 
+	public channel(id: string): ChannelBridge {
+		return new ChannelBridge(this, id);
+	}
+
 	public acquireChannel(id: string): ChannelBridge {
-		const entry = this.#ensureChannelEntry(id);
-		entry.refCount += 1;
-		return entry.bridge;
+		const bridge = this.channel(id);
+		bridge.attach();
+		return bridge;
 	}
 
-	public releaseChannel(id: string): void {
-		const entry = this.#channels.get(id);
-		if (!entry) {
-			return;
+	public releaseChannel(bridge: ChannelBridge): void {
+		bridge.detach();
+	}
+
+	attachHandle(bridge: ChannelBridge): void {
+		let mailbox = this.#mailboxes.get(bridge.id);
+		if (!mailbox) {
+			mailbox = new Set();
+			this.#mailboxes.set(bridge.id, mailbox);
 		}
-		entry.refCount = Math.max(0, entry.refCount - 1);
-		if (entry.refCount === 0) {
-			entry.bridge.dispose(new PulseChannelResetError("Channel released"));
-			this.sendMessage({
-				type: "channel_message",
-				channel: id,
-				event: "__close__",
-				payload: { reason: "refcount_zero" },
-			});
-			this.#channels.delete(id);
+		mailbox.add(bridge);
+	}
+
+	detachHandle(bridge: ChannelBridge): void {
+		const mailbox = this.#mailboxes.get(bridge.id);
+		if (!mailbox) return;
+		mailbox.delete(bridge);
+		if (mailbox.size === 0) {
+			this.#mailboxes.delete(bridge.id);
 		}
 	}
 
-	#ensureChannelEntry(id: string): {
-		bridge: ChannelBridge;
-		refCount: number;
-	} {
-		let entry = this.#channels.get(id);
-		if (!entry) {
-			entry = {
-				bridge: new ChannelBridge(this, id),
-				refCount: 0,
-			};
-			this.#channels.set(id, entry);
+	requestChannel(requestId: string, message: ClientChannelRequestMessage): Promise<any> {
+		return new Promise((resolve, reject) => {
+			this.#pending.set(requestId, { resolve, reject });
+			this.sendMessage(message);
+		});
+	}
+
+	#failPending(reason: PulseChannelDisconnectedError): void {
+		const pending = [...this.#pending.values()];
+		this.#pending.clear();
+		for (const entry of pending) {
+			entry.reject(reason);
 		}
-		return entry;
 	}
 
 	#routeChannelMessage(message: ServerChannelMessage): void {
-		const entry = this.#ensureChannelEntry(message.channel);
-		const closed = entry.bridge.handleServerMessage(message);
-		if (closed && entry.refCount === 0) {
-			this.#channels.delete(message.channel);
+		if (message.action === "response") {
+			const pending = this.#pending.get(message.responseTo);
+			if (!pending) return;
+			this.#pending.delete(message.responseTo);
+			if (message.error) {
+				pending.reject(new PulseChannelRemoteError(message.error.code, message.error.message));
+				return;
+			}
+			pending.resolve(message.payload);
+			return;
+		}
+		const handles = [...(this.#mailboxes.get(message.channel) ?? [])];
+		if (message.action === "event") {
+			if (handles.length === 0) {
+				console.debug(
+					`[Pulse] Dropping event ${message.event} on mailbox ${message.channel} (no listeners)`,
+				);
+				return;
+			}
+			for (const handle of handles) {
+				handle.dispatchEvent(message.event, message.payload);
+			}
+			return;
+		}
+		for (const handle of handles) {
+			if (!handle.hasHandler(message.event)) continue;
+			void this.#dispatchChannelRequest(handle, message);
+			return;
+		}
+		this.sendMessage({
+			type: "channel",
+			action: "response",
+			channel: message.channel,
+			responseTo: message.requestId,
+			error: {
+				code: "no_handler",
+				message: `No handler for '${message.event}' on channel '${message.channel}'`,
+			},
+		});
+	}
+
+	async #dispatchChannelRequest(
+		handle: ChannelBridge,
+		message: Extract<ServerChannelMessage, { action: "request" }>,
+	): Promise<void> {
+		try {
+			const payload = await handle.dispatchRequest(message.event, message.payload);
+			this.sendMessage({
+				type: "channel",
+				action: "response",
+				channel: message.channel,
+				responseTo: message.requestId,
+				payload,
+			});
+		} catch (err) {
+			console.error("Pulse channel handler error", err);
+			this.sendMessage({
+				type: "channel",
+				action: "response",
+				channel: message.channel,
+				responseTo: message.requestId,
+				error: { code: "handler_error", message: "Channel handler failed" },
+			});
 		}
 	}
 
 	#handleTransportDisconnect(): void {
 		this.#ackedAttachIds.clear();
-		for (const entry of this.#channels.values()) {
-			entry.bridge.handleDisconnect(new PulseChannelResetError("Connection lost"));
-		}
+		this.#failPending(new PulseChannelDisconnectedError("Connection lost"));
 	}
 
 	#sendAttach(path: string, routeInfo: RouteInfo, socket?: Socket): void {
@@ -635,12 +709,5 @@ export class PulseSocketIOClient {
 		for (const message of queue) {
 			this.sendMessage(message);
 		}
-	}
-
-	_ensureChannelEntry(id: string): {
-		bridge: ChannelBridge;
-		refCount: number;
-	} {
-		return this.#ensureChannelEntry(id);
 	}
 }

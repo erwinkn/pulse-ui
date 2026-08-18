@@ -11,7 +11,7 @@ Core classes for Pulse client functionality.
 
 ## ChannelBridge
 
-A local handle on a mailbox. You get a `ChannelBridge` from `usePulseChannel`. Messages route by `id`. Detach only drops this handle's listeners.
+A local handle on a mailbox. You get a `ChannelBridge` from `useChannel`. Messages route by `id`. Detach only drops this handle's listeners.
 
 ```ts
 class ChannelBridge {
@@ -49,7 +49,7 @@ emit(event: string, payload?: any): void
 **Example:**
 
 ```ts
-const channel = usePulseChannel("notifications");
+const channel = useChannel("notifications");
 
 // Notify server of user activity (no response expected)
 channel.emit("user_active", { page: "/dashboard" });
@@ -78,7 +78,7 @@ request(event: string, payload?: any): Promise<any>
 **Example:**
 
 ```ts
-const channel = usePulseChannel("api");
+const channel = useChannel("api");
 
 // Fetch data from server
 const users = await channel.request("get_users", { limit: 10 });
@@ -110,7 +110,7 @@ The handler can be sync or async. If multiple handlers are registered for the sa
 **Example:**
 
 ```ts
-const channel = usePulseChannel("notifications");
+const channel = useChannel("notifications");
 
 // Subscribe to events
 useEffect(() => {
@@ -135,11 +135,11 @@ Events with no listener are dropped. Requests with no handler NACKs immediately.
 ### Complete Example
 
 ```tsx
-import { usePulseChannel, PulseChannelDisconnectedError } from "pulse-ui-client";
+import { useChannel, PulseChannelDisconnectedError } from "pulse-ui-client";
 import { useState, useEffect } from "react";
 
 function LiveAuction({ auctionId }: { auctionId: string }) {
-  const channel = usePulseChannel(`auction-${auctionId}`);
+  const channel = useChannel(`auction-${auctionId}`);
   const [currentBid, setCurrentBid] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -334,6 +334,6 @@ function CustomView({ path }: { path: string }) {
 
 ## See Also
 
-- [Hooks](/docs/reference/pulse-client/hooks) - usePulseChannel hook
+- [Hooks](/docs/reference/pulse-client/hooks) - useChannel hook
 - [Types](/docs/reference/pulse-client/types) - VDOM and update types
 - [Serialization](/docs/reference/pulse-client/serialization) - Wire format

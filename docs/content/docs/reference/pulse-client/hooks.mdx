@@ -100,14 +100,14 @@ Most of these are used internally by `PulseView`. The most useful for app code a
 
 ---
 
-## usePulseChannel
+## useChannel
 
 Hook that returns a handle on a mailbox. Client lifetime is React placement: a route component detaches on navigation, a layout keeps the handle for the tab.
 
 ```ts
-import { usePulseChannel } from "pulse-ui-client";
+import { useChannel } from "pulse-ui-client";
 
-function usePulseChannel(channelId: string): ChannelBridge
+function useChannel(channelId: string): ChannelBridge
 ```
 
 ### Parameters
@@ -134,7 +134,7 @@ There is no `lifetime` argument. Put the hook in a layout if listeners should su
 ### Example: Chat Room
 
 ```tsx
-import { usePulseChannel } from "pulse-ui-client";
+import { useChannel } from "pulse-ui-client";
 import { useState, useEffect } from "react";
 
 interface Message {
@@ -144,7 +144,7 @@ interface Message {
 }
 
 function ChatRoom({ roomId }: { roomId: string }) {
-  const channel = usePulseChannel(`chat-${roomId}`);
+  const channel = useChannel(`chat-${roomId}`);
   const [messages, setMessages] = useState<Message[]>([]);
 
   useEffect(() => {
@@ -181,11 +181,11 @@ function ChatRoom({ roomId }: { roomId: string }) {
 ### Example: Request-Response
 
 ```tsx
-import { usePulseChannel } from "pulse-ui-client";
+import { useChannel } from "pulse-ui-client";
 import { useState } from "react";
 
 function UserSearch() {
-  const channel = usePulseChannel("user-search");
+  const channel = useChannel("user-search");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
 

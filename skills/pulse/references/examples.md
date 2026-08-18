@@ -199,7 +199,7 @@ Bidirectional communication using channels.
 
 ```python
 import pulse as ps
-from pulse.js.pulse import usePulseChannel
+from pulse.js.pulse import useChannel
 
 useState = ps.Import("useState", "react")
 useEffect = ps.Import("useEffect", "react")
@@ -220,7 +220,7 @@ class ChatRoom(ps.State):
 
 @ps.javascript(jsx=True)
 def ChatWidget(*, channelId: str):
-    bridge = usePulseChannel(channelId)
+    bridge = useChannel(channelId)
     messages, setMessages = useState([])
     draft, setDraft = useState("")
 

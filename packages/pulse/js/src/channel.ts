@@ -160,10 +160,10 @@ export class ChannelBridge {
 	}
 }
 
-export function usePulseChannel(channelId: string): ChannelBridge {
+export function useChannel(channelId: string): ChannelBridge {
 	const client = usePulseClient();
 	if (!channelId) {
-		throw new Error("usePulseChannel requires a non-empty channelId");
+		throw new Error("useChannel requires a non-empty channelId");
 	}
 	const bridge = useMemo(() => client.channel(channelId), [client, channelId]);
 	useEffect(() => {

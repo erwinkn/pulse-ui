@@ -5,7 +5,7 @@ export {
 	PulseChannelDetachedError,
 	PulseChannelDisconnectedError,
 	PulseChannelRemoteError,
-	usePulseChannel,
+	useChannel,
 } from "./channel";
 // Client implementation (types only - implementation is internal)
 export type {

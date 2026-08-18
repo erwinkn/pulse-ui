@@ -81,15 +81,15 @@ function MyComponent() {
 }
 ```
 
-### usePulseChannel
+### useChannel
 
 Hook for real-time bidirectional messaging between client and server.
 
 ```tsx
-import { usePulseChannel } from "pulse-client";
+import { useChannel } from "pulse-client";
 
 function Chat() {
-  const channel = usePulseChannel("chat");
+  const channel = useChannel("chat");
 
   channel.on("new_message", (msg) => {
     // Handle incoming message
@@ -143,7 +143,7 @@ const data = deserialize(wire);
 
 **Hooks:**
 - `usePulseClient()` - Access the client instance
-- `usePulseChannel(name)` - Real-time messaging
+- `useChannel(name)` - Real-time messaging
 
 **Functions:**
 - `serialize` - Convert data for wire transfer

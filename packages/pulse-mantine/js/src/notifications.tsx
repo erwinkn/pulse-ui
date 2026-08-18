@@ -5,7 +5,7 @@ import {
 	type NotificationsProps,
 	notifications as notificationsApi,
 } from "@mantine/notifications";
-import { usePulseChannel } from "pulse-ui-client";
+import { useChannel } from "pulse-ui-client";
 import { useEffect } from "react";
 
 type NotificationUpdatePayload = Parameters<typeof notificationsApi.update>[0];
@@ -38,7 +38,7 @@ export function Notifications({ channelId, ...props }: PulseNotificationsProps) 
 
 function ConnectedNotifications({ channelId, ...props }: ConnectedNotificationsProps) {
 	const { store = defaultStore, ...rest } = props;
-	const channel = usePulseChannel(channelId);
+	const channel = useChannel(channelId);
 
 	useEffect(() => {
 		const cleanups = [

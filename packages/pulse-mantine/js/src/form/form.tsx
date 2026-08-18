@@ -1,6 +1,6 @@
 import type { UseFormInput, UseFormReturnType } from "@mantine/form";
 import { useForm } from "@mantine/form";
-import { submitForm, usePulseChannel, usePulseDirectivesSource } from "pulse-ui-client";
+import { submitForm, useChannel, usePulseDirectivesSource } from "pulse-ui-client";
 import {
 	type ComponentPropsWithoutRef,
 	type FormEvent,
@@ -59,7 +59,7 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 	cascadeUpdates,
 	...formProps
 }: MantineFormProps<TValues>) {
-	const channel = usePulseChannel(channelId);
+	const channel = useChannel(channelId);
 	const directives = usePulseDirectivesSource();
 	const formRef = useRef<UseFormReturnType<TValues> | null>(null);
 	// Timers for server-validation per path

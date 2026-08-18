@@ -173,7 +173,7 @@ The emitted JavaScript symbol uses the callable name captured by `@ps.javascript
 ### React Hooks in Transpiled Code
 
 ```python
-from pulse.js.pulse import usePulseChannel
+from pulse.js.pulse import useChannel
 
 useState = ps.Import("useState", "react")
 useEffect = ps.Import("useEffect", "react")

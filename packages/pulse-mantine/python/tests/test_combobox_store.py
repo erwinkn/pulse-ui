@@ -5,6 +5,7 @@ from typing import Any, cast
 import pulse as ps
 import pytest
 from pulse.messages import ClientChannelResponseMessage
+from pulse.routing import Route, RouteInfo, RouteTree
 from pulse.user_session import UserSession
 from pulse_mantine.core.combobox.combobox import Combobox, ComboboxStore
 
@@ -21,28 +22,53 @@ class DummyRender:
 
 
 def build_context():
-	app = ps.App()
+	def page():
+		return ps.div()
+
+	route = Route("/", ps.component(page))
+	routes = RouteTree([route])
+	app = ps.App(routes=[route])
 	render = DummyRender()
 	session = SimpleNamespace(sid="session-1")
 
-	real_render = ps.RenderSession(render.id, app.routes)
+	real_render = ps.RenderSession(render.id, routes, server_address="http://localhost")
 	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
 	real_render.connected = True
+	with ps.PulseContext(app=app):
+		real_render.prerender(
+			["/"],
+			cast(
+				RouteInfo,
+				cast(
+					object,
+					{
+						"pathname": "/",
+						"hash": "",
+						"query": "",
+						"queryParams": {},
+						"pathParams": {},
+						"catchall": [],
+					},
+				),
+			),
+		)
+	route_ctx = real_render.route_mounts["/"].route
 
 	app.render_sessions[render.id] = real_render
 	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
 	app.user_sessions[session.sid] = session  # pyright: ignore[reportArgumentType]
-	return app, render, session, real_render
+	return app, render, session, real_render, route_ctx
 
 
 @pytest.mark.asyncio
 async def test_combobox_store_emits_actions():
-	app, render, session, real_render = build_context()
+	app, render, session, real_render, route = build_context()
 
 	with ps.PulseContext(
 		app=app,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
+		route=route,
 	):
 		store = ComboboxStore()
 		store.open_dropdown("keyboard")
@@ -60,12 +86,13 @@ async def test_combobox_store_emits_actions():
 
 @pytest.mark.asyncio
 async def test_combobox_store_optional_payloads():
-	app, render, session, real_render = build_context()
+	app, render, session, real_render, route = build_context()
 
 	with ps.PulseContext(
 		app=app,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
+		route=route,
 	):
 		store = ComboboxStore()
 		store.open_dropdown()
@@ -83,12 +110,13 @@ async def test_combobox_store_optional_payloads():
 
 @pytest.mark.asyncio
 async def test_combobox_store_request_roundtrip():
-	app, render, session, real_render = build_context()
+	app, render, session, real_render, route = build_context()
 
 	with ps.PulseContext(
 		app=app,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
+		route=route,
 	):
 		store = ComboboxStore()
 		pending = asyncio.create_task(store.get_dropdown_opened())
@@ -118,7 +146,7 @@ async def test_combobox_store_request_roundtrip():
 
 @pytest.mark.asyncio
 async def test_combobox_store_callbacks():
-	app, render, session, real_render = build_context()
+	app, render, session, real_render, route = build_context()
 	opened: list[bool] = []
 	opened_sources: list[str] = []
 	closed_sources: list[str] = []
@@ -127,6 +155,7 @@ async def test_combobox_store_callbacks():
 		app=app,
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
+		route=route,
 	):
 		store = ComboboxStore(
 			onOpenedChange=lambda value: opened.append(value),

@@ -46,14 +46,14 @@ async def _send(app: ps.App, socket_sid: str, message: dict[str, object]) -> Non
 async def _send_serial(
 	app: ps.App, socket_sid: str, message: dict[str, object]
 ) -> None:
-	"""Drain-style: await the command so Apply has finished."""
+	"""Await the command (connect-drain path) so mutation has finished."""
 	await app._process_socket_message(  # pyright: ignore[reportPrivateUsage]
 		socket_sid, serialize(message)
 	)
 
 
 class GatingMessageMiddleware(PulseMiddleware):
-	"""Decide that parks selected pulse messages until `release` is set."""
+	"""Parks selected pulse commands until `release` is set."""
 
 	started: asyncio.Event
 	release: asyncio.Event
@@ -81,7 +81,7 @@ class GatingMessageMiddleware(PulseMiddleware):
 
 
 @pytest.mark.asyncio
-async def test_completion_applies_while_other_message_is_in_decide():
+async def test_replies_resolve_while_command_middleware_is_parked():
 	middleware = GatingMessageMiddleware()
 	app = ps.App(middleware=middleware)
 	render = RenderSession("render-1", app.routes)
@@ -95,7 +95,7 @@ async def test_completion_applies_while_other_message_is_in_decide():
 	channel_fut: asyncio.Future[object] = asyncio.get_running_loop().create_future()
 	render.channels.register_pending("req-1", channel_fut, "ch-1")
 
-	# Live handler returns immediately; attach Decide is a detached task.
+	# Live handler returns immediately; attach middleware is a detached task.
 	await _send(
 		app,
 		"socket-1",
@@ -174,9 +174,9 @@ async def test_same_path_attach_then_callback_apply_in_order():
 	assert render.route_mounts["/"].state == "pending"
 	callback_key = next(iter(render.route_mounts["/"].tree.callbacks))
 
-	# Sequential Decides (connect-drain path). Apply is sync, so the
-	# callback lookup sees the mount. Live ingress does not promise this
-	# once middleware parks — callback Decide must not wait for attach Decide.
+	# Awaited commands (connect-drain). Mutation is sync, so callback
+	# sees the mount. Live ingress does not serialize commands — a parked
+	# attach must not block a later callback or reply.
 	await _send_serial(
 		app,
 		"socket-1",
@@ -194,7 +194,7 @@ async def test_same_path_attach_then_callback_apply_in_order():
 
 
 @pytest.mark.asyncio
-async def test_decide_on_one_path_does_not_serialize_other_path_or_completion():
+async def test_parked_command_does_not_block_other_path_or_reply():
 	middleware = GatingMessageMiddleware(gate_paths={"/a"})
 	clicked: list[str] = []
 

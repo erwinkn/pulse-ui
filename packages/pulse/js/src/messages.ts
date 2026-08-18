@@ -41,27 +41,43 @@ export interface ServerApiCallMessage {
 	credentials: "include" | "omit";
 }
 
-export interface ServerChannelRequestMessage {
-	type: "channel_message";
+export type ChannelErrorCode = "no_handler" | "denied" | "handler_error";
+
+export interface ChannelError {
+	code: ChannelErrorCode;
+	message: string;
+}
+
+export interface ServerChannelEventMessage {
+	type: "channel";
+	action: "event";
 	channel: string;
 	event: string;
 	payload?: any;
-	requestId?: string;
-	responseTo?: never;
-	error?: any;
+}
+
+export interface ServerChannelRequestMessage {
+	type: "channel";
+	action: "request";
+	channel: string;
+	event: string;
+	requestId: string;
+	payload?: any;
 }
 
 export interface ServerChannelResponseMessage {
-	type: "channel_message";
+	type: "channel";
+	action: "response";
 	channel: string;
-	event?: undefined;
 	responseTo: string;
 	payload?: any;
-	error?: any;
-	requestId?: never;
+	error?: ChannelError;
 }
 
-export type ServerChannelMessage = ServerChannelRequestMessage | ServerChannelResponseMessage;
+export type ServerChannelMessage =
+	| ServerChannelEventMessage
+	| ServerChannelRequestMessage
+	| ServerChannelResponseMessage;
 
 export interface ServerNavigateToMessage {
 	type: "navigate_to";
@@ -98,8 +114,7 @@ export type ServerMessage =
 	| ServerNavigateToMessage
 	| ServerReloadMessage
 	| ServerAttachAckMessage
-	| ServerChannelRequestMessage
-	| ServerChannelResponseMessage
+	| ServerChannelMessage
 	| ServerJsExecMessage;
 
 export interface ClientCallbackMessage {
@@ -134,27 +149,36 @@ export interface ClientApiResultMessage {
 	body: any | null;
 }
 
-export interface ClientChannelRequestMessage {
-	type: "channel_message";
+export interface ClientChannelEventMessage {
+	type: "channel";
+	action: "event";
 	channel: string;
 	event: string;
 	payload?: any;
-	requestId?: string;
-	responseTo?: never;
-	error?: any;
+}
+
+export interface ClientChannelRequestMessage {
+	type: "channel";
+	action: "request";
+	channel: string;
+	event: string;
+	requestId: string;
+	payload?: any;
 }
 
 export interface ClientChannelResponseMessage {
-	type: "channel_message";
+	type: "channel";
+	action: "response";
 	channel: string;
-	event?: undefined;
 	responseTo: string;
 	payload?: any;
-	error?: any;
-	requestId?: never;
+	error?: ChannelError;
 }
 
-export type ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage;
+export type ClientChannelMessage =
+	| ClientChannelEventMessage
+	| ClientChannelRequestMessage
+	| ClientChannelResponseMessage;
 
 export interface ClientJsResultMessage {
 	type: "js_result";
@@ -169,6 +193,5 @@ export type ClientMessage =
 	| ClientUpdateMessage
 	| ClientDetachMessage
 	| ClientApiResultMessage
-	| ClientChannelRequestMessage
-	| ClientChannelResponseMessage
+	| ClientChannelMessage
 	| ClientJsResultMessage;

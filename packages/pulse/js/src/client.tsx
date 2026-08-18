@@ -391,8 +391,15 @@ export class PulseSocketIOClient {
 			}
 			case "server_error": {
 				const route = this.#activeViews.get(message.path);
-				if (!route) return; // discard for inactive paths
-				route.onServerError(message.error);
+				if (route) {
+					route.onServerError(message.error);
+					break;
+				}
+				// Tab / connect errors are often tagged "/" even when that
+				// view is not mounted — deliver to every live view.
+				for (const view of this.#activeViews.values()) {
+					view.onServerError(message.error);
+				}
 				break;
 			}
 			case "api_call": {

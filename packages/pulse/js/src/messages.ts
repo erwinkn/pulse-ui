@@ -21,7 +21,16 @@ export interface ServerUpdateMessage {
 export interface ServerError {
 	message: string;
 	stack?: string;
-	phase: "render" | "callback" | "mount" | "unmount" | "navigate" | "server";
+	phase:
+		| "render"
+		| "callback"
+		| "mount"
+		| "unmount"
+		| "navigate"
+		| "server"
+		| "effect"
+		| "connect"
+		| "channel";
 	details?: Record<string, any>;
 }
 

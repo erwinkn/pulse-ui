@@ -456,9 +456,19 @@ class RenderSession:
 		if mount.state == "pending":
 			mount.deliver(message, lambda _: None)
 
+	def _error_report_paths(self, path: str | None) -> list[str]:
+		# Wire `path` must match a live client view. Tab / connect / middleware
+		# errors have no route (or a stale "/") — fan out to current mounts.
+		if path is not None:
+			path = ensure_absolute_path(path)
+			if path in self.route_mounts:
+				return [path]
+		mounts = list(self.route_mounts)
+		return mounts if mounts else ["/"]
+
 	def report_error(
 		self,
-		path: str,
+		path: str | None,
 		phase: ServerErrorPhase,
 		exc: BaseException,
 		details: dict[str, Any] | None = None,
@@ -467,18 +477,19 @@ class RenderSession:
 		# is also called outside an `except` block (e.g. a deferred connect error),
 		# where traceback.format_exc() would yield "NoneType: None".
 		stack = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-		self.send(
-			{
-				"type": "server_error",
-				"path": path,
-				"error": {
-					"message": str(exc),
-					"stack": stack,
-					"phase": phase,
-					"details": details or {},
-				},
-			}
-		)
+		for target in self._error_report_paths(path):
+			self.send(
+				{
+					"type": "server_error",
+					"path": target,
+					"error": {
+						"message": str(exc),
+						"stack": stack,
+						"phase": phase,
+						"details": details or {},
+					},
+				}
+			)
 		logger.error(
 			"Error reported for path %r during %s: %s\n%s",
 			path,

@@ -43,7 +43,7 @@ T = _TypeVar("T")
 
 
 class PulseChannelDetachedError(Exception):
-	"""Raised when `on()` is called on a detached handle."""
+	"""Kept for the JS export. Client `on()` is legal while detached."""
 
 	pass
 
@@ -60,8 +60,14 @@ class PulseChannelRemoteError(Exception):
 	pass
 
 
+class PulseChannelTimeoutError(Exception):
+	"""Raised when a client request exceeds `options.timeout` (milliseconds)."""
+
+	pass
+
+
 class ChannelBridge:
-	"""A local handle on a mailbox. Messages route by `id`."""
+	"""A local handle on a channel name. Messages route by `id`."""
 
 	@property
 	def id(self) -> str:
@@ -77,12 +83,15 @@ class ChannelBridge:
 		"""
 		...
 
-	def request(self, event: str, payload: _Any = None) -> _Awaitable[_Any]:
+	def request(
+		self, event: str, payload: _Any = None, options: dict[str, _Any] | None = None
+	) -> _Awaitable[_Any]:
 		"""Make a request to the server and await a response.
 
 		Args:
 		    event: The event name to send.
 		    payload: Optional data to send with the request.
+		    options: Optional `{ timeout }` in milliseconds.
 
 		Returns:
 		    A Promise that resolves with the server's response.
@@ -105,16 +114,17 @@ class ChannelBridge:
 
 
 def useChannel(channel_id: str) -> ChannelBridge:
-	"""React hook to attach a handle to a Pulse mailbox.
+	"""React hook to attach a handle to a Pulse channel.
 
 	Must be called from within a React component. Client lifetime is React
-	placement (route component vs layout).
+	placement (route component vs layout). Registers the handle during render
+	so a live-socket emit is not dropped waiting for useEffect.
 
 	Args:
-	    channel_id: The mailbox identifier.
+	    channel_id: The channel identifier.
 
 	Returns:
-	    A ChannelBridge handle for that mailbox.
+	    A ChannelBridge handle for that channel.
 	"""
 	...
 

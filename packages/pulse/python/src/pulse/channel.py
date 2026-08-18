@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 ChannelLifetime = Literal["route", "tab"]
+ChannelInternKey = tuple[ChannelLifetime, str, str | None]
 ChannelHandler = Callable[[Any], Any | Awaitable[Any]]
 ChannelHandlerRemover = Callable[[], None]
 
@@ -63,7 +64,7 @@ class ChannelRemoteError(Exception):
 
 
 class Channel:
-	"""A local handle on a mailbox. Messages route by `id`."""
+	"""A local handle on a channel name. Messages route by `id`."""
 
 	_session: RenderSession
 	_id: str
@@ -102,7 +103,8 @@ class Channel:
 	def on(self, event: str, handler: ChannelHandler) -> ChannelHandlerRemover:
 		self._assert_attached()
 		handlers = self._handlers.setdefault(event, [])
-		handlers.append(handler)
+		if handler not in handlers:
+			handlers.append(handler)
 
 		def remove() -> None:
 			if handler in handlers:
@@ -145,6 +147,17 @@ class Channel:
 		self._handlers.clear()
 		self._session.channels.forget_handle(self)
 
+	def _report_task_error(self, task: asyncio.Task[Any]) -> None:
+		if task.cancelled():
+			return
+		try:
+			exc = task.exception()
+		except asyncio.CancelledError:
+			return
+		if exc is None:
+			return
+		self._session.report_error(self._route_path or "/", "channel", exc)
+
 	def dispatch_event(self, event: str, payload: Any) -> None:
 		if self._detached:
 			return
@@ -152,6 +165,7 @@ class Channel:
 			self._session.create_task(
 				self._invoke_handler(handler, payload, required=False),
 				name=f"channel:{self._id}:{event}",
+				on_done=self._report_task_error,
 			)
 
 	async def dispatch_request(self, event: str, payload: Any) -> Any:
@@ -204,12 +218,9 @@ class ChannelsManager:
 
 	def __init__(self, session: RenderSession):
 		self._session = session
-		self._handles: set[Channel] = set()
-		self._mailboxes: dict[str, list[Channel]] = {}
-		self._route_handles: dict[tuple[str, str], Channel] = {}
-		self._handles_by_route: dict[str, set[Channel]] = {}
-		self._tab_handles: dict[str, Channel] = {}
-		self._unscoped_handles: dict[str, Channel] = {}
+		# (lifetime, channel_id, route_path) → live handle
+		self._intern: dict[ChannelInternKey, Channel] = {}
+		self._by_name: dict[str, list[Channel]] = {}
 		self._pending: dict[str, asyncio.Future[Any]] = {}
 
 	def can_request(self) -> bool:
@@ -219,9 +230,12 @@ class ChannelsManager:
 		route = PulseContext.get().route
 		return route.route_path if route is not None else None
 
+	def _intern_key(self, handle: Channel) -> ChannelInternKey:
+		return (handle.lifetime, handle.id, handle._route_path)
+
 	def _register(self, handle: Channel) -> None:
-		self._handles.add(handle)
-		self._mailboxes.setdefault(handle.id, []).append(handle)
+		self._intern[self._intern_key(handle)] = handle
+		self._by_name.setdefault(handle.id, []).append(handle)
 
 	def acquire(
 		self, identifier: str | None = None, *, lifetime: ChannelLifetime = "route"
@@ -229,73 +243,42 @@ class ChannelsManager:
 		if identifier is not None and identifier == "":
 			raise ValueError("Channel identifier cannot be empty")
 		channel_id = identifier or str(uuid.uuid4())
-		route_path = self._current_route_path()
 		if lifetime == "tab":
-			existing = self._tab_handles.get(channel_id)
-			if existing is not None and not existing.is_detached():
-				return existing
-			handle = Channel(self._session, channel_id, "tab")
-			self._tab_handles[channel_id] = handle
-			self._register(handle)
-			return handle
-		if route_path is None:
-			existing = self._unscoped_handles.get(channel_id)
-			if existing is not None and not existing.is_detached():
-				return existing
-			handle = Channel(self._session, channel_id, "route")
-			self._unscoped_handles[channel_id] = handle
-			self._register(handle)
-			return handle
-		key = (channel_id, route_path)
-		existing = self._route_handles.get(key)
+			route_path = None
+		else:
+			route_path = self._current_route_path()
+			if route_path is None:
+				raise RuntimeError(
+					"channel(..., lifetime='route') requires a route context"
+				)
+		key = (lifetime, channel_id, route_path)
+		existing = self._intern.get(key)
 		if existing is not None and not existing.is_detached():
 			return existing
-		handle = Channel(self._session, channel_id, "route", route_path=route_path)
-		self._route_handles[key] = handle
-		self._handles_by_route.setdefault(route_path, set()).add(handle)
+		handle = Channel(
+			self._session, channel_id, lifetime, route_path=route_path
+		)
 		self._register(handle)
-		return handle
-
-	def open_handle(
-		self, identifier: str, *, lifetime: ChannelLifetime = "route"
-	) -> Channel:
-		"""Always create a new handle on the mailbox (no intern)."""
-		if identifier == "":
-			raise ValueError("Channel identifier cannot be empty")
-		route_path = self._current_route_path() if lifetime == "route" else None
-		handle = Channel(self._session, identifier, lifetime, route_path=route_path)
-		self._register(handle)
-		if lifetime == "route" and route_path is not None:
-			self._handles_by_route.setdefault(route_path, set()).add(handle)
 		return handle
 
 	def forget_handle(self, handle: Channel) -> None:
-		self._handles.discard(handle)
-		mailbox = self._mailboxes.get(handle.id)
-		if mailbox is not None:
-			if handle in mailbox:
-				mailbox.remove(handle)
-			if not mailbox:
-				del self._mailboxes[handle.id]
-		if self._tab_handles.get(handle.id) is handle:
-			del self._tab_handles[handle.id]
+		key = self._intern_key(handle)
+		if self._intern.get(key) is handle:
+			del self._intern[key]
+		bucket = self._by_name.get(handle.id)
+		if bucket is None:
 			return
-		if self._unscoped_handles.get(handle.id) is handle:
-			del self._unscoped_handles[handle.id]
-			return
-		for key, existing in list(self._route_handles.items()):
-			if existing is not handle:
-				continue
-			del self._route_handles[key]
-			route_handles = self._handles_by_route.get(key[1])
-			if route_handles is not None:
-				route_handles.discard(handle)
-				if not route_handles:
-					del self._handles_by_route[key[1]]
-			return
+		if handle in bucket:
+			bucket.remove(handle)
+		if not bucket:
+			del self._by_name[handle.id]
 
 	def detach_route(self, route_path: str) -> None:
-		handles = list(self._handles_by_route.pop(route_path, set()))
+		handles = [
+			handle
+			for handle in self._intern.values()
+			if handle.lifetime == "route" and handle._route_path == route_path
+		]
 		for handle in handles:
 			handle.detach()
 
@@ -365,17 +348,13 @@ class ChannelsManager:
 
 	def reset(self) -> None:
 		self.fail_pending()
-		for handle in list(self._handles):
+		for handle in list(self._intern.values()):
 			handle.detach()
-		self._handles.clear()
-		self._mailboxes.clear()
-		self._route_handles.clear()
-		self._handles_by_route.clear()
-		self._tab_handles.clear()
-		self._unscoped_handles.clear()
+		self._intern.clear()
+		self._by_name.clear()
 
 	def _handles_for(self, channel_id: str) -> list[Channel]:
-		return [h for h in self._mailboxes.get(channel_id, []) if not h.is_detached()]
+		return [h for h in self._by_name.get(channel_id, []) if not h.is_detached()]
 
 	def handle_event(self, message: ClientChannelEventMessage) -> None:
 		channel_id = message["channel"]
@@ -384,7 +363,7 @@ class ChannelsManager:
 		handles = self._handles_for(channel_id)
 		if not handles:
 			logger.debug(
-				"Dropping event %s on mailbox %s (no listeners)", event, channel_id
+				"Dropping event %s on channel %s (no listeners)", event, channel_id
 			)
 			return
 		for handle in handles:
@@ -436,7 +415,7 @@ def _serialize_payload(payload: Any) -> Any:
 def channel(
 	identifier: str | None = None, *, lifetime: ChannelLifetime = "route"
 ) -> Channel:
-	"""Return a handle on a mailbox. Empty identifier raises. None generates a UUID."""
+	"""Return a handle on a channel name. Empty identifier raises. None generates a UUID."""
 	ctx = PulseContext.get()
 	if ctx.render is None:
 		raise RuntimeError("channel() requires a render session")

@@ -391,6 +391,15 @@ class RenderSession:
 
 	def send(self, message: ServerMessage):
 		"""Route message based on mount state."""
+		# Channel RPC is fail-fast. Never park request/response on the
+		# disconnect queue — the pending future is already rejected.
+		if message.get("type") == "channel" and message.get("action") in (
+			"request",
+			"response",
+		):
+			if self._send_message:
+				self._send_message(message)
+			return
 		# Forced navigation is global. Route-bound navigation is dropped once
 		# its source route has unmounted.
 		if message.get("type") == "navigate_to":
@@ -597,7 +606,6 @@ class RenderSession:
 	def detach(self, path: str):
 		"""Client route unmounted. Dispose immediately outside dev StrictMode replay."""
 		path = ensure_absolute_path(path)
-		self.channels.detach_route(path)
 		mount = self.route_mounts.get(path)
 		if not mount:
 			return

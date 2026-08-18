@@ -1,5 +1,5 @@
 import { Combobox as MantineCombobox, useCombobox } from "@mantine/core";
-import { usePulseClient, type ChannelBridge } from "pulse-ui-client";
+import { usePulseChannel } from "pulse-ui-client";
 import { type ComponentPropsWithoutRef, useEffect, useRef } from "react";
 
 type DropdownEventSource = "keyboard" | "mouse" | "unknown";
@@ -38,8 +38,9 @@ export function Combobox({
 	scrollBehavior,
 	...rest
 }: PulseComboboxProps) {
-	const client = usePulseClient();
-	const channelRef = useRef<ChannelBridge | null>(null);
+	const channel = usePulseChannel(channelId);
+	const channelRef = useRef(channel);
+	channelRef.current = channel;
 
 	const combobox = useCombobox({
 		defaultOpened,
@@ -61,8 +62,6 @@ export function Combobox({
 	});
 
 	useEffect(() => {
-		const channel = client.acquireChannel(channelId);
-		channelRef.current = channel;
 		const cleanups = [
 			channel.on("openDropdown", (payload: OptionalEventSourcePayload) => {
 				combobox.openDropdown(payload?.eventSource);
@@ -108,12 +107,8 @@ export function Combobox({
 
 		return () => {
 			for (const dispose of cleanups) dispose();
-			if (channelRef.current === channel) {
-				channelRef.current = null;
-			}
-			client.releaseChannel(channelId);
 		};
-	}, [client, channelId, combobox]);
+	}, [channel, combobox]);
 
 	return <MantineCombobox {...(rest as any)} store={combobox} />;
 }

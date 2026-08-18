@@ -27,6 +27,7 @@ def build_context():
 
 	real_render = ps.RenderSession(render.id, app.routes)
 	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
+	real_render.connected = True
 
 	app.render_sessions[render.id] = real_render
 	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
@@ -73,11 +74,11 @@ async def test_combobox_store_optional_payloads():
 	assert len(render.sent) == 2
 	open_msg = render.sent[0]
 	assert open_msg["event"] == "openDropdown"
-	assert open_msg["payload"] is None
+	assert open_msg.get("payload") is None
 
 	update_msg = render.sent[1]
 	assert update_msg["event"] == "updateSelectedOptionIndex"
-	assert update_msg["payload"] is None
+	assert update_msg.get("payload") is None
 
 
 @pytest.mark.asyncio
@@ -98,18 +99,16 @@ async def test_combobox_store_request_roundtrip():
 	request_id = request_message.get("requestId")
 	assert request_id
 
-	real_render.channels.handle_client_response(
-		message=cast(
+	real_render.channels.handle_response(
+		cast(
 			ClientChannelResponseMessage,
-			cast(
-				object,
-				{
-					"type": "channel_message",
-					"channel": request_message["channel"],
-					"responseTo": request_id,
-					"payload": True,
-				},
-			),
+			{
+				"type": "channel",
+				"action": "response",
+				"channel": request_message["channel"],
+				"responseTo": request_id,
+				"payload": True,
+			},
 		)
 	)
 
@@ -140,35 +139,32 @@ async def test_combobox_store_callbacks():
 		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 		render=real_render,
 	):
-		real_render.channels.handle_client_event(
-			render=real_render,
-			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
-			message={
-				"type": "channel_message",
+		real_render.channels.handle_event(
+			{
+				"type": "channel",
+				"action": "event",
 				"channel": store._channel.id,
 				"event": "openedChange",
 				"payload": {"opened": True},
-			},
+			}
 		)
-		real_render.channels.handle_client_event(
-			render=real_render,
-			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
-			message={
-				"type": "channel_message",
+		real_render.channels.handle_event(
+			{
+				"type": "channel",
+				"action": "event",
 				"channel": store._channel.id,
 				"event": "dropdownOpen",
 				"payload": {"eventSource": "mouse"},
-			},
+			}
 		)
-		real_render.channels.handle_client_event(
-			render=real_render,
-			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
-			message={
-				"type": "channel_message",
+		real_render.channels.handle_event(
+			{
+				"type": "channel",
+				"action": "event",
 				"channel": store._channel.id,
 				"event": "dropdownClose",
 				"payload": {"eventSource": "keyboard"},
-			},
+			}
 		)
 
 	await asyncio.sleep(0)

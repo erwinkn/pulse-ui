@@ -9,8 +9,9 @@ const channel = {
 	emit: mock(),
 };
 const client = {
-	acquireChannel: () => channel,
-	releaseChannel: () => {},
+	channel: () => channel,
+	attachHandle: () => {},
+	detachHandle: () => {},
 };
 let currentDirectives = {
 	query: { pulse_deployment: "prod-old" },
@@ -23,6 +24,7 @@ const submitForm = mock(
 mock.module("pulse-ui-client", () => ({
 	submitForm,
 	usePulseClient: () => client,
+	usePulseChannel: () => channel,
 	usePulseDirectivesSource: () => directivesSource,
 }));
 

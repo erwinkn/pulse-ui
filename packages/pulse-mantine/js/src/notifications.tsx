@@ -5,8 +5,8 @@ import {
 	type NotificationsProps,
 	notifications as notificationsApi,
 } from "@mantine/notifications";
-import { usePulseClient, type ChannelBridge } from "pulse-ui-client";
-import { useEffect, useRef } from "react";
+import { usePulseChannel } from "pulse-ui-client";
+import { useEffect } from "react";
 
 type NotificationUpdatePayload = Parameters<typeof notificationsApi.update>[0];
 type NotificationShowPayload = NotificationData;
@@ -38,14 +38,9 @@ export function Notifications({ channelId, ...props }: PulseNotificationsProps) 
 
 function ConnectedNotifications({ channelId, ...props }: ConnectedNotificationsProps) {
 	const { store = defaultStore, ...rest } = props;
-	const client = usePulseClient();
-	const channelRef = useRef<ChannelBridge | null>(null);
+	const channel = usePulseChannel(channelId);
 
 	useEffect(() => {
-		if (!channelId) return;
-
-		const channel = client.acquireChannel(channelId);
-		channelRef.current = channel;
 		const cleanups = [
 			channel.on("show", (payload: unknown) => {
 				if (!isNotificationData(payload)) return;
@@ -75,15 +70,13 @@ function ConnectedNotifications({ channelId, ...props }: ConnectedNotificationsP
 				notificationsApi.updateState(store, () => next as NotificationData[]);
 			}),
 			store.subscribe((state) => {
-				const currentChannel = channelRef.current;
-				if (!currentChannel) return;
 				const notificationIds = state.notifications
 					.map((item) => item.id)
 					.filter((id): id is string => !!id && id.length > 0);
 				const queueIds = state.queue
 					.map((item) => item.id)
 					.filter((id): id is string => !!id && id.length > 0);
-				currentChannel.emit("stateSync", {
+				channel.emit("stateSync", {
 					notifications: notificationIds,
 					queue: queueIds,
 				});
@@ -94,12 +87,8 @@ function ConnectedNotifications({ channelId, ...props }: ConnectedNotificationsP
 			for (const dispose of cleanups) {
 				dispose();
 			}
-			if (channelRef.current === channel) {
-				channelRef.current = null;
-			}
-			client.releaseChannel(channelId);
 		};
-	}, [client, channelId, store]);
+	}, [channel, store]);
 
 	return <MantineNotifications {...rest} store={store} />;
 }

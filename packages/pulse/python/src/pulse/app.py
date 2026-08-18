@@ -1055,19 +1055,9 @@ class App:
 		if sid in self._connecting_sockets:
 			self._queue_pending_socket_message(sid, data)
 			return
-		inbound = self._resolve_socket_inbound(sid, data)
-		if inbound is None:
-			return
-		render, session, msg = inbound
-		if self._is_inbound_reply(msg):
-			self._apply_inbound_reply(render, msg)
-			return
-		# Command handling is async (middleware). Detach it so this Socket.IO
-		# handler can return — replies on this socket must not sit behind Decide.
-		self._tasks.create_task(
-			self._dispatch_inbound_command(render, session, msg),
-			name=f"inbound:{render.id}:{msg['type']}",
-		)
+		# Live socket: detach commands so this handler returns. Replies
+		# resolve inline and must not wait on middleware.
+		await self._deliver_socket_message(sid, data, detach=True)
 
 	def _queue_pending_socket_message(self, sid: str, data: Serialized) -> None:
 		queue = self._pending_socket_messages.setdefault(sid, [])
@@ -1083,11 +1073,30 @@ class App:
 		try:
 			while pending := self._pending_socket_messages.pop(sid, []):
 				for data in pending:
-					# Connect replay stays ordered: await each command. Replies
-					# still resolve inline when we reach them.
-					await self._process_socket_message(sid, data)
+					# First-load replay stays ordered (attach then callback).
+					await self._deliver_socket_message(sid, data, detach=False)
 		finally:
 			self._connecting_sockets.discard(sid)
+
+	async def _process_socket_message(self, sid: str, data: Serialized) -> None:
+		await self._deliver_socket_message(sid, data, detach=False)
+
+	async def _deliver_socket_message(
+		self, sid: str, data: Serialized, *, detach: bool
+	) -> None:
+		inbound = self._resolve_socket_inbound(sid, data)
+		if inbound is None:
+			return
+		render, session, msg = inbound
+		if self._apply_reply(render, msg):
+			return
+		if detach:
+			self._tasks.create_task(
+				self._run_command(render, session, msg),
+				name=f"inbound:{render.id}:{msg['type']}",
+			)
+			return
+		await self._run_command(render, session, msg)
 
 	def _resolve_socket_inbound(
 		self, sid: str, data: Serialized
@@ -1105,28 +1114,29 @@ class App:
 		session = self.user_sessions.get(owner_sid)
 		if session is None:
 			return None
-		# Cancel any leftover cleanup for connected sessions. Never cancel
+		# Cancel leftover cleanup for connected sessions only. Never cancel
 		# for disconnected renders: nothing would reschedule it and the
 		# session would survive past its timeout.
 		if render.connected:
 			self._cancel_render_cleanup(rid)
 		return render, session, msg
 
-	def _is_inbound_reply(self, msg: ClientMessage) -> bool:
-		if msg["type"] == "api_result" or msg["type"] == "js_result":
-			return True
-		return msg["type"] == "channel_message" and bool(msg.get("responseTo"))
-
-	def _apply_inbound_reply(self, render: RenderSession, msg: ClientMessage) -> None:
+	def _apply_reply(self, render: RenderSession, msg: ClientMessage) -> bool:
+		"""Resolve a protocol reply. Returns False if `msg` is a command."""
 		if msg["type"] == "api_result":
 			render.handle_api_result(dict(msg))
-			return
+			return True
 		if msg["type"] == "js_result":
 			render.handle_js_result(dict(msg))
-			return
-		render.channels.handle_client_response(cast(ClientChannelResponseMessage, msg))
+			return True
+		if msg["type"] == "channel_message" and msg.get("responseTo"):
+			render.channels.handle_client_response(
+				cast(ClientChannelResponseMessage, msg)
+			)
+			return True
+		return False
 
-	async def _dispatch_inbound_command(
+	async def _run_command(
 		self, render: RenderSession, session: UserSession, msg: ClientMessage
 	) -> None:
 		try:
@@ -1138,21 +1148,10 @@ class App:
 			path = msg.get("path", "")
 			render.report_error(path, "server", e)
 
-	async def _process_socket_message(self, sid: str, data: Serialized) -> None:
-		inbound = self._resolve_socket_inbound(sid, data)
-		if inbound is None:
-			return
-		render, session, msg = inbound
-		if self._is_inbound_reply(msg):
-			self._apply_inbound_reply(render, msg)
-			return
-		await self._dispatch_inbound_command(render, session, msg)
-
 	async def _handle_pulse_message(
 		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
 	) -> None:
-		if self._is_inbound_reply(msg):
-			self._apply_inbound_reply(render, msg)
+		if self._apply_reply(render, msg):
 			return
 
 		async def _next() -> Ok[None]:
@@ -1208,38 +1207,38 @@ class App:
 	async def _handle_channel_message(
 		self, render: RenderSession, session: UserSession, msg: ClientChannelMessage
 	) -> None:
-		if msg.get("responseTo"):
-			self._apply_inbound_reply(render, msg)
-		else:
-			channel_id = str(msg.get("channel", ""))
-			msg = cast(ClientChannelRequestMessage, msg)
+		if self._apply_reply(render, msg):
+			return
 
-			async def _next() -> Ok[None]:
-				render.channels.handle_client_event(
-					render=render, session=session, message=msg
-				)
-				return Ok(None)
+		channel_id = str(msg.get("channel", ""))
+		msg = cast(ClientChannelRequestMessage, msg)
 
-			def _normalize_message_response(res: Any) -> Ok[None] | Deny:
-				if isinstance(res, (Ok, Deny)):
-					return res  # type: ignore[return-value]
-				# Treat any other value as allow
-				return Ok(None)
+		async def _next() -> Ok[None]:
+			render.channels.handle_client_event(
+				render=render, session=session, message=msg
+			)
+			return Ok(None)
 
-			with PulseContext.update(session=session, render=render):
-				res = await self.middleware.channel(
-					channel_id=channel_id,
-					event=msg.get("event", ""),
-					payload=msg.get("payload"),
-					request_id=msg.get("requestId"),
-					session=session.data,
-					next=_next,
-				)
-				res = _normalize_message_response(res)
+		def _normalize_message_response(res: Any) -> Ok[None] | Deny:
+			if isinstance(res, (Ok, Deny)):
+				return res  # type: ignore[return-value]
+			# Treat any other value as allow
+			return Ok(None)
 
-			if isinstance(res, Deny):
-				if req_id := msg.get("requestId"):
-					render.channels.send_error(channel_id, req_id, "Denied")
+		with PulseContext.update(session=session, render=render):
+			res = await self.middleware.channel(
+				channel_id=channel_id,
+				event=msg.get("event", ""),
+				payload=msg.get("payload"),
+				request_id=msg.get("requestId"),
+				session=session.data,
+				next=_next,
+			)
+			res = _normalize_message_response(res)
+
+		if isinstance(res, Deny):
+			if req_id := msg.get("requestId"):
+				render.channels.send_error(channel_id, req_id, "Denied")
 
 	def get_route(self, path: str):
 		return self.routes.find(path)

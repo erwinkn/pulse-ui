@@ -1,89 +1,267 @@
 import asyncio
+from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast, override
 
 import pulse as ps
 import pytest
-from pulse.messages import ClientPulseMessage
+from pulse.messages import ClientMessage, ClientPulseMessage
+from pulse.middleware import Deny, Ok, PulseMiddleware
 from pulse.render_session import RenderSession
 from pulse.serializer import serialize
 from pulse.user_session import UserSession
 
 
-@pytest.mark.asyncio
-async def test_socket_messages_for_render_are_serialized(
-	monkeypatch: pytest.MonkeyPatch,
-):
-	app = ps.App()
-	render = RenderSession("render-1", app.routes)
-	session = SimpleNamespace(sid="session-1", data={})
+def _route_info(path: str) -> dict[str, object]:
+	return {
+		"pathname": path,
+		"hash": "",
+		"query": "",
+		"queryParams": {},
+		"pathParams": {},
+		"catchall": [],
+	}
+
+
+def _bind_render(
+	app: ps.App,
+	render: RenderSession,
+	session: SimpleNamespace,
+	socket_sid: str = "socket-1",
+) -> None:
 	app.render_sessions[render.id] = render
 	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
 	app.user_sessions[session.sid] = cast(UserSession, cast(object, session))
-	app._socket_to_render["socket-1"] = render.id  # pyright: ignore[reportPrivateUsage]
+	app._socket_to_render[socket_sid] = render.id  # pyright: ignore[reportPrivateUsage]
 
-	started_attach = asyncio.Event()
-	release_attach = asyncio.Event()
-	events: list[str] = []
 
-	async def handle_pulse_message(
-		_render: RenderSession, _session: UserSession, msg: ClientPulseMessage
-	) -> None:
-		events.append(f"start:{msg['type']}")
-		if msg["type"] == "attach":
-			started_attach.set()
-			await release_attach.wait()
-		events.append(f"end:{msg['type']}")
+async def _send(
+	app: ps.App, socket_sid: str, message: dict[str, object]
+) -> None:
+	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+		socket_sid, serialize(message)
+	)
 
-	monkeypatch.setattr(app, "_handle_pulse_message", handle_pulse_message)
 
-	attach_task = asyncio.create_task(
-		app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+class GatingMessageMiddleware(PulseMiddleware):
+	"""Decide that parks selected pulse messages until `release` is set."""
+
+	started: asyncio.Event
+	release: asyncio.Event
+	gate_paths: set[str] | None
+	seen: list[str]
+
+	def __init__(self, gate_paths: set[str] | None = None) -> None:
+		super().__init__()
+		self.started = asyncio.Event()
+		self.release = asyncio.Event()
+		self.gate_paths = gate_paths
+		self.seen = []
+
+	@override
+	async def message(
+		self,
+		*,
+		data: ClientMessage,
+		session: dict[str, Any],
+		next: Callable[[], Awaitable[Ok[None]]],
+	) -> Ok[None] | Deny:
+		path = str(data.get("path", ""))
+		if self.gate_paths is None or path in self.gate_paths:
+			self.started.set()
+			await self.release.wait()
+		self.seen.append(f"{data['type']}:{path}")
+		return await next()
+
+
+@pytest.mark.asyncio
+async def test_completion_applies_while_other_message_is_in_decide():
+	middleware = GatingMessageMiddleware()
+	app = ps.App(middleware=middleware)
+	render = RenderSession("render-1", app.routes)
+	session = SimpleNamespace(sid="session-1", data={})
+	_bind_render(app, render, session)
+
+	api_fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+	render._pending_api["corr-1"] = api_fut  # pyright: ignore[reportPrivateUsage]
+	js_fut: asyncio.Future[object] = asyncio.get_running_loop().create_future()
+	render._pending_js_results["js-1"] = js_fut  # pyright: ignore[reportPrivateUsage]
+	channel_fut: asyncio.Future[object] = asyncio.get_running_loop().create_future()
+	render.channels.register_pending("req-1", channel_fut, "ch-1")
+
+	gated = asyncio.create_task(
+		_send(
+			app,
 			"socket-1",
-			serialize(
-				{
-					"type": "attach",
-					"path": "/",
-					"routeInfo": {
-						"pathname": "/",
-						"hash": "",
-						"query": "",
-						"queryParams": {},
-						"pathParams": {},
-						"catchall": [],
-					},
-				}
-			),
+			{"type": "attach", "path": "/", "routeInfo": _route_info("/")},
 		)
 	)
-	await started_attach.wait()
+	await middleware.started.wait()
+	assert not api_fut.done()
+	assert not js_fut.done()
+	assert not channel_fut.done()
 
-	callback_task = asyncio.create_task(
-		app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+	await _send(
+		app,
+		"socket-1",
+		{
+			"type": "api_result",
+			"id": "corr-1",
+			"ok": True,
+			"status": 200,
+			"headers": {},
+			"body": {"n": 1},
+		},
+	)
+	assert api_fut.done()
+	assert api_fut.result()["body"] == {"n": 1}
+	assert not middleware.release.is_set()
+
+	await _send(
+		app,
+		"socket-1",
+		{"type": "js_result", "id": "js-1", "result": 42, "error": None},
+	)
+	assert js_fut.done()
+	assert js_fut.result() == 42
+
+	await _send(
+		app,
+		"socket-1",
+		{
+			"type": "channel_message",
+			"channel": "ch-1",
+			"event": None,
+			"responseTo": "req-1",
+			"payload": "pong",
+		},
+	)
+	assert channel_fut.done()
+	assert channel_fut.result() == "pong"
+
+	middleware.release.set()
+	await gated
+	render.close()
+
+
+@pytest.mark.asyncio
+async def test_same_path_attach_then_callback_apply_in_order():
+	seen: list[str] = []
+
+	@ps.component
+	def Home():
+		def on_click():
+			ctx = ps.PulseContext.get()
+			assert ctx.render is not None
+			seen.append(ctx.render.route_mounts["/"].state)
+
+		return ps.button(onClick=on_click)["inc"]
+
+	app = ps.App(routes=[ps.Route("/", Home)])
+	render = RenderSession("render-1", app.routes)
+	session = SimpleNamespace(sid="session-1", data={})
+	_bind_render(app, render, session)
+	render.connect(lambda _message: None)
+
+	with ps.PulseContext.update(render=render):
+		render.prerender(["/"])
+	assert render.route_mounts["/"].state == "pending"
+	callback_key = next(iter(render.route_mounts["/"].tree.callbacks))
+
+	# Sequential inbound messages, no yield between Apply of attach and callback.
+	# Same-path Apply is sync, so the callback lookup sees the mount.
+	await _send(
+		app,
+		"socket-1",
+		{"type": "attach", "path": "/", "routeInfo": _route_info("/")},
+	)
+	await _send(
+		app,
+		"socket-1",
+		{"type": "callback", "path": "/", "callback": callback_key, "args": []},
+	)
+
+	assert render.route_mounts["/"].state == "active"
+	assert seen == ["active"]
+	render.close()
+
+
+@pytest.mark.asyncio
+async def test_decide_on_one_path_does_not_serialize_other_path_or_completion():
+	middleware = GatingMessageMiddleware(gate_paths={"/a"})
+	clicked: list[str] = []
+
+	@ps.component
+	def PageA():
+		return ps.div["a"]
+
+	@ps.component
+	def PageB():
+		def on_click():
+			ctx = ps.PulseContext.get()
+			assert ctx.render is not None
+			clicked.append(ctx.render.route_mounts["/b"].state)
+
+		return ps.button(onClick=on_click)["b"]
+
+	app = ps.App(
+		routes=[ps.Route("/a", PageA), ps.Route("/b", PageB)],
+		middleware=middleware,
+	)
+	render = RenderSession("render-1", app.routes)
+	session = SimpleNamespace(sid="session-1", data={})
+	_bind_render(app, render, session)
+	render.connect(lambda _message: None)
+
+	with ps.PulseContext.update(render=render):
+		render.prerender(["/a", "/b"])
+	callback_key = next(iter(render.route_mounts["/b"].tree.callbacks))
+
+	api_fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+	render._pending_api["corr-b"] = api_fut  # pyright: ignore[reportPrivateUsage]
+
+	gated = asyncio.create_task(
+		_send(
+			app,
 			"socket-1",
-			serialize(
-				{
-					"type": "callback",
-					"path": "/",
-					"callback": "1.onClick",
-					"args": [],
-				}
-			),
+			{"type": "attach", "path": "/a", "routeInfo": _route_info("/a")},
 		)
 	)
-	await asyncio.sleep(0)
-	assert events == ["start:attach"]
+	await middleware.started.wait()
+	assert render.route_mounts["/a"].state == "pending"
 
-	release_attach.set()
-	await asyncio.gather(attach_task, callback_task)
+	await _send(
+		app,
+		"socket-1",
+		{"type": "attach", "path": "/b", "routeInfo": _route_info("/b")},
+	)
+	await _send(
+		app,
+		"socket-1",
+		{"type": "callback", "path": "/b", "callback": callback_key, "args": []},
+	)
+	await _send(
+		app,
+		"socket-1",
+		{
+			"type": "api_result",
+			"id": "corr-b",
+			"ok": True,
+			"status": 200,
+			"headers": {},
+			"body": None,
+		},
+	)
 
-	assert events == [
-		"start:attach",
-		"end:attach",
-		"start:callback",
-		"end:callback",
-	]
+	assert render.route_mounts["/b"].state == "active"
+	assert clicked == ["active"]
+	assert api_fut.done()
+	assert render.route_mounts["/a"].state == "pending"
+	assert not middleware.release.is_set()
 
+	middleware.release.set()
+	await gated
+	assert render.route_mounts["/a"].state == "active"
 	render.close()
 
 

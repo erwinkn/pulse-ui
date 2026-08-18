@@ -565,6 +565,75 @@ async def test_event_handler_error_is_reported():
 	assert "handler exploded" in errors[-1]["error"]["message"]
 
 
+def _dash_route_info() -> RouteInfo:
+	return cast(
+		RouteInfo,
+		cast(
+			object,
+			{
+				"pathname": "/dash",
+				"hash": "",
+				"query": "",
+				"queryParams": {},
+				"pathParams": {},
+				"catchall": [],
+			},
+		),
+	)
+
+
+def build_dash_session():
+	def page():
+		return ps.div()
+
+	route = Route("/dash", ps.component(page))
+	app = ps.App(routes=[route])
+	dummy = DummyRender()
+	session = SimpleNamespace(sid="session-1", data={})
+	render = ps.RenderSession(dummy.id, app.routes, server_address="http://localhost")
+	render.connect(dummy.send)  # pyright: ignore[reportArgumentType]
+	app.render_sessions[render.id] = render
+	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
+	app.user_sessions[session.sid] = session  # pyright: ignore[reportArgumentType]
+	info = _dash_route_info()
+	with ctx(app, session, render):
+		render.prerender(["/dash"], info)
+		render.attach("/dash", info)
+	return app, dummy, session, render
+
+
+@pytest.mark.asyncio
+async def test_tab_handler_error_reports_on_live_mount():
+	app, dummy, session, render = build_dash_session()
+
+	def boom(_: Any) -> None:
+		raise RuntimeError("tab exploded")
+
+	with ctx(app, session, render):
+		channel = ps.channel("tab-boom", lifetime="tab")
+		channel.on("ping", boom)
+	render.channels.handle_event(
+		as_event(
+			{
+				"type": "channel",
+				"action": "event",
+				"channel": "tab-boom",
+				"event": "ping",
+			},
+		)
+	)
+	errors: list[dict[str, Any]] = []
+	for _ in range(20):
+		await asyncio.sleep(0)
+		errors = [msg for msg in dummy.sent if msg.get("type") == "server_error"]
+		if errors:
+			break
+	assert errors
+	assert errors[-1]["path"] == "/dash"
+	assert errors[-1]["error"]["phase"] == "channel"
+	assert "tab exploded" in errors[-1]["error"]["message"]
+
+
 @pytest.mark.asyncio
 async def test_strict_mode_detach_keeps_route_handle():
 	app, _dummy, session, render, route = build_session(with_route=True)
@@ -615,6 +684,50 @@ async def test_middleware_exception_nacks_request():
 	nacks = [msg for msg in dummy.sent if msg.get("type") == "channel"]
 	errors = [msg for msg in dummy.sent if msg.get("type") == "server_error"]
 	assert nacks[-1]["error"]["code"] == "handler_error"
+	assert errors[-1]["error"]["phase"] == "channel"
+	assert errors[-1]["path"] == "/"
+
+
+@pytest.mark.asyncio
+async def test_middleware_exception_reports_on_live_mount():
+	class Boom(PulseMiddleware):
+		@override
+		async def channel(self, **kwargs: Any):
+			raise RuntimeError("middleware down")
+
+	def page():
+		return ps.div()
+
+	route = Route("/dash", ps.component(page))
+	app = ps.App(routes=[route], middleware=Boom())
+	dummy = DummyRender()
+	session = SimpleNamespace(sid="session-1", data={})
+	render = ps.RenderSession(dummy.id, app.routes, server_address="http://localhost")
+	render.connect(dummy.send)  # pyright: ignore[reportArgumentType]
+	app.render_sessions[render.id] = render
+	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
+	app.user_sessions[session.sid] = session  # pyright: ignore[reportArgumentType]
+	info = _dash_route_info()
+	with ctx(app, session, render):
+		render.prerender(["/dash"], info)
+		render.attach("/dash", info)
+	user = cast(UserSession, cast(object, session))
+
+	await app._handle_channel_message(  # pyright: ignore[reportPrivateUsage]
+		render,
+		user,
+		as_request(
+			{
+				"type": "channel",
+				"action": "request",
+				"channel": "gated",
+				"event": "ping",
+				"requestId": "req-dash",
+			},
+		),
+	)
+	errors = [msg for msg in dummy.sent if msg.get("type") == "server_error"]
+	assert errors[-1]["path"] == "/dash"
 	assert errors[-1]["error"]["phase"] == "channel"
 
 

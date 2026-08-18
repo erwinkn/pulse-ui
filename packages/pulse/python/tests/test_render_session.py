@@ -2178,3 +2178,45 @@ async def test_async_callback_error_reports_real_traceback():
 	assert "NoneType: None" not in err["stack"]
 
 	session.close()
+
+
+def test_report_error_fans_out_when_path_is_unmounted():
+	routes = RouteTree(
+		[Route("dash", simple_component), Route("other", simple_component)]
+	)
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/dash", "/other"])
+		session.attach("/dash", make_route_info("/dash"))
+		session.attach("/other", make_route_info("/other"))
+
+	session.report_error(None, "channel", RuntimeError("no path"))
+	session.report_error("/", "connect", RuntimeError("stale root"))
+	session.report_error("/dash", "callback", RuntimeError("route scoped"))
+
+	channel_paths = [
+		m["path"]
+		for m in messages
+		if m["type"] == "server_error" and cast(Any, m)["error"]["message"] == "no path"
+	]
+	connect_paths = [
+		m["path"]
+		for m in messages
+		if m["type"] == "server_error"
+		and cast(Any, m)["error"]["message"] == "stale root"
+	]
+	scoped = [
+		m
+		for m in messages
+		if m["type"] == "server_error"
+		and cast(Any, m)["error"]["message"] == "route scoped"
+	]
+	assert sorted(channel_paths) == ["/dash", "/other"]
+	assert sorted(connect_paths) == ["/dash", "/other"]
+	assert len(scoped) == 1
+	assert scoped[0]["path"] == "/dash"
+
+	session.close()

@@ -974,7 +974,7 @@ class App:
 					self._cancel_render_cleanup(rid)
 
 					if connect_error is not None:
-						render.report_error("/", "connect", connect_error)
+						render.report_error(None, "connect", connect_error)
 			except Exception:
 				owns_connect_attempt = (
 					self._render_connect_attempts.get(rid) is connect_attempt
@@ -1198,7 +1198,7 @@ class App:
 				except asyncio.CancelledError:
 					return
 				if exc is not None:
-					render.report_error("/", "channel", exc)
+					render.report_error(None, "channel", exc)
 
 			render.create_task(
 				render.channels.handle_request(request_msg),
@@ -1228,7 +1228,7 @@ class App:
 				render.channels.send_error(
 					channel_id, request_id, "handler_error", "Channel handler failed"
 				)
-			render.report_error("/", "channel", e)
+			render.report_error(None, "channel", e)
 			return
 
 		if isinstance(res, Deny) and action == "request" and request_id:

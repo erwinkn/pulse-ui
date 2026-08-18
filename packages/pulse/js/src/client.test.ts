@@ -406,6 +406,74 @@ describe("PulseSocketIOClient attach ack", () => {
 			body: { ok: true },
 		});
 	});
+
+	it("delivers unmatched server_error to all active views", async () => {
+		const client = await makeClient();
+		const dashView = {
+			routeInfo: { ...routeInfo, pathname: "/dash" },
+			onInit: vi.fn(),
+			onUpdate: vi.fn(),
+			onJsExec: vi.fn(),
+			onServerError: vi.fn(),
+		};
+		const connected = client.connect();
+		client.attach("/dash", dashView);
+		socket.trigger("connect");
+		await connected;
+
+		socket.trigger(
+			"message",
+			serialize({
+				type: "server_error",
+				path: "/",
+				error: {
+					message: "tab boom",
+					phase: "channel",
+					details: {},
+				},
+			}),
+		);
+
+		expect(dashView.onServerError).toHaveBeenCalledWith(
+			expect.objectContaining({ message: "tab boom", phase: "channel" }),
+		);
+	});
+
+	it("delivers matching server_error only to that view", async () => {
+		const client = await makeClient();
+		const rootView = {
+			...view,
+			onServerError: vi.fn(),
+		};
+		const dashView = {
+			routeInfo: { ...routeInfo, pathname: "/dash" },
+			onInit: vi.fn(),
+			onUpdate: vi.fn(),
+			onJsExec: vi.fn(),
+			onServerError: vi.fn(),
+		};
+		const connected = client.connect();
+		client.attach("/", rootView);
+		client.attach("/dash", dashView);
+		socket.trigger("connect");
+		await connected;
+
+		socket.trigger(
+			"message",
+			serialize({
+				type: "server_error",
+				path: "/dash",
+				error: {
+					message: "route boom",
+					phase: "callback",
+					details: {},
+				},
+			}),
+		);
+
+		expect(dashView.onServerError).toHaveBeenCalledTimes(1);
+		expect(rootView.onServerError).not.toHaveBeenCalled();
+	});
 });
 
 describe("PulseProvider connection handling", () => {

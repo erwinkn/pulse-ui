@@ -160,7 +160,7 @@ class Channel:
 			return
 		if exc is None:
 			return
-		self._session.report_error(self._route_path or "/", "channel", exc)
+		self._session.report_error(self._route_path, "channel", exc)
 
 	def dispatch_event(self, event: str, payload: Any) -> None:
 		if self._detached:

@@ -113,7 +113,7 @@ class Channel:
 		def remove() -> None:
 			if handler in handlers:
 				handlers.remove(handler)
-			if not handlers:
+			if self._handlers.get(event) is handlers and not handlers:
 				self._handlers.pop(event, None)
 
 		return remove
@@ -246,6 +246,8 @@ class ChannelsManager:
 	) -> Channel:
 		if identifier is not None and identifier == "":
 			raise ValueError("Channel identifier cannot be empty")
+		if lifetime not in ("route", "tab"):
+			raise ValueError(f"Invalid channel lifetime {lifetime!r}")
 		channel_id = identifier or str(uuid.uuid4())
 		if lifetime == "tab":
 			route_path = None
@@ -381,13 +383,12 @@ class ChannelsManager:
 				continue
 			try:
 				result = await handle.dispatch_request(event, payload)
+				self.send_response(channel_id, request_id, result)
 			except Exception:
 				logger.exception("Channel %s handler for %s failed", channel_id, event)
 				self.send_error(
 					channel_id, request_id, "handler_error", "Channel handler failed"
 				)
-				return
-			self.send_response(channel_id, request_id, result)
 			return
 		self.send_error(
 			channel_id,

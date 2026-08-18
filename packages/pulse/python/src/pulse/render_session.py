@@ -526,8 +526,7 @@ class RenderSession:
 
 			results[path] = message
 			if message["type"] == "navigate_to":
-				mount.dispose()
-				del self.route_mounts[path]
+				self.dispose_mount(path, mount)
 				continue
 
 		return results

@@ -11,14 +11,14 @@ Core classes for Pulse client functionality.
 
 ## ChannelBridge
 
-A local handle on a mailbox. You get a `ChannelBridge` from `useChannel`. Messages route by `id`. Detach only drops this handle's listeners.
+A local handle on a channel name. You get a `ChannelBridge` from `useChannel`. Messages route by `id`. Detach only drops this handle's listeners.
 
 ```ts
 class ChannelBridge {
   readonly id: string;
 
   emit(event: string, payload?: any): void;
-  request(event: string, payload?: any): Promise<any>;
+  request(event: string, payload?: any, options?: { timeout?: number }): Promise<any>;
   on(event: string, handler: ChannelEventHandler): () => void;
 }
 
@@ -201,7 +201,7 @@ class PulseChannelRemoteError extends Error {
 
 ## PulseChannelDetachedError
 
-Thrown when `on()` is called on a detached handle. `emit` and `request` still address the mailbox.
+Unused by current client `on()` — registering while detached is legal (StrictMode). `emit` and `request` still address the channel name.
 
 ```ts
 class PulseChannelDetachedError extends Error {

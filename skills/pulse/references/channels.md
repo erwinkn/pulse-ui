@@ -1,6 +1,6 @@
 # Channels
 
-A channel id is a mailbox name scoped to a render session. Messages route by id. The only lifecycle is local listener attach/detach. The mailbox is not created or destroyed on the wire.
+A channel id is a session-scoped name. Messages route by id. The only lifecycle is local listener attach/detach. The name is not created or destroyed on the wire.
 
 ## Creating a handle
 
@@ -9,7 +9,7 @@ class ChatState(ps.State):
     messages: list[str] = []
 
     def __init__(self):
-        self.channel = ps.channel()
+        self.channel = ps.channel("chat")
         self._cleanup = self.channel.on("client:message", self._on_message)
 
     def _on_message(self, payload: dict):
@@ -21,9 +21,9 @@ class ChatState(ps.State):
 
 `ps.channel()` with `None` generates a UUID. Empty string raises `ValueError`. Pass `channel.id` to client components.
 
-`lifetime="route"` (default) auto-detaches this handle on route unmount. `lifetime="tab"` survives navigation until session end or `detach()`.
+`lifetime="route"` (default) auto-detaches this handle on real route unmount and requires a route context. `lifetime="tab"` survives navigation until session end or `detach()`.
 
-During a live route mount, `ps.channel("foo")` returns the same handle. After auto-detach, the next call is a new handle on the same mailbox.
+During a live route mount, `ps.channel("foo")` returns the same handle. `on(event, handler)` is idempotent for that triple. Use a stable method, not a new lambda each render. After auto-detach, the next call is a new handle on the same name.
 
 ## Server → Client
 
@@ -34,6 +34,8 @@ self.channel.emit("server:notify", {"type": "update", "data": {...}})
 ```
 
 If the WebSocket is down, emit uses the session global queue. No per-channel buffer.
+
+Do not emit during prerender / first server render and expect the client to hear it. `useChannel` registers during render, so an emit after the client has rendered the hook is delivered. Earlier events drop — no listener yet.
 
 ### Request (with response)
 
@@ -52,7 +54,7 @@ except ps.ChannelRemoteError as exc:
     print(exc.code, exc.message)
 ```
 
-No handler → immediate `no_handler` NACK. Never hangs when `timeout=None`. Requests are not queued while the socket is down.
+No handler → immediate `no_handler` NACK. Middleware `Deny` → `denied`. Middleware exception → `handler_error`. Requests are not queued while the socket is down.
 
 ## Client → Server
 
@@ -61,7 +63,7 @@ cleanup = self.channel.on("client:ping", self._on_ping)
 cleanup()
 ```
 
-`on()` after `detach()` raises `ChannelDetached`. `emit` / `request` still address the mailbox.
+`on()` after `detach()` raises `ChannelDetached`. `emit` / `request` still address the channel name.
 
 ## Client-side
 
@@ -82,9 +84,9 @@ def ChatClient(*, channel_id: str):
     return ps.div(...)
 ```
 
-No `lifetime` argument. Place the hook in a layout to keep listeners across routes.
+No `lifetime` argument. Place the hook in a layout to keep listeners across routes. The hook attaches during render (not only in `useEffect`).
 
-Two hooks → two handles, one mailbox. Events fan out. RPC uses the first handler in attach order.
+Two hooks → two handles, one name. Events fan out. RPC uses the first handler in attach order. Client `on()` is legal while detached (StrictMode). Optional `request(event, payload, { timeout })` is milliseconds.
 
 ## Wire
 
@@ -94,11 +96,11 @@ Two hooks → two handles, one mailbox. Events fan out. RPC uses the first handl
 {type:"channel", action:"response", channel, responseTo, payload?, error?}
 ```
 
-`error.code` is `no_handler` | `denied` | `handler_error`. No connect/disconnect/close/subscriptionId on the wire. Reconnect sends zero channel protocol traffic.
+`error.code` is `no_handler` | `denied` | `handler_error`. No connect/disconnect/close/subscriptionId on the wire. Reconnect sends zero channel protocol traffic. Events may flush from the global queue; request/response never do.
 
 ## Middleware
 
-`channel()` sees inbound events and requests only. `Deny` on event = drop. `Deny` on request = `denied` error response. Mailbox names are guessable; gate messages.
+`channel()` sees inbound events and requests only. `Deny` on event = drop. `Deny` on request = `denied` error response. Channel ids are guessable; gate messages.
 
 ## See Also
 

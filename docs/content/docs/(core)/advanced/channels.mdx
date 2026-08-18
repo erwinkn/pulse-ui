@@ -39,6 +39,10 @@ import pulse as ps
 class NotificationState(ps.State):
     notifications: list[dict] = []
 
+    def __init__(self):
+        self.channel = ps.channel("notifications")
+        self.channel.on("new_notification", self.add)
+
     def add(self, notification: dict):
         self.notifications = [notification] + self.notifications
 
@@ -51,11 +55,7 @@ class NotificationState(ps.State):
 @ps.component
 def NotificationCenter():
     with ps.init():
-        channel = ps.channel("notifications")
         state = NotificationState()
-
-    # When the server sends a notification, add it to state
-    channel.on("new_notification", lambda payload: state.add(payload))
 
     return ps.div(className="fixed top-4 right-4 space-y-2")[
         ps.For(
@@ -93,7 +93,7 @@ The notification appears instantly for the user, without them clicking anything.
 
 ## Creating a channel
 
-Call `ps.channel()` inside a component to get a handle on a mailbox. The id is just a name in this render session.
+Call `ps.channel()` inside a component to get a handle. The id is just a name in this render session.
 
 ```python
 import pulse as ps
@@ -106,30 +106,27 @@ def ChatRoom():
     # ... rest of component
 ```
 
-The string argument (`"chat"`) is the mailbox name. If you don't provide one, Pulse generates a UUID. `lifetime="route"` (the default) detaches this handle's listeners when the route unmounts. The mailbox name itself is not created or destroyed.
+The string argument (`"chat"`) is the channel name. If you don't provide one, Pulse generates a UUID. `lifetime="route"` (the default) detaches this handle's listeners when the route actually unmounts — it requires a route context. The name itself is not created or destroyed.
 
 ## Handling events from the client
 
 Use `channel.on()` to register handlers for events sent from the browser. This is how you receive messages from client-side JavaScript code.
 
 ```python
-@ps.component
-def ChatRoom():
-    with ps.init():
-        chat = ps.channel("chat")
-        messages = ChatState()
+class ChatState(ps.State):
+    def __init__(self):
+        self.channel = ps.channel("chat")
+        self.channel.on("send_message", self._on_send)
+        self.channel.on("typing", self._on_typing)
 
-    # Handle incoming messages from the client
-    chat.on("send_message", lambda payload: messages.add(payload["text"]))
+    def _on_send(self, payload: dict):
+        self.add(payload["text"])
 
-    # Handlers can be async for operations that need to await
-    async def handle_typing(payload):
-        await messages.set_typing(payload["user"])
-
-    chat.on("typing", handle_typing)
+    async def _on_typing(self, payload: dict):
+        await self.set_typing(payload["user"])
 ```
 
-Each handler receives a `payload` dictionary containing whatever data the client sent. You can register multiple handlers for the same event if needed.
+Each handler receives a `payload` dictionary containing whatever data the client sent. `on(event, handler)` is idempotent for the same handler — register a stable method, not a new lambda each render. You can register multiple different handlers for the same event.
 
 ## Sending events to the client
 
@@ -150,6 +147,8 @@ async def get_client_info(chat: ps.Channel):
 ```
 
 The `timeout` parameter prevents your code from waiting forever if the client doesn't respond.
+
+Don't `emit` during prerender or the first server render and expect the client to hear it. `useChannel` registers during render, so an emit after the hook has rendered is delivered. Earlier events drop.
 
 ## Using channels on the client
 
@@ -190,14 +189,14 @@ The `useChannel` hook returns a bridge object with three methods:
 
 ## Channel lifecycle
 
-A channel id is just a mailbox name. Nothing is created or destroyed on the wire. The only lifecycle is local: this handle's listeners attach and detach.
+A channel id is just a name. Nothing is created or destroyed on the wire. The only lifecycle is local: this handle's listeners attach and detach.
 
-`lifetime` controls when the **handle** auto-detaches, not whether the mailbox exists:
+`lifetime` controls when the **handle** auto-detaches, not whether the name exists:
 
 - `"route"` (default) — tear down this handle's `on()` set when that route unmounts, even if you stored the object.
 - `"tab"` — do not detach on route unmount. Lives until the render session ends or you call `detach()`.
 
-After a route handle detaches, `on()` raises `ChannelDetached`. `emit` and `request` still address the mailbox name.
+After a route handle detaches, `on()` raises `ChannelDetached`. `emit` and `request` still address the channel name.
 
 On the client, lifetime is React placement: put `useChannel(id)` in a route component to drop listeners on navigation, or in a layout to keep them for the tab. There is no `lifetime` argument on the hook.
 
@@ -207,7 +206,7 @@ chat.detach()
 
 ## Error handling
 
-`request()` fails immediately if the socket is down. If the peer has no handler, you get a `ChannelRemoteError` with code `no_handler` — it never hangs when `timeout=None`.
+`request()` fails immediately if the socket is down. If the peer has no handler, you get a `ChannelRemoteError` with code `no_handler`. Middleware `Deny` is `denied`; a middleware exception is `handler_error`. It never hangs when `timeout=None`.
 
 ```python
 from pulse import ChannelDisconnected, ChannelRemoteError, ChannelTimeout

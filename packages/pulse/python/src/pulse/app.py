@@ -21,7 +21,7 @@ import uvicorn
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.routing import APIRoute, request_response
+from fastapi.routing import APIRoute
 from socketio.exceptions import ConnectionRefusedError as SocketIOConnectionRefusedError
 from starlette.types import ASGIApp
 from starlette.websockets import WebSocket
@@ -170,19 +170,16 @@ def _wrap_user_api_handler(
 	original: Callable[[Request], Coroutine[Any, Any, Response]],
 ) -> Callable[[Request], Coroutine[Any, Any, Response]]:
 	async def handler(request: Request) -> Response:
-		app = getattr(request.app.state, "pulse_app", None)
-		if app is None:
+		ctx = PULSE_CONTEXT.get()
+		if ctx is None:
 			return await original(request)
 
-		ctx = PULSE_CONTEXT.get()
-		session = (
-			ctx.session.data if ctx is not None and ctx.session is not None else {}
-		)
+		session: dict[str, Any] = ctx.session.data if ctx.session is not None else {}
 
 		async def _next() -> Response:
 			return await original(request)
 
-		response = await app.middleware.api(
+		response = await ctx.app.middleware.api(
 			request=PulseRequest.from_fastapi(request),
 			session=session,
 			next=_next,
@@ -198,15 +195,7 @@ def _wrap_user_api_handler(
 
 
 class PulseAPIRoute(APIRoute):
-	"""FastAPI route class for user-defined Pulse API endpoints.
-
-	Unwraps reactive return values and runs ``PulseMiddleware.api`` around the
-	handler. Framework routes registered during ``App.setup`` use
-	``PulseFrameworkAPIRoute`` so prerender and other ``/_pulse/*`` endpoints
-	are not intercepted.
-	"""
-
-	_intercept_user_api: bool = True
+	"""User-defined FastAPI routes: unwrap reactives and run ``PulseMiddleware.api``."""
 
 	def __init__(
 		self,
@@ -218,35 +207,71 @@ class PulseAPIRoute(APIRoute):
 
 	@override
 	def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
-		original = super().get_route_handler()
-		if not self._intercept_user_api:
-			return original
-		return _wrap_user_api_handler(original)
+		return _wrap_user_api_handler(super().get_route_handler())
 
 
-class PulseFrameworkAPIRoute(PulseAPIRoute):
-	"""Route class for Pulse framework and plugin FastAPI endpoints."""
+class PulseFrameworkAPIRoute(APIRoute):
+	"""Pulse built-in FastAPI routes: unwrap reactives, no ``api`` hook."""
 
-	_intercept_user_api: bool = False
+	def __init__(
+		self,
+		path: str,
+		endpoint: Callable[..., Any],
+		**kwargs: Any,
+	) -> None:
+		super().__init__(path, _wrap_fastapi_endpoint(endpoint), **kwargs)
+
+
+def _as_user_api_route(route: APIRoute) -> PulseAPIRoute:
+	"""Rebuild an included FastAPI route as ``PulseAPIRoute``.
+
+	``APIRouter.include_router`` copies routes with ``type(source_route)``, so
+	user routers stay as stock ``APIRoute`` unless we reconstruct them.
+	"""
+	return PulseAPIRoute(
+		path=route.path,
+		endpoint=route.endpoint,
+		response_model=route.response_model,
+		status_code=route.status_code,
+		tags=route.tags,
+		dependencies=route.dependencies,
+		summary=route.summary,
+		description=route.description,
+		response_description=route.response_description,
+		responses=route.responses,
+		deprecated=route.deprecated,
+		name=route.name,
+		methods=route.methods,
+		operation_id=route.operation_id,
+		response_model_include=route.response_model_include,
+		response_model_exclude=route.response_model_exclude,
+		response_model_by_alias=route.response_model_by_alias,
+		response_model_exclude_unset=route.response_model_exclude_unset,
+		response_model_exclude_defaults=route.response_model_exclude_defaults,
+		response_model_exclude_none=route.response_model_exclude_none,
+		include_in_schema=route.include_in_schema,
+		response_class=route.response_class,
+		dependency_overrides_provider=route.dependency_overrides_provider,
+		callbacks=route.callbacks,
+		openapi_extra=route.openapi_extra,
+		generate_unique_id_function=route.generate_unique_id_function,
+	)
 
 
 class PulseFastAPI(FastAPI):
 	@override
 	def include_router(self, router: APIRouter, **kwargs: Any) -> None:
 		_wrap_router_endpoints(router)
-		# FastAPI copies included routes with the source route class, so
-		# user routers stay as APIRoute unless we wrap them here.
 		before = {id(route) for route in self.router.routes}
 		super().include_router(router, **kwargs)
-		if self.router.route_class is PulseFrameworkAPIRoute:
-			return
-		for route in self.router.routes:
+		routes = self.router.routes
+		for index, route in enumerate(routes):
 			if id(route) in before:
 				continue
-			if isinstance(route, APIRoute) and not isinstance(route, PulseAPIRoute):
-				route.app = request_response(
-					_wrap_user_api_handler(route.get_route_handler())
-				)
+			if isinstance(route, (PulseAPIRoute, PulseFrameworkAPIRoute)):
+				continue
+			if isinstance(route, APIRoute):
+				routes[index] = _as_user_api_route(route)
 
 
 def _wrap_router_endpoints(router: APIRouter) -> None:
@@ -495,7 +520,6 @@ class App:
 			lifespan=self.fastapi_lifespan,
 		)
 		self.fastapi.router.route_class = PulseAPIRoute
-		self.fastapi.state.pulse_app = self
 		self.sio = socketio.AsyncServer(
 			async_mode="asgi", cors_allowed_origins="*", async_handlers=False
 		)
@@ -740,23 +764,25 @@ class App:
 					# so dropping the in-memory object is safe.
 					self.close_session_if_inactive(session.sid)
 
-		# User-defined FastAPI routes keep PulseAPIRoute so middleware.api
-		# intercepts them. Framework and plugin routes skip that hook.
-		self.fastapi.router.route_class = PulseFrameworkAPIRoute
-
-		# Apply prefix to all routes
+		# Pulse built-ins live on a router with PulseFrameworkAPIRoute so
+		# middleware.api never sees prerender/health/forms. App.fastapi stays
+		# PulseAPIRoute for user and plugin routes.
 		prefix = self.api_prefix
+		framework = APIRouter(
+			route_class=PulseFrameworkAPIRoute,
+			include_in_schema=False,
+		)
 
-		@self.fastapi.get(f"{prefix}/health", include_in_schema=False)
+		@framework.get(f"{prefix}/health")
 		def healthcheck():  # pyright: ignore[reportUnusedFunction]
 			return {"health": "ok", "message": "Pulse server is running"}
 
-		@self.fastapi.get(f"{prefix}/set-cookies", include_in_schema=False)
+		@framework.get(f"{prefix}/set-cookies")
 		def set_cookies():  # pyright: ignore[reportUnusedFunction]
 			return {"health": "ok", "message": "Cookies updated"}
 
 		# RouteInfo is the request body
-		@self.fastapi.post(f"{prefix}/prerender", include_in_schema=False)
+		@framework.post(f"{prefix}/prerender")
 		async def prerender(payload: PrerenderPayload, request: Request):  # pyright: ignore[reportUnusedFunction]
 			"""
 			POST /prerender
@@ -866,10 +892,7 @@ class App:
 			# Fallback (shouldn't happen)
 			raise ValueError("Unexpected prerender result type")
 
-		@self.fastapi.post(
-			f"{prefix}/forms/{{render_id}}/{{form_id}}",
-			include_in_schema=False,
-		)
+		@framework.post(f"{prefix}/forms/{{render_id}}/{{form_id}}")
 		async def handle_form_submit(  # pyright: ignore[reportUnusedFunction]
 			render_id: str, form_id: str, request: Request
 		) -> Response:
@@ -883,12 +906,11 @@ class App:
 
 			return await render.forms.handle_submit(form_id, request, session)
 
+		self.fastapi.include_router(framework)
+
 		# Call on_setup hooks after FastAPI routes/middleware are in place
-		try:
-			for plugin in self.plugins:
-				plugin.on_setup(self)
-		finally:
-			self.fastapi.router.route_class = PulseAPIRoute
+		for plugin in self.plugins:
+			plugin.on_setup(self)
 
 		# In single-server mode, add catch-all route to proxy unmatched requests to React server.
 		# This route must be registered last so FastAPI tries all specific routes first.

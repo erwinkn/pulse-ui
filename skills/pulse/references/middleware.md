@@ -122,7 +122,7 @@ async def prerender(
 
 ### `api`
 
-Called only for FastAPI routes you registered on `app.fastapi` (including included routers). Does **not** run for `/_pulse/*` (prerender, health, forms), generated docs, plugin `on_setup` routes, or the React proxy.
+Called only for FastAPI routes you registered on `app.fastapi` (including included routers). Does **not** run for `/_pulse/*` (prerender, health, forms), generated docs, or the React proxy.
 
 Use this instead of FastAPI HTTP middleware when you need to log, auth, or report errors for your API without also catching prerender.
 

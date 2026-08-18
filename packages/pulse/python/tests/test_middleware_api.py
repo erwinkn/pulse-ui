@@ -1,4 +1,5 @@
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from typing import Any, override
 
 import httpx
@@ -6,6 +7,7 @@ import pulse as ps
 import pytest
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from pulse.context import PulseContext
 from pulse.middleware import ApiResponse
 from pulse.plugin import Plugin
 from pulse.request import PulseRequest
@@ -102,9 +104,18 @@ def prerender_home():
 	return ps.div("ok")
 
 
-def _client(app: ps.App) -> httpx.AsyncClient:
-	transport = httpx.ASGITransport(app=app.fastapi)
-	return httpx.AsyncClient(transport=transport, base_url="http://testserver")
+@asynccontextmanager
+async def _client(
+	app: ps.App, *, raise_app_exceptions: bool = True
+) -> AsyncIterator[httpx.AsyncClient]:
+	transport = httpx.ASGITransport(
+		app=app.fastapi, raise_app_exceptions=raise_app_exceptions
+	)
+	with PulseContext(app=app):
+		async with httpx.AsyncClient(
+			transport=transport, base_url="http://testserver"
+		) as client:
+			yield client
 
 
 @pytest.mark.asyncio
@@ -192,10 +203,7 @@ async def test_api_middleware_can_catch_user_route_exceptions():
 	def boom() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]
 		raise RuntimeError("user api failed")
 
-	transport = httpx.ASGITransport(app=app.fastapi, raise_app_exceptions=False)
-	async with httpx.AsyncClient(
-		transport=transport, base_url="http://testserver"
-	) as client:
+	async with _client(app, raise_app_exceptions=False) as client:
 		response = await client.get("/api/boom")
 
 	assert response.status_code == 500
@@ -243,7 +251,7 @@ async def test_api_middleware_skips_pulse_framework_and_docs_routes():
 
 
 @pytest.mark.asyncio
-async def test_api_middleware_skips_plugin_on_setup_routes():
+async def test_api_middleware_runs_for_plugin_on_setup_routes():
 	mw = RecordingApiMiddleware()
 	app = ps.App(
 		routes=[],
@@ -264,7 +272,7 @@ async def test_api_middleware_skips_plugin_on_setup_routes():
 	assert direct.json() == {"plugin": True}
 	assert included.status_code == 200
 	assert included.json() == {"plugin": True}
-	assert mw.paths == []
+	assert mw.paths == ["/plugin-route", "/plugin/included"]
 
 
 @pytest.mark.asyncio
@@ -393,10 +401,7 @@ async def test_api_middleware_rejects_non_response_return():
 	def hello() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]
 		return {"hello": "world"}
 
-	transport = httpx.ASGITransport(app=app.fastapi, raise_app_exceptions=False)
-	async with httpx.AsyncClient(
-		transport=transport, base_url="http://testserver"
-	) as client:
+	async with _client(app, raise_app_exceptions=False) as client:
 		response = await client.get("/api/hello")
 
 	assert response.status_code == 500

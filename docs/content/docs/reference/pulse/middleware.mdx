@@ -85,7 +85,7 @@ async def api(
 
 Handle user-defined FastAPI routes registered on `app.fastapi`, including included routers.
 
-Does not run for Pulse framework endpoints (`/_pulse/*`), generated OpenAPI/docs routes, plugin routes added in `on_setup`, or the React proxy.
+Does not run for Pulse framework endpoints (`/_pulse/*`), generated OpenAPI/docs routes, or the React proxy.
 
 **Parameters:**
 - `request` - Normalized request object. Use `request.raw` for the FastAPI request.

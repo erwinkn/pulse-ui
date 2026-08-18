@@ -165,9 +165,9 @@ class PulseMiddleware:
 		"""Handle user-defined FastAPI routes.
 
 		Runs only for routes registered on ``app.fastapi`` by the application
-		(including included routers). Does not run for Pulse framework
-		endpoints (``/_pulse/*``), generated OpenAPI/docs routes, plugin
-		routes added in ``on_setup``, or the React proxy.
+		(including included routers and plugin routes added in ``on_setup``).
+		Does not run for Pulse framework endpoints (``/_pulse/*``), generated
+		OpenAPI/docs routes, or the React proxy.
 
 		``next()`` invokes the route handler and returns its HTTP response.
 		Return that response, replace it, or raise after inspecting it.

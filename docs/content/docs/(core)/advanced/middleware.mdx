@@ -114,7 +114,7 @@ async def prerender_route(self, *, path, route_info, request, session, next):
 
 Called for HTTP requests to FastAPI routes you registered on `app.fastapi` (including routers you include). This is the hook you want for API auth, logging, or error reporting.
 
-It does **not** run for Pulse's own endpoints (`/_pulse/prerender`, health, forms), generated OpenAPI/docs routes, plugin routes added in `on_setup`, or the React proxy. That's the point: wrapping FastAPI with HTTP middleware catches prerender too, so the same exception can get reported twice.
+It does **not** run for Pulse's own endpoints (`/_pulse/prerender`, health, forms), generated OpenAPI/docs routes, or the React proxy. That's the point: wrapping FastAPI with HTTP middleware catches prerender too, so the same exception can get reported twice.
 
 ```python
 from fastapi.responses import JSONResponse

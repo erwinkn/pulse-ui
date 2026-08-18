@@ -46,6 +46,21 @@ class AuthMiddleware(ps.PulseMiddleware):
         return await next()
 
     @override
+    async def api(
+        self,
+        *,
+        request: PulseRequest,
+        session: dict,
+        next,
+    ):
+        # User-defined FastAPI routes only (not prerender or /_pulse/*)
+        try:
+            return await next()
+        except Exception as exc:
+            report_user_api_error(exc, request)
+            raise
+
+    @override
     async def message(
         self,
         *,
@@ -104,6 +119,37 @@ async def prerender(
 - `routeInfo`: Route metadata (params, query, etc.)
 - `ttlSeconds`: Optional cache TTL
 - `renderId`: Optional render correlation ID
+
+### `api`
+
+Called only for FastAPI routes you registered on `app.fastapi` (including included routers). Does **not** run for `/_pulse/*` (prerender, health, forms), generated docs, plugin `on_setup` routes, or the React proxy.
+
+Use this instead of FastAPI HTTP middleware when you need to log, auth, or report errors for your API without also catching prerender.
+
+```python
+from fastapi.responses import JSONResponse
+
+@override
+async def api(
+    self,
+    *,
+    request: PulseRequest,
+    session: dict,
+    next,
+) -> ps.ApiResponse:
+    if request.path.startswith("/api/admin") and not session.get("is_admin"):
+        return JSONResponse({"detail": "forbidden"}, status_code=403)
+
+    try:
+        response = await next()
+    except Exception as exc:
+        report_user_api_error(exc, request)
+        raise
+
+    return response
+```
+
+**Returns:** the HTTP `Response` from `await next()`, or a replacement response.
 
 ### `connect`
 

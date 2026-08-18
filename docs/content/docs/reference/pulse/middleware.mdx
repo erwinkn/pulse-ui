@@ -71,6 +71,29 @@ Handle batch prerender at the top level (HTTP request).
 
 **Returns:** `Ok[Prerender]`, `Redirect`, or `NotFound`.
 
+##### api
+
+```python
+async def api(
+    self,
+    *,
+    request: PulseRequest,
+    session: dict[str, Any],
+    next: Callable[[], Awaitable[ApiResponse]],
+) -> ApiResponse
+```
+
+Handle user-defined FastAPI routes registered on `app.fastapi`, including included routers.
+
+Does not run for Pulse framework endpoints (`/_pulse/*`), generated OpenAPI/docs routes, plugin routes added in `on_setup`, or the React proxy.
+
+**Parameters:**
+- `request` - Normalized request object. Use `request.raw` for the FastAPI request.
+- `session` - Session data dictionary.
+- `next` - Callable that invokes the route handler and returns its HTTP response.
+
+**Returns:** A Starlette/FastAPI `Response`.
+
 ##### prerender_route
 
 ```python
@@ -187,6 +210,7 @@ def __init__(
     self,
     *,
     prerender_ms: float = 80.0,
+    api_ms: float = 25.0,
     prerender_route_ms: float = 60.0,
     connect_ms: float = 40.0,
     message_ms: float = 25.0,
@@ -196,6 +220,7 @@ def __init__(
 
 **Parameters:**
 - `prerender_ms` - Latency for batch prerender requests. Default: 80ms.
+- `api_ms` - Latency for user-defined FastAPI routes. Default: 25ms.
 - `prerender_route_ms` - Latency for individual route prerenders. Default: 60ms.
 - `connect_ms` - Latency for WebSocket connections. Default: 40ms.
 - `message_ms` - Latency for WebSocket messages. Default: 25ms.
@@ -251,6 +276,14 @@ class Deny
 Denial response. Blocks the request.
 
 ## Type Aliases
+
+### ApiResponse
+
+```python
+ApiResponse = Response
+```
+
+Starlette/FastAPI HTTP response returned by the `api` hook.
 
 ### ConnectResponse
 

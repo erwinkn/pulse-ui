@@ -167,6 +167,16 @@ class FastAPIConfig:
 
 
 class PulseAPIRoute(APIRoute):
+	"""FastAPI route class for user-defined Pulse API endpoints.
+
+	Unwraps reactive return values and runs ``PulseMiddleware.api`` around the
+	handler. Framework routes registered during ``App.setup`` use
+	``PulseFrameworkAPIRoute`` so prerender and other ``/_pulse/*`` endpoints
+	are not intercepted.
+	"""
+
+	_intercept_user_api = True
+
 	def __init__(
 		self,
 		path: str,
@@ -174,6 +184,45 @@ class PulseAPIRoute(APIRoute):
 		**kwargs: Any,
 	) -> None:
 		super().__init__(path, _wrap_fastapi_endpoint(endpoint), **kwargs)
+
+	@override
+	def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
+		original = super().get_route_handler()
+		if not self._intercept_user_api:
+			return original
+
+		async def handler(request: Request) -> Response:
+			app = getattr(request.app.state, "pulse_app", None)
+			if app is None:
+				return await original(request)
+
+			ctx = PULSE_CONTEXT.get()
+			session = (
+				ctx.session.data if ctx is not None and ctx.session is not None else {}
+			)
+
+			async def _next() -> Response:
+				return await original(request)
+
+			response = await app.middleware.api(
+				request=PulseRequest.from_fastapi(request),
+				session=session,
+				next=_next,
+			)
+			if not isinstance(response, Response):
+				raise TypeError(
+					"PulseMiddleware.api() must return a Response, "
+					+ f"got {type(response).__name__}"
+				)
+			return response
+
+		return handler
+
+
+class PulseFrameworkAPIRoute(PulseAPIRoute):
+	"""Route class for Pulse framework and plugin FastAPI endpoints."""
+
+	_intercept_user_api = False
 
 
 class PulseFastAPI(FastAPI):
@@ -429,6 +478,7 @@ class App:
 			lifespan=self.fastapi_lifespan,
 		)
 		self.fastapi.router.route_class = PulseAPIRoute
+		self.fastapi.state.pulse_app = self
 		self.sio = socketio.AsyncServer(
 			async_mode="asgi", cors_allowed_origins="*", async_handlers=False
 		)
@@ -673,6 +723,10 @@ class App:
 					# so dropping the in-memory object is safe.
 					self.close_session_if_inactive(session.sid)
 
+		# User-defined FastAPI routes keep PulseAPIRoute so middleware.api
+		# intercepts them. Framework and plugin routes skip that hook.
+		self.fastapi.router.route_class = PulseFrameworkAPIRoute
+
 		# Apply prefix to all routes
 		prefix = self.api_prefix
 
@@ -813,8 +867,11 @@ class App:
 			return await render.forms.handle_submit(form_id, request, session)
 
 		# Call on_setup hooks after FastAPI routes/middleware are in place
-		for plugin in self.plugins:
-			plugin.on_setup(self)
+		try:
+			for plugin in self.plugins:
+				plugin.on_setup(self)
+		finally:
+			self.fastapi.router.route_class = PulseAPIRoute
 
 		# In single-server mode, add catch-all route to proxy unmatched requests to React server.
 		# This route must be registered last so FastAPI tries all specific routes first.

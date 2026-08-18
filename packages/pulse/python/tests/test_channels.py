@@ -515,7 +515,7 @@ async def test_rpc_is_not_queued_while_disconnected():
 async def test_event_handler_error_is_reported():
 	app, dummy, session, render, _route = build_session()
 	del render.send  # pyright: ignore[reportAttributeAccessIssue]
-	render.connect(dummy.sent.append)
+	render.connect(dummy.send)  # pyright: ignore[reportArgumentType]
 
 	def boom(_: Any) -> None:
 		raise RuntimeError("handler exploded")

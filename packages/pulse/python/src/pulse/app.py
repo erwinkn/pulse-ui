@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import IntEnum
 from functools import wraps
-from typing import Any, Callable, Literal, Self, TypeVar, cast, override
+from typing import Any, Callable, Literal, TypeVar, cast, override
 
 import socketio
 import uvicorn
@@ -205,42 +205,6 @@ class PulseAPIRoute(APIRoute):
 	) -> None:
 		super().__init__(path, _wrap_fastapi_endpoint(endpoint), **kwargs)
 
-	@classmethod
-	def wrap(cls, route: APIRoute) -> Self:
-		"""Rebuild an ``APIRoute`` as a ``PulseAPIRoute``.
-
-		``APIRouter.include_router`` copies routes with ``type(source_route)``, so
-		user routers stay as stock ``APIRoute`` unless we reconstruct them.
-		"""
-		return cls(
-			path=route.path,
-			endpoint=route.endpoint,
-			response_model=route.response_model,
-			status_code=route.status_code,
-			tags=route.tags,
-			dependencies=route.dependencies,
-			summary=route.summary,
-			description=route.description,
-			response_description=route.response_description,
-			responses=route.responses,
-			deprecated=route.deprecated,
-			name=route.name,
-			methods=route.methods,
-			operation_id=route.operation_id,
-			response_model_include=route.response_model_include,
-			response_model_exclude=route.response_model_exclude,
-			response_model_by_alias=route.response_model_by_alias,
-			response_model_exclude_unset=route.response_model_exclude_unset,
-			response_model_exclude_defaults=route.response_model_exclude_defaults,
-			response_model_exclude_none=route.response_model_exclude_none,
-			include_in_schema=route.include_in_schema,
-			response_class=route.response_class,
-			dependency_overrides_provider=route.dependency_overrides_provider,
-			callbacks=route.callbacks,
-			openapi_extra=route.openapi_extra,
-			generate_unique_id_function=route.generate_unique_id_function,
-		)
-
 	@override
 	def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
 		return _wrap_user_api_handler(super().get_route_handler())
@@ -258,26 +222,32 @@ class PulseFrameworkAPIRoute(APIRoute):
 		super().__init__(path, _wrap_fastapi_endpoint(endpoint), **kwargs)
 
 
-class PulseFastAPI(FastAPI):
+class PulseAPIRouter(APIRouter):
+	"""App router that keeps ``PulseAPIRoute`` when including foreign routers.
+
+	``APIRouter.include_router`` copies routes with ``route_class_override=type(source)``,
+	which would drop ``PulseMiddleware.api``. Ignore that override unless the
+	source is a Pulse framework route.
+	"""
+
 	@override
-	def include_router(self, router: APIRouter, **kwargs: Any) -> None:
-		_wrap_router_endpoints(router)
-		before = {id(route) for route in self.router.routes}
-		super().include_router(router, **kwargs)
-		routes = self.router.routes
-		for index, route in enumerate(routes):
-			if id(route) in before:
-				continue
-			if isinstance(route, (PulseAPIRoute, PulseFrameworkAPIRoute)):
-				continue
-			if isinstance(route, APIRoute):
-				routes[index] = PulseAPIRoute.wrap(route)
+	def add_api_route(
+		self,
+		path: str,
+		endpoint: Callable[..., Any],
+		**kwargs: Any,
+	) -> None:
+		override = kwargs.get("route_class_override")
+		if override is not None and not issubclass(override, PulseFrameworkAPIRoute):
+			kwargs["route_class_override"] = None
+		super().add_api_route(path, endpoint, **kwargs)
 
 
-def _wrap_router_endpoints(router: APIRouter) -> None:
-	for route in router.routes:
-		if isinstance(route, APIRoute):
-			route.endpoint = _wrap_fastapi_endpoint(route.endpoint)
+class PulseFastAPI(FastAPI):
+	def __init__(self, *args: Any, **kwargs: Any) -> None:
+		super().__init__(*args, **kwargs)
+		self.router.__class__ = PulseAPIRouter
+		self.router.route_class = PulseAPIRoute
 
 
 def _wrap_fastapi_endpoint(endpoint: Callable[..., Any]) -> Callable[..., Any]:
@@ -519,7 +489,6 @@ class App:
 			openapi_external_docs=fastapi_config.openapi_external_docs,
 			lifespan=self.fastapi_lifespan,
 		)
-		self.fastapi.router.route_class = PulseAPIRoute
 		self.sio = socketio.AsyncServer(
 			async_mode="asgi", cors_allowed_origins="*", async_handlers=False
 		)

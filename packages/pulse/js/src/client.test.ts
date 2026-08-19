@@ -396,14 +396,16 @@ describe("PulseSocketIOClient attach ack", () => {
 		expect(init.credentials).toBe("omit");
 
 		expect(sentMessages().at(-1)).toEqual({
-			type: "api_result",
+			type: "reply",
 			id: "call-1",
-			ok: true,
-			status: 200,
-			headers: {
-				"content-type": "application/json",
+			payload: {
+				ok: true,
+				status: 200,
+				headers: {
+					"content-type": "application/json",
+				},
+				body: { ok: true },
 			},
-			body: { ok: true },
 		});
 	});
 });

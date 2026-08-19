@@ -1,28 +1,56 @@
 import { describe, expect, it, vi } from "bun:test";
 import { ChannelBridge, PulseChannelResetError } from "./channel";
 import { PulseSocketIOClient } from "./client";
-import type { ClientChannelMessage } from "./messages";
+import type { ClientMessage, ReplyMessage } from "./messages";
 
 function makeClient() {
-	const sent: ClientChannelMessage[] = [];
-	const sendMessage = vi.fn(async (message: ClientChannelMessage) => {
+	const sent: ClientMessage[] = [];
+	const pending = new Map<string, { resolve: (value: any) => void; reject: (error: any) => void }>();
+	const sendMessage = vi.fn(async (message: ClientMessage) => {
 		sent.push(message);
 	});
-	const client = { sendMessage } as any;
+	const client = {
+		sendMessage,
+		replies: {
+			register(id: string) {
+				return new Promise((resolve, reject) => {
+					pending.set(id, { resolve, reject });
+				});
+			},
+			reject(id: string, error: unknown) {
+				const entry = pending.get(id);
+				if (!entry) return;
+				pending.delete(id);
+				entry.reject(error);
+			},
+			apply(message: ReplyMessage) {
+				const entry = pending.get(message.id);
+				if (!entry) return;
+				pending.delete(message.id);
+				if (message.error != null) {
+					entry.reject(new PulseChannelResetError(String(message.error)));
+				} else {
+					entry.resolve(message.payload);
+				}
+			},
+		},
+	};
 	const bridge = new ChannelBridge(client, "chan-1");
-	return { bridge, sent, sendMessage };
+	return { bridge, sent, sendMessage, client };
 }
 
 describe("ChannelBridge", () => {
-	it("queues request and resolves on response", async () => {
-		const { bridge, sent } = makeClient();
+	it("queues request and resolves on reply", async () => {
+		const { bridge, sent, client } = makeClient();
 		const pending = bridge.request("echo", { foo: 1 });
 		expect(sent).toHaveLength(1);
-		const requestId = sent[0]!.requestId!;
-		bridge.handleServerMessage({
-			type: "channel_message",
-			channel: "chan-1",
-			responseTo: requestId,
+		const request = sent[0];
+		expect(request).toMatchObject({ type: "channel_message", event: "echo" });
+		const requestId = request && "requestId" in request ? request.requestId : undefined;
+		expect(requestId).toBeDefined();
+		client.replies.apply({
+			type: "reply",
+			id: requestId!,
 			payload: { foo: 2 },
 		});
 		await expect(pending).resolves.toEqual({ foo: 2 });
@@ -41,7 +69,7 @@ describe("ChannelBridge", () => {
 		expect(handler).toHaveBeenCalledWith({ value: 42 });
 	});
 
-	it("responds to server requests", async () => {
+	it("responds to server requests with a reply", async () => {
 		const { bridge, sendMessage } = makeClient();
 		bridge.on("compute", () => 99);
 		bridge.handleServerMessage({
@@ -52,13 +80,11 @@ describe("ChannelBridge", () => {
 			payload: {},
 		});
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		expect(sendMessage).toHaveBeenCalledWith(
-			expect.objectContaining({
-				responseTo: "req-1",
-				payload: 99,
-				event: undefined,
-			}),
-		);
+		expect(sendMessage).toHaveBeenCalledWith({
+			type: "reply",
+			id: "req-1",
+			payload: 99,
+		});
 	});
 
 	it("rejects pending requests when closed", async () => {

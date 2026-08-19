@@ -359,9 +359,8 @@ type ClientMessage =
   | ClientCallbackMessage
   | ClientUpdateMessage
   | ClientDetachMessage
-  | ClientApiResultMessage
   | ClientChannelRequestMessage
-  | ClientChannelResponseMessage;
+  | ReplyMessage;
 ```
 
 #### ClientAttachMessage
@@ -412,18 +411,16 @@ interface ClientDetachMessage {
 }
 ```
 
-#### ClientApiResultMessage
+#### ReplyMessage
 
-Result of an API call requested by the server.
+Completes a pending server request (`call_api`, `run_js`, `Channel.request`). Same shape in both directions.
 
 ```ts
-interface ClientApiResultMessage {
-  type: "api_result";
+interface ReplyMessage {
+  type: "reply";
   id: string;
-  ok: boolean;
-  status: number;
-  headers: Record<string, string>;
-  body: any | null;
+  payload?: any;
+  error?: any;
 }
 ```
 
@@ -441,20 +438,6 @@ interface ClientChannelRequestMessage {
 }
 ```
 
-#### ClientChannelResponseMessage
-
-Response to a server channel request.
-
-```ts
-interface ClientChannelResponseMessage {
-  type: "channel_message";
-  channel: string;
-  responseTo: string;
-  payload?: any;
-  error?: any;
-}
-```
-
 ### Server Messages
 
 ```ts
@@ -465,7 +448,7 @@ type ServerMessage =
   | ServerApiCallMessage
   | ServerNavigateToMessage
   | ServerChannelRequestMessage
-  | ServerChannelResponseMessage;
+  | ReplyMessage;
 ```
 
 #### ServerInitMessage
@@ -553,20 +536,6 @@ interface ServerChannelRequestMessage {
   event: string;
   payload?: any;
   requestId?: string;
-}
-```
-
-#### ServerChannelResponseMessage
-
-Response to a client channel request.
-
-```ts
-interface ServerChannelResponseMessage {
-  type: "channel_message";
-  channel: string;
-  responseTo: string;
-  payload?: any;
-  error?: any;
 }
 ```
 

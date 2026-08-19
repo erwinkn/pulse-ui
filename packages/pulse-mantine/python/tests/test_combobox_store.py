@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import pulse as ps
 import pytest
-from pulse.messages import ClientChannelResponseMessage
+from pulse.messages import ReplyMessage
 from pulse.user_session import UserSession
 from pulse_mantine.core.combobox.combobox import Combobox, ComboboxStore
 
@@ -98,19 +98,8 @@ async def test_combobox_store_request_roundtrip():
 	request_id = request_message.get("requestId")
 	assert request_id
 
-	real_render.channels.handle_client_response(
-		message=cast(
-			ClientChannelResponseMessage,
-			cast(
-				object,
-				{
-					"type": "channel_message",
-					"channel": request_message["channel"],
-					"responseTo": request_id,
-					"payload": True,
-				},
-			),
-		)
+	real_render.replies.apply(
+		cast(ReplyMessage, {"type": "reply", "id": request_id, "payload": True})
 	)
 
 	result = await pending

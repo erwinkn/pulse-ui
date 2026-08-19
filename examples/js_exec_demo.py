@@ -14,7 +14,6 @@ from typing import Any, cast
 import pulse as ps
 from pulse import App, Route, component, javascript, run_js
 from pulse.js import Error, console, document, navigator, window
-from pulse.render_session import JsExecError
 
 
 class DemoState(ps.State):
@@ -114,7 +113,7 @@ def JsExecDemo():
 		state.add_log("Triggering JS error...")
 		try:
 			await run_js(cause_error(), result=True)  # pyright: ignore[reportArgumentType]
-		except JsExecError as e:
+		except RuntimeError as e:
 			state.error = str(e)
 			state.add_log(f"Caught error: {e}")
 

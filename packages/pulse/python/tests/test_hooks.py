@@ -226,14 +226,18 @@ def test_state_key_change_keeps_unkeyed_sibling():
 	ctx = HookContext()
 	item_id = Signal("1")
 
-	with ctx:
+	@ps.component
+	def Comp():
 		keyed = state(DummyState, key=item_id())
 		unkeyed = state(DummyState)
+		return keyed, unkeyed
+
+	with ctx:
+		keyed, unkeyed = Comp.fn()  # type: ignore[attr-defined]
 
 	item_id.write("2")
 	with ctx:
-		keyed2 = state(DummyState, key=item_id())
-		unkeyed2 = state(DummyState)
+		keyed2, unkeyed2 = Comp.fn()  # type: ignore[attr-defined]
 
 	assert keyed2 is not keyed
 	assert keyed.dispose_calls == 1

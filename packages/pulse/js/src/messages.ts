@@ -47,7 +47,6 @@ export interface ServerChannelRequestMessage {
 	event: string;
 	payload?: any;
 	requestId?: string;
-	error?: any;
 }
 
 export interface ReplyMessage {
@@ -56,8 +55,6 @@ export interface ReplyMessage {
 	payload?: any;
 	error?: any;
 }
-
-export type ServerChannelMessage = ServerChannelRequestMessage;
 
 export interface ServerNavigateToMessage {
 	type: "navigate_to";
@@ -127,10 +124,7 @@ export interface ClientChannelRequestMessage {
 	event: string;
 	payload?: any;
 	requestId?: string;
-	error?: any;
 }
-
-export type ClientChannelMessage = ClientChannelRequestMessage;
 
 export type ClientMessage =
 	| ClientAttachMessage

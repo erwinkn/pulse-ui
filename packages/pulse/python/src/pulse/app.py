@@ -915,12 +915,7 @@ class App:
 			try:
 				with PulseContext.update(session=session, render=render):
 
-					async def _next():
-						return Ok(None)
-
-					def _normalize_connect_response(res: Any) -> ConnectResponse:
-						if isinstance(res, (Ok, Deny)):
-							return res  # type: ignore[return-value]
+					async def _next() -> ConnectResponse:
 						return Ok(None)
 
 					try:
@@ -929,7 +924,6 @@ class App:
 							session=session.data,
 							next=_next,
 						)
-						res = _normalize_connect_response(res)
 					except Exception as exc:
 						connect_error = exc
 						res = Ok(None)
@@ -1132,12 +1126,6 @@ class App:
 				logger.warning("Unknown message type received: %s", msg)
 			return Ok()
 
-		def _normalize_message_response(res: Any) -> Ok[None] | Deny:
-			if isinstance(res, (Ok, Deny)):
-				return res  # type: ignore[return-value]
-			# Treat any other value as allow
-			return Ok(None)
-
 		with PulseContext.update(session=session, render=render):
 			try:
 				res = await self.middleware.message(
@@ -1145,7 +1133,6 @@ class App:
 					session=session.data,
 					next=_next,
 				)
-				res = _normalize_message_response(res)
 			except Exception:
 				logger.exception("Error in message middleware")
 				return
@@ -1170,12 +1157,6 @@ class App:
 			)
 			return Ok(None)
 
-		def _normalize_message_response(res: Any) -> Ok[None] | Deny:
-			if isinstance(res, (Ok, Deny)):
-				return res  # type: ignore[return-value]
-			# Treat any other value as allow
-			return Ok(None)
-
 		with PulseContext.update(session=session, render=render):
 			res = await self.middleware.channel(
 				channel_id=channel_id,
@@ -1185,7 +1166,6 @@ class App:
 				session=session.data,
 				next=_next,
 			)
-			res = _normalize_message_response(res)
 
 		if isinstance(res, Deny):
 			if req_id := msg.get("requestId"):

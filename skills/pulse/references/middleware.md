@@ -291,7 +291,7 @@ app = ps.App(
 )
 ```
 
-Executes in order. Each calls `await next()` to continue chain.
+Executes in order. Each calls `await next()` to continue the chain. `next()` returns the downstream decision (`Ok` or `Deny`); return it as-is or override it. An inner `Deny` reaches the app unless an outer hook replaces it.
 
 ## Built-in Middleware
 

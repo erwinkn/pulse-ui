@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import type { PulseSocketIOClient } from "./client";
 import type { ClientMessage, ReplyMessage, ServerChannelRequestMessage } from "./messages";
 import { usePulseClient } from "./pulse";
 

@@ -2,9 +2,17 @@
 Channel.request: correlation id -> future, resolved synchronously."""
 
 import asyncio
+from types import SimpleNamespace
+from typing import Any, cast, override
 
+import pulse as ps
 import pytest
+from pulse.messages import ClientMessage
+from pulse.middleware import Deny, Ok, PulseMiddleware
 from pulse.replies import PendingReplies
+from pulse.render_session import RenderSession
+from pulse.serializer import serialize
+from pulse.user_session import UserSession
 
 
 def _future() -> asyncio.Future[object]:
@@ -133,3 +141,37 @@ async def test_cancel_all_cancels_and_clears():
 	assert f1.cancelled()
 	assert f2.cancelled()
 	assert len(replies) == 0
+
+
+@pytest.mark.asyncio
+async def test_socket_reply_resolves_and_skips_middleware():
+	class Tracking(PulseMiddleware):
+		called: bool = False
+
+		@override
+		async def message(
+			self, *, data: ClientMessage, session: Any, next: Any
+		) -> Ok[None] | Deny:
+			self.called = True
+			return await next()
+
+	middleware = Tracking()
+	app = ps.App(middleware=middleware)
+	render = RenderSession("render-1", app.routes)
+	session = SimpleNamespace(sid="session-1", data={})
+	app.render_sessions[render.id] = render
+	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
+	app.user_sessions[session.sid] = cast(UserSession, cast(object, session))
+	app._socket_to_render["socket-1"] = render.id  # pyright: ignore[reportPrivateUsage]
+
+	fut: asyncio.Future[object] = asyncio.get_running_loop().create_future()
+	render.replies.register("corr-1", fut)
+
+	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+		"socket-1",
+		serialize({"type": "reply", "id": "corr-1", "payload": 7}),
+	)
+
+	assert fut.result() == 7
+	assert middleware.called is False
+	render.close()

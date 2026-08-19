@@ -9,7 +9,6 @@ from pulse.context import PulseContext
 from pulse.messages import (
 	ClientChannelRequestMessage,
 	ReplyMessage,
-	ServerChannelMessage,
 	ServerChannelRequestMessage,
 )
 from pulse.replies import PendingReplies
@@ -130,7 +129,7 @@ class ChannelsManager:
 		channel = self._channels.get(channel_id)
 		if channel is None:
 			if request_id := message.get("requestId"):
-				self._send_error_response(channel_id, request_id, "Channel closed")
+				self.send_error(request_id, "Channel closed")
 			return
 
 		if channel.render_id != render.id or channel.session_id != session.sid:
@@ -179,7 +178,7 @@ class ChannelsManager:
 					result = await channel.dispatch(event, payload, request_id)
 			except Exception as exc:
 				if request_id:
-					self._send_error_response(channel.id, request_id, str(exc))
+					self.send_error(request_id, str(exc))
 				else:
 					logger.exception("Unhandled error in channel handler")
 				return
@@ -191,22 +190,11 @@ class ChannelsManager:
 
 		render.create_task(_invoke(), name=f"channel:{channel_id}:{event}")
 
-	def _send_error_response(
-		self, channel_id: str, request_id: str, message: str
-	) -> None:
-		channel = self._channels.get(channel_id)
-		if channel is None:
-			self.replies.reject(request_id, ChannelClosed(message))
-			return
-		try:
-			self._render_session.send(
-				ReplyMessage(type="reply", id=request_id, error=message)
-			)
-		except ChannelClosed:
-			self.replies.reject(request_id, ChannelClosed(message))
-
-	def send_error(self, channel_id: str, request_id: str, message: str) -> None:
-		self._send_error_response(channel_id, request_id, message)
+	def send_error(self, request_id: str, message: str) -> None:
+		"""Complete a client request. Routing is the reply id, not the channel."""
+		self._render_session.send(
+			ReplyMessage(type="reply", id=request_id, error=message)
+		)
 
 	# ------------------------------------------------------------------
 	def release_channel(
@@ -264,7 +252,7 @@ class ChannelsManager:
 		self,
 		*,
 		channel: "Channel",
-		msg: ServerChannelMessage,
+		msg: ServerChannelRequestMessage,
 	) -> None:
 		self._render_session.send(msg)
 

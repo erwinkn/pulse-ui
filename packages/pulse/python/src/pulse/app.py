@@ -50,7 +50,7 @@ from pulse.helpers import (
 )
 from pulse.hooks.core import hooks
 from pulse.messages import (
-	ClientChannelMessage,
+	ClientChannelRequestMessage,
 	ClientMessage,
 	ClientPulseMessage,
 	Prerender,
@@ -1160,7 +1160,10 @@ class App:
 				)
 
 	async def _handle_channel_message(
-		self, render: RenderSession, session: UserSession, msg: ClientChannelMessage
+		self,
+		render: RenderSession,
+		session: UserSession,
+		msg: ClientChannelRequestMessage,
 	) -> None:
 		channel_id = str(msg.get("channel", ""))
 
@@ -1189,7 +1192,7 @@ class App:
 
 		if isinstance(res, Deny):
 			if req_id := msg.get("requestId"):
-				render.channels.send_error(channel_id, req_id, "Denied")
+				render.channels.send_error(req_id, "Denied")
 
 	def get_route(self, path: str):
 		return self.routes.find(path)

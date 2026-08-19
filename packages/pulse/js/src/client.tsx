@@ -6,13 +6,13 @@ import { pulseFetch } from "./http";
 import type {
 	ClientCallbackMessage,
 	ClientMessage,
-	ReplyMessage,
 	ServerApiCallMessage,
-	ServerChannelMessage,
+	ServerChannelRequestMessage,
 	ServerError,
 	ServerJsExecMessage,
 	ServerMessage,
 } from "./messages";
+import { createPendingReplies } from "./replies";
 import type { PulsePrerenderView } from "./pulse";
 import { extractEvent } from "./serialize/events";
 import { deserialize, serialize } from "./serialize/serializer";
@@ -81,29 +81,7 @@ export class PulseSocketIOClient {
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
 	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
-	#pendingReplies = new Map<string, { resolve: (value: any) => void; reject: (error: any) => void }>();
-	readonly replies = {
-		register: (id: string) =>
-			new Promise<any>((resolve, reject) => {
-				this.#pendingReplies.set(id, { resolve, reject });
-			}),
-		apply: (message: ReplyMessage) => {
-			const entry = this.#pendingReplies.get(message.id);
-			if (!entry) return;
-			this.#pendingReplies.delete(message.id);
-			if (message.error != null) {
-				entry.reject(new PulseChannelResetError(String(message.error)));
-			} else {
-				entry.resolve(message.payload);
-			}
-		},
-		reject: (id: string, error: unknown) => {
-			const entry = this.#pendingReplies.get(id);
-			if (!entry) return;
-			this.#pendingReplies.delete(id);
-			entry.reject(error);
-		},
-	};
+	readonly replies = createPendingReplies();
 	#url: string;
 	#frameworkNavigate: NavigateFunction;
 	#directives: Directives;
@@ -504,17 +482,21 @@ export class PulseSocketIOClient {
 				body = await res.text().catch(() => null);
 			}
 			this.sendReply(msg.id, {
-				ok: res.ok,
-				status: res.status,
-				headers: headersObj,
-				body,
+				payload: {
+					ok: res.ok,
+					status: res.status,
+					headers: headersObj,
+					body,
+				},
 			});
 		} catch (err) {
 			this.sendReply(msg.id, {
-				ok: false,
-				status: 0,
-				headers: {},
-				body: { error: String(err) },
+				payload: {
+					ok: false,
+					status: 0,
+					headers: {},
+					body: { error: String(err) },
+				},
 			});
 		}
 	}
@@ -539,18 +521,18 @@ export class PulseSocketIOClient {
 		if (!view) {
 			// View unmounted before the message arrived - send result back to unblock
 			// the server-side future (which is likely already cancelled anyway).
-			this.sendReply(message.id, undefined, null);
+			this.sendReply(message.id);
 			return;
 		}
 		view.onJsExec(message);
 	}
 
-	public sendReply(id: string, payload?: any, error?: string | null) {
-		const message: ReplyMessage =
-			error != null
-				? { type: "reply", id, error }
-				: { type: "reply", id, payload };
-		this.sendMessage(message);
+	public sendReply(id: string, result: { payload?: any; error?: string | null } = {}) {
+		this.sendMessage(
+			result.error != null
+				? { type: "reply", id, error: result.error }
+				: { type: "reply", id, payload: result.payload },
+		);
 	}
 
 	public acquireChannel(id: string): ChannelBridge {
@@ -592,7 +574,7 @@ export class PulseSocketIOClient {
 		return entry;
 	}
 
-	#routeChannelMessage(message: ServerChannelMessage): void {
+	#routeChannelMessage(message: ServerChannelRequestMessage): void {
 		const entry = this.#ensureChannelEntry(message.channel);
 		const closed = entry.bridge.handleServerMessage(message);
 		if (closed && entry.refCount === 0) {

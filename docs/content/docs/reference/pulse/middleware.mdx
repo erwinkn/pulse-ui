@@ -125,7 +125,7 @@ async def message(
     *,
     data: ClientMessage,
     session: dict[str, Any],
-    next: Callable[[], Awaitable[Ok[None]]],
+    next: Callable[[], Awaitable[Ok[None] | Deny]],
 ) -> Ok[None] | Deny
 ```
 
@@ -134,7 +134,7 @@ Handle per-message authorization.
 **Parameters:**
 - `data` - Client message data.
 - `session` - Session data dictionary.
-- `next` - Callable to continue the middleware chain.
+- `next` - Callable to continue the middleware chain. Returns the downstream decision; return it as-is or override it.
 
 **Returns:** `Ok[None]` to allow, `Deny` to block.
 
@@ -149,7 +149,7 @@ async def channel(
     payload: Any,
     request_id: str | None,
     session: dict[str, Any],
-    next: Callable[[], Awaitable[Ok[None]]],
+    next: Callable[[], Awaitable[Ok[None] | Deny]],
 ) -> Ok[None] | Deny
 ```
 
@@ -161,7 +161,7 @@ Handle channel message authorization.
 - `payload` - Event payload.
 - `request_id` - Request ID if awaiting response.
 - `session` - Session data dictionary.
-- `next` - Callable to continue the middleware chain.
+- `next` - Callable to continue the middleware chain. Returns the downstream decision; return it as-is or override it.
 
 **Returns:** `Ok[None]` to allow, `Deny` to block.
 

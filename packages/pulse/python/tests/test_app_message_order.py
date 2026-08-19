@@ -36,19 +36,21 @@ def _bind_render(
 	app._socket_to_render[socket_sid] = render.id  # pyright: ignore[reportPrivateUsage]
 
 
-async def _send(app: ps.App, socket_sid: str, message: dict[str, object]) -> None:
-	"""Live ingress: replies resolve inline, commands detach."""
-	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
-		socket_sid, serialize(message)
+def _spawn(
+	app: ps.App, socket_sid: str, message: dict[str, object]
+) -> asyncio.Task[None]:
+	"""Live EVENT: Socket.IO async_handlers=True runs the handler as a task."""
+	return asyncio.create_task(
+		app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+			socket_sid, serialize(message)
+		)
 	)
 
 
-async def _send_serial(
-	app: ps.App, socket_sid: str, message: dict[str, object]
-) -> None:
-	"""Await the command (connect-drain path) so mutation has finished."""
-	await app._deliver_socket_message(  # pyright: ignore[reportPrivateUsage]
-		socket_sid, serialize(message), detach=False
+async def _send(app: ps.App, socket_sid: str, message: dict[str, object]) -> None:
+	"""Await the handler (connect-drain / reply / finished command)."""
+	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+		socket_sid, serialize(message)
 	)
 
 
@@ -95,8 +97,7 @@ async def test_replies_resolve_while_command_middleware_is_parked():
 	channel_fut: asyncio.Future[object] = asyncio.get_running_loop().create_future()
 	render.replies.register("req-1", channel_fut, cancel_key="ch-1")
 
-	# Live handler returns immediately; attach middleware is a detached task.
-	await _send(
+	parked = _spawn(
 		app,
 		"socket-1",
 		{"type": "attach", "path": "/", "routeInfo": _route_info("/")},
@@ -146,7 +147,7 @@ async def test_replies_resolve_while_command_middleware_is_parked():
 	assert channel_fut.result() == "pong"
 
 	middleware.release.set()
-	await asyncio.sleep(0)
+	await parked
 	render.close()
 
 
@@ -175,14 +176,14 @@ async def test_awaited_attach_then_callback_sees_mount():
 	callback_key = next(iter(render.route_mounts["/"].tree.callbacks))
 
 	# Awaited commands (connect-drain). Mutation is sync, so callback
-	# sees the mount. Live ingress does not serialize commands — a parked
-	# attach must not block a later callback or reply.
-	await _send_serial(
+	# sees the mount. Live EVENTs are Socket.IO tasks — a parked attach
+	# must not block a later callback or reply.
+	await _send(
 		app,
 		"socket-1",
 		{"type": "attach", "path": "/", "routeInfo": _route_info("/")},
 	)
-	await _send_serial(
+	await _send(
 		app,
 		"socket-1",
 		{"type": "callback", "path": "/", "callback": callback_key, "args": []},
@@ -227,7 +228,7 @@ async def test_parked_command_does_not_block_other_path_or_reply():
 	api_fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
 	render.replies.register("corr-b", api_fut)
 
-	await _send(
+	parked = _spawn(
 		app,
 		"socket-1",
 		{"type": "attach", "path": "/a", "routeInfo": _route_info("/a")},
@@ -265,14 +266,15 @@ async def test_parked_command_does_not_block_other_path_or_reply():
 	assert not middleware.release.is_set()
 
 	middleware.release.set()
-	assert await wait_for(lambda: render.route_mounts["/a"].state == "active")
+	await parked
+	assert render.route_mounts["/a"].state == "active"
 	render.close()
 
 
-def test_socketio_handlers_are_ordered():
+def test_socketio_async_handlers():
 	app = ps.App()
 
-	assert app.sio.async_handlers is False
+	assert app.sio.async_handlers is True
 
 
 @pytest.mark.asyncio

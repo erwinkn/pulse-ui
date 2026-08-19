@@ -9,23 +9,22 @@ import asyncio
 import logging
 import os
 from collections import defaultdict
-from collections.abc import Awaitable, Coroutine, Sequence
+from collections.abc import Awaitable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import IntEnum
-from functools import wraps
-from typing import Any, Callable, Literal, TypeVar, cast, override
+from typing import Any, Callable, Literal, TypeVar, cast
 
 import socketio
 import uvicorn
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.routing import APIRoute
 from socketio.exceptions import ConnectionRefusedError as SocketIOConnectionRefusedError
 from starlette.types import ASGIApp
 from starlette.websockets import WebSocket
 
+from pulse.api_router import PulseFastAPI, PulseFrameworkAPIRoute
 from pulse.codegen.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.cookies import (
@@ -73,7 +72,6 @@ from pulse.middleware import (
 )
 from pulse.plugin import Plugin
 from pulse.proxy import Proxy, ReactProxy
-from pulse.reactive_extensions import unwrap
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
@@ -92,7 +90,6 @@ FRAMEWORK_API_PREFIX = "/_pulse"
 PAGE_INSTANCE_AUTH_KEY = "__pulse_page_instance_id"
 RENDER_ID_COLLISION_CODE = "render_id_collision"
 MAX_PENDING_SOCKET_MESSAGES = 100
-PULSE_ENDPOINT_UNWRAP_MARKER = "__pulse_endpoint_unwrap__"
 
 
 class AppStatus(IntEnum):
@@ -164,117 +161,6 @@ class FastAPIConfig:
 	swagger_ui_parameters: dict[str, Any] | None = None
 	separate_input_output_schemas: bool = True
 	openapi_external_docs: dict[str, Any] | None = None
-
-
-def _wrap_user_api_handler(
-	original: Callable[[Request], Coroutine[Any, Any, Response]],
-) -> Callable[[Request], Coroutine[Any, Any, Response]]:
-	async def handler(request: Request) -> Response:
-		ctx = PULSE_CONTEXT.get()
-		if ctx is None:
-			return await original(request)
-
-		session: dict[str, Any] = ctx.session.data if ctx.session is not None else {}
-
-		async def _next() -> Response:
-			return await original(request)
-
-		response = await ctx.app.middleware.api(
-			request=PulseRequest.from_fastapi(request),
-			session=session,
-			next=_next,
-		)
-		if not isinstance(response, Response):
-			raise TypeError(
-				"PulseMiddleware.api() must return a Response, "
-				+ f"got {type(response).__name__}"
-			)
-		return response
-
-	return handler
-
-
-class PulseAPIRoute(APIRoute):
-	"""User-defined FastAPI routes: unwrap reactives and run ``PulseMiddleware.api``."""
-
-	def __init__(
-		self,
-		path: str,
-		endpoint: Callable[..., Any],
-		**kwargs: Any,
-	) -> None:
-		super().__init__(path, _wrap_fastapi_endpoint(endpoint), **kwargs)
-
-	@override
-	def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
-		return _wrap_user_api_handler(super().get_route_handler())
-
-
-class PulseFrameworkAPIRoute(APIRoute):
-	"""Pulse built-in FastAPI routes: unwrap reactives, no ``api`` hook."""
-
-	def __init__(
-		self,
-		path: str,
-		endpoint: Callable[..., Any],
-		**kwargs: Any,
-	) -> None:
-		super().__init__(path, _wrap_fastapi_endpoint(endpoint), **kwargs)
-
-
-class PulseAPIRouter(APIRouter):
-	"""App router that keeps ``PulseAPIRoute`` when including foreign routers.
-
-	``APIRouter.include_router`` copies routes with ``route_class_override=type(source)``,
-	which would drop ``PulseMiddleware.api``. Ignore that override unless the
-	source is a Pulse framework route.
-	"""
-
-	@override
-	def add_api_route(
-		self,
-		path: str,
-		endpoint: Callable[..., Any],
-		**kwargs: Any,
-	) -> None:
-		override = kwargs.get("route_class_override")
-		if override is not None and not issubclass(override, PulseFrameworkAPIRoute):
-			kwargs["route_class_override"] = None
-		super().add_api_route(path, endpoint, **kwargs)
-
-
-class PulseFastAPI(FastAPI):
-	def __init__(self, *args: Any, **kwargs: Any) -> None:
-		super().__init__(*args, **kwargs)
-		self.router.__class__ = PulseAPIRouter
-		self.router.route_class = PulseAPIRoute
-
-
-def _wrap_fastapi_endpoint(endpoint: Callable[..., Any]) -> Callable[..., Any]:
-	if endpoint.__dict__.get(PULSE_ENDPOINT_UNWRAP_MARKER):
-		return endpoint
-
-	if asyncio.iscoroutinefunction(endpoint):
-
-		@wraps(endpoint)
-		async def async_endpoint(*args: Any, **kwargs: Any) -> Any:
-			return _unwrap_fastapi_response(await endpoint(*args, **kwargs))
-
-		async_endpoint.__dict__[PULSE_ENDPOINT_UNWRAP_MARKER] = True
-		return async_endpoint
-
-	@wraps(endpoint)
-	def sync_endpoint(*args: Any, **kwargs: Any) -> Any:
-		return _unwrap_fastapi_response(endpoint(*args, **kwargs))
-
-	sync_endpoint.__dict__[PULSE_ENDPOINT_UNWRAP_MARKER] = True
-	return sync_endpoint
-
-
-def _unwrap_fastapi_response(value: Any) -> Any:
-	if isinstance(value, Response):
-		return value
-	return unwrap(value, untrack=True)
 
 
 class App:

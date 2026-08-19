@@ -4,10 +4,9 @@ import { ChannelBridge, createRandomId, PulseChannelResetError } from "./channel
 import type { RouteInfo } from "./helpers";
 import { pulseFetch } from "./http";
 import type {
-	ClientApiResultMessage,
 	ClientCallbackMessage,
-	ClientJsResultMessage,
 	ClientMessage,
+	ReplyMessage,
 	ServerApiCallMessage,
 	ServerChannelMessage,
 	ServerError,
@@ -82,6 +81,29 @@ export class PulseSocketIOClient {
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
 	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
+	#pendingReplies = new Map<string, { resolve: (value: any) => void; reject: (error: any) => void }>();
+	readonly replies = {
+		register: (id: string) =>
+			new Promise<any>((resolve, reject) => {
+				this.#pendingReplies.set(id, { resolve, reject });
+			}),
+		apply: (message: ReplyMessage) => {
+			const entry = this.#pendingReplies.get(message.id);
+			if (!entry) return;
+			this.#pendingReplies.delete(message.id);
+			if (message.error != null) {
+				entry.reject(new PulseChannelResetError(String(message.error)));
+			} else {
+				entry.resolve(message.payload);
+			}
+		},
+		reject: (id: string, error: unknown) => {
+			const entry = this.#pendingReplies.get(id);
+			if (!entry) return;
+			this.#pendingReplies.delete(id);
+			entry.reject(error);
+		},
+	};
 	#url: string;
 	#frameworkNavigate: NavigateFunction;
 	#directives: Directives;
@@ -443,6 +465,10 @@ export class PulseSocketIOClient {
 				this.#handleAttachAck(message.path, message.attachId);
 				break;
 			}
+			case "reply": {
+				this.replies.apply(message);
+				break;
+			}
 			case "channel_message": {
 				this.#routeChannelMessage(message);
 				break;
@@ -477,25 +503,19 @@ export class PulseSocketIOClient {
 			} else {
 				body = await res.text().catch(() => null);
 			}
-			const reply: ClientApiResultMessage = {
-				type: "api_result",
-				id: msg.id,
+			this.sendReply(msg.id, {
 				ok: res.ok,
 				status: res.status,
 				headers: headersObj,
 				body,
-			};
-			this.sendMessage(reply);
+			});
 		} catch (err) {
-			const reply: ClientApiResultMessage = {
-				type: "api_result",
-				id: msg.id,
+			this.sendReply(msg.id, {
 				ok: false,
 				status: 0,
 				headers: {},
 				body: { error: String(err) },
-			};
-			this.sendMessage(reply);
+			});
 		}
 	}
 
@@ -519,24 +539,18 @@ export class PulseSocketIOClient {
 		if (!view) {
 			// View unmounted before the message arrived - send result back to unblock
 			// the server-side future (which is likely already cancelled anyway).
-			this.#sendJsResult(message.id, undefined, null);
+			this.sendReply(message.id, undefined, null);
 			return;
 		}
 		view.onJsExec(message);
 	}
 
-	public sendJsResult(id: string, result: any, error: string | null) {
-		this.#sendJsResult(id, result, error);
-	}
-
-	#sendJsResult(id: string, result: any, error: string | null) {
-		const msg: ClientJsResultMessage = {
-			type: "js_result",
-			id,
-			result,
-			error,
-		};
-		this.sendMessage(msg);
+	public sendReply(id: string, payload?: any, error?: string | null) {
+		const message: ReplyMessage =
+			error != null
+				? { type: "reply", id, error }
+				: { type: "reply", id, payload };
+		this.sendMessage(message);
 	}
 
 	public acquireChannel(id: string): ChannelBridge {

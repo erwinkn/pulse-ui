@@ -24,19 +24,16 @@ def _wrap_user_api_handler(
 		from pulse.context import PULSE_CONTEXT
 
 		ctx = PULSE_CONTEXT.get()
-		if ctx is None:
+		if ctx is None or ctx.session is None:
+			# No Pulse request: raw FastAPI, or session_middleware hasn't run.
 			return await original(request)
-		# session_middleware mounts a UserSession before the route runs.
-		session = ctx.session
-		if session is None:
-			raise RuntimeError("Internal error: couldn't resolve user session")
 
 		async def _next() -> Response:
 			return await original(request)
 
 		response = await ctx.app.middleware.api(
 			request=PulseRequest.from_fastapi(request),
-			session=session.data,
+			session=ctx.session.data,
 			next=_next,
 		)
 		if not isinstance(response, Response):

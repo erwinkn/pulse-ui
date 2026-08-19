@@ -127,7 +127,7 @@ async def _client(
 @pytest.mark.asyncio
 async def test_api_middleware_runs_for_user_fastapi_routes():
 	mw = RecordingApiMiddleware()
-	app = ps.App(routes=[], middleware=mw)
+	app = ps.App(routes=[], middleware=mw, mode="subdomains")
 
 	@app.fastapi.get("/api/hello")
 	def hello() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]
@@ -145,7 +145,7 @@ async def test_api_middleware_runs_for_user_fastapi_routes():
 @pytest.mark.asyncio
 async def test_api_middleware_runs_for_included_routers():
 	mw = RecordingApiMiddleware()
-	app = ps.App(routes=[], middleware=mw)
+	app = ps.App(routes=[], middleware=mw, mode="subdomains")
 	router = APIRouter()
 
 	@router.post("/items")
@@ -165,7 +165,7 @@ async def test_api_middleware_runs_for_included_routers():
 
 @pytest.mark.asyncio
 async def test_api_middleware_can_short_circuit_user_routes():
-	app = ps.App(routes=[], middleware=ShortCircuitApiMiddleware())
+	app = ps.App(routes=[], middleware=ShortCircuitApiMiddleware(), mode="subdomains")
 
 	@app.fastapi.get("/secret")
 	def secret() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]
@@ -187,7 +187,7 @@ async def test_api_middleware_can_short_circuit_user_routes():
 
 @pytest.mark.asyncio
 async def test_api_middleware_can_modify_response_headers():
-	app = ps.App(routes=[], middleware=HeaderApiMiddleware())
+	app = ps.App(routes=[], middleware=HeaderApiMiddleware(), mode="subdomains")
 
 	@app.fastapi.get("/api/hello")
 	def hello() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]
@@ -203,7 +203,7 @@ async def test_api_middleware_can_modify_response_headers():
 @pytest.mark.asyncio
 async def test_api_middleware_can_catch_user_route_exceptions():
 	mw = ErrorReportingApiMiddleware()
-	app = ps.App(routes=[], middleware=mw)
+	app = ps.App(routes=[], middleware=mw, mode="subdomains")
 
 	@app.fastapi.get("/api/boom")
 	def boom() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]
@@ -373,7 +373,7 @@ async def test_api_middleware_stack_runs_in_order():
 			order.append("second")
 			return await next()
 
-	app = ps.App(routes=[], middleware=[First(), Second()])
+	app = ps.App(routes=[], middleware=[First(), Second()], mode="subdomains")
 
 	@app.fastapi.get("/api/hello")
 	def hello() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]
@@ -400,7 +400,7 @@ async def test_api_middleware_rejects_non_response_return():
 		) -> ApiResponse:
 			return {"not": "a response"}  # pyright: ignore[reportReturnType]
 
-	app = ps.App(routes=[], middleware=BadMiddleware())
+	app = ps.App(routes=[], middleware=BadMiddleware(), mode="subdomains")
 
 	@app.fastapi.get("/api/hello")
 	def hello() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]

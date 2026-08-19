@@ -1105,10 +1105,8 @@ class App:
 	) -> None:
 		try:
 			if msg["type"] == "channel_message":
-				await self._handle_channel_command(
-					render, session, cast(ClientChannelRequestMessage, msg)
-				)
-			else:
+				await self._handle_channel_command(render, session, msg)
+			elif msg["type"] != "reply":
 				await self._handle_pulse_command(render, session, msg)
 		except Exception as e:
 			path = msg.get("path", "")

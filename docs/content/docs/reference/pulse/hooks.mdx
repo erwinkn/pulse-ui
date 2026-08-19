@@ -56,7 +56,7 @@ def user_profile(user_id):
 - Key must be non-empty string if provided
 - Can only be called once per render at the same location or with the same key
 - Factory is only called on first render; subsequent renders return cached instance
-- State is disposed when component unmounts or when key changes
+- State is disposed when the component unmounts, the key changes, or the call is skipped (e.g. a false conditional)
 
 ---
 

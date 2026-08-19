@@ -4,6 +4,7 @@ import httpx
 import pulse as ps
 import pytest
 from fastapi import APIRouter, Response
+from pulse.api_router import PulseAPIRoute
 from starlette.responses import PlainTextResponse
 from starlette.types import Receive, Scope, Send
 
@@ -69,6 +70,47 @@ async def test_included_fastapi_routers_unwrap_reactive_response_values():
 
 	assert response.status_code == 200
 	assert response.json() == {"count": 3}
+
+
+def _route_at(app: ps.App, path: str):
+	for route in app.fastapi.routes:
+		if getattr(route, "path", None) == path:
+			return route
+	raise AssertionError(f"no route {path}")
+
+
+def test_pulse_api_route_keeps_user_endpoint():
+	app = ps.App(routes=[])
+
+	def hello() -> dict[str, Any]:
+		return {"n": ps.Signal(1)}
+
+	app.fastapi.get("/hello")(hello)
+
+	assert _route_at(app, "/hello").endpoint is hello
+
+
+@pytest.mark.asyncio
+async def test_included_pulse_route_class_router_keeps_user_endpoint():
+	app = ps.App(routes=[])
+	router = APIRouter(route_class=PulseAPIRoute)
+
+	def reactive_payload() -> dict[str, Any]:
+		return {"count": ps.Signal(4)}
+
+	router.get("/reactive")(reactive_payload)
+	app.fastapi.include_router(router, prefix="/api")
+
+	assert _route_at(app, "/api/reactive").endpoint is reactive_payload
+
+	transport = httpx.ASGITransport(app=app.fastapi)
+	async with httpx.AsyncClient(
+		transport=transport, base_url="http://testserver"
+	) as client:
+		response = await client.get("/api/reactive")
+
+	assert response.status_code == 200
+	assert response.json() == {"count": 4}
 
 
 @pytest.mark.asyncio

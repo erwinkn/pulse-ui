@@ -15,8 +15,6 @@ from starlette.responses import Response
 from pulse.reactive_extensions import unwrap
 from pulse.request import PulseRequest
 
-PULSE_ENDPOINT_UNWRAP_MARKER = "__pulse_endpoint_unwrap__"
-
 
 def _wrap_user_api_handler(
 	original: Callable[[Request], Coroutine[Any, Any, Response]],
@@ -50,23 +48,18 @@ def _wrap_user_api_handler(
 
 
 def _wrap_fastapi_endpoint(endpoint: Callable[..., Any]) -> Callable[..., Any]:
-	if endpoint.__dict__.get(PULSE_ENDPOINT_UNWRAP_MARKER):
-		return endpoint
-
 	if asyncio.iscoroutinefunction(endpoint):
 
 		@wraps(endpoint)
 		async def async_endpoint(*args: Any, **kwargs: Any) -> Any:
 			return _unwrap_fastapi_response(await endpoint(*args, **kwargs))
 
-		async_endpoint.__dict__[PULSE_ENDPOINT_UNWRAP_MARKER] = True
 		return async_endpoint
 
 	@wraps(endpoint)
 	def sync_endpoint(*args: Any, **kwargs: Any) -> Any:
 		return _unwrap_fastapi_response(endpoint(*args, **kwargs))
 
-	sync_endpoint.__dict__[PULSE_ENDPOINT_UNWRAP_MARKER] = True
 	return sync_endpoint
 
 
@@ -85,7 +78,14 @@ class PulseFrameworkAPIRoute(APIRoute):
 		endpoint: Callable[..., Any],
 		**kwargs: Any,
 	) -> None:
-		super().__init__(path, _wrap_fastapi_endpoint(endpoint), **kwargs)
+		# Leave endpoint as the user function. include_router copies route.endpoint
+		# into a new route; wrapping that would stack wrappers. Unwrap the call
+		# FastAPI actually invokes — rebuilt per copy.
+		super().__init__(path, endpoint, **kwargs)
+		call = self.dependant.call
+		if call is None:
+			raise TypeError("FastAPI route has no endpoint")
+		self.dependant.call = _wrap_fastapi_endpoint(call)
 
 
 class PulseAPIRoute(PulseFrameworkAPIRoute):

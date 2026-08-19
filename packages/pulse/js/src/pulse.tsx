@@ -251,7 +251,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 					} catch (e) {
 						error = e instanceof Error ? e.message : String(e);
 					}
-					client.sendJsResult(msg.id, result, error);
+					client.sendReply(msg.id, result, error);
 				},
 				onServerError: setServerError,
 			});

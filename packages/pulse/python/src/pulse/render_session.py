@@ -49,10 +49,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__file__)
 
 
-class JsExecError(Exception):
-	"""Raised when client-side JS execution fails."""
-
-
 class RenderLoopError(RuntimeError):
 	path: str
 	renders: int
@@ -889,20 +885,6 @@ class RenderSession:
 			raise
 		return result
 
-	def handle_api_result(self, data: dict[str, Any]):
-		id_ = data.get("id")
-		if id_ is None:
-			return
-		self.replies.resolve(
-			str(id_),
-			{
-				"ok": data.get("ok", False),
-				"status": data.get("status", 0),
-				"headers": data.get("headers", {}),
-				"body": data.get("body"),
-			},
-		)
-
 	# ---- JS Execution ----
 
 	@overload
@@ -986,15 +968,3 @@ class RenderSession:
 			return future
 
 		return None
-
-	def handle_js_result(self, data: dict[str, Any]) -> None:
-		"""Handle js_result message from client."""
-		exec_id = data.get("id")
-		if exec_id is None:
-			return
-		exec_id = str(exec_id)
-		error = data.get("error")
-		if error is not None:
-			self.replies.reject(exec_id, JsExecError(error))
-		else:
-			self.replies.resolve(exec_id, data.get("result"))

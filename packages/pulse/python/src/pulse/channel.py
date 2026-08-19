@@ -8,10 +8,9 @@ from typing import TYPE_CHECKING, Any, cast
 from pulse.context import PulseContext
 from pulse.messages import (
 	ClientChannelRequestMessage,
-	ClientChannelResponseMessage,
+	ReplyMessage,
 	ServerChannelMessage,
 	ServerChannelRequestMessage,
-	ServerChannelResponseMessage,
 )
 from pulse.replies import PendingReplies
 from pulse.scheduling import create_future
@@ -28,12 +27,6 @@ ChannelHandler = Callable[[Any], Any | Awaitable[Any]]
 
 Type alias for ``Callable[[Any], Any | Awaitable[Any]]``.
 """
-
-
-def _as_exception(error: Any) -> BaseException:
-	if isinstance(error, BaseException):
-		return error
-	return RuntimeError(str(error))
 
 
 class ChannelClosed(RuntimeError):
@@ -126,18 +119,6 @@ class ChannelsManager:
 			self.dispose_channel(channel, reason="route.unmount")
 		self._channels_by_route.pop(path, None)
 
-	# ------------------------------------------------------------------
-	def handle_client_response(self, message: ClientChannelResponseMessage) -> None:
-		response_to = message.get("responseTo")
-		if not response_to:
-			return
-
-		error = message.get("error")
-		if error is not None:
-			self.replies.reject(response_to, _as_exception(error))
-		else:
-			self.replies.resolve(response_to, message.get("payload"))
-
 	def handle_client_event(
 		self,
 		*,
@@ -204,16 +185,8 @@ class ChannelsManager:
 				return
 
 			if request_id:
-				msg = ServerChannelResponseMessage(
-					type="channel_message",
-					channel=channel.id,
-					event=None,
-					responseTo=request_id,
-					payload=result,
-				)
-				self.send_to_client(
-					channel=channel,
-					msg=msg,
+				self._render_session.send(
+					ReplyMessage(type="reply", id=request_id, payload=result)
 				)
 
 		render.create_task(_invoke(), name=f"channel:{channel_id}:{event}")
@@ -226,17 +199,8 @@ class ChannelsManager:
 			self.replies.reject(request_id, ChannelClosed(message))
 			return
 		try:
-			msg = ServerChannelResponseMessage(
-				type="channel_message",
-				channel=channel.id,
-				event=None,
-				responseTo=request_id,
-				payload=None,
-				error=message,
-			)
-			self.send_to_client(
-				channel=channel,
-				msg=msg,
+			self._render_session.send(
+				ReplyMessage(type="reply", id=request_id, error=message)
 			)
 		except ChannelClosed:
 			self.replies.reject(request_id, ChannelClosed(message))

@@ -78,6 +78,17 @@ class Deny:
 	"""Denial response. Blocks the request."""
 
 
+def _coerce_decision(res: Any) -> "Ok[None] | Deny":
+	"""User hooks may return anything; only Ok/Deny are decisions.
+
+	Applied once, where each middleware returns — so `MiddlewareStack`
+	honors its declared return types and callers never re-normalize.
+	"""
+	if isinstance(res, (Ok, Deny)):
+		return res  # type: ignore[return-value]
+	return Ok(None)
+
+
 PrerenderResponse = Ok[Prerender] | Redirect | NotFound
 """Response type for batch prerender: ``Ok[Prerender] | Redirect | NotFound``."""
 
@@ -167,14 +178,15 @@ class PulseMiddleware:
 		*,
 		data: ClientMessage,
 		session: dict[str, Any],
-		next: Callable[[], Awaitable[Ok[None]]],
+		next: Callable[[], Awaitable["Ok[None] | Deny"]],
 	) -> Ok[None] | Deny:
 		"""Handle per-message authorization.
 
 		Args:
 			data: Client message data.
 			session: Session data dictionary.
-			next: Callable to continue the middleware chain.
+			next: Callable to continue the middleware chain. Returns the
+				downstream decision; return it as-is or override it.
 
 		Returns:
 			``Ok[None]`` to allow, ``Deny`` to block.
@@ -189,7 +201,7 @@ class PulseMiddleware:
 		payload: Any,
 		request_id: str | None,
 		session: dict[str, Any],
-		next: Callable[[], Awaitable[Ok[None]]],
+		next: Callable[[], Awaitable["Ok[None] | Deny"]],
 	) -> Ok[None] | Deny:
 		"""Handle channel message authorization.
 
@@ -199,7 +211,8 @@ class PulseMiddleware:
 			payload: Event payload.
 			request_id: Request ID if awaiting response.
 			session: Session data dictionary.
-			next: Callable to continue the middleware chain.
+			next: Callable to continue the middleware chain. Returns the
+				downstream decision; return it as-is or override it.
 
 		Returns:
 			``Ok[None]`` to allow, ``Deny`` to block.
@@ -282,7 +295,9 @@ class MiddlewareStack(PulseMiddleware):
 			async def _next() -> ConnectResponse:
 				return await dispatch(index + 1)
 
-			return await mw.connect(request=request, session=session, next=_next)
+			return _coerce_decision(
+				await mw.connect(request=request, session=session, next=_next)
+			)
 
 		return await dispatch(0)
 
@@ -292,23 +307,19 @@ class MiddlewareStack(PulseMiddleware):
 		*,
 		data: ClientMessage,
 		session: dict[str, Any],
-		next: Callable[[], Awaitable[Ok[None]]],
+		next: Callable[[], Awaitable["Ok[None] | Deny"]],
 	) -> Ok[None] | Deny:
 		async def dispatch(index: int) -> Ok[None] | Deny:
 			if index >= len(self._middlewares):
 				return await next()
 			mw = self._middlewares[index]
 
-			async def _next() -> Ok[None]:
-				result = await dispatch(index + 1)
-				# If dispatch returns Deny, the middleware should have short-circuited
-				# This should only be called when continuing the chain
-				if isinstance(result, Deny):
-					# This shouldn't happen, but handle it gracefully
-					return Ok(None)
-				return result
+			async def _next() -> Ok[None] | Deny:
+				return await dispatch(index + 1)
 
-			return await mw.message(session=session, data=data, next=_next)
+			return _coerce_decision(
+				await mw.message(session=session, data=data, next=_next)
+			)
 
 		return await dispatch(0)
 
@@ -321,29 +332,25 @@ class MiddlewareStack(PulseMiddleware):
 		payload: Any,
 		request_id: str | None,
 		session: dict[str, Any],
-		next: Callable[[], Awaitable[Ok[None]]],
+		next: Callable[[], Awaitable["Ok[None] | Deny"]],
 	) -> Ok[None] | Deny:
 		async def dispatch(index: int) -> Ok[None] | Deny:
 			if index >= len(self._middlewares):
 				return await next()
 			mw = self._middlewares[index]
 
-			async def _next() -> Ok[None]:
-				result = await dispatch(index + 1)
-				# If dispatch returns Deny, the middleware should have short-circuited
-				# This should only be called when continuing the chain
-				if isinstance(result, Deny):
-					# This shouldn't happen, but handle it gracefully
-					return Ok(None)
-				return result
+			async def _next() -> Ok[None] | Deny:
+				return await dispatch(index + 1)
 
-			return await mw.channel(
-				channel_id=channel_id,
-				event=event,
-				payload=payload,
-				request_id=request_id,
-				session=session,
-				next=_next,
+			return _coerce_decision(
+				await mw.channel(
+					channel_id=channel_id,
+					event=event,
+					payload=payload,
+					request_id=request_id,
+					session=session,
+					next=_next,
+				)
 			)
 
 		return await dispatch(0)
@@ -449,7 +456,7 @@ class LatencyMiddleware(PulseMiddleware):
 		*,
 		data: ClientMessage,
 		session: dict[str, Any],
-		next: Callable[[], Awaitable[Ok[None]]],
+		next: Callable[[], Awaitable["Ok[None] | Deny"]],
 	) -> Ok[None] | Deny:
 		if self.message_ms > 0:
 			await asyncio.sleep(self.message_ms / 1000.0)
@@ -464,7 +471,7 @@ class LatencyMiddleware(PulseMiddleware):
 		payload: Any,
 		request_id: str | None,
 		session: dict[str, Any],
-		next: Callable[[], Awaitable[Ok[None]]],
+		next: Callable[[], Awaitable["Ok[None] | Deny"]],
 	) -> Ok[None] | Deny:
 		if self.channel_ms > 0:
 			await asyncio.sleep(self.channel_ms / 1000.0)

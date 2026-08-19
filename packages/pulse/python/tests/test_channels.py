@@ -150,3 +150,33 @@ async def test_channel_pending_cancelled_on_render_close():
 	real_render.close()
 	with pytest.raises(ChannelClosed):
 		await pending
+
+
+@pytest.mark.asyncio
+async def test_missing_channel_request_sends_error_reply():
+	app = ps.App()
+	render = DummyRender()
+	session = SimpleNamespace(sid="session-5")
+
+	real_render = ps.RenderSession(render.id, app.routes)
+	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
+
+	app.render_sessions[render.id] = real_render
+	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
+	app.user_sessions[session.sid] = session  # pyright: ignore[reportArgumentType]
+
+	real_render.channels.handle_client_event(
+		render=real_render,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		message={
+			"type": "channel_message",
+			"channel": "gone",
+			"event": "get",
+			"payload": None,
+			"requestId": "client-req-1",
+		},
+	)
+
+	assert render.sent == [
+		{"type": "reply", "id": "client-req-1", "error": "Channel closed"}
+	]

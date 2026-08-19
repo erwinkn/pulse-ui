@@ -946,25 +946,23 @@ class RenderSession:
 		# This must match the path used to key views on the client side
 		path = ctx.route.pulse_route.unique_path() if ctx.route else "/"
 
-		self.send(
-			ServerJsExecMessage(
-				type="js_exec",
-				path=path,
-				id=exec_id,
-				expr=expr.render(),
-			)
+		msg = ServerJsExecMessage(
+			type="js_exec",
+			path=path,
+			id=exec_id,
+			expr=expr.render(),
 		)
+		if not result:
+			self.send(msg)
+			return None
 
-		if result:
-			loop = asyncio.get_running_loop()
-			future: asyncio.Future[object] = loop.create_future()
-			self.replies.register(exec_id, future)
+		loop = asyncio.get_running_loop()
+		future: asyncio.Future[object] = loop.create_future()
+		self.replies.register(exec_id, future)
 
-			def _on_timeout() -> None:
-				self.replies.reject(exec_id, asyncio.TimeoutError())
+		def _on_timeout() -> None:
+			self.replies.reject(exec_id, asyncio.TimeoutError())
 
-			self._timers.later(timeout, _on_timeout)
-
-			return future
-
-		return None
+		self._timers.later(timeout, _on_timeout)
+		self.send(msg)
+		return future

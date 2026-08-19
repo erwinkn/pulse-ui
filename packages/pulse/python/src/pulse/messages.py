@@ -80,7 +80,6 @@ class ServerChannelRequestMessage(TypedDict):
 	event: str
 	payload: Any
 	requestId: NotRequired[str]
-	error: NotRequired[Any]
 
 
 class ReplyMessage(TypedDict):
@@ -135,10 +134,8 @@ class ClientChannelRequestMessage(TypedDict):
 	event: str
 	payload: Any
 	requestId: NotRequired[str]
-	error: NotRequired[Any]
 
 
-ServerChannelMessage = ServerChannelRequestMessage
 ServerMessage = (
 	ServerInitMessage
 	| ServerUpdateMessage
@@ -147,7 +144,7 @@ ServerMessage = (
 	| ServerNavigateToMessage
 	| ServerReloadMessage
 	| ServerAttachAckMessage
-	| ServerChannelMessage
+	| ServerChannelRequestMessage
 	| ServerJsExecMessage
 	| ReplyMessage
 )
@@ -159,8 +156,7 @@ ClientPulseMessage = (
 	| ClientUpdateMessage
 	| ClientDetachMessage
 )
-ClientChannelMessage = ClientChannelRequestMessage
-ClientMessage = ClientPulseMessage | ClientChannelMessage | ReplyMessage
+ClientMessage = ClientPulseMessage | ClientChannelRequestMessage | ReplyMessage
 
 
 class PrerenderPayload(TypedDict):

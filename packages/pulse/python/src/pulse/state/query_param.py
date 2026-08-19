@@ -352,20 +352,23 @@ class QueryParamProperty(StateProperty, InitializableProperty):
 		super().__set_name__(owner, name)
 		self.param_name = name
 
-	def hydrate(self, state: "State") -> None:
+	@override
+	def _get_signal(self, obj: Any) -> Signal[Any]:
+		priv = cast(str, self.private_name)
+		cached = getattr(obj, priv, None)
+		if cached is not None:
+			return cached
 		ctx = PulseContext.get()
 		if ctx.render is None:
 			raise RuntimeError(
 				"QueryParam properties require a render context. Create the state inside a component render."
 			)
-		raw = ctx.render.url["queryParams"].get(self.param_name)
-		value = _parse_query_param_value(
-			raw,
-			default=self.default_value,
-			codec=self.codec,
-			param=self.param_name,
-		)
-		self.__set__(state, value)
+		signal = ctx.render.query_param_sync.ensure(self)
+		setattr(obj, priv, signal)
+		return signal
+
+	def hydrate(self, state: "State") -> None:
+		self._get_signal(state)
 
 	@override
 	def initialize(self, state: "State", name: str) -> "QueryParamSync":
@@ -375,112 +378,105 @@ class QueryParamProperty(StateProperty, InitializableProperty):
 				"QueryParam properties require a render context. Create the state inside a component render."
 			)
 		sync = ctx.render.query_param_sync
-		registration = sync.register(state, name, self)
-		setattr(state, f"_query_param_reg_{name}", registration)
+		setattr(state, f"_query_param_reg_{name}", sync.retain(self))
 		return sync
-
-
-@dataclass(eq=False)
-class QueryParamBinding:
-	param: str
-	state: "State"
-	prop: QueryParamProperty
-	attr_name: str
-	route_path: str | None
-
-	def signal(self) -> Signal[Any]:
-		return self.prop.get_signal(self.state)
-
-	def default(self) -> Any:
-		return self.prop.default_value
-
-	def codec(self) -> QueryParamCodec:
-		return self.prop.codec
 
 
 class QueryParamRegistration(Disposable):
 	_sync: "QueryParamSync"
-	_binding: QueryParamBinding
+	_param: str
 
-	def __init__(self, sync: "QueryParamSync", binding: QueryParamBinding) -> None:
+	def __init__(self, sync: "QueryParamSync", param: str) -> None:
 		self._sync = sync
-		self._binding = binding
+		self._param = param
 
 	@override
 	def dispose(self) -> None:
-		self._sync.unregister(self._binding)
+		self._sync.release(self._param)
+
+
+@dataclass
+class _QueryParamSlot:
+	codec: QueryParamCodec
+	default: Any
+	signal: Signal[Any]
+	refs: int = 0
 
 
 class QueryParamSync(Disposable):
-	"""Two-way sync between `QueryParam` state properties and the session URL.
+	"""Session-level URL sync for `QueryParam` fields.
 
-	Owned by the `RenderSession`, not by a mount: a binding lives as long as
-	the state that declared it, so a session-scoped state keeps syncing across
-	in-app navigation.
-
-	Bindings for one param name form a stack. Every binding follows the URL.
-	Writers are every binding whose ``route_path`` matches the latest
-	registration's route: two states on the same route can share a param, and
-	changing either updates the URL so the other follows. An incoming route
-	takes write ownership during prerender overlap so the outgoing mount
-	cannot stomp the URL. Two writers with different values in one flush:
-	the last change wins.
+	One slot per param name: a single Signal plus codec/default. Every
+	`QueryParam` property on this session reads and writes that Signal.
+	The URL is the other side of the same value — no per-state copy, no
+	write-ownership stack.
 	"""
 
 	render: "RenderSession"
-	_bindings: dict[str, list[QueryParamBinding]]
+	_slots: dict[str, _QueryParamSlot]
 	_route_effect: Effect | None
 	_state_effect: Effect | None
 
 	def __init__(self, render: "RenderSession") -> None:
 		self.render = render
-		self._bindings = {}
+		self._slots = {}
 		self._route_effect = None
 		self._state_effect = None
 
-	def register(
-		self, state: "State", attr_name: str, prop: QueryParamProperty
-	) -> QueryParamRegistration:
+	def ensure(self, prop: QueryParamProperty) -> Signal[Any]:
 		param = prop.param_name
 		if not param:
 			raise RuntimeError("QueryParam param name was not resolved")
-		ctx = PulseContext.get()
-		route_path = ctx.route.route_path if ctx.route is not None else None
-		stack = self._bindings.get(param)
-		had_bindings = bool(stack)
-		if stack is None:
-			stack = []
-		binding = QueryParamBinding(
-			param=param,
-			state=state,
-			prop=prop,
-			attr_name=attr_name,
-			route_path=route_path,
-		)
-		stack.append(binding)
-		self._bindings[param] = stack
-		self._ensure_effects()
-		if had_bindings:
-			self._rerun_effects()
-		return QueryParamRegistration(self, binding)
+		slot = self._slots.get(param)
+		if slot is None:
+			raw = self.render.url["queryParams"].get(param)
+			value: Any = _parse_query_param_value(
+				raw,
+				default=prop.default_value,
+				codec=prop.codec,
+				param=param,
+			)
+			slot = _QueryParamSlot(
+				codec=prop.codec,
+				default=prop.default_value,
+				signal=Signal(
+					reactive(value),  # pyright: ignore[reportUnknownArgumentType]
+					name=f"QueryParam.{param}",
+				),
+			)
+			self._slots[param] = slot
+			self._ensure_effects()
+			return slot.signal
+		if slot.codec != prop.codec or not values_equal(
+			slot.default, prop.default_value
+		):
+			raise ValueError(
+				f"QueryParam '{param}' is already registered as {slot.codec.label} "
+				+ f"with default {slot.default!r}"
+			)
+		return slot.signal
 
-	def unregister(self, binding: QueryParamBinding) -> None:
-		stack = self._bindings.get(binding.param)
-		if stack is None or binding not in stack:
+	def retain(self, prop: QueryParamProperty) -> QueryParamRegistration:
+		self.ensure(prop)
+		self._slots[prop.param_name].refs += 1
+		return QueryParamRegistration(self, prop.param_name)
+
+	def release(self, param: str) -> None:
+		slot = self._slots.get(param)
+		if slot is None:
 			return
-		stack.remove(binding)
-		if not stack:
-			del self._bindings[binding.param]
-		if not self._bindings:
-			if self._route_effect:
-				self._route_effect.dispose()
-				self._route_effect = None
-			if self._state_effect:
-				self._state_effect.dispose()
-				self._state_effect = None
+		slot.refs -= 1
+		if slot.refs > 0:
 			return
-		# Writer set or owning route may have changed.
-		self._rerun_effects()
+		del self._slots[param]
+		if self._slots:
+			return
+		if self._route_effect:
+			self._route_effect.dispose()
+			self._route_effect = None
+		if self._state_effect:
+			self._state_effect.dispose()
+			self._state_effect = None
 
 	def _ensure_effects(self) -> None:
 		if self._route_effect is None or self._state_effect is None:
@@ -504,48 +500,26 @@ class QueryParamSync(Disposable):
 		if self._state_effect:
 			self._state_effect.run()
 
-	def _rerun_effects(self) -> None:
-		if self._route_effect is not None:
-			self._route_effect.run()
-		if self._state_effect is not None:
-			self._state_effect.run()
-
-	def _active_bindings(self) -> list[QueryParamBinding]:
-		"""Bindings on the latest registration's route write the URL."""
-		writers: list[QueryParamBinding] = []
-		for stack in self._bindings.values():
-			if not stack:
-				continue
-			owner_route = stack[-1].route_path
-			writers.extend(
-				binding for binding in stack if binding.route_path == owner_route
-			)
-		return writers
-
-	def _apply_route_to_binding(self, binding: QueryParamBinding) -> None:
+	def _apply_route_to_slot(self, param: str, slot: _QueryParamSlot) -> None:
 		query_params = self.render.url["queryParams"]
-		raw = query_params.get(binding.param)
+		raw = query_params.get(param)
 		parsed = _parse_query_param_value(
 			raw,
-			default=binding.default(),
-			codec=binding.codec(),
-			param=binding.param,
+			default=slot.default,
+			codec=slot.codec,
+			param=param,
 		)
-		signal = binding.signal()
-		current = signal.value
-		if values_equal(current, parsed):
+		if values_equal(slot.signal.value, parsed):
 			return
-		binding.prop.__set__(binding.state, parsed)
+		value = reactive(parsed)
+		slot.signal.write(value)
 
 	def _sync_from_route(self) -> None:
 		_ = self.render.url["queryParams"]
 		if self._route_effect and self._route_effect.runs == 0:
 			return
-		# Every binding follows the URL, including displaced ones whose state is
-		# still mounted; only writing back to the URL is exclusive.
-		for stack in self._bindings.values():
-			for binding in stack:
-				self._apply_route_to_binding(binding)
+		for param, slot in self._slots.items():
+			self._apply_route_to_slot(param, slot)
 
 	def _sync_to_route(self) -> None:
 		with Untrack():
@@ -557,25 +531,16 @@ class QueryParamSync(Disposable):
 			# No route info yet: nothing to navigate relative to.
 			return
 		query_params = dict(current_params)
-		# Read every writer so the state effect tracks them all. When siblings
-		# disagree, keep the last value that differs from the current URL.
-		pending: dict[str, str | None] = {}
-		for binding in self._active_bindings():
-			signal = binding.signal()
-			value = signal.read()
-			codec = binding.codec()
-			if codec.kind == "list" and value is not None:
+		for param, slot in self._slots.items():
+			value = slot.signal.read()
+			if slot.codec.kind == "list" and value is not None:
 				value = unwrap(value)
 			serialized = _serialize_query_param_value(
 				value,
-				default=binding.default(),
-				codec=codec,
-				param=binding.param,
+				default=slot.default,
+				codec=slot.codec,
+				param=param,
 			)
-			current = current_params.get(binding.param)
-			if serialized != current or binding.param not in pending:
-				pending[binding.param] = serialized
-		for param, serialized in pending.items():
 			if serialized is None:
 				query_params.pop(param, None)
 			else:
@@ -613,4 +578,4 @@ class QueryParamSync(Disposable):
 		if self._state_effect:
 			self._state_effect.dispose()
 			self._state_effect = None
-		self._bindings.clear()
+		self._slots.clear()

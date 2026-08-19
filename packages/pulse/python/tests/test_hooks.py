@@ -189,7 +189,8 @@ def test_state_creates_different_instances_for_different_keys():
 		second = state(DummyState, key="b")
 
 	assert first is not second
-	assert first.dispose_calls == 0  # States not disposed on key change
+	assert first.dispose_calls == 1
+	assert second.dispose_calls == 0
 
 
 def test_state_disposes_direct_instances():
@@ -306,7 +307,7 @@ def test_state_disposes_all_on_unmount():
 	assert state_c.dispose_calls == 1
 
 
-def test_state_kept_when_not_called_in_render():
+def test_state_disposed_when_not_called_in_render():
 	ctx = HookContext()
 	flag = Signal(True)
 	states: list[DummyState] = []
@@ -329,8 +330,9 @@ def test_state_kept_when_not_called_in_render():
 		Comp.fn()  # type: ignore[attr-defined]
 
 	assert len(states) == 2
-	assert states[0] is states[1]
-	assert states[0].dispose_calls == 0
+	assert states[0] is not states[1]
+	assert states[0].dispose_calls == 1
+	assert states[1].dispose_calls == 0
 
 
 def test_state_branch_disambiguation_with_key():
@@ -356,7 +358,7 @@ def test_state_branch_disambiguation_with_key():
 	assert left is not None
 	assert right is not None
 	assert left is not right
-	assert left.dispose_calls == 0
+	assert left.dispose_calls == 1
 	assert right.dispose_calls == 0
 
 

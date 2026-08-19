@@ -36,6 +36,22 @@ class StateHookState(HookState):
 		super().on_render_start(render_cycle)
 		self.called_keys.clear()
 
+	@override
+	def on_render_end(self, render_cycle: int) -> None:
+		super().on_render_end(render_cycle)
+		# Dispose states that weren't seen this render (key change, or a
+		# conditional that became false). Mirrors EffectState.
+		for key in list(self.instances.keys()):
+			if key in self.called_keys:
+				continue
+			instance = self.instances.pop(key)
+			if instance.__disposed__:
+				continue
+			try:
+				instance.dispose()
+			except RuntimeError:
+				pass
+
 	def get_or_create_state(
 		self,
 		identity: Any,
@@ -160,7 +176,8 @@ def state(
 		- Key must be non-empty string
 		- Can only be called once per render with the same key
 		- Factory is only called on first render; subsequent renders return cached instance
-		- State is disposed when component unmounts
+		- State is disposed when the component unmounts, the key changes, or
+		  the call is skipped (e.g. a false conditional)
 	"""
 	if key is not None and not isinstance(key, str):
 		raise TypeError("state() key must be a string")

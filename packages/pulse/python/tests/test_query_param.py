@@ -5,6 +5,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pulse as ps
 import pytest
+from pulse.hooks.core import HookContext
 from pulse.messages import ServerMessage, ServerNavigateToMessage
 from pulse.reactive import flush_effects
 from pulse.render_session import RenderSession
@@ -403,6 +404,74 @@ class TestQueryParam:
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			assert QState.__dict__["q"].get_signal(state) is sig
 			assert state.q == "hello"
+
+	def test_state_key_change_releases_query_param_binding(self):
+		class QState(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+		session.connect(lambda _msg: None)
+		ctx = HookContext()
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			with ctx:
+				first = ps.state(QState, key="1")
+			with ctx:
+				second = ps.state(QState, key="2")
+
+		assert first.__disposed__
+		assert not second.__disposed__
+		bindings = session.query_param_sync._bindings["q"]  # pyright: ignore[reportPrivateUsage]
+		assert len(bindings) == 1
+		assert bindings[0].state is second
+
+	def test_path_id_state_key_does_not_collide(self):
+		"""Same mount, new path id: keyed ps.state must release the old binding."""
+
+		class ItemState(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		created: list[ItemState] = []
+
+		@ps.component
+		def ItemPage():
+			item_id = ps.route()["pathParams"]["id"]
+			item = ps.state(ItemState, key=item_id)
+			created.append(item)
+			return ps.div(item.q)
+
+		route = Route("items/:id", ItemPage)
+		session = RenderSession("test", RouteTree([route]))
+		app = ps.App(routes=[route])
+		mount_path = route.unique_path()
+
+		def info(item_id: str) -> RouteInfo:
+			return {
+				"pathname": f"/items/{item_id}",
+				"hash": "",
+				"query": "",
+				"queryParams": {"q": "hello"},
+				"pathParams": {"id": item_id},
+				"catchall": [],
+			}
+
+		with ps.PulseContext(app=app, render=session):
+			session.prerender([mount_path], info("1"))
+		mount = session.route_mounts[mount_path]
+		assert len(created) == 1
+		first = created[0]
+
+		if mount.effect is not None:
+			mount.effect.pause()
+		with ps.PulseContext(app=app, render=session, route=mount.route):
+			mount.route.info.update(info("2"))
+			mount.tree.rerender()
+
+		assert len(created) == 2
+		assert first.__disposed__
+		assert not created[1].__disposed__
+		bindings = session.query_param_sync._bindings["q"]  # pyright: ignore[reportPrivateUsage]
+		assert len(bindings) == 1
+		assert bindings[0].state is created[1]
 
 
 def make_two_route_session():

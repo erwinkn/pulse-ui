@@ -274,7 +274,7 @@ def ItemList():
 
 ### Disposal
 
-State is disposed when component unmounts. Override `on_dispose()` for cleanup:
+State is disposed when the component unmounts, a `ps.state` key changes, or the `ps.state` call is skipped. Override `on_dispose()` for cleanup:
 
 ```python
 class ConnectionState(ps.State):

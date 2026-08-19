@@ -52,7 +52,6 @@ from pulse.hooks.core import hooks
 from pulse.messages import (
 	ClientChannelMessage,
 	ClientChannelRequestMessage,
-	ClientChannelResponseMessage,
 	ClientMessage,
 	ClientPulseMessage,
 	Prerender,
@@ -1098,6 +1097,9 @@ class App:
 			# session would survive past its timeout.
 			if render.connected:
 				self._cancel_render_cleanup(rid)
+			if msg["type"] == "reply":
+				render.replies.apply(msg)
+				return
 			try:
 				if msg["type"] == "channel_message":
 					await self._handle_channel_message(render, session, msg)
@@ -1129,10 +1131,6 @@ class App:
 			elif msg["type"] == "detach":
 				render.detach(msg["path"])
 				render.channels.remove_route(msg["path"])
-			elif msg["type"] == "api_result":
-				render.handle_api_result(dict(msg))
-			elif msg["type"] == "js_result":
-				render.handle_js_result(dict(msg))
 			else:
 				logger.warning("Unknown message type received: %s", msg)
 			return Ok()
@@ -1167,39 +1165,35 @@ class App:
 	async def _handle_channel_message(
 		self, render: RenderSession, session: UserSession, msg: ClientChannelMessage
 	) -> None:
-		if msg.get("responseTo"):
-			msg = cast(ClientChannelResponseMessage, msg)
-			render.channels.handle_client_response(msg)
-		else:
-			channel_id = str(msg.get("channel", ""))
-			msg = cast(ClientChannelRequestMessage, msg)
+		channel_id = str(msg.get("channel", ""))
+		msg = cast(ClientChannelRequestMessage, msg)
 
-			async def _next() -> Ok[None]:
-				render.channels.handle_client_event(
-					render=render, session=session, message=msg
-				)
-				return Ok(None)
+		async def _next() -> Ok[None]:
+			render.channels.handle_client_event(
+				render=render, session=session, message=msg
+			)
+			return Ok(None)
 
-			def _normalize_message_response(res: Any) -> Ok[None] | Deny:
-				if isinstance(res, (Ok, Deny)):
-					return res  # type: ignore[return-value]
-				# Treat any other value as allow
-				return Ok(None)
+		def _normalize_message_response(res: Any) -> Ok[None] | Deny:
+			if isinstance(res, (Ok, Deny)):
+				return res  # type: ignore[return-value]
+			# Treat any other value as allow
+			return Ok(None)
 
-			with PulseContext.update(session=session, render=render):
-				res = await self.middleware.channel(
-					channel_id=channel_id,
-					event=msg.get("event", ""),
-					payload=msg.get("payload"),
-					request_id=msg.get("requestId"),
-					session=session.data,
-					next=_next,
-				)
-				res = _normalize_message_response(res)
+		with PulseContext.update(session=session, render=render):
+			res = await self.middleware.channel(
+				channel_id=channel_id,
+				event=msg.get("event", ""),
+				payload=msg.get("payload"),
+				request_id=msg.get("requestId"),
+				session=session.data,
+				next=_next,
+			)
+			res = _normalize_message_response(res)
 
-			if isinstance(res, Deny):
-				if req_id := msg.get("requestId"):
-					render.channels.send_error(channel_id, req_id, "Denied")
+		if isinstance(res, Deny):
+			if req_id := msg.get("requestId"):
+				render.channels.send_error(channel_id, req_id, "Denied")
 
 	def get_route(self, path: str):
 		return self.routes.find(path)

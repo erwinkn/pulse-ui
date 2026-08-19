@@ -5,7 +5,6 @@ from typing import Any, cast
 import pulse as ps
 import pytest
 from pulse.channel import ChannelClosed
-from pulse.messages import ClientChannelResponseMessage
 from pulse.user_session import UserSession
 
 
@@ -76,19 +75,8 @@ async def test_channel_request_resolves_on_response():
 	request_id = request_message.get("requestId")
 	assert request_id
 
-	real_render.channels.handle_client_response(
-		message=cast(
-			ClientChannelResponseMessage,
-			cast(
-				object,
-				{
-					"type": "channel_message",
-					"channel": "req-channel",
-					"responseTo": request_id,
-					"payload": {"x": 2},
-				},
-			),
-		)
+	real_render.replies.apply(
+		{"type": "reply", "id": str(request_id), "payload": {"x": 2}}
 	)
 
 	result = await pending

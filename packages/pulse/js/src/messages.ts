@@ -47,21 +47,17 @@ export interface ServerChannelRequestMessage {
 	event: string;
 	payload?: any;
 	requestId?: string;
-	responseTo?: never;
 	error?: any;
 }
 
-export interface ServerChannelResponseMessage {
-	type: "channel_message";
-	channel: string;
-	event?: undefined;
-	responseTo: string;
+export interface ReplyMessage {
+	type: "reply";
+	id: string;
 	payload?: any;
 	error?: any;
-	requestId?: never;
 }
 
-export type ServerChannelMessage = ServerChannelRequestMessage | ServerChannelResponseMessage;
+export type ServerChannelMessage = ServerChannelRequestMessage;
 
 export interface ServerNavigateToMessage {
 	type: "navigate_to";
@@ -99,8 +95,8 @@ export type ServerMessage =
 	| ServerReloadMessage
 	| ServerAttachAckMessage
 	| ServerChannelRequestMessage
-	| ServerChannelResponseMessage
-	| ServerJsExecMessage;
+	| ServerJsExecMessage
+	| ReplyMessage;
 
 export interface ClientCallbackMessage {
 	type: "callback";
@@ -125,50 +121,21 @@ export interface ClientDetachMessage {
 	path: string;
 }
 
-export interface ClientApiResultMessage {
-	type: "api_result";
-	id: string;
-	ok: boolean;
-	status: number;
-	headers: Record<string, string>;
-	body: any | null;
-}
-
 export interface ClientChannelRequestMessage {
 	type: "channel_message";
 	channel: string;
 	event: string;
 	payload?: any;
 	requestId?: string;
-	responseTo?: never;
 	error?: any;
 }
 
-export interface ClientChannelResponseMessage {
-	type: "channel_message";
-	channel: string;
-	event?: undefined;
-	responseTo: string;
-	payload?: any;
-	error?: any;
-	requestId?: never;
-}
-
-export type ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage;
-
-export interface ClientJsResultMessage {
-	type: "js_result";
-	id: string;
-	result: any;
-	error: string | null;
-}
+export type ClientChannelMessage = ClientChannelRequestMessage;
 
 export type ClientMessage =
 	| ClientAttachMessage
 	| ClientCallbackMessage
 	| ClientUpdateMessage
 	| ClientDetachMessage
-	| ClientApiResultMessage
 	| ClientChannelRequestMessage
-	| ClientChannelResponseMessage
-	| ClientJsResultMessage;
+	| ReplyMessage;

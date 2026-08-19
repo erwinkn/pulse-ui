@@ -9,8 +9,8 @@ import pulse as ps
 import pytest
 from pulse.messages import ClientMessage
 from pulse.middleware import Deny, Ok, PulseMiddleware
-from pulse.replies import PendingReplies
 from pulse.render_session import RenderSession
+from pulse.replies import PendingReplies
 from pulse.serializer import serialize
 from pulse.user_session import UserSession
 

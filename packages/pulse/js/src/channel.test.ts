@@ -1,39 +1,17 @@
 import { describe, expect, it, vi } from "bun:test";
 import { ChannelBridge, PulseChannelResetError } from "./channel";
 import { PulseSocketIOClient } from "./client";
-import type { ClientMessage, ReplyMessage } from "./messages";
+import type { ClientMessage } from "./messages";
+import { createPendingReplies } from "./replies";
 
 function makeClient() {
 	const sent: ClientMessage[] = [];
-	const pending = new Map<string, { resolve: (value: any) => void; reject: (error: any) => void }>();
 	const sendMessage = vi.fn(async (message: ClientMessage) => {
 		sent.push(message);
 	});
 	const client = {
 		sendMessage,
-		replies: {
-			register(id: string) {
-				return new Promise((resolve, reject) => {
-					pending.set(id, { resolve, reject });
-				});
-			},
-			reject(id: string, error: unknown) {
-				const entry = pending.get(id);
-				if (!entry) return;
-				pending.delete(id);
-				entry.reject(error);
-			},
-			apply(message: ReplyMessage) {
-				const entry = pending.get(message.id);
-				if (!entry) return;
-				pending.delete(message.id);
-				if (message.error != null) {
-					entry.reject(new PulseChannelResetError(String(message.error)));
-				} else {
-					entry.resolve(message.payload);
-				}
-			},
-		},
+		replies: createPendingReplies(),
 	};
 	const bridge = new ChannelBridge(client, "chan-1");
 	return { bridge, sent, sendMessage, client };
@@ -54,6 +32,23 @@ describe("ChannelBridge", () => {
 			payload: { foo: 2 },
 		});
 		await expect(pending).resolves.toEqual({ foo: 2 });
+	});
+
+	it("rejects wire errors as Error, not PulseChannelResetError", async () => {
+		const { bridge, sent, client } = makeClient();
+		const pending = bridge.request("boom");
+		const request = sent[0];
+		const requestId = request && "requestId" in request ? request.requestId : undefined;
+		client.replies.apply({
+			type: "reply",
+			id: requestId!,
+			error: "handler failed",
+		});
+		await expect(pending).rejects.toThrow("handler failed");
+		await pending.catch((error: unknown) => {
+			expect(error).toBeInstanceOf(Error);
+			expect(error).not.toBeInstanceOf(PulseChannelResetError);
+		});
 	});
 
 	it("dispatches events to registered handlers", () => {

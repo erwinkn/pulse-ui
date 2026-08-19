@@ -1184,7 +1184,7 @@ class App:
 
 		if isinstance(res, Deny):
 			if req_id := msg.get("requestId"):
-				render.channels.send_error(channel_id, req_id, "Denied")
+				render.channels.send_error(req_id, "Denied")
 
 	def get_route(self, path: str):
 		return self.routes.find(path)

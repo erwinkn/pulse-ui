@@ -89,11 +89,11 @@ async def test_replies_resolve_while_command_middleware_is_parked():
 	_bind_render(app, render, session)
 
 	api_fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
-	render._pending_api["corr-1"] = api_fut  # pyright: ignore[reportPrivateUsage]
+	render.replies.register("corr-1", api_fut)
 	js_fut: asyncio.Future[object] = asyncio.get_running_loop().create_future()
-	render._pending_js_results["js-1"] = js_fut  # pyright: ignore[reportPrivateUsage]
+	render.replies.register("js-1", js_fut)
 	channel_fut: asyncio.Future[object] = asyncio.get_running_loop().create_future()
-	render.channels.register_pending("req-1", channel_fut, "ch-1")
+	render.replies.register("req-1", channel_fut, cancel_key="ch-1")
 
 	# Live handler returns immediately; attach middleware is a detached task.
 	await _send(
@@ -225,7 +225,7 @@ async def test_parked_command_does_not_block_other_path_or_reply():
 	callback_key = next(iter(render.route_mounts["/b"].tree.callbacks))
 
 	api_fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
-	render._pending_api["corr-b"] = api_fut  # pyright: ignore[reportPrivateUsage]
+	render.replies.register("corr-b", api_fut)
 
 	await _send(
 		app,

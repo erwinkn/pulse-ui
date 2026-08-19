@@ -1200,7 +1200,7 @@ async def test_call_api_timeout():
 		await session.call_api("/test", timeout=0.01)
 
 	# Verify the pending API was cleaned up
-	assert len(session._pending_api) == 0  # pyright: ignore[reportPrivateUsage]
+	assert len(session.replies) == 0
 
 	session.close()
 
@@ -1274,7 +1274,7 @@ async def test_run_js_timeout():
 		await future
 
 	# Verify the pending JS result was cleaned up
-	assert len(session._pending_js_results) == 0  # pyright: ignore[reportPrivateUsage]
+	assert len(session.replies) == 0
 
 	session.close()
 
@@ -1329,14 +1329,14 @@ async def test_session_close_cancels_pending_api():
 	# Create a pending API future manually (simulating an in-flight request)
 	loop = asyncio.get_running_loop()
 	fut: asyncio.Future[Any] = loop.create_future()
-	session._pending_api["test-id"] = fut  # pyright: ignore[reportPrivateUsage]
+	session.replies.register("test-id", fut)
 
 	# Close the session
 	session.close()
 
 	# The future should be cancelled
 	assert fut.cancelled()
-	assert len(session._pending_api) == 0  # pyright: ignore[reportPrivateUsage]
+	assert len(session.replies) == 0
 
 
 @pytest.mark.asyncio
@@ -1355,14 +1355,14 @@ async def test_session_close_cancels_pending_js():
 	# Create a pending JS future manually
 	loop = asyncio.get_running_loop()
 	fut: asyncio.Future[Any] = loop.create_future()
-	session._pending_js_results["test-id"] = fut  # pyright: ignore[reportPrivateUsage]
+	session.replies.register("test-id", fut)
 
 	# Close the session
 	session.close()
 
 	# The future should be cancelled
 	assert fut.cancelled()
-	assert len(session._pending_js_results) == 0  # pyright: ignore[reportPrivateUsage]
+	assert len(session.replies) == 0
 
 
 @pytest.mark.asyncio

@@ -71,7 +71,7 @@ class GatingMessageMiddleware(PulseMiddleware):
 		*,
 		data: ClientMessage,
 		session: dict[str, Any],
-		next: Callable[[], Awaitable[Ok[None]]],
+		next: Callable[[], Awaitable[Ok[None] | Deny]],
 	) -> Ok[None] | Deny:
 		path = str(data.get("path", ""))
 		if self.gate_paths is None or path in self.gate_paths:

@@ -183,13 +183,6 @@ class PulseFastAPI(FastAPI):
 		super().include_router(router, **kwargs)
 
 
-def _normalize_message_response(res: Any) -> Ok[None] | Deny:
-	"""Middleware may return anything; treat everything but Ok/Deny as allow."""
-	if isinstance(res, (Ok, Deny)):
-		return res  # type: ignore[return-value]
-	return Ok(None)
-
-
 def _wrap_router_endpoints(router: APIRouter) -> None:
 	for route in router.routes:
 		if isinstance(route, APIRoute):
@@ -922,12 +915,7 @@ class App:
 			try:
 				with PulseContext.update(session=session, render=render):
 
-					async def _next():
-						return Ok(None)
-
-					def _normalize_connect_response(res: Any) -> ConnectResponse:
-						if isinstance(res, (Ok, Deny)):
-							return res  # type: ignore[return-value]
+					async def _next() -> ConnectResponse:
 						return Ok(None)
 
 					try:
@@ -936,7 +924,6 @@ class App:
 							session=session.data,
 							next=_next,
 						)
-						res = _normalize_connect_response(res)
 					except Exception as exc:
 						connect_error = exc
 						res = Ok(None)
@@ -1178,7 +1165,6 @@ class App:
 					session=session.data,
 					next=_next,
 				)
-				res = _normalize_message_response(res)
 			except Exception:
 				logger.exception("Error in message middleware")
 				return
@@ -1213,7 +1199,6 @@ class App:
 				session=session.data,
 				next=_next,
 			)
-			res = _normalize_message_response(res)
 
 		if isinstance(res, Deny):
 			if req_id := msg.get("requestId"):

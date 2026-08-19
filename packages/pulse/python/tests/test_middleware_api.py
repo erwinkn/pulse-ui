@@ -340,7 +340,6 @@ async def test_api_middleware_receives_session_after_setup():
 
 	assert response.status_code == 200
 	assert len(mw.sessions) == 1
-	# Session exists (cookie store mints one) even if empty at hook entry
 	assert isinstance(mw.sessions[0], dict)
 
 

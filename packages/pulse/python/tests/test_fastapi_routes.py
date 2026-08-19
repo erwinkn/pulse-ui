@@ -4,6 +4,7 @@ import httpx
 import pulse as ps
 import pytest
 from fastapi import APIRouter, Response
+from fastapi.routing import APIRoute
 from pulse.api_router import PulseAPIRoute
 from starlette.responses import PlainTextResponse
 from starlette.types import Receive, Scope, Send
@@ -72,9 +73,9 @@ async def test_included_fastapi_routers_unwrap_reactive_response_values():
 	assert response.json() == {"count": 3}
 
 
-def _route_at(app: ps.App, path: str):
+def _route_at(app: ps.App, path: str) -> APIRoute:
 	for route in app.fastapi.routes:
-		if getattr(route, "path", None) == path:
+		if isinstance(route, APIRoute) and route.path == path:
 			return route
 	raise AssertionError(f"no route {path}")
 

@@ -420,9 +420,8 @@ class TestQueryParam:
 
 		assert first.__disposed__
 		assert not second.__disposed__
-		bindings = session.query_param_sync._bindings["q"]  # pyright: ignore[reportPrivateUsage]
-		assert len(bindings) == 1
-		assert bindings[0].state is second
+		assert session.query_param_sync._slots["q"].refs == 1  # pyright: ignore[reportPrivateUsage]
+		assert second.q == ""
 
 	def test_state_key_change_disposes_eager_query_param_instance(self):
 		class QState(ps.State):
@@ -439,9 +438,8 @@ class TestQueryParam:
 
 		assert first.__disposed__
 		assert not second.__disposed__
-		bindings = session.query_param_sync._bindings["q"]  # pyright: ignore[reportPrivateUsage]
-		assert len(bindings) == 1
-		assert bindings[0].state is second
+		assert session.query_param_sync._slots["q"].refs == 1  # pyright: ignore[reportPrivateUsage]
+		assert second.q == ""
 
 	def test_path_id_state_key_does_not_collide(self):
 		"""Same mount, new path id: keyed ps.state must release the old binding."""
@@ -484,9 +482,8 @@ class TestQueryParam:
 		assert len(created) == 2
 		assert first.__disposed__
 		assert not created[1].__disposed__
-		bindings = session.query_param_sync._bindings["q"]  # pyright: ignore[reportPrivateUsage]
-		assert len(bindings) == 1
-		assert bindings[0].state is created[1]
+		assert session.query_param_sync._slots["q"].refs == 1  # pyright: ignore[reportPrivateUsage]
+		assert created[1].q == "hello"
 
 	def test_path_id_key_change_keeps_unkeyed_sibling(self):
 		class Shared(ps.State):

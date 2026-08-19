@@ -1283,6 +1283,32 @@ async def test_run_js_timeout():
 
 
 @pytest.mark.asyncio
+async def test_run_js_registers_before_send():
+	"""A synchronous send callback can reply immediately; the future
+	must already be registered."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	def on_send(msg: ServerMessage) -> None:
+		if msg["type"] == "js_exec":
+			session.replies.apply({"type": "reply", "id": msg["id"], "payload": 99})
+
+	session.connect(on_send)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	with ps.PulseContext.update(render=session, route=session.route_mounts["/a"].route):
+		future = session.run_js(get_answer(), result=True, timeout=1.0)
+
+	assert future is not None
+	assert future.done()
+	assert future.result() == 99
+	session.close()
+
+
+@pytest.mark.asyncio
 async def test_run_js_success_before_timeout():
 	"""Test that run_js future resolves when response arrives before timeout."""
 	routes = RouteTree([Route("a", simple_component)])

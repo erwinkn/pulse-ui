@@ -418,12 +418,13 @@ class QueryParamSync(Disposable):
 	the state that declared it, so a session-scoped state keeps syncing across
 	in-app navigation.
 
-	Bindings for one param name form a stack. The most recent registration owns
-	the URL; earlier ones still follow the URL but no longer write to it. This
-	tolerates the transient overlap during client-side navigation, where the
-	incoming route's states are created (via prerender) while the outgoing
-	route is still mounted. Two states of the *same* route claiming one param
-	is still an error.
+	Bindings for one param name form a stack. Every binding follows the URL.
+	Writers are every binding whose ``route_path`` matches the latest
+	registration's route: two states on the same route can share a param, and
+	changing either updates the URL so the other follows. An incoming route
+	takes write ownership during prerender overlap so the outgoing mount
+	cannot stomp the URL. Two writers with different values in one flush:
+	the last change wins.
 	"""
 
 	render: "RenderSession"
@@ -446,10 +447,9 @@ class QueryParamSync(Disposable):
 		ctx = PulseContext.get()
 		route_path = ctx.route.route_path if ctx.route is not None else None
 		stack = self._bindings.get(param)
+		had_bindings = bool(stack)
 		if stack is None:
 			stack = []
-		elif any(existing.route_path == route_path for existing in stack):
-			raise ValueError(f"QueryParam '{param}' is already bound in this route")
 		binding = QueryParamBinding(
 			param=param,
 			state=state,
@@ -460,13 +460,14 @@ class QueryParamSync(Disposable):
 		stack.append(binding)
 		self._bindings[param] = stack
 		self._ensure_effects()
+		if had_bindings:
+			self._rerun_effects()
 		return QueryParamRegistration(self, binding)
 
 	def unregister(self, binding: QueryParamBinding) -> None:
 		stack = self._bindings.get(binding.param)
 		if stack is None or binding not in stack:
 			return
-		was_owner = stack[-1] is binding
 		stack.remove(binding)
 		if not stack:
 			del self._bindings[binding.param]
@@ -478,14 +479,8 @@ class QueryParamSync(Disposable):
 				self._state_effect.dispose()
 				self._state_effect = None
 			return
-		if was_owner and self._state_effect is not None:
-			# Ownership moved to the previous binding: re-run so the state
-			# effect tracks the restored binding's signal. The restored binding
-			# has been following the URL all along, so this normally finds
-			# nothing to write and emits no navigation.
-			if self._route_effect is not None:
-				self._route_effect.run()
-			self._state_effect.run()
+		# Writer set or owning route may have changed.
+		self._rerun_effects()
 
 	def _ensure_effects(self) -> None:
 		if self._route_effect is None or self._state_effect is None:
@@ -509,9 +504,23 @@ class QueryParamSync(Disposable):
 		if self._state_effect:
 			self._state_effect.run()
 
+	def _rerun_effects(self) -> None:
+		if self._route_effect is not None:
+			self._route_effect.run()
+		if self._state_effect is not None:
+			self._state_effect.run()
+
 	def _active_bindings(self) -> list[QueryParamBinding]:
-		"""The binding that owns the URL for each param name."""
-		return [stack[-1] for stack in self._bindings.values() if stack]
+		"""Bindings on the latest registration's route write the URL."""
+		writers: list[QueryParamBinding] = []
+		for stack in self._bindings.values():
+			if not stack:
+				continue
+			owner_route = stack[-1].route_path
+			writers.extend(
+				binding for binding in stack if binding.route_path == owner_route
+			)
+		return writers
 
 	def _apply_route_to_binding(self, binding: QueryParamBinding) -> None:
 		query_params = self.render.url["queryParams"]
@@ -548,6 +557,9 @@ class QueryParamSync(Disposable):
 			# No route info yet: nothing to navigate relative to.
 			return
 		query_params = dict(current_params)
+		# Read every writer so the state effect tracks them all. When siblings
+		# disagree, keep the last value that differs from the current URL.
+		pending: dict[str, str | None] = {}
 		for binding in self._active_bindings():
 			signal = binding.signal()
 			value = signal.read()
@@ -560,10 +572,14 @@ class QueryParamSync(Disposable):
 				codec=codec,
 				param=binding.param,
 			)
+			current = current_params.get(binding.param)
+			if serialized != current or binding.param not in pending:
+				pending[binding.param] = serialized
+		for param, serialized in pending.items():
 			if serialized is None:
-				query_params.pop(binding.param, None)
+				query_params.pop(param, None)
 			else:
-				query_params[binding.param] = serialized
+				query_params[param] = serialized
 
 		if query_params == current_params:
 			return

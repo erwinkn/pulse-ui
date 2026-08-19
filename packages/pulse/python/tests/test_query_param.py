@@ -8,7 +8,7 @@ import pytest
 from pulse.messages import ServerMessage, ServerNavigateToMessage
 from pulse.reactive import flush_effects
 from pulse.render_session import RenderSession
-from pulse.routing import Route, RouteInfo, RouteTree
+from pulse.routing import Route, RouteContext, RouteInfo, RouteTree
 
 
 class MissingType:
@@ -46,6 +46,18 @@ def flush_query_param_sync(session: RenderSession) -> None:
 	effect = session.query_param_sync._state_effect  # pyright: ignore[reportPrivateUsage]
 	if effect is not None:
 		effect.flush()
+
+
+def navigations(messages: list[ServerMessage]) -> list[ServerNavigateToMessage]:
+	return [m for m in messages if m["type"] == "navigate_to"]
+
+
+def apply_navigate(route_ctx: RouteContext, msg: ServerNavigateToMessage) -> None:
+	parsed = urlparse(str(msg["path"]))
+	query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+	route_ctx.update(
+		make_route_info(parsed.path or "/", query_params=query, hash=parsed.fragment)
+	)
 
 
 class TestQueryParam:
@@ -296,19 +308,76 @@ class TestQueryParam:
 				state = TimeState()
 				assert state.ts.tzinfo == timezone.utc
 
-	def test_duplicate_param_in_same_route_raises(self):
+	def test_same_route_states_share_query_param(self):
 		class First(ps.State):
 			q: ps.QueryParam[str] = ""
 
 		class Second(ps.State):
 			q: ps.QueryParam[str] = ""
 
-		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
-		session.connect(lambda _msg: None)
+		app, session, route_ctx = make_context(
+			make_route_info("/", query_params={"q": "hello"})
+		)
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
-			_first = First()
-			with pytest.raises(ValueError, match="'q' is already bound"):
-				_second = Second()
+			first = First()
+			second = Second()
+			assert first.q == "hello"
+			assert second.q == "hello"
+			flush_effects()
+			messages.clear()
+
+			first.q = "from-first"
+			flush_query_param_sync(session)
+			navs = navigations(messages)
+			assert len(navs) == 1
+			assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["from-first"]
+			apply_navigate(route_ctx, navs[0])
+			flush_effects()
+			assert second.q == "from-first"
+
+			messages.clear()
+			second.q = "from-second"
+			flush_query_param_sync(session)
+			navs = navigations(messages)
+			assert len(navs) == 1
+			assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["from-second"]
+			apply_navigate(route_ctx, navs[0])
+			flush_effects()
+			assert first.q == "from-second"
+
+		bindings = session.query_param_sync._bindings["q"]  # pyright: ignore[reportPrivateUsage]
+		assert len(bindings) == 2
+
+	def test_same_route_sibling_unregister_keeps_remaining_writer(self):
+		class First(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		class Second(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		app, session, route_ctx = make_context(
+			make_route_info("/", query_params={"q": "hello"})
+		)
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			first = First()
+			second = Second()
+			flush_effects()
+			first.dispose()
+			flush_effects()
+			messages.clear()
+			second.q = "only-second"
+			flush_query_param_sync(session)
+
+		navs = navigations(messages)
+		assert len(navs) == 1
+		assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["only-second"]
+		bindings = session.query_param_sync._bindings["q"]  # pyright: ignore[reportPrivateUsage]
+		assert len(bindings) == 1
+		assert bindings[0].state is second
 
 
 def make_two_route_session():
@@ -322,10 +391,6 @@ def make_two_route_session():
 	routes = RouteTree([route_a, route_b])
 	app = ps.App(routes=[route_a, route_b])
 	return app, RenderSession("test", routes)
-
-
-def navigations(messages: list[ServerMessage]) -> list[ServerNavigateToMessage]:
-	return [m for m in messages if m["type"] == "navigate_to"]
 
 
 class TestQueryParamAcrossMounts:

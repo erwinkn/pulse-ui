@@ -137,7 +137,7 @@ async def test_inner_deny_reports_deny_error_to_client(
 
 	monkeypatch.setattr(render, "report_error", report_error)
 
-	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+	await app._deliver_socket_message(  # pyright: ignore[reportPrivateUsage]
 		"socket-1",
 		serialize({"type": "callback", "path": "/", "callback": "k", "args": []}),
 	)

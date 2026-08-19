@@ -342,7 +342,9 @@ class TestQueryParam:
 			flush_query_param_sync(session)
 			navs = navigations(messages)
 			assert len(navs) == 1
-			assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["from-second"]
+			assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == [
+				"from-second"
+			]
 			apply_navigate(route_ctx, navs[0])
 			flush_effects()
 			assert first.q == "from-second"

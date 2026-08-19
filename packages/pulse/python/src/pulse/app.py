@@ -50,7 +50,7 @@ from pulse.helpers import (
 )
 from pulse.hooks.core import hooks
 from pulse.messages import (
-	ClientChannelMessage,
+	ClientChannelRequestMessage,
 	ClientMessage,
 	ClientPulseMessage,
 	Prerender,
@@ -1047,33 +1047,37 @@ class App:
 
 	async def _handle_socket_message(self, sid: str, data: Serialized) -> None:
 		if sid in self._connecting_sockets:
-			self._queue_pending_socket_message(sid, data)
+			# Connect middleware is still running; the render is not mapped
+			# yet. _drain_pending_socket_messages replays these in order.
+			queue = self._pending_socket_messages.setdefault(sid, [])
+			if len(queue) >= MAX_PENDING_SOCKET_MESSAGES:
+				logger.warning(
+					"Dropping socket message for %s while connect is pending; queue is full",
+					sid,
+				)
+			else:
+				queue.append(data)
 			return
-		await self._process_socket_message(sid, data)
-
-	def _queue_pending_socket_message(self, sid: str, data: Serialized) -> None:
-		queue = self._pending_socket_messages.setdefault(sid, [])
-		if len(queue) >= MAX_PENDING_SOCKET_MESSAGES:
-			logger.warning(
-				"Dropping socket message for %s while connect is pending; queue is full",
-				sid,
-			)
-			return
-		queue.append(data)
+		await self._deliver_socket_message(sid, data)
 
 	async def _drain_pending_socket_messages(self, sid: str) -> None:
 		try:
 			while pending := self._pending_socket_messages.pop(sid, []):
 				for data in pending:
-					await self._process_socket_message(sid, data)
+					# First-load replay stays ordered (attach then callback).
+					await self._deliver_socket_message(sid, data)
 		finally:
 			self._connecting_sockets.discard(sid)
 
-	async def _process_socket_message(self, sid: str, data: Serialized) -> None:
+	async def _deliver_socket_message(self, sid: str, data: Serialized) -> None:
+		"""Route a packet to its render. `reply` completes a pending
+		request; commands await middleware. Live EVENTs are already tasks
+		(async_handlers). Connect drain awaits this so first-load attach
+		then callback stays ordered."""
+		# Route. The packet carries no render id; the socket does.
 		rid = self._socket_to_render.get(sid)
 		if not rid:
 			return
-		msg = cast(ClientMessage, deserialize(data))
 		render = self.render_sessions.get(rid)
 		if render is None:
 			return
@@ -1083,24 +1087,32 @@ class App:
 		session = self.user_sessions.get(owner_sid)
 		if session is None:
 			return
-		# Cancel any leftover cleanup for connected sessions. Never cancel
+		# Cancel leftover cleanup for connected sessions only. Never cancel
 		# for disconnected renders: nothing would reschedule it and the
 		# session would survive past its timeout.
 		if render.connected:
 			self._cancel_render_cleanup(rid)
+		# Dispatch. `reply` completes a pending request; everything else
+		# is a command (middleware + mutation).
+		msg = cast(ClientMessage, deserialize(data))
 		if msg["type"] == "reply":
 			render.replies.apply(msg)
-			return
+		else:
+			await self._run_command(render, session, msg)
+
+	async def _run_command(
+		self, render: RenderSession, session: UserSession, msg: ClientMessage
+	) -> None:
 		try:
 			if msg["type"] == "channel_message":
-				await self._handle_channel_message(render, session, msg)
-			else:
-				await self._handle_pulse_message(render, session, msg)
+				await self._handle_channel_command(render, session, msg)
+			elif msg["type"] != "reply":
+				await self._handle_pulse_command(render, session, msg)
 		except Exception as e:
 			path = msg.get("path", "")
 			render.report_error(path, "server", e)
 
-	async def _handle_pulse_message(
+	async def _handle_pulse_command(
 		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
 	) -> None:
 		async def _next() -> Ok[None]:
@@ -1146,8 +1158,11 @@ class App:
 					{"kind": "deny"},
 				)
 
-	async def _handle_channel_message(
-		self, render: RenderSession, session: UserSession, msg: ClientChannelMessage
+	async def _handle_channel_command(
+		self,
+		render: RenderSession,
+		session: UserSession,
+		msg: ClientChannelRequestMessage,
 	) -> None:
 		channel_id = str(msg.get("channel", ""))
 

@@ -38,6 +38,30 @@ async def test_reject_sets_exception_and_pops():
 
 
 @pytest.mark.asyncio
+async def test_apply_reply_resolves_payload():
+	replies = PendingReplies()
+	fut = _future()
+	replies.register("r1", fut)
+
+	replies.apply({"type": "reply", "id": "r1", "payload": 7})
+
+	assert fut.result() == 7
+	assert len(replies) == 0
+
+
+@pytest.mark.asyncio
+async def test_apply_reply_rejects_on_error():
+	replies = PendingReplies()
+	fut = _future()
+	replies.register("r1", fut)
+
+	replies.apply({"type": "reply", "id": "r1", "error": "boom"})
+
+	with pytest.raises(RuntimeError, match="boom"):
+		fut.result()
+
+
+@pytest.mark.asyncio
 async def test_unknown_id_is_a_noop():
 	replies = PendingReplies()
 	replies.resolve("missing", 1)

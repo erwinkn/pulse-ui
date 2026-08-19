@@ -112,12 +112,14 @@ async def test_replies_resolve_while_command_middleware_is_parked():
 		app,
 		"socket-1",
 		{
-			"type": "api_result",
+			"type": "reply",
 			"id": "corr-1",
-			"ok": True,
-			"status": 200,
-			"headers": {},
-			"body": {"n": 1},
+			"payload": {
+				"ok": True,
+				"status": 200,
+				"headers": {},
+				"body": {"n": 1},
+			},
 		},
 	)
 	assert api_fut.done()
@@ -127,7 +129,7 @@ async def test_replies_resolve_while_command_middleware_is_parked():
 	await _send(
 		app,
 		"socket-1",
-		{"type": "js_result", "id": "js-1", "result": 42, "error": None},
+		{"type": "reply", "id": "js-1", "payload": 42},
 	)
 	assert js_fut.done()
 	assert js_fut.result() == 42
@@ -135,13 +137,7 @@ async def test_replies_resolve_while_command_middleware_is_parked():
 	await _send(
 		app,
 		"socket-1",
-		{
-			"type": "channel_message",
-			"channel": "ch-1",
-			"event": None,
-			"responseTo": "req-1",
-			"payload": "pong",
-		},
+		{"type": "reply", "id": "req-1", "payload": "pong"},
 	)
 	assert channel_fut.done()
 	assert channel_fut.result() == "pong"
@@ -252,12 +248,14 @@ async def test_parked_command_does_not_block_other_path_or_reply():
 		app,
 		"socket-1",
 		{
-			"type": "api_result",
+			"type": "reply",
 			"id": "corr-b",
-			"ok": True,
-			"status": 200,
-			"headers": {},
-			"body": None,
+			"payload": {
+				"ok": True,
+				"status": 200,
+				"headers": {},
+				"body": None,
+			},
 		},
 	)
 

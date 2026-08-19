@@ -453,7 +453,7 @@ def run_js(
 ### Error Handling
 
 ```python
-from pulse import run_js, JsExecError
+from pulse import run_js
 
 @javascript
 def risky_operation():
@@ -462,7 +462,7 @@ def risky_operation():
 async def handle_action():
     try:
         result = await run_js(risky_operation(), result=True)
-    except JsExecError as e:
+    except RuntimeError as e:
         print(f"JS error: {e}")
 ```
 

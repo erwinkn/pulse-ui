@@ -1070,10 +1070,10 @@ class App:
 			self._connecting_sockets.discard(sid)
 
 	async def _deliver_socket_message(self, sid: str, data: Serialized) -> None:
-		"""Route a packet to its render. Replies resolve here; commands
-		await middleware. Live EVENTs are already tasks (async_handlers).
-		Connect drain awaits this so first-load attach then callback stays
-		ordered."""
+		"""Route a packet to its render. `reply` completes a pending
+		request; commands await middleware. Live EVENTs are already tasks
+		(async_handlers). Connect drain awaits this so first-load attach
+		then callback stays ordered."""
 		# Route. The packet carries no render id; the socket does.
 		rid = self._socket_to_render.get(sid)
 		if not rid:
@@ -1092,16 +1092,11 @@ class App:
 		# session would survive past its timeout.
 		if render.connected:
 			self._cancel_render_cleanup(rid)
-		# Dispatch. Replies and commands are disjoint types. channel_message
-		# is the one wire type that carries both; responseTo is the reply.
+		# Dispatch. `reply` completes a pending request; everything else
+		# is a command (middleware + mutation).
 		msg = cast(ClientMessage, deserialize(data))
-		kind = msg["type"]
-		if kind == "api_result":
-			render.handle_api_result(dict(msg))
-		elif kind == "js_result":
-			render.handle_js_result(dict(msg))
-		elif kind == "channel_message" and "responseTo" in msg:
-			render.channels.handle_client_response(msg)
+		if msg["type"] == "reply":
+			render.replies.apply(msg)
 		else:
 			await self._run_command(render, session, msg)
 

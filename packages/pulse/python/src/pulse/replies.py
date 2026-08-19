@@ -1,18 +1,20 @@
 """Single request/reply primitive for server-initiated exchanges.
 
 `call_api`, `run_js`, and `Channel.request` all follow the same protocol:
-mint a correlation id, park a future here, send a typed message to the
-client, and await the future. The matching client reply (`api_result`,
-`js_result`, channel `responseTo`) resolves it synchronously — no
-middleware, no awaits between packet and `set_result`.
+mint a correlation id, park a future here, send a typed command to the
+client, and await the future. The matching `{type: "reply", id}` packet
+resolves it synchronously — no middleware, no awaits between packet and
+`set_result`.
 
-Only the wire shapes and payload codecs differ; they stay at the call
-sites. Unknown or already-resolved ids are ignored: a reply can race a
-timeout or a channel close, and the loser must be a no-op.
+Command payloads stay at the call sites (`api_call`, `js_exec`,
+`channel_message`). Unknown or already-resolved ids are ignored: a reply
+can race a timeout or a channel close, and the loser must be a no-op.
 """
 
 import asyncio
 from typing import Any
+
+from pulse.messages import ReplyMessage
 
 
 class PendingReplies:
@@ -49,6 +51,15 @@ class PendingReplies:
 		if cancel_key is not None:
 			self._cancel_keys[reply_id] = cancel_key
 
+	def apply(self, message: ReplyMessage) -> None:
+		"""Resolve or reject from a `reply` packet. Missing ids are no-ops."""
+		reply_id = message["id"]
+		error = message.get("error")
+		if error is not None:
+			self.reject(reply_id, as_exception(error))
+		else:
+			self.resolve(reply_id, message.get("payload"))
+
 	def resolve(self, reply_id: str, value: Any) -> None:
 		future = self._pop(reply_id)
 		if future is not None and not future.done():
@@ -80,3 +91,9 @@ class PendingReplies:
 	def _pop(self, reply_id: str) -> asyncio.Future[Any] | None:
 		self._cancel_keys.pop(reply_id, None)
 		return self._futures.pop(reply_id, None)
+
+
+def as_exception(error: Any) -> BaseException:
+	if isinstance(error, BaseException):
+		return error
+	return RuntimeError(str(error))

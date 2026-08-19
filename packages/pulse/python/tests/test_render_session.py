@@ -1232,13 +1232,16 @@ async def test_call_api_success_before_timeout():
 	api_id = cast(Any, api_msgs[0])["id"]
 
 	# Simulate client response
-	session.handle_api_result(
+	session.replies.apply(
 		{
+			"type": "reply",
 			"id": api_id,
-			"ok": True,
-			"status": 200,
-			"headers": {},
-			"body": {"success": True},
+			"payload": {
+				"ok": True,
+				"status": 200,
+				"headers": {},
+				"body": {"success": True},
+			},
 		}
 	)
 
@@ -1304,7 +1307,7 @@ async def test_run_js_success_before_timeout():
 	exec_id = cast(Any, js_msgs[0])["id"]
 
 	# Simulate client response
-	session.handle_js_result({"id": exec_id, "result": 42, "error": None})
+	session.replies.apply({"type": "reply", "id": exec_id, "payload": 42})
 
 	# The future should resolve with the result
 	result = await future
@@ -1498,28 +1501,13 @@ async def test_session_close_cancels_cleanup_timers():
 	assert state_box[0].fired is False
 
 
-def test_handle_api_result_ignores_unknown_id():
-	"""Test that handle_api_result silently ignores unknown correlation IDs."""
+def test_apply_reply_ignores_unknown_id():
+	"""Unknown reply ids are no-ops."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
 	session.connect(lambda _: None)
 
-	# Should not raise
-	session.handle_api_result(
-		{"id": "unknown-id", "ok": True, "status": 200, "headers": {}, "body": None}
-	)
-
-	session.close()
-
-
-def test_handle_js_result_ignores_unknown_id():
-	"""Test that handle_js_result silently ignores unknown exec IDs."""
-	routes = RouteTree([Route("a", simple_component)])
-	session = RenderSession("test-id", routes)
-	session.connect(lambda _: None)
-
-	# Should not raise
-	session.handle_js_result({"id": "unknown-id", "result": 42, "error": None})
+	session.replies.apply({"type": "reply", "id": "unknown-id", "payload": None})
 
 	session.close()
 

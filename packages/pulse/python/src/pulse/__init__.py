@@ -1424,7 +1424,6 @@ from pulse.refs import (
 )
 
 # JavaScript execution
-from pulse.render_session import JsExecError as JsExecError
 from pulse.render_session import (
 	RenderSession as RenderSession,
 )

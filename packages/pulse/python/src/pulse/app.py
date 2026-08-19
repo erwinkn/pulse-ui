@@ -183,6 +183,13 @@ class PulseFastAPI(FastAPI):
 		super().include_router(router, **kwargs)
 
 
+def _normalize_message_response(res: Any) -> Ok[None] | Deny:
+	"""Middleware may return anything; treat everything but Ok/Deny as allow."""
+	if isinstance(res, (Ok, Deny)):
+		return res  # type: ignore[return-value]
+	return Ok(None)
+
+
 def _wrap_router_endpoints(router: APIRouter) -> None:
 	for route in router.routes:
 		if isinstance(route, APIRoute):
@@ -1053,21 +1060,18 @@ class App:
 
 	async def _handle_socket_message(self, sid: str, data: Serialized) -> None:
 		if sid in self._connecting_sockets:
-			self._queue_pending_socket_message(sid, data)
+			# Connect middleware is still running; the render is not mapped
+			# yet. _drain_pending_socket_messages replays these in order.
+			queue = self._pending_socket_messages.setdefault(sid, [])
+			if len(queue) >= MAX_PENDING_SOCKET_MESSAGES:
+				logger.warning(
+					"Dropping socket message for %s while connect is pending; queue is full",
+					sid,
+				)
+			else:
+				queue.append(data)
 			return
-		# Live socket: detach commands so this handler returns. Replies
-		# resolve inline and must not wait on middleware.
 		await self._deliver_socket_message(sid, data, detach=True)
-
-	def _queue_pending_socket_message(self, sid: str, data: Serialized) -> None:
-		queue = self._pending_socket_messages.setdefault(sid, [])
-		if len(queue) >= MAX_PENDING_SOCKET_MESSAGES:
-			logger.warning(
-				"Dropping socket message for %s while connect is pending; queue is full",
-				sid,
-			)
-			return
-		queue.append(data)
 
 	async def _drain_pending_socket_messages(self, sid: str) -> None:
 		try:
@@ -1078,48 +1082,41 @@ class App:
 		finally:
 			self._connecting_sockets.discard(sid)
 
-	async def _process_socket_message(self, sid: str, data: Serialized) -> None:
-		await self._deliver_socket_message(sid, data, detach=False)
-
 	async def _deliver_socket_message(
 		self, sid: str, data: Serialized, *, detach: bool
 	) -> None:
-		inbound = self._resolve_socket_inbound(sid, data)
-		if inbound is None:
-			return
-		render, session, msg = inbound
-		if self._apply_reply(render, msg):
-			return
-		if detach:
-			self._tasks.create_task(
-				self._run_command(render, session, msg),
-				name=f"inbound:{render.id}:{msg['type']}",
-			)
-			return
-		await self._run_command(render, session, msg)
-
-	def _resolve_socket_inbound(
-		self, sid: str, data: Serialized
-	) -> tuple[RenderSession, UserSession, ClientMessage] | None:
+		"""Route a packet to its render, then dispatch: replies resolve
+		inline; commands may await middleware, so the live socket detaches
+		them (`detach=True`) to keep the Socket.IO handler prompt."""
+		# Route. The packet carries no render id; the socket does.
 		rid = self._socket_to_render.get(sid)
 		if not rid:
-			return None
-		msg = cast(ClientMessage, deserialize(data))
+			return
 		render = self.render_sessions.get(rid)
 		if render is None:
-			return None
+			return
 		owner_sid = self._render_to_user.get(rid)
 		if owner_sid is None:
-			return None
+			return
 		session = self.user_sessions.get(owner_sid)
 		if session is None:
-			return None
+			return
 		# Cancel leftover cleanup for connected sessions only. Never cancel
 		# for disconnected renders: nothing would reschedule it and the
 		# session would survive past its timeout.
 		if render.connected:
 			self._cancel_render_cleanup(rid)
-		return render, session, msg
+		# Dispatch.
+		msg = cast(ClientMessage, deserialize(data))
+		if self._apply_reply(render, msg):
+			return
+		if detach:
+			self._tasks.create_task(
+				self._run_command(render, session, msg),
+				name=f"inbound:{rid}:{msg['type']}",
+			)
+		else:
+			await self._run_command(render, session, msg)
 
 	def _apply_reply(self, render: RenderSession, msg: ClientMessage) -> bool:
 		"""Resolve a protocol reply. Returns False if `msg` is a command."""
@@ -1141,19 +1138,16 @@ class App:
 	) -> None:
 		try:
 			if msg["type"] == "channel_message":
-				await self._handle_channel_message(render, session, msg)
+				await self._handle_channel_command(render, session, msg)
 			else:
-				await self._handle_pulse_message(render, session, msg)
+				await self._handle_pulse_command(render, session, msg)
 		except Exception as e:
 			path = msg.get("path", "")
 			render.report_error(path, "server", e)
 
-	async def _handle_pulse_message(
+	async def _handle_pulse_command(
 		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
 	) -> None:
-		if self._apply_reply(render, msg):
-			return
-
 		async def _next() -> Ok[None]:
 			if msg["type"] == "attach":
 				attached = render.attach(msg["path"], msg["routeInfo"])
@@ -1177,12 +1171,6 @@ class App:
 				logger.warning("Unknown message type received: %s", msg)
 			return Ok()
 
-		def _normalize_message_response(res: Any) -> Ok[None] | Deny:
-			if isinstance(res, (Ok, Deny)):
-				return res  # type: ignore[return-value]
-			# Treat any other value as allow
-			return Ok(None)
-
 		with PulseContext.update(session=session, render=render):
 			try:
 				res = await self.middleware.message(
@@ -1204,12 +1192,9 @@ class App:
 					{"kind": "deny"},
 				)
 
-	async def _handle_channel_message(
+	async def _handle_channel_command(
 		self, render: RenderSession, session: UserSession, msg: ClientChannelMessage
 	) -> None:
-		if self._apply_reply(render, msg):
-			return
-
 		channel_id = str(msg.get("channel", ""))
 		msg = cast(ClientChannelRequestMessage, msg)
 
@@ -1217,12 +1202,6 @@ class App:
 			render.channels.handle_client_event(
 				render=render, session=session, message=msg
 			)
-			return Ok(None)
-
-		def _normalize_message_response(res: Any) -> Ok[None] | Deny:
-			if isinstance(res, (Ok, Deny)):
-				return res  # type: ignore[return-value]
-			# Treat any other value as allow
 			return Ok(None)
 
 		with PulseContext.update(session=session, render=render):

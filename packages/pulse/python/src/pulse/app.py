@@ -427,8 +427,10 @@ class App:
 			lifespan=self.fastapi_lifespan,
 		)
 		self.fastapi.router.route_class = PulseAPIRoute
+		# EVENT handlers run as tasks so a parked command does not stall
+		# the receive loop. CONNECT is still awaited by python-socketio.
 		self.sio = socketio.AsyncServer(
-			async_mode="asgi", cors_allowed_origins="*", async_handlers=False
+			async_mode="asgi", cors_allowed_origins="*", async_handlers=True
 		)
 		self.asgi = socketio.ASGIApp(self.sio, self.fastapi)
 
@@ -1058,23 +1060,22 @@ class App:
 			else:
 				queue.append(data)
 			return
-		await self._deliver_socket_message(sid, data, detach=True)
+		await self._deliver_socket_message(sid, data)
 
 	async def _drain_pending_socket_messages(self, sid: str) -> None:
 		try:
 			while pending := self._pending_socket_messages.pop(sid, []):
 				for data in pending:
 					# First-load replay stays ordered (attach then callback).
-					await self._deliver_socket_message(sid, data, detach=False)
+					await self._deliver_socket_message(sid, data)
 		finally:
 			self._connecting_sockets.discard(sid)
 
-	async def _deliver_socket_message(
-		self, sid: str, data: Serialized, *, detach: bool
-	) -> None:
-		"""Route a packet to its render, then dispatch: replies resolve
-		inline; commands may await middleware, so the live socket detaches
-		them (`detach=True`) to keep the Socket.IO handler prompt."""
+	async def _deliver_socket_message(self, sid: str, data: Serialized) -> None:
+		"""Route a packet to its render. Replies resolve here; commands
+		await middleware. Live EVENTs are already tasks (async_handlers).
+		Connect drain awaits this so first-load attach then callback stays
+		ordered."""
 		# Route. The packet carries no render id; the socket does.
 		rid = self._socket_to_render.get(sid)
 		if not rid:
@@ -1097,13 +1098,7 @@ class App:
 		msg = cast(ClientMessage, deserialize(data))
 		if self._apply_reply(render, msg):
 			return
-		if detach:
-			self._tasks.create_task(
-				self._run_command(render, session, msg),
-				name=f"inbound:{rid}:{msg['type']}",
-			)
-		else:
-			await self._run_command(render, session, msg)
+		await self._run_command(render, session, msg)
 
 	def _apply_reply(self, render: RenderSession, msg: ClientMessage) -> bool:
 		"""Resolve a protocol reply. Returns False if `msg` is a command."""

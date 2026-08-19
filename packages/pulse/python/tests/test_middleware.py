@@ -140,7 +140,6 @@ async def test_inner_deny_reports_deny_error_to_client(
 	await app._deliver_socket_message(  # pyright: ignore[reportPrivateUsage]
 		"socket-1",
 		serialize({"type": "callback", "path": "/", "callback": "k", "args": []}),
-		detach=False,
 	)
 
 	assert len(reported) == 1

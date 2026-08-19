@@ -51,7 +51,6 @@ from pulse.helpers import (
 from pulse.hooks.core import hooks
 from pulse.messages import (
 	ClientChannelMessage,
-	ClientChannelRequestMessage,
 	ClientMessage,
 	ClientPulseMessage,
 	Prerender,
@@ -1154,7 +1153,7 @@ class App:
 				return
 
 			if isinstance(res, Deny):
-				path = cast(str, msg.get("path", "api_response"))
+				path = msg.get("path", "api_response")
 				render.report_error(
 					path,
 					"server",
@@ -1166,7 +1165,6 @@ class App:
 		self, render: RenderSession, session: UserSession, msg: ClientChannelMessage
 	) -> None:
 		channel_id = str(msg.get("channel", ""))
-		msg = cast(ClientChannelRequestMessage, msg)
 
 		async def _next() -> Ok[None]:
 			render.channels.handle_client_event(

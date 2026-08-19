@@ -193,6 +193,54 @@ def test_state_creates_different_instances_for_different_keys():
 	assert second.dispose_calls == 0
 
 
+def test_state_loop_key_reorder_keeps_surviving_key():
+	"""[a,b] → [c,a] must keep `a`. Mid-render eviction would kill it when creating `c`."""
+	ctx = HookContext()
+	items = Signal(["a", "b"])
+	seen: dict[str, DummyState] = {}
+
+	@ps.component
+	def Comp():
+		for item in items():
+			seen[item] = state(lambda i=item: DummyState(), key=item)
+		return None
+
+	with ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+	first_a = seen["a"]
+	first_b = seen["b"]
+
+	items.write(["c", "a"])
+	with ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+
+	assert seen["a"] is first_a
+	assert first_a.dispose_calls == 0
+	assert first_b.dispose_calls == 1
+	assert seen["c"] is not first_a
+	assert seen["c"].dispose_calls == 0
+
+
+def test_state_key_change_keeps_unkeyed_sibling():
+	"""Keyed replacement must not dispose an unkeyed sibling called later in the same render."""
+	ctx = HookContext()
+	item_id = Signal("1")
+
+	with ctx:
+		keyed = state(DummyState, key=item_id())
+		unkeyed = state(DummyState)
+
+	item_id.write("2")
+	with ctx:
+		keyed2 = state(DummyState, key=item_id())
+		unkeyed2 = state(DummyState)
+
+	assert keyed2 is not keyed
+	assert keyed.dispose_calls == 1
+	assert unkeyed2 is unkeyed
+	assert unkeyed.dispose_calls == 0
+
+
 def test_state_disposes_direct_instances():
 	ctx = HookContext()
 

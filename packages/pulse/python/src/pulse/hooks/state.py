@@ -39,8 +39,9 @@ class StateHookState(HookState):
 	@override
 	def on_render_end(self, render_cycle: int) -> None:
 		super().on_render_end(render_cycle)
-		# Dispose states that weren't seen this render (key change, or a
-		# conditional that became false). Mirrors EffectState.
+		# Unseen keys only, and only here. Mid-render `called_keys` is "reached
+		# so far", not "live this render" — evicting then would dispose a key
+		# reused later in a loop, or an unkeyed sibling after a keyed replacement.
 		for key in list(self.instances.keys()):
 			if key in self.called_keys:
 				continue

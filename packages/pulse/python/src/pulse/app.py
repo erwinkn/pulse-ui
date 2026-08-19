@@ -50,7 +50,6 @@ from pulse.helpers import (
 )
 from pulse.hooks.core import hooks
 from pulse.messages import (
-	ClientChannelMessage,
 	ClientChannelRequestMessage,
 	ClientChannelResponseMessage,
 	ClientMessage,
@@ -1094,33 +1093,29 @@ class App:
 		# session would survive past its timeout.
 		if render.connected:
 			self._cancel_render_cleanup(rid)
-		# Dispatch.
+		# Dispatch. Replies and commands are disjoint types. channel_message
+		# is the one wire type that carries both; responseTo is the reply.
 		msg = cast(ClientMessage, deserialize(data))
-		if self._apply_reply(render, msg):
-			return
-		await self._run_command(render, session, msg)
-
-	def _apply_reply(self, render: RenderSession, msg: ClientMessage) -> bool:
-		"""Resolve a protocol reply. Returns False if `msg` is a command."""
-		if msg["type"] == "api_result":
+		kind = msg["type"]
+		if kind == "api_result":
 			render.handle_api_result(dict(msg))
-			return True
-		if msg["type"] == "js_result":
+		elif kind == "js_result":
 			render.handle_js_result(dict(msg))
-			return True
-		if msg["type"] == "channel_message" and msg.get("responseTo"):
+		elif kind == "channel_message" and "responseTo" in msg:
 			render.channels.handle_client_response(
 				cast(ClientChannelResponseMessage, msg)
 			)
-			return True
-		return False
+		else:
+			await self._run_command(render, session, msg)
 
 	async def _run_command(
 		self, render: RenderSession, session: UserSession, msg: ClientMessage
 	) -> None:
 		try:
 			if msg["type"] == "channel_message":
-				await self._handle_channel_command(render, session, msg)
+				await self._handle_channel_command(
+					render, session, cast(ClientChannelRequestMessage, msg)
+				)
 			else:
 				await self._handle_pulse_command(render, session, msg)
 		except Exception as e:
@@ -1174,10 +1169,12 @@ class App:
 				)
 
 	async def _handle_channel_command(
-		self, render: RenderSession, session: UserSession, msg: ClientChannelMessage
+		self,
+		render: RenderSession,
+		session: UserSession,
+		msg: ClientChannelRequestMessage,
 	) -> None:
 		channel_id = str(msg.get("channel", ""))
-		msg = cast(ClientChannelRequestMessage, msg)
 
 		async def _next() -> Ok[None]:
 			render.channels.handle_client_event(

@@ -51,7 +51,6 @@ from pulse.helpers import (
 from pulse.hooks.core import hooks
 from pulse.messages import (
 	ClientChannelRequestMessage,
-	ClientChannelResponseMessage,
 	ClientMessage,
 	ClientPulseMessage,
 	Prerender,
@@ -1102,9 +1101,7 @@ class App:
 		elif kind == "js_result":
 			render.handle_js_result(dict(msg))
 		elif kind == "channel_message" and "responseTo" in msg:
-			render.channels.handle_client_response(
-				cast(ClientChannelResponseMessage, msg)
-			)
+			render.channels.handle_client_response(msg)
 		else:
 			await self._run_command(render, session, msg)
 

@@ -7,7 +7,7 @@ import pulse as ps
 import pytest
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from pulse.context import PulseContext
+from pulse.app import AppStatus
 from pulse.middleware import ApiResponse
 from pulse.plugin import Plugin
 from pulse.request import PulseRequest
@@ -108,14 +108,20 @@ def prerender_home():
 async def _client(
 	app: ps.App, *, raise_app_exceptions: bool = True
 ) -> AsyncIterator[httpx.AsyncClient]:
+	owns_setup = app.status < AppStatus.initialized
+	if owns_setup:
+		app.setup("http://testserver")
 	transport = httpx.ASGITransport(
 		app=app.fastapi, raise_app_exceptions=raise_app_exceptions
 	)
-	with PulseContext(app=app):
+	try:
 		async with httpx.AsyncClient(
 			transport=transport, base_url="http://testserver"
 		) as client:
 			yield client
+	finally:
+		if owns_setup:
+			await app.close()
 
 
 @pytest.mark.asyncio

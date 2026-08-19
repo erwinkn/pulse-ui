@@ -8,7 +8,7 @@ import pytest
 from pulse.messages import ServerMessage, ServerNavigateToMessage
 from pulse.reactive import flush_effects
 from pulse.render_session import RenderSession
-from pulse.routing import Route, RouteContext, RouteInfo, RouteTree
+from pulse.routing import Route, RouteInfo, RouteTree
 
 
 class MissingType:
@@ -50,14 +50,6 @@ def flush_query_param_sync(session: RenderSession) -> None:
 
 def navigations(messages: list[ServerMessage]) -> list[ServerNavigateToMessage]:
 	return [m for m in messages if m["type"] == "navigate_to"]
-
-
-def apply_navigate(route_ctx: RouteContext, msg: ServerNavigateToMessage) -> None:
-	parsed = urlparse(str(msg["path"]))
-	query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
-	route_ctx.update(
-		make_route_info(parsed.path or "/", query_params=query, hash=parsed.fragment)
-	)
 
 
 class TestQueryParam:
@@ -325,32 +317,30 @@ class TestQueryParam:
 			second = Second()
 			assert first.q == "hello"
 			assert second.q == "hello"
+			assert First.__dict__["q"].get_signal(first) is Second.__dict__[
+				"q"
+			].get_signal(second)
 			flush_effects()
 			messages.clear()
 
 			first.q = "from-first"
+			assert second.q == "from-first"
 			flush_query_param_sync(session)
 			navs = navigations(messages)
 			assert len(navs) == 1
 			assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["from-first"]
-			apply_navigate(route_ctx, navs[0])
-			flush_effects()
-			assert second.q == "from-first"
 
 			messages.clear()
 			second.q = "from-second"
+			assert first.q == "from-second"
 			flush_query_param_sync(session)
 			navs = navigations(messages)
 			assert len(navs) == 1
 			assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == [
 				"from-second"
 			]
-			apply_navigate(route_ctx, navs[0])
-			flush_effects()
-			assert first.q == "from-second"
 
-		bindings = session.query_param_sync._bindings["q"]  # pyright: ignore[reportPrivateUsage]
-		assert len(bindings) == 2
+		assert session.query_param_sync._slots["q"].refs == 2  # pyright: ignore[reportPrivateUsage]
 
 	def test_same_route_sibling_unregister_keeps_remaining_writer(self):
 		class First(ps.State):
@@ -377,9 +367,26 @@ class TestQueryParam:
 		navs = navigations(messages)
 		assert len(navs) == 1
 		assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["only-second"]
-		bindings = session.query_param_sync._bindings["q"]  # pyright: ignore[reportPrivateUsage]
-		assert len(bindings) == 1
-		assert bindings[0].state is second
+		assert session.query_param_sync._slots["q"].refs == 1  # pyright: ignore[reportPrivateUsage]
+
+	def test_conflicting_codec_or_default_raises(self):
+		class AsStr(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		class AsInt(ps.State):
+			q: ps.QueryParam[int] = 0
+
+		class OtherDefault(ps.State):
+			q: ps.QueryParam[str] = "other"
+
+		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+		session.connect(lambda _msg: None)
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			_first = AsStr()
+			with pytest.raises(ValueError, match="already registered as str"):
+				AsInt()
+			with pytest.raises(ValueError, match="already registered as str"):
+				OtherDefault()
 
 
 def make_two_route_session():
@@ -485,8 +492,8 @@ class TestQueryParamAcrossMounts:
 
 		session.close()
 
-	def test_same_param_on_another_route_takes_over(self):
-		"""Overlapping mounts must not collide; the newest binding owns the URL."""
+	def test_same_param_on_another_route_shares_slot(self):
+		"""Overlapping mounts share the session slot; either write updates both."""
 
 		class FiltersA(ps.State):
 			q: ps.QueryParam[str] = ""
@@ -505,7 +512,6 @@ class TestQueryParamAcrossMounts:
 			a = FiltersA()
 			flush_effects()
 
-		# The new route is prerendered while /a is still mounted: no error.
 		info_b = make_route_info("/b", query_params={"q": "hello"})
 		session.prerender(["/b"], info_b)
 		with ps.PulseContext(
@@ -514,35 +520,30 @@ class TestQueryParamAcrossMounts:
 			b = FiltersB()
 			flush_effects()
 
-		# The newest binding writes the URL...
+		assert FiltersA.__dict__["q"].get_signal(a) is FiltersB.__dict__[
+			"q"
+		].get_signal(b)
+
 		messages.clear()
 		b.q = "from-b"
+		assert a.q == "from-b"
 		flush_query_param_sync(session)
 		navs = navigations(messages)
 		assert len(navs) == 1
 		assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["from-b"]
 
-		# ...the displaced one does not, while it is still mounted.
 		messages.clear()
 		a.q = "from-a"
+		assert b.q == "from-a"
 		flush_query_param_sync(session)
-		assert navigations(messages) == []
-
-		# Both still follow the URL.
-		session.update_route("/b", make_route_info("/b", query_params={"q": "shared"}))
-		session.update_route("/a", make_route_info("/a", query_params={"q": "shared"}))
-		flush_effects()
-		assert a.q == "shared"
-		assert b.q == "shared"
+		navs = navigations(messages)
+		assert len(navs) == 1
+		assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["from-a"]
 
 		session.close()
 
-	def test_restored_binding_regains_url_ownership(self):
-		"""Disposing the owning binding hands the URL back to the previous one.
-
-		The restored binding must be re-tracked by the state effect, or its
-		changes silently stop writing to the URL.
-		"""
+	def test_release_keeps_slot_while_other_state_remains(self):
+		"""Disposing one registrant leaves the session slot for the other."""
 
 		class Filters(ps.State):
 			q: ps.QueryParam[str] = ""

@@ -102,6 +102,7 @@ def main() -> None:
 			daemon=True,
 		).start()
 		if os.name == "nt":
+			# Inherited listen sockets cannot be served by the Proactor loop.
 			asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 		asyncio.run(server.serve(sockets=listeners))
 		raise SystemExit(0)

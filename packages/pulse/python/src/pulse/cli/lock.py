@@ -6,17 +6,16 @@ Provides typed helpers for coordinating exclusive access to a Pulse web root.
 
 from __future__ import annotations
 
-import ctypes
 import json
 import os
 import platform as platform_module
 import signal
 import socket
 import time
-from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
+from typing import Any
 
 from pulse.cli.helpers import ensure_gitignore_has, os_family
 
@@ -29,7 +28,11 @@ ERROR_INVALID_PARAMETER = 87
 WAIT_TIMEOUT = 0x102
 
 
-def _kernel32() -> ctypes.WinDLL:
+def _kernel32() -> Any:
+	# ctypes.wintypes is importable on Windows only.
+	import ctypes
+	from ctypes import wintypes
+
 	kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 	kernel32.OpenProcess.argtypes = [
 		wintypes.DWORD,
@@ -141,6 +144,8 @@ def _coerce_int(value: object) -> int | None:
 def is_process_alive(pid: int) -> bool:
 	"""Check if a process with the given PID is running."""
 	if os_family() == "windows":
+		import ctypes
+
 		kernel32 = _kernel32()
 		handle = kernel32.OpenProcess(
 			PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
@@ -223,6 +228,8 @@ def interrupt_active_dev_server(
 
 def _interrupt_process(pid: int) -> None:
 	if os_family() == "windows":
+		import ctypes
+
 		kernel32 = _kernel32()
 		handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
 		if not handle:

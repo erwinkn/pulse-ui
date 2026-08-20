@@ -224,17 +224,24 @@ class DevSupervisor:
 		finally:
 			for listener in self.listeners:
 				listener.set_inheritable(False)
-		result = await self._race(
-			"changed",
-			"backend",
-			"web",
-			extra=asyncio.create_task(self._backend_ready.wait()),
-		)
-		if result == "ready":
-			return True
-		await self._stop(self.backend)
-		self.backend = None
-		return False
+		waiter = asyncio.create_task(self._backend_ready.wait())
+		try:
+			result = await self._race(
+				"changed",
+				"backend",
+				"web",
+				extra=waiter,
+			)
+			if result == "ready":
+				return True
+			await self._stop(self.backend)
+			self.backend = None
+			return False
+		finally:
+			if not waiter.done():
+				waiter.cancel()
+				with contextlib.suppress(asyncio.CancelledError):
+					await waiter
 
 	async def _wait_vite_signal(
 		self, event: asyncio.Event, *, timeout: float | None

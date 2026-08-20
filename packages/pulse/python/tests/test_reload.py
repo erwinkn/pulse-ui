@@ -278,6 +278,28 @@ async def test_rapid_edit_kills_starting_backend(
 
 
 @pytest.mark.asyncio
+async def test_interrupted_backend_start_cancels_readiness_waiter(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	install_process_script(monkeypatch, events, [("server", "stall")])
+	waiters: list[asyncio.Task[Any]] = []
+
+	async def race(*_names: str, extra: asyncio.Task[Any] | None = None) -> str:
+		assert extra is not None
+		waiters.append(extra)
+		return "changed"
+
+	monkeypatch.setattr(supervisor, "_race", race)
+
+	assert not await supervisor._replace_backend()  # pyright: ignore[reportPrivateUsage]
+	assert len(waiters) == 1
+	assert waiters[0].done()
+	assert waiters[0].cancelled()
+
+
+@pytest.mark.asyncio
 async def test_vite_crash_returns_its_exit_code(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

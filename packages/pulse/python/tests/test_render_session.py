@@ -1358,9 +1358,7 @@ async def test_session_close_cancels_pending_api():
 		session.attach("/a", make_route_info("/a"))
 
 	# Create a pending API future manually (simulating an in-flight request)
-	loop = asyncio.get_running_loop()
-	fut: asyncio.Future[Any] = loop.create_future()
-	session.replies.register("test-id", fut)
+	fut = session.replies.register("test-id")
 
 	# Close the session
 	session.close()
@@ -1384,9 +1382,7 @@ async def test_session_close_cancels_pending_js():
 		session.attach("/a", make_route_info("/a"))
 
 	# Create a pending JS future manually
-	loop = asyncio.get_running_loop()
-	fut: asyncio.Future[Any] = loop.create_future()
-	session.replies.register("test-id", fut)
+	fut = session.replies.register("test-id")
 
 	# Close the session
 	session.close()

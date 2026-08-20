@@ -2,6 +2,8 @@
 
 Async data fetching with caching, loading states, and automatic refetching.
 
+On each State instance, query, infinite-query, and mutation descriptors store a separate result wrapper per descriptor. This is independent of query keys, which still control shared query data. Inheritance preserves the defining descriptor; fresh same-name subclass descriptors get separate wrappers, including through `super()`. Assigning one descriptor object to multiple members or classes raises `TypeError`; create a fresh descriptor for each member. Descriptors must be defined in the class body — assigning one to an existing State class also raises `TypeError`.
+
 ## `@ps.query`
 
 Cached async data fetching on State methods.
@@ -147,6 +149,21 @@ def UserProfile():
         ps.h1(user["name"]),
         ps.button("Refresh", onClick=lambda: state.user.refetch()),
     )
+```
+
+### Loading UX
+
+- **Scope loading indicators to the region that is loading.** Returning a whole-page spinner on `is_loading` blanks unrelated, already-rendered UI; render the loading state only where the data goes.
+- **Prefer skeletons/placeholders with stable layout** over swapping the page for a spinner — the surrounding layout should not jump when data arrives.
+- **Use `keep_previous_data=True` for pagination/filter changes** so the previous page stays visible instead of flashing back to a loading state:
+
+```python
+@ps.query(keep_previous_data=True)
+async def page_data(self) -> list[dict]:
+    return await api.fetch_page(self.page)
+
+# In the component: render state.page_data.data as usual;
+# dim or badge with state.page_data.is_fetching while the next page loads.
 ```
 
 ## `@ps.mutation`

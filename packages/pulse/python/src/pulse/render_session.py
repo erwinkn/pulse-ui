@@ -9,7 +9,7 @@ from asyncio import iscoroutine
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, TypeVar, cast, overload
 
 from pulse.channel import Channel
 from pulse.context import PulseContext
@@ -29,6 +29,7 @@ from pulse.messages import (
 )
 from pulse.queries.store import QueryStore
 from pulse.reactive import REACTIVE_CONTEXT, Effect, flush_effects
+from pulse.reactive_extensions import ReactiveDict
 from pulse.renderer import Callback, Callbacks, RenderTree
 from pulse.routing import (
 	Layout,
@@ -44,6 +45,7 @@ from pulse.scheduling import (
 	TimerRegistry,
 	create_future,
 )
+from pulse.state.query_param import QueryParamSync
 from pulse.state.state import State
 from pulse.transpiler.id import next_id
 from pulse.transpiler.nodes import Expr
@@ -234,6 +236,20 @@ class CallbackHistory:
 			and left.n_args == right.n_args
 			and left.accepts_varargs == right.accepts_varargs
 		)
+
+
+class SessionUrl(TypedDict):
+	"""The URL currently displayed by the session's browser tab.
+
+	A render session is one browser tab, so it has exactly one URL. Every
+	mount reports the same pathname/hash/query params (they all derive from
+	the client's single ``location``); only ``pathParams``/``catchall`` are
+	mount-specific, and those live on `RouteContext`.
+	"""
+
+	pathname: str
+	hash: str
+	queryParams: dict[str, str]
 
 
 class RouteMount:
@@ -437,6 +453,8 @@ class RenderSession:
 	forms: "FormRegistry"
 	query_store: QueryStore
 	route_mounts: dict[str, RouteMount]
+	url: SessionUrl
+	query_param_sync: QueryParamSync
 	connected: bool
 	prerender_queue_timeout: float
 	dev_strict_mode_detach_timeout: float
@@ -474,6 +492,14 @@ class RenderSession:
 		self.id = id
 		self.routes = routes
 		self.route_mounts = {}
+		self.url = cast(
+			SessionUrl,
+			cast(
+				object,
+				ReactiveDict({"pathname": "", "hash": "", "queryParams": {}}),
+			),
+		)
+		self.query_param_sync = QueryParamSync(self)
 		self._server_address = server_address
 		self._client_address = client_address
 		self._send_message = None
@@ -534,6 +560,20 @@ class RenderSession:
 				self.query_store.reconnect_all()
 			else:
 				self.query_store.resume_all()
+
+	def resync(self) -> None:
+		"""A replacement socket arrived before the old one's disconnect fired:
+		apply the missed disconnect, skipping the reconnect grace period.
+
+		Suspending (rather than leaving mounts pending) forces attach to send a
+		fresh init — updates in the gap went to the dead socket, so the pending
+		queue can't cover what the client missed. Only previously-active mounts
+		are suspended; never-active prerender mounts keep their dispose timers.
+		"""
+		active = [m for m in self.route_mounts.values() if m.state == "active"]
+		self.disconnect()
+		for mount in active:
+			mount.suspend()
 
 	def disconnect(self):
 		"""WebSocket disconnected. Queue briefly, then suspend mounts on timeout."""
@@ -903,6 +943,7 @@ class RenderSession:
 	def close(self):
 		# Close all pending timers at the start, to avoid anything firing while we clean up
 		self._timers.cancel_all()
+		self.query_param_sync.dispose()
 		self.forms.dispose()
 		self._tasks.cancel_all()
 		for path, mount in list(self.route_mounts.items()):
@@ -944,6 +985,20 @@ class RenderSession:
 		return next(
 			(mount for mount in self.route_mounts.values() if mount.view_id == view_id),
 			None,
+		)
+
+	def set_url(self, info: RouteInfo) -> None:
+		"""Record the URL the client is currently displaying.
+
+		Called by every `RouteContext` on creation and on route updates. All
+		mounts report the same URL, so this is last-writer-wins by design.
+		"""
+		self.url.update(
+			{
+				"pathname": info["pathname"],
+				"hash": info["hash"],
+				"queryParams": info["queryParams"],
+			}
 		)
 
 	def get_global_state(self, key: str, factory: Callable[[], Any]) -> Any:

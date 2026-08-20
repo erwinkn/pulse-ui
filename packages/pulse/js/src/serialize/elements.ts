@@ -195,7 +195,29 @@ const HTML_FORM_KEYS = [
 	"target",
 	"rel",
 ] as const satisfies readonly (keyof HTMLFormElement)[];
-const formExtractor = withBase<HTMLFormElement>(HTML_FORM_KEYS);
+const FORM_KEYS = [
+	...ELEMENT_KEYS,
+	...HTML_OR_SVG_KEYS,
+	...HTML_ELEMENT_BASE_KEYS,
+	...HTML_FORM_KEYS,
+] as const satisfies readonly (keyof HTMLFormElement)[];
+
+function formExtractor(form: HTMLFormElement): object {
+	const prototype = Object.getPrototypeOf(form);
+	const out: Record<string, unknown> = {};
+
+	// HTMLFormElement exposes controls as named properties, and those controls
+	// override even inherited IDL properties such as name, action, and tagName.
+	// Start every form read at the prototype to bypass named-property lookup.
+	for (const key of FORM_KEYS) {
+		const value = Reflect.get(prototype, key, form);
+		if (value !== undefined) {
+			out[key] = value;
+		}
+	}
+	out.tagName = String(out.tagName).toLowerCase();
+	return out;
+}
 
 const HTML_IFRAME_KEYS = [
 	"allow",
@@ -920,14 +942,37 @@ const elementExtractors: Record<string, (elt: any) => object> = {
 	MASK: maskExtractor,
 };
 
-export function extractHTMLElement(elt: HTMLElement): object {
+function extractHTMLElementByTagName(elt: HTMLElement): object {
 	const tagName = elt.tagName.toUpperCase();
-
 	const extractor = elementExtractors[tagName];
 	if (extractor) {
 		return extractor(elt);
 	}
-	throw new Error(`Unexpected HTML element tag: ${elt.tagName} (update .web/custom/serialize.ts)`);
+	throw new Error(`Unexpected HTML element tag: ${tagName} (update .web/custom/serialize.ts)`);
+}
+
+function isSameRealmHTMLFormElement(elt: Element): elt is HTMLFormElement {
+	// The constructor is absent when this browser-oriented module is imported
+	// during SSR, in a worker, or in a test process without a DOM implementation.
+	return typeof HTMLFormElement !== "undefined" && elt instanceof HTMLFormElement;
+}
+
+function isCrossRealmHTMLFormElement(elt: Element): elt is HTMLFormElement {
+	return Object.prototype.toString.call(elt) === "[object HTMLFormElement]";
+}
+
+export function extractHTMLElement(elt: HTMLElement): object {
+	if (isSameRealmHTMLFormElement(elt)) {
+		return formExtractor(elt);
+	}
+	// A form from an iframe fails this realm's instanceof checks.
+	if (
+		(typeof HTMLElement === "undefined" || !(elt instanceof HTMLElement)) &&
+		isCrossRealmHTMLFormElement(elt)
+	) {
+		return formExtractor(elt);
+	}
+	return extractHTMLElementByTagName(elt);
 }
 
 export function extractSVGElement(elt: SVGElement): object {
@@ -942,10 +987,16 @@ export function extractSVGElement(elt: SVGElement): object {
 }
 
 export function extractElement(elt: Element): object {
-	if (elt instanceof HTMLElement) {
-		return extractHTMLElement(elt);
+	if (typeof HTMLElement !== "undefined" && elt instanceof HTMLElement) {
+		if (isSameRealmHTMLFormElement(elt)) {
+			return formExtractor(elt);
+		}
+		return extractHTMLElementByTagName(elt);
 	}
-	if (elt instanceof SVGElement) {
+	if (isCrossRealmHTMLFormElement(elt)) {
+		return formExtractor(elt);
+	}
+	if (typeof SVGElement !== "undefined" && elt instanceof SVGElement) {
 		return extractSVGElement(elt);
 	}
 	// Fallback for other Element types - use base element extractor

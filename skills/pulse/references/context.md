@@ -156,7 +156,8 @@ See `queries.md` for full API.
 
 ### `ps.global_state()`
 
-Access global state instances (not the decorator).
+Access session-scoped state instances (not the decorator). One instance per
+render session (browser tab) — never shared across tabs or users.
 
 ```python
 @ps.global_state
@@ -177,7 +178,7 @@ class UserCache(ps.State):
     data: dict = {}
 
 def user_profile(user_id: str):
-    # Separate instance per user_id
+    # Separate instance per user_id, still scoped to this session
     cache = UserCache(id=user_id)
     return m.Text(cache.data.get("name"))
 ```

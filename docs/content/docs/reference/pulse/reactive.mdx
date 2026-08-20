@@ -323,6 +323,25 @@ with Untrack():
     value = signal()  # No dependency registered
 ```
 
+### `resume(*, replace=False)`
+
+Temporarily restore the tracking scope suspended by the active `Untrack` context:
+
+```python
+with Scope() as scope:
+    with Untrack() as tracking:
+        ignored = signal()
+
+        with tracking.resume():
+            tracked = signal()
+
+print(scope.deps)  # Contains only `tracked`
+```
+
+`resume()` raises `RuntimeError` if the `Untrack` context is not active or did not suspend a tracking scope.
+
+Pass `replace=True` to discard dependencies collected earlier in the suspended scope before tracking the block. This is useful when repeated attempts should keep only the final attempt's dependencies.
+
 ---
 
 ## IgnoreBatch

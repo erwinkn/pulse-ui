@@ -1,6 +1,7 @@
 import {
 	createContext,
 	type ReactNode,
+	type RefObject,
 	useContext,
 	useEffect,
 	useLayoutEffect,
@@ -43,6 +44,7 @@ export type PulsePrerender = {
 // Context for the client, provided by PulseProvider
 const PulseClientContext = createContext<PulseSocketIOClient | null>(null);
 const PulsePrerenderContext = createContext<PulsePrerender | null>(null);
+const PulseDirectivesContext = createContext<RefObject<Directives> | null>(null);
 
 export const usePulseClient = () => {
 	const client = useContext(PulseClientContext);
@@ -62,6 +64,11 @@ export const usePulsePrerender = (path: string) => {
 		throw new Error(`No prerender found for '${path}'`);
 	}
 	return view;
+};
+
+export const usePulseDirectivesSource = () => {
+	const ref = useContext(PulseDirectivesContext);
+	return ref ? (() => ref.current) : undefined;
 };
 
 // =================================================================
@@ -85,6 +92,8 @@ export function PulseProvider({ children, config, prerender }: PulseProviderProp
 	const [status, setStatus] = useState<ConnectionStatus>("ok");
 	const rrNavigate = useNavigate();
 	const { directives } = prerender;
+	const directivesRef = useRef(directives);
+	directivesRef.current = directives;
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: another useEffect syncs the directives without recreating the client
 	const client = useMemo(() => {
@@ -151,25 +160,27 @@ export function PulseProvider({ children, config, prerender }: PulseProviderProp
 
 	return (
 		<PulseClientContext.Provider value={client}>
-			<PulsePrerenderContext.Provider value={prerender}>
-				{statusMessage && (
-					<div
-						style={{
-							position: "fixed",
-							bottom: "20px",
-							right: "20px",
-							backgroundColor: status === "error" ? "red" : "#666",
-							color: "white",
-							padding: "10px",
-							borderRadius: "5px",
-							zIndex: 1000,
-						}}
-					>
-						{statusMessage}
-					</div>
-				)}
-				{children}
-			</PulsePrerenderContext.Provider>
+			<PulseDirectivesContext.Provider value={directivesRef}>
+				<PulsePrerenderContext.Provider value={prerender}>
+					{statusMessage && (
+						<div
+							style={{
+								position: "fixed",
+								bottom: "20px",
+								right: "20px",
+								backgroundColor: status === "error" ? "red" : "#666",
+								color: "white",
+								padding: "10px",
+								borderRadius: "5px",
+								zIndex: 1000,
+							}}
+						>
+							{statusMessage}
+						</div>
+					)}
+					{children}
+				</PulsePrerenderContext.Provider>
+			</PulseDirectivesContext.Provider>
 		</PulseClientContext.Provider>
 	);
 }

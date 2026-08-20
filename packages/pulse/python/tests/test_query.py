@@ -1,7 +1,7 @@
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any, ParamSpec, TypeVar, cast
+from typing import Any, ParamSpec, TypeVar, cast, final
 
 import pulse as ps
 import pytest
@@ -11,6 +11,7 @@ from pulse.queries.query import (
 	STATE_LOCAL_QUERY_STORE,
 	KeyedQuery,
 	KeyedQueryResult,
+	QueryProperty,
 	UnkeyedQueryResult,
 )
 from pulse.queries.store import QueryStore
@@ -497,6 +498,121 @@ async def test_query_retry_exhausted():
 
 
 @pytest.mark.asyncio
+async def test_unkeyed_query_retry_exhausted_stops_refetching():
+	retries = 2
+	attempts = 0
+
+	class S(ps.State):
+		dependency: int = 0
+
+		@ps.query(retries=retries, retry_delay=0.001)
+		async def fail(self) -> None:
+			nonlocal attempts
+			attempts += 1
+			await asyncio.sleep(0)
+			_ = self.dependency
+			raise RuntimeError("boom")
+
+	s = S()
+	q = s.fail
+	expected_attempts = retries + 1
+
+	try:
+		assert await wait_for(
+			lambda: attempts > expected_attempts or (q.is_error and not q.is_scheduled),
+			timeout=0.2,
+			poll_interval=0.001,
+		)
+		assert attempts == expected_attempts
+		assert q.status == "error"
+
+		attempts = 0
+		s.dependency = 1
+		assert await wait_for(
+			lambda: attempts > expected_attempts or (q.is_error and not q.is_scheduled),
+			timeout=0.2,
+			poll_interval=0.001,
+		)
+		await asyncio.sleep(0.01)
+		assert attempts == expected_attempts
+		assert q.status == "error"
+		assert q.is_scheduled is False
+		result = cast(UnkeyedQueryResult[None], q)
+		assert set(result._effect.deps) == set(s.properties())  # pyright: ignore[reportPrivateUsage]
+	finally:
+		query_result(q).dispose()
+
+
+@pytest.mark.asyncio
+async def test_unkeyed_query_retry_succeeds_without_extra_refetch():
+	attempts = 0
+
+	class S(ps.State):
+		@ps.query(retries=2, retry_delay=0.001)
+		async def value(self) -> str:
+			nonlocal attempts
+			attempts += 1
+			await asyncio.sleep(0)
+			if attempts == 1:
+				raise RuntimeError("temporary")
+			return "success"
+
+	s = S()
+	q = s.value
+
+	try:
+		await q.wait()
+		await asyncio.sleep(0.01)
+		assert attempts == 2
+		assert q.status == "success"
+		assert q.data == "success"
+		assert q.is_scheduled is False
+		result = cast(UnkeyedQueryResult[str], q)
+		assert result._effect.deps == {}  # pyright: ignore[reportPrivateUsage]
+	finally:
+		query_result(q).dispose()
+
+
+@pytest.mark.asyncio
+async def test_unkeyed_query_uses_final_retry_dependencies():
+	attempts = 0
+
+	class S(ps.State):
+		first: int = 0
+		second: int = 0
+
+		@ps.query(retries=1, retry_delay=0.001)
+		async def value(self) -> int:
+			nonlocal attempts
+			attempts += 1
+			await asyncio.sleep(0)
+			if attempts == 1:
+				_ = self.first
+				raise RuntimeError("temporary")
+			_ = self.second
+			return attempts
+
+	s = S()
+	q = s.value
+
+	try:
+		await q.wait()
+		assert q.data == 2
+		result = cast(UnkeyedQueryResult[int], q)
+		_, second = s.properties()
+		assert set(result._effect.deps) == {second}  # pyright: ignore[reportPrivateUsage]
+
+		s.first = 1
+		await asyncio.sleep(0.01)
+		assert attempts == 2
+
+		s.second = 1
+		assert await wait_for(lambda: attempts == 3 and q.data == 3)
+	finally:
+		query_result(q).dispose()
+
+
+@pytest.mark.asyncio
 async def test_query_retry_delay():
 	"""Test that retry delay is respected between attempts."""
 	key = ("test", 1)
@@ -640,6 +756,137 @@ def with_render_session(fn: Callable[P, Awaitable[R]]):
 			return await fn(*args, **kwargs)
 
 	return wrapper
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_factory_queries_use_class_member_identity():
+	initials: list[tuple[int, int]] = []
+	successes: list[tuple[int, int]] = []
+	errors: list[tuple[int, int]] = []
+
+	def make_query(value: int, *, fails: bool = False) -> QueryProperty[int, ps.State]:
+		async def member(self: ps.State) -> int:
+			if fails:
+				raise RuntimeError(f"failure {value}")
+			return value
+
+		member.__name__ = "shared"
+		descriptor = ps.query(retries=0, fetch_on_mount=False)(member)
+
+		@descriptor.key
+		def _key(self: ps.State):  # pyright: ignore[reportUnusedFunction]
+			return ("renamed-query", id(self), value)
+
+		@descriptor.initial_data
+		def _initial(self: ps.State):  # pyright: ignore[reportUnusedFunction]
+			initials.append((id(self), value))
+			return -value
+
+		@descriptor.on_success
+		def _success(  # pyright: ignore[reportUnusedFunction]
+			self: ps.State, data: int
+		):
+			successes.append((id(self), data))
+
+		@descriptor.on_error
+		async def _error(  # pyright: ignore[reportUnusedFunction]
+			self: ps.State,
+		):
+			await asyncio.sleep(0)
+			errors.append((id(self), value))
+
+		return descriptor
+
+	@final
+	class S(ps.State):
+		first = make_query(1)
+		second = make_query(2)
+		failing = make_query(3, fails=True)
+
+	s = S()
+	first = s.first
+	second = s.second
+	failing = s.failing
+
+	assert first is not second
+	assert first.data == -1
+	assert second.data == -2
+	assert failing.data == -3
+	assert initials == [(id(s), 1), (id(s), 2), (id(s), 3)]
+	assert S.__dict__["first"].name == "first"
+	assert S.__dict__["second"].name == "second"
+	assert S.__dict__["failing"].name == "failing"
+	await first.refetch()
+	await second.refetch()
+	await failing.refetch()
+	await asyncio.sleep(0)
+	assert first.data == 1
+	assert second.data == 2
+	assert successes == [(id(s), 1), (id(s), 2)]
+	assert errors == [(id(s), 3)]
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_query_descriptor_inheritance_keeps_base_binding():
+	def make_query() -> QueryProperty[str, ps.State]:
+		async def renamed(self: ps.State) -> str:
+			return type(self).__name__
+
+		renamed.__name__ = "shared"
+		descriptor = ps.query(retries=0, fetch_on_mount=False)(renamed)
+
+		@descriptor.key
+		def _key(self: ps.State):  # pyright: ignore[reportUnusedFunction]
+			return ("inherited-query", id(self))
+
+		return descriptor
+
+	class Base(ps.State):
+		item = make_query()  # pyright: ignore[reportUnannotatedClassAttribute]
+
+	class Left(Base):
+		pass
+
+	class Right(Base):
+		pass
+
+	descriptor = Base.__dict__["item"]
+	states = [Base(), Left(), Right()]
+	results = [state.item for state in states]
+
+	assert descriptor.name == "item"
+	assert len({id(result) for result in results}) == 3
+	for result in results:
+		await result.ensure()
+	assert [result.data for result in results] == ["Base", "Left", "Right"]
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_query_override_uses_defining_member_identity():
+	class Base(ps.State):
+		@ps.query(retries=0, fetch_on_mount=False)
+		async def item(self) -> int:
+			return 1
+
+	class Child(Base):
+		@ps.query(retries=0, fetch_on_mount=False)
+		async def item(self) -> int:
+			base = super().item
+			await base.ensure()
+			assert base.data is not None
+			return base.data + 1
+
+	state = Child()
+	child = state.item
+	await child.refetch()
+	base = super(Child, state).item
+
+	assert child is not base
+	assert child.data == 2
+	assert base.data == 1
 
 
 @pytest.mark.asyncio

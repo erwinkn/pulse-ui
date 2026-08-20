@@ -34,6 +34,256 @@ class TestState:
 		state.count = 5
 		assert state.double_count == 10
 
+	def test_factory_computed_uses_class_member_identity(self):
+		def make_computed(value: int):
+			def member(self: ps.State):
+				return value
+
+			member.__name__ = "shared"
+			return ps.computed(member)
+
+		GeneratedState = type(
+			"GeneratedState",
+			(ps.State,),
+			{"first": make_computed(1), "second": make_computed(2)},
+		)
+
+		state = GeneratedState()
+		other = GeneratedState()
+		first_descriptor = GeneratedState.__dict__["first"]
+		second_descriptor = GeneratedState.__dict__["second"]
+
+		assert first_descriptor.name == "first"
+		assert second_descriptor.name == "second"
+		assert (cast(Any, state).first, cast(Any, state).second) == (1, 2)
+		assert first_descriptor.get_computed(
+			state
+		) is not second_descriptor.get_computed(state)
+		assert first_descriptor.get_computed(
+			state
+		) is not first_descriptor.get_computed(other)
+
+	def test_computed_descriptor_inheritance_and_rebinding(self):
+		def member(self: ps.State):
+			return 1
+
+		alias = ps.computed(member)
+		with pytest.raises(TypeError, match="cannot also be bound"):
+			type("AliasState", (ps.State,), {"first": alias, "second": alias})
+
+		descriptor = ps.computed(member)
+		BaseState = type("BaseState", (ps.State,), {"value": descriptor})
+		LeftState = type("LeftState", (BaseState,), {})
+		RightState = type("RightState", (BaseState,), {})
+
+		base = BaseState()
+		left = LeftState()
+		right = RightState()
+		assert (
+			cast(Any, base).value,
+			cast(Any, left).value,
+			cast(Any, right).value,
+		) == (1, 1, 1)
+		assert descriptor.get_computed(base) is not descriptor.get_computed(left)
+		assert descriptor.get_computed(left) is not descriptor.get_computed(right)
+
+		with pytest.raises(TypeError, match="already bound"):
+			type("AliasState", (ps.State,), {"alias": descriptor})
+
+		assert cast(Any, BaseState()).value == 1
+
+	def test_computed_override_uses_defining_member_identity(self):
+		class Base(ps.State):
+			@ps.computed
+			def value(self) -> int:
+				return 1
+
+		class Child(Base):
+			@ps.computed
+			def value(self) -> int:
+				return super().value + 1
+
+		state = Child()
+		base_descriptor = Base.__dict__["value"]
+		child_descriptor = Child.__dict__["value"]
+
+		assert state.value == 2
+		assert base_descriptor.get_computed(state) is not child_descriptor.get_computed(
+			state
+		)
+
+	def test_computed_override_supports_cooperative_multiple_inheritance(self):
+		class Root(ps.State):
+			@ps.computed
+			def value(self) -> int:
+				return 0
+
+		class Left(Root):
+			@ps.computed
+			def value(self) -> int:
+				return super().value + 1
+
+		class Right(Root):
+			@ps.computed
+			def value(self) -> int:
+				return super().value + 10
+
+		class Combined(Left, Right):
+			pass
+
+		assert Combined().value == 11
+
+	def test_duplicate_state_descriptors_rejected(self):
+		def computed_member(self: ps.State) -> int:
+			return 1
+
+		async def query_member(self: ps.State) -> int:
+			return 1
+
+		async def infinite_member(self: ps.State, _page: int) -> int:
+			return 1
+
+		async def mutation_member(self: ps.State) -> int:
+			return 1
+
+		def effect_member(self: ps.State) -> None:
+			return None
+
+		def make_descriptors() -> list[Any]:
+			return [
+				ps.computed(computed_member),
+				ps.query(query_member),
+				ps.infinite_query(initial_page_param=0)(infinite_member),
+				ps.mutation(mutation_member),
+				ps.effect(effect_member),
+			]
+
+		for descriptor in make_descriptors():
+			with pytest.raises(
+				TypeError,
+				match="cannot also be bound to 'Invalid.second'",
+			):
+				type(
+					"Invalid",
+					(ps.State,),
+					{"first": descriptor, "second": descriptor},
+				)
+
+		for index, descriptor in enumerate(make_descriptors()):
+			Valid = type(f"Valid{index}", (ps.State,), {"value": descriptor})
+			assert Valid.__dict__["value"] is descriptor
+			assert descriptor.name == "value"
+
+	def test_state_descriptor_late_assignment_rejected(self):
+		def computed_member(self: ps.State) -> int:
+			return 1
+
+		async def query_member(self: ps.State) -> int:
+			return 1
+
+		async def infinite_member(self: ps.State, _page: int) -> int:
+			return 1
+
+		async def mutation_member(self: ps.State) -> int:
+			return 1
+
+		def effect_member(self: ps.State) -> None:
+			return None
+
+		class S(ps.State):
+			pass
+
+		descriptors: list[Any] = [
+			ps.computed(computed_member),
+			ps.query(query_member),
+			ps.infinite_query(initial_page_param=0)(infinite_member),
+			ps.mutation(mutation_member),
+			ps.effect(effect_member),
+		]
+		# __set_name__ only runs at class creation, so late assignment is rejected
+		for descriptor in descriptors:
+			with pytest.raises(TypeError, match="after class creation"):
+				S.value = descriptor  # pyright: ignore[reportAttributeAccessIssue]
+
+	def test_state_effect_stored_in_member_cache(self):
+		class MyState(ps.State):
+			count: int = 0
+
+			@ps.effect
+			def track(self):
+				_ = self.count
+
+		state = MyState()
+		effect = state.track
+		assert effect.name == "MyState.track"
+		assert list(state.effects()) == [effect]
+		assert state.track is effect
+
+		with pytest.raises(AttributeError, match="Cannot set effect 'track'"):
+			state.track = None  # pyright: ignore[reportAttributeAccessIssue]
+
+	def test_state_effect_access_before_initialization_raises(self):
+		captured: list[Exception] = []
+
+		class MyState(ps.State):
+			count: int = 0
+
+			@ps.effect
+			def track(self):
+				_ = self.count
+
+			def __init__(self):
+				try:
+					_ = self.track
+				except RuntimeError as exc:
+					captured.append(exc)
+				super().__init__()
+
+		state = MyState()
+		assert len(captured) == 1
+		assert "before state initialization" in str(captured[0])
+		assert state.track.name == "MyState.track"
+
+	def test_state_effect_override_uses_defining_member_identity(self):
+		base_runs = 0
+		child_runs = 0
+
+		class Base(ps.State):
+			count: int = 0
+
+			@ps.effect
+			def track(self):
+				nonlocal base_runs
+				_ = self.count
+				base_runs += 1
+
+		class Child(Base):
+			@ps.effect
+			def track(self):
+				nonlocal child_runs
+				_ = self.count
+				child_runs += 1
+
+		state = Child()
+		state.track.schedule()
+		flush_effects()
+		assert (base_runs, child_runs) == (0, 1)
+		# Only the defining (non-shadowed) member is initialized
+		assert [e.name for e in state.effects()] == ["Child.track"]
+
+	def test_state_effect_disposed_with_state(self):
+		class MyState(ps.State):
+			count: int = 0
+
+			@ps.effect
+			def track(self):
+				_ = self.count
+
+		state = MyState()
+		effect = state.track
+		state.dispose()
+		assert effect.__disposed__
+
 	def test_unannotated_property_becomes_signal(self):
 		class MyState(ps.State):
 			count: int

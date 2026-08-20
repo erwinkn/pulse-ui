@@ -37,7 +37,7 @@ from pulse.queries.common import (
 from pulse.queries.effect import AsyncQueryEffect
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.scheduling import TimerHandleLike, create_task, is_pytest, later
-from pulse.state.property import InitializableProperty
+from pulse.state.property import InitializableProperty, StateMemberDescriptor
 from pulse.state.state import State
 
 if TYPE_CHECKING:
@@ -265,32 +265,25 @@ async def run_fetch_with_retries(
 	fetch_fn: Callable[[], Awaitable[T]],
 	on_success: Callable[[T], Awaitable[None] | None] | None = None,
 	on_error: Callable[[Exception], Awaitable[None] | None] | None = None,
-	untrack: bool = False,
 ) -> None:
 	"""
 	Execute a fetch with retry logic, updating QueryState.
+	Dependency tracking is controlled by the caller.
 
 	Args:
 		state: The QueryState to update
 		fetch_fn: Async function to fetch data
 		on_success: Optional callback on success
 		on_error: Optional callback on error
-		untrack: If True, wrap fetch_fn in Untrack() to prevent dependency tracking.
-		         Use for keyed queries where fetch is triggered via create_task().
 	"""
 	state.reset_retries()
 
 	while True:
 		try:
-			if untrack:
-				with Untrack():
-					result = await fetch_fn()
-			else:
-				result = await fetch_fn()
+			result = await fetch_fn()
 			state.set_success(result)
 			if on_success:
-				with Untrack():
-					await maybe_await(call_flexible(on_success, result))
+				await maybe_await(call_flexible(on_success, result))
 			return
 		except asyncio.CancelledError:
 			raise
@@ -305,8 +298,7 @@ async def run_fetch_with_retries(
 				state.retry_reason.write(e)
 				state.apply_error(e)
 				if on_error:
-					with Untrack():
-						await maybe_await(call_flexible(on_error, e))
+					await maybe_await(call_flexible(on_error, e))
 				return
 
 
@@ -471,13 +463,13 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 				if obs._on_error:  # pyright: ignore[reportPrivateUsage]
 					await maybe_await(call_flexible(obs._on_error, e))  # pyright: ignore[reportPrivateUsage]
 
-		await run_fetch_with_retries(
-			self.state,
-			fetch_fn,
-			on_success=on_success,
-			on_error=on_error,
-			untrack=True,  # Keyed queries use create_task(), need to untrack
-		)
+		with Untrack():
+			await run_fetch_with_retries(
+				self.state,
+				fetch_fn,
+				on_success=on_success,
+				on_error=on_error,
+			)
 
 	def run_fetch(
 		self,
@@ -883,16 +875,19 @@ class UnkeyedQueryResult(Generic[T], Disposable, SuspendableQuery):
 		return (time.time() - self.state.last_updated.read()) > self._stale_time
 
 	async def _run(self):
-		"""Run the fetch through the effect (for dependency tracking)."""
-		# Unkeyed queries run inside AsyncEffect which has its own scope,
-		# so we don't need untrack=True here - deps should be tracked
-		await run_fetch_with_retries(
-			self.state,
-			self._fetch_fn,
-			on_success=self._on_success,
-			on_error=self._on_error,
-			untrack=False,
-		)
+		"""Run the fetch, tracking only dependencies read by the user fetch."""
+		with Untrack() as tracking:
+
+			async def tracked_fetch() -> T:
+				with tracking.resume(replace=True):
+					return await self._fetch_fn()
+
+			await run_fetch_with_retries(
+				self.state,
+				tracked_fetch,
+				on_success=self._on_success,
+				on_error=self._on_error,
+			)
 
 	def schedule(self):
 		"""Schedule the effect to run."""
@@ -1149,7 +1144,7 @@ class KeyedQueryResult(Generic[T], Disposable):
 			self._observe_effect.dispose()
 
 
-class QueryProperty(Generic[T, TState], InitializableProperty):
+class QueryProperty(StateMemberDescriptor, Generic[T, TState], InitializableProperty):
 	"""Descriptor for state-bound queries created by the @query decorator.
 
 	QueryProperty is the return type of the ``@query`` decorator. It acts as a
@@ -1184,7 +1179,6 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 	```
 	"""
 
-	name: str
 	_fetch_fn: "Callable[[TState], Awaitable[T]]"
 	_keep_alive: bool
 	_keep_previous_data: bool
@@ -1203,7 +1197,6 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 	_on_success_fn: Callable[[TState, T], Any] | None
 	_on_error_fn: Callable[[TState, Exception], Any] | None
 	_fetch_on_mount: bool
-	_priv_result: str
 
 	def __init__(
 		self,
@@ -1220,7 +1213,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		fetch_on_mount: bool = True,
 		key: QueryKey | Callable[[TState], QueryKey] | None = None,
 	):
-		self.name = name
+		super().__init__(name)
 		self._fetch_fn = fetch_fn
 		if key is None:
 			self._key = None
@@ -1245,7 +1238,6 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		self._initial_data = MISSING
 		self._enabled = enabled
 		self._fetch_on_mount = fetch_on_mount
-		self._priv_result = f"__query_{name}"
 
 	# Decorator to attach a key function
 	def key(self, fn: Callable[[TState], QueryKey]):
@@ -1292,10 +1284,9 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 		self, state: Any, name: str
 	) -> KeyedQueryResult[T] | UnkeyedQueryResult[T]:
 		# Return cached query instance if present
-		result: KeyedQueryResult[T] | UnkeyedQueryResult[T] | None = getattr(
-			state, self._priv_result, None
-		)
-		if result:
+		cache = self.instance_cache(state)
+		result: KeyedQueryResult[T] | UnkeyedQueryResult[T] | None = cache.get(self)
+		if result is not None:
 			# Don't re-initialize, just return the cached instance
 			return result
 
@@ -1328,7 +1319,7 @@ class QueryProperty(Generic[T, TState], InitializableProperty):
 			)
 
 		# Store result on the instance
-		setattr(state, self._priv_result, result)
+		cache[self] = result
 		return result
 
 	def _create_keyed(

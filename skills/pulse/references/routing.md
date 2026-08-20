@@ -301,8 +301,8 @@ def SearchPage():
 **Lists** are stored as reactive lists: in-place mutation (`state.tags.append(...)`) also syncs the URL. A non-default empty list serializes as an empty param value.
 
 **Constraints:**
-- Requires a render context — creating the state outside a component render raises `RuntimeError`.
-- `pulse.url.SessionUrl` (`render.url`) is a `Disposable` with `pathname` / `hash` / `query_params`. It owns one Signal per param name (`url.param(...)`). `RouteContext` writes the snapshot via `url.apply(...)`; typed fields read and write the Signal. Two states sharing `q` see the same value immediately. A second registration with a different type or default raises `ValueError`.
+- Requires a render context — creating the state outside a component render raises `RuntimeError`. Reads and writes also go through `render.url.param(...)`, so they need an active `PulseContext` (component render and server callbacks have one).
+- `pulse.url.SessionUrl` (`render.url`) is a `Disposable` with `pathname` / `hash` / `query_params`. It owns one Signal per param name (`url.param(...)`). `RouteContext` writes the snapshot via `url.apply(...)`; typed fields read and write that Signal. Two states sharing `q` see the same value immediately. A second registration with a different type or default raises `ValueError`.
 - The slot lives on the session URL until the session closes, so a `ps.global_state` field keeps syncing across in-app navigation. The URL stays the source of truth: navigating to a URL without the param resets the field to its default.
 - Server-synced by design: every change is a round-trip. For rapid URL updates (map viewport, scroll position), sync client-side with `history.replaceState` in transpiled code instead — see `js-interop.md` → "Latency-sensitive interactions".
 

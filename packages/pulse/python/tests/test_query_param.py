@@ -89,9 +89,8 @@ class TestQueryParam:
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			state = QState()
 			flush_query_param_sync(session)
-
-		assert state.q == "from-constructor"
-		assert state.page == 3
+			assert state.q == "from-constructor"
+			assert state.page == 3
 		assert len(messages) == 1
 		msg = messages[0]
 		assert msg["type"] == "navigate_to"
@@ -388,6 +387,23 @@ class TestQueryParam:
 			with pytest.raises(ValueError, match="already registered as str"):
 				OtherDefault()
 
+	def test_query_param_access_requires_pulse_context(self):
+		class QState(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		app, session, route_ctx = make_context(
+			make_route_info("/", query_params={"q": "hello"})
+		)
+		session.connect(lambda _msg: None)
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			state = QState()
+			sig = QState.__dict__["q"].get_signal(state)
+		with pytest.raises(RuntimeError, match="PULSE_CONTEXT is not set"):
+			_ = state.q
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			assert QState.__dict__["q"].get_signal(state) is sig
+			assert state.q == "hello"
+
 
 def make_two_route_session():
 	"""A session with routes /a and /b, nothing mounted yet."""
@@ -451,12 +467,14 @@ class TestQueryParamAcrossMounts:
 			"/b", make_route_info("/b", query_params={"q": "world", "other": "1"})
 		)
 		flush_effects()
-		assert state.q == "world"
-
-		# state -> URL still works, against the *current* route.
-		messages.clear()
-		state.q = "next"
-		flush_query_param_sync(session)
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/b"].route
+		):
+			assert state.q == "world"
+			# state -> URL still works, against the *current* route.
+			messages.clear()
+			state.q = "next"
+			flush_query_param_sync(session)
 		navs = navigations(messages)
 		assert len(navs) == 1
 		assert navs[0].get("sourcePath") == "/b"
@@ -488,7 +506,10 @@ class TestQueryParamAcrossMounts:
 		# The URL stays the source of truth: a route without the param means default.
 		self.navigate(session, "/b", {}, detach="/a")
 		flush_effects()
-		assert state.q == "fallback"
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/b"].route
+		):
+			assert state.q == "fallback"
 
 		session.close()
 
@@ -520,25 +541,28 @@ class TestQueryParamAcrossMounts:
 			b = FiltersB()
 			flush_effects()
 
-		assert FiltersA.__dict__["q"].get_signal(a) is FiltersB.__dict__[
-			"q"
-		].get_signal(b)
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/b"].route
+		):
+			assert FiltersA.__dict__["q"].get_signal(a) is FiltersB.__dict__[
+				"q"
+			].get_signal(b)
 
-		messages.clear()
-		b.q = "from-b"
-		assert a.q == "from-b"
-		flush_query_param_sync(session)
-		navs = navigations(messages)
-		assert len(navs) == 1
-		assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["from-b"]
+			messages.clear()
+			b.q = "from-b"
+			assert a.q == "from-b"
+			flush_query_param_sync(session)
+			navs = navigations(messages)
+			assert len(navs) == 1
+			assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["from-b"]
 
-		messages.clear()
-		a.q = "from-a"
-		assert b.q == "from-a"
-		flush_query_param_sync(session)
-		navs = navigations(messages)
-		assert len(navs) == 1
-		assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["from-a"]
+			messages.clear()
+			a.q = "from-a"
+			assert b.q == "from-a"
+			flush_query_param_sync(session)
+			navs = navigations(messages)
+			assert len(navs) == 1
+			assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["from-a"]
 
 		session.close()
 
@@ -599,8 +623,11 @@ class TestQueryParamAcrossMounts:
 		assert navigations(messages) == []
 
 		# ...and its changes write to the URL once more.
-		state.q = "from-restored"
-		flush_query_param_sync(session)
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/c"].route
+		):
+			state.q = "from-restored"
+			flush_query_param_sync(session)
 		navs = navigations(messages)
 		assert len(navs) == 1
 		assert navs[0].get("sourcePath") == "/c"

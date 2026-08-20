@@ -68,9 +68,7 @@ class TestEffectPulseContext:
 		):
 			state = Tracked()
 		flush_effects()
-		assert seen == [
-			(session, route_ctx, route_ctx.route_path, "/", mount.mount_id)
-		]
+		assert seen == [(session, route_ctx, route_ctx.route_path, "/", mount.mount_id)]
 
 		state.n += 1
 		flush_effects()

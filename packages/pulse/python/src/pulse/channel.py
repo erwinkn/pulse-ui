@@ -12,7 +12,6 @@ from pulse.messages import (
 	ServerChannelRequestMessage,
 )
 from pulse.replies import PendingReplies
-from pulse.scheduling import create_future
 
 if TYPE_CHECKING:
 	from pulse.render_session import RenderSession
@@ -415,8 +414,7 @@ class Channel:
 
 		self._ensure_open()
 		request_id = uuid.uuid4().hex
-		fut = create_future()
-		self._manager.replies.register(request_id, fut, cancel_key=self.id)
+		fut = self._manager.replies.register(request_id, cancel_key=self.id)
 		msg = ServerChannelRequestMessage(
 			type="channel_message",
 			channel=self.id,

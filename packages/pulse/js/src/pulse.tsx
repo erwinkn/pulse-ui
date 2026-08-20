@@ -204,7 +204,10 @@ export function PulseView({ path, registry }: PulseViewProps) {
 	const [instanceId] = useState(
 		() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
 	);
-	const disposeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const disposeTimer = useRef<{
+		renderer: VDOMRenderer;
+		timer: ReturnType<typeof setTimeout>;
+	} | null>(null);
 	const [rendered, setRendered] = useState(() => ({
 		tree: renderer.init(initialView),
 		viewId: initialView.viewId,
@@ -241,8 +244,10 @@ export function PulseView({ path, registry }: PulseViewProps) {
 	// biome-ignore lint/correctness/useExhaustiveDependencies: We don't want to detach on navigation, so another useEffect syncs the routeInfo on navigation.
 	useEffect(() => {
 		if (inBrowser) {
-			if (disposeTimer.current) {
-				clearTimeout(disposeTimer.current);
+			// Only rescue the renderer this attach is for (StrictMode replays
+			// the same renderer); a discarded renderer must still be disposed.
+			if (disposeTimer.current?.renderer === renderer) {
+				clearTimeout(disposeTimer.current.timer);
 				disposeTimer.current = null;
 			}
 			client.attach(path, initialView, instanceId, {
@@ -281,10 +286,13 @@ export function PulseView({ path, registry }: PulseViewProps) {
 					renderer.dispose();
 					return;
 				}
-				disposeTimer.current = setTimeout(() => {
-					disposeTimer.current = null;
+				const timer = setTimeout(() => {
+					if (disposeTimer.current?.renderer === renderer) {
+						disposeTimer.current = null;
+					}
 					renderer.dispose();
 				}, 0);
+				disposeTimer.current = { renderer, timer };
 			};
 		}
 		//  routeInfo is NOT included here on purpose

@@ -4,7 +4,6 @@ Query parameter bindings for State properties.
 
 import sys
 import warnings
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from types import UnionType
@@ -19,19 +18,16 @@ from typing import (
 	get_origin,
 	override,
 )
-from urllib.parse import urlencode
 
 from pulse.context import PulseContext
-from pulse.helpers import Disposable, values_equal
-from pulse.messages import ServerNavigateToMessage
-from pulse.reactive import Effect, Scope, Signal, Untrack
+from pulse.helpers import values_equal
+from pulse.reactive import Signal
 from pulse.reactive_extensions import reactive, unwrap
 from pulse.state.property import InitializableProperty, StateProperty
 
 T = TypeVar("T")
 
 if TYPE_CHECKING:
-	from pulse.render_session import RenderSession
 	from pulse.state.state import State
 
 
@@ -223,7 +219,7 @@ def _parse_query_param_scalar(raw: str, *, codec: QueryParamCodec, param: str) -
 	raise TypeError(f"Unsupported QueryParam codec '{codec.kind}'")
 
 
-def _parse_query_param_value(
+def parse_query_param_value(
 	raw: str | None,
 	*,
 	default: Any,
@@ -280,7 +276,7 @@ def _serialize_query_param_scalar(
 	raise TypeError(f"Unsupported QueryParam codec '{codec.kind}'")
 
 
-def _serialize_query_param_value(
+def serialize_query_param_value(
 	value: Any,
 	*,
 	default: Any,
@@ -363,7 +359,7 @@ class QueryParamProperty(StateProperty, InitializableProperty):
 			raise RuntimeError(
 				"QueryParam properties require a render context. Create the state inside a component render."
 			)
-		signal = ctx.render.query_param_sync.ensure(self)
+		signal = ctx.render.url.param(self.param_name, self.codec, self.default_value)
 		setattr(obj, priv, signal)
 		return signal
 
@@ -371,211 +367,5 @@ class QueryParamProperty(StateProperty, InitializableProperty):
 		self._get_signal(state)
 
 	@override
-	def initialize(self, state: "State", name: str) -> "QueryParamSync":
-		ctx = PulseContext.get()
-		if ctx.render is None:
-			raise RuntimeError(
-				"QueryParam properties require a render context. Create the state inside a component render."
-			)
-		sync = ctx.render.query_param_sync
-		setattr(state, f"_query_param_reg_{name}", sync.retain(self))
-		return sync
-
-
-class QueryParamRegistration(Disposable):
-	_sync: "QueryParamSync"
-	_param: str
-
-	def __init__(self, sync: "QueryParamSync", param: str) -> None:
-		self._sync = sync
-		self._param = param
-
-	@override
-	def dispose(self) -> None:
-		self._sync.release(self._param)
-
-
-@dataclass
-class _QueryParamSlot:
-	codec: QueryParamCodec
-	default: Any
-	signal: Signal[Any]
-	refs: int = 0
-
-
-class QueryParamSync(Disposable):
-	"""Session-level URL sync for `QueryParam` fields.
-
-	One slot per param name: a single Signal plus codec/default. Every
-	`QueryParam` property on this session reads and writes that Signal.
-	The URL is the other side of the same value — no per-state copy, no
-	write-ownership stack.
-	"""
-
-	render: "RenderSession"
-	_slots: dict[str, _QueryParamSlot]
-	_route_effect: Effect | None
-	_state_effect: Effect | None
-
-	def __init__(self, render: "RenderSession") -> None:
-		self.render = render
-		self._slots = {}
-		self._route_effect = None
-		self._state_effect = None
-
-	def ensure(self, prop: QueryParamProperty) -> Signal[Any]:
-		param = prop.param_name
-		if not param:
-			raise RuntimeError("QueryParam param name was not resolved")
-		slot = self._slots.get(param)
-		if slot is None:
-			raw = self.render.url["queryParams"].get(param)
-			value: Any = _parse_query_param_value(
-				raw,
-				default=prop.default_value,
-				codec=prop.codec,
-				param=param,
-			)
-			slot = _QueryParamSlot(
-				codec=prop.codec,
-				default=prop.default_value,
-				signal=Signal(
-					reactive(value),  # pyright: ignore[reportUnknownArgumentType]
-					name=f"QueryParam.{param}",
-				),
-			)
-			self._slots[param] = slot
-			self._ensure_effects()
-			return slot.signal
-		if slot.codec != prop.codec or not values_equal(
-			slot.default, prop.default_value
-		):
-			raise ValueError(
-				f"QueryParam '{param}' is already registered as {slot.codec.label} "
-				+ f"with default {slot.default!r}"
-			)
-		return slot.signal
-
-	def retain(self, prop: QueryParamProperty) -> QueryParamRegistration:
-		self.ensure(prop)
-		self._slots[prop.param_name].refs += 1
-		return QueryParamRegistration(self, prop.param_name)
-
-	def release(self, param: str) -> None:
-		slot = self._slots.get(param)
-		if slot is None:
-			return
-		slot.refs -= 1
-		if slot.refs > 0:
-			return
-		del self._slots[param]
-		if self._slots:
-			return
-		if self._route_effect:
-			self._route_effect.dispose()
-			self._route_effect = None
-		if self._state_effect:
-			self._state_effect.dispose()
-			self._state_effect = None
-
-	def _ensure_effects(self) -> None:
-		if self._route_effect is None or self._state_effect is None:
-			with Scope():
-				if self._route_effect is None:
-					self._route_effect = Effect(
-						self._sync_from_route,
-						name="QueryParamSync:route",
-						lazy=True,
-					)
-				if self._state_effect is None:
-					self._state_effect = Effect(
-						self._sync_to_route,
-						name="QueryParamSync:state",
-						lazy=True,
-					)
-
-	def prime(self) -> None:
-		if self._route_effect and self._route_effect.runs == 0:
-			self._route_effect.run()
-		if self._state_effect:
-			self._state_effect.run()
-
-	def _apply_route_to_slot(self, param: str, slot: _QueryParamSlot) -> None:
-		query_params = self.render.url["queryParams"]
-		raw = query_params.get(param)
-		parsed = _parse_query_param_value(
-			raw,
-			default=slot.default,
-			codec=slot.codec,
-			param=param,
-		)
-		if values_equal(slot.signal.value, parsed):
-			return
-		value = reactive(parsed)
-		slot.signal.write(value)
-
-	def _sync_from_route(self) -> None:
-		_ = self.render.url["queryParams"]
-		if self._route_effect and self._route_effect.runs == 0:
-			return
-		for param, slot in self._slots.items():
-			self._apply_route_to_slot(param, slot)
-
-	def _sync_to_route(self) -> None:
-		with Untrack():
-			url = self.render.url
-			current_params = dict(cast(Mapping[str, str], url["queryParams"]))
-			pathname = url["pathname"]
-			hash_frag = url["hash"]
-		if not pathname:
-			# No route info yet: nothing to navigate relative to.
-			return
-		query_params = dict(current_params)
-		for param, slot in self._slots.items():
-			value = slot.signal.read()
-			if slot.codec.kind == "list" and value is not None:
-				value = unwrap(value)
-			serialized = _serialize_query_param_value(
-				value,
-				default=slot.default,
-				codec=slot.codec,
-				param=param,
-			)
-			if serialized is None:
-				query_params.pop(param, None)
-			else:
-				query_params[param] = serialized
-
-		if query_params == current_params:
-			return
-		path = pathname
-		query = urlencode(query_params)
-		if query:
-			path += "?" + query
-		if hash_frag:
-			if hash_frag.startswith("#"):
-				path += hash_frag
-			else:
-				path += "#" + hash_frag
-		# Session-scoped, so the navigation is not bound to a route mount: the
-		# only staleness question is whether the URL it was built from is still
-		# the one on screen. `sourcePath` alone expresses exactly that.
-		self.render.send(
-			ServerNavigateToMessage(
-				type="navigate_to",
-				path=path,
-				replace=True,
-				hard=False,
-				sourcePath=pathname,
-			)
-		)
-
-	@override
-	def dispose(self) -> None:
-		if self._route_effect:
-			self._route_effect.dispose()
-			self._route_effect = None
-		if self._state_effect:
-			self._state_effect.dispose()
-			self._state_effect = None
-		self._slots.clear()
+	def initialize(self, state: "State", name: str) -> None:
+		_ = (state, name)

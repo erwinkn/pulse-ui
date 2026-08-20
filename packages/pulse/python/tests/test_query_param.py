@@ -43,7 +43,7 @@ def make_context(route_info: RouteInfo):
 
 def flush_query_param_sync(session: RenderSession) -> None:
 	flush_effects()
-	effect = session.query_param_sync._state_effect  # pyright: ignore[reportPrivateUsage]
+	effect = session.url._state_effect  # pyright: ignore[reportPrivateUsage]
 	if effect is not None:
 		effect.flush()
 
@@ -340,7 +340,7 @@ class TestQueryParam:
 				"from-second"
 			]
 
-		assert session.query_param_sync._slots["q"].refs == 2  # pyright: ignore[reportPrivateUsage]
+		assert "q" in session.url._slots  # pyright: ignore[reportPrivateUsage]
 
 	def test_same_route_sibling_unregister_keeps_remaining_writer(self):
 		class First(ps.State):
@@ -367,7 +367,7 @@ class TestQueryParam:
 		navs = navigations(messages)
 		assert len(navs) == 1
 		assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["only-second"]
-		assert session.query_param_sync._slots["q"].refs == 1  # pyright: ignore[reportPrivateUsage]
+		assert "q" in session.url._slots  # pyright: ignore[reportPrivateUsage]
 
 	def test_conflicting_codec_or_default_raises(self):
 		class AsStr(ps.State):

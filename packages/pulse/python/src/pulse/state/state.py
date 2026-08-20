@@ -12,6 +12,7 @@ from enum import IntEnum
 from types import SimpleNamespace
 from typing import Any, get_type_hints, override
 
+from pulse.context import PulseContext
 from pulse.helpers import Disposable
 from pulse.reactive import Computed, Effect, Scope, Signal
 from pulse.reactive_extensions import ReactiveProperty
@@ -278,15 +279,17 @@ class State(Disposable, metaclass=StateMeta):
 		setattr(self, STATE_STATUS_FIELD, StateStatus.INITIALIZING)
 
 		self._scope = Scope()
-		query_param_sync = None
+		needs_query_param_prime = False
 		with self._scope:
 			for name, attr in self._initializable_properties():
 				if isinstance(attr, QueryParamProperty):
-					query_param_sync = attr.initialize(self, name)
-				else:
-					attr.initialize(self, name)
-		if query_param_sync is not None:
-			query_param_sync.prime()
+					needs_query_param_prime = True
+					continue
+				attr.initialize(self, name)
+		if needs_query_param_prime:
+			ctx = PulseContext.get()
+			if ctx.render is not None:
+				ctx.render.url.prime()
 
 		setattr(self, STATE_STATUS_FIELD, StateStatus.INITIALIZED)
 

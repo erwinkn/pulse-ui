@@ -302,8 +302,8 @@ def SearchPage():
 
 **Constraints:**
 - Requires a render context — creating the state outside a component render raises `RuntimeError`.
-- The render session owns one Signal per param name. Every `QueryParam` field with that name reads and writes it — two states sharing `q` are looking at the same value, immediately. A second registration with a different type or default raises `ValueError`.
-- The slot belongs to the render session, not to the mount that created it, so a `ps.global_state` field keeps syncing across in-app navigation. The URL stays the source of truth: navigating to a URL without the param resets the field to its default.
+- The session URL owns one Signal per param name (`render.url.param(...)`). Every `QueryParam` field with that name reads and writes it — two states sharing `q` are looking at the same value, immediately. A second registration with a different type or default raises `ValueError`.
+- The slot lives on the session URL until the session closes, so a `ps.global_state` field keeps syncing across in-app navigation. The URL stays the source of truth: navigating to a URL without the param resets the field to its default.
 - Server-synced by design: every change is a round-trip. For rapid URL updates (map viewport, scroll position), sync client-side with `history.replaceState` in transpiled code instead — see `js-interop.md` → "Latency-sensitive interactions".
 
 ## Path Parameters

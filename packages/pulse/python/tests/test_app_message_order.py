@@ -90,12 +90,9 @@ async def test_replies_resolve_while_command_middleware_is_parked():
 	session = SimpleNamespace(sid="session-1", data={})
 	_bind_render(app, render, session)
 
-	api_fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
-	render.replies.register("corr-1", api_fut)
-	js_fut: asyncio.Future[object] = asyncio.get_running_loop().create_future()
-	render.replies.register("js-1", js_fut)
-	channel_fut: asyncio.Future[object] = asyncio.get_running_loop().create_future()
-	render.replies.register("req-1", channel_fut, cancel_key="ch-1")
+	api_fut = render.replies.register("corr-1")
+	js_fut = render.replies.register("js-1")
+	channel_fut = render.replies.register("req-1", cancel_key="ch-1")
 
 	parked = _spawn(
 		app,
@@ -221,8 +218,7 @@ async def test_parked_command_does_not_block_other_path_or_reply():
 		render.prerender(["/a", "/b"])
 	callback_key = next(iter(render.route_mounts["/b"].tree.callbacks))
 
-	api_fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
-	render.replies.register("corr-b", api_fut)
+	api_fut = render.replies.register("corr-b")
 
 	parked = _spawn(
 		app,

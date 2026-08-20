@@ -1,7 +1,6 @@
 """Spec for the request/reply primitive behind call_api, run_js, and
 Channel.request: correlation id -> future, resolved synchronously."""
 
-import asyncio
 from types import SimpleNamespace
 from typing import Any, cast, override
 
@@ -15,15 +14,10 @@ from pulse.serializer import serialize
 from pulse.user_session import UserSession
 
 
-def _future() -> asyncio.Future[object]:
-	return asyncio.get_running_loop().create_future()
-
-
 @pytest.mark.asyncio
 async def test_resolve_sets_result_and_pops():
 	replies = PendingReplies()
-	fut = _future()
-	replies.register("r1", fut)
+	fut = replies.register("r1")
 
 	replies.resolve("r1", {"x": 1})
 
@@ -35,8 +29,7 @@ async def test_resolve_sets_result_and_pops():
 @pytest.mark.asyncio
 async def test_reject_sets_exception_and_pops():
 	replies = PendingReplies()
-	fut = _future()
-	replies.register("r1", fut)
+	fut = replies.register("r1")
 
 	replies.reject("r1", RuntimeError("boom"))
 
@@ -48,8 +41,7 @@ async def test_reject_sets_exception_and_pops():
 @pytest.mark.asyncio
 async def test_apply_reply_resolves_payload():
 	replies = PendingReplies()
-	fut = _future()
-	replies.register("r1", fut)
+	fut = replies.register("r1")
 
 	replies.apply({"type": "reply", "id": "r1", "payload": 7})
 
@@ -60,8 +52,7 @@ async def test_apply_reply_resolves_payload():
 @pytest.mark.asyncio
 async def test_apply_reply_rejects_on_error():
 	replies = PendingReplies()
-	fut = _future()
-	replies.register("r1", fut)
+	fut = replies.register("r1")
 
 	replies.apply({"type": "reply", "id": "r1", "error": "boom"})
 
@@ -80,17 +71,16 @@ async def test_unknown_id_is_a_noop():
 @pytest.mark.asyncio
 async def test_duplicate_register_fails():
 	replies = PendingReplies()
-	replies.register("r1", _future())
+	replies.register("r1")
 	with pytest.raises(ValueError, match="Duplicate"):
-		replies.register("r1", _future())
+		replies.register("r1")
 
 
 @pytest.mark.asyncio
 async def test_resolve_after_discard_is_a_noop():
 	# A late reply racing a timeout must lose silently.
 	replies = PendingReplies()
-	fut = _future()
-	replies.register("r1", fut)
+	fut = replies.register("r1")
 	replies.discard("r1")
 
 	replies.resolve("r1", 42)
@@ -101,8 +91,7 @@ async def test_resolve_after_discard_is_a_noop():
 @pytest.mark.asyncio
 async def test_resolve_on_already_done_future_is_a_noop():
 	replies = PendingReplies()
-	fut = _future()
-	replies.register("r1", fut)
+	fut = replies.register("r1")
 	fut.cancel()
 
 	replies.resolve("r1", 42)
@@ -112,11 +101,10 @@ async def test_resolve_on_already_done_future_is_a_noop():
 @pytest.mark.asyncio
 async def test_reject_where_only_hits_matching_cancel_key():
 	replies = PendingReplies()
-	ch_a1, ch_a2, ch_b, plain = _future(), _future(), _future(), _future()
-	replies.register("a1", ch_a1, cancel_key="ch-a")
-	replies.register("a2", ch_a2, cancel_key="ch-a")
-	replies.register("b1", ch_b, cancel_key="ch-b")
-	replies.register("p1", plain)
+	ch_a1 = replies.register("a1", cancel_key="ch-a")
+	ch_a2 = replies.register("a2", cancel_key="ch-a")
+	ch_b = replies.register("b1", cancel_key="ch-b")
+	plain = replies.register("p1")
 
 	replies.reject_where("ch-a", RuntimeError("closed"))
 
@@ -132,9 +120,8 @@ async def test_reject_where_only_hits_matching_cancel_key():
 @pytest.mark.asyncio
 async def test_cancel_all_cancels_and_clears():
 	replies = PendingReplies()
-	f1, f2 = _future(), _future()
-	replies.register("r1", f1)
-	replies.register("r2", f2, cancel_key="ch")
+	f1 = replies.register("r1")
+	f2 = replies.register("r2", cancel_key="ch")
 
 	replies.cancel_all()
 
@@ -164,8 +151,7 @@ async def test_socket_reply_resolves_and_skips_middleware():
 	app.user_sessions[session.sid] = cast(UserSession, cast(object, session))
 	app._socket_to_render["socket-1"] = render.id  # pyright: ignore[reportPrivateUsage]
 
-	fut: asyncio.Future[object] = asyncio.get_running_loop().create_future()
-	render.replies.register("corr-1", fut)
+	fut = render.replies.register("corr-1")
 
 	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
 		"socket-1",

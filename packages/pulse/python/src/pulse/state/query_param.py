@@ -349,19 +349,13 @@ class QueryParamProperty(StateProperty):
 		self.param_name = name
 
 	@override
-	def _get_signal(self, obj: Any) -> Signal[Any]:
-		priv = cast(str, self.private_name)
-		cached = getattr(obj, priv, None)
-		if cached is not None:
-			return cached
+	def _get_signal(self, _obj: Any) -> Signal[Any]:
 		ctx = PulseContext.get()
 		if ctx.render is None:
 			raise RuntimeError(
 				"QueryParam properties require a render context. Create the state inside a component render."
 			)
-		signal = ctx.render.url.param(self.param_name, self.codec, self.default_value)
-		setattr(obj, priv, signal)
-		return signal
+		return ctx.render.url.param(self.param_name, self.codec, self.default_value)
 
 	def hydrate(self, state: "State") -> None:
 		self._get_signal(state)

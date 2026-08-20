@@ -13,18 +13,18 @@ from collections.abc import Awaitable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import IntEnum
-from functools import wraps
-from typing import Any, Callable, Literal, TypeVar, cast, override
+from typing import Any, Callable, Literal, TypeVar, cast
 
 import socketio
 import uvicorn
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.routing import APIRoute
+from socketio.exceptions import ConnectionRefusedError as SocketIOConnectionRefusedError
 from starlette.types import ASGIApp
 from starlette.websockets import WebSocket
 
+from pulse.api_router import PulseFastAPI, PulseFrameworkAPIRoute
 from pulse.codegen.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.cookies import (
@@ -72,7 +72,6 @@ from pulse.middleware import (
 )
 from pulse.plugin import Plugin
 from pulse.proxy import Proxy, ReactProxy
-from pulse.reactive_extensions import unwrap
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
@@ -88,8 +87,9 @@ from pulse.user_session import (
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 FRAMEWORK_API_PREFIX = "/_pulse"
+PAGE_INSTANCE_AUTH_KEY = "__pulse_page_instance_id"
+RENDER_ID_COLLISION_CODE = "render_id_collision"
 MAX_PENDING_SOCKET_MESSAGES = 100
-PULSE_ENDPOINT_UNWRAP_MARKER = "__pulse_endpoint_unwrap__"
 
 
 class AppStatus(IntEnum):
@@ -138,54 +138,29 @@ class ConnectionStatusConfig:
 	reconnect_error_delay: float = 8.0
 
 
-class PulseAPIRoute(APIRoute):
-	def __init__(
-		self,
-		path: str,
-		endpoint: Callable[..., Any],
-		**kwargs: Any,
-	) -> None:
-		super().__init__(path, _wrap_fastapi_endpoint(endpoint), **kwargs)
+@dataclass
+class FastAPIConfig:
+	"""Configuration for FastAPI's generated OpenAPI schema and documentation."""
 
-
-class PulseFastAPI(FastAPI):
-	@override
-	def include_router(self, router: APIRouter, **kwargs: Any) -> None:
-		_wrap_router_endpoints(router)
-		super().include_router(router, **kwargs)
-
-
-def _wrap_router_endpoints(router: APIRouter) -> None:
-	for route in router.routes:
-		if isinstance(route, APIRoute):
-			route.endpoint = _wrap_fastapi_endpoint(route.endpoint)
-
-
-def _wrap_fastapi_endpoint(endpoint: Callable[..., Any]) -> Callable[..., Any]:
-	if endpoint.__dict__.get(PULSE_ENDPOINT_UNWRAP_MARKER):
-		return endpoint
-
-	if asyncio.iscoroutinefunction(endpoint):
-
-		@wraps(endpoint)
-		async def async_endpoint(*args: Any, **kwargs: Any) -> Any:
-			return _unwrap_fastapi_response(await endpoint(*args, **kwargs))
-
-		async_endpoint.__dict__[PULSE_ENDPOINT_UNWRAP_MARKER] = True
-		return async_endpoint
-
-	@wraps(endpoint)
-	def sync_endpoint(*args: Any, **kwargs: Any) -> Any:
-		return _unwrap_fastapi_response(endpoint(*args, **kwargs))
-
-	sync_endpoint.__dict__[PULSE_ENDPOINT_UNWRAP_MARKER] = True
-	return sync_endpoint
-
-
-def _unwrap_fastapi_response(value: Any) -> Any:
-	if isinstance(value, Response):
-		return value
-	return unwrap(value, untrack=True)
+	title: str = "Pulse UI Server"
+	summary: str | None = None
+	description: str = ""
+	version: str = "0.1.0"
+	openapi_url: str | None = f"{FRAMEWORK_API_PREFIX}/openapi.json"
+	docs_url: str | None = f"{FRAMEWORK_API_PREFIX}/docs"
+	redoc_url: str | None = None
+	swagger_ui_oauth2_redirect_url: str | None = (
+		f"{FRAMEWORK_API_PREFIX}/docs/oauth2-redirect"
+	)
+	openapi_tags: list[dict[str, Any]] | None = None
+	servers: list[dict[str, Any]] | None = None
+	terms_of_service: str | None = None
+	contact: dict[str, Any] | None = None
+	license_info: dict[str, Any] | None = None
+	swagger_ui_init_oauth: dict[str, Any] | None = None
+	swagger_ui_parameters: dict[str, Any] | None = None
+	separate_input_output_schemas: bool = True
+	openapi_external_docs: dict[str, Any] | None = None
 
 
 class App:
@@ -213,7 +188,7 @@ class App:
 			namespace.
 		proxy: Single-server proxy tuning. Ignored in subdomains mode.
 		cors: CORS configuration. Auto-configured based on mode if not provided.
-		fastapi: Additional FastAPI constructor options.
+		fastapi: FastAPI OpenAPI and generated documentation configuration.
 		session_timeout: Session cleanup timeout in seconds. Defaults to 60.0.
 		shell_render_timeout: Cleanup timeout in seconds for placeholder
 			"shell" renders minted on stale-render-id reconnect. These have no
@@ -272,6 +247,8 @@ class App:
 	_sessions_in_request: dict[str, int]
 	_socket_to_render: dict[str, str]
 	_render_to_socket: dict[str, str]
+	_render_to_page_instance: dict[str, str | None]
+	_render_connect_attempts: dict[str, object]
 	_connecting_sockets: set[str]
 	_pending_socket_messages: dict[str, list[Serialized]]
 	_render_cleanups: dict[str, TimerHandleLike]
@@ -303,7 +280,7 @@ class App:
 		mode: PulseMode = "single-server",
 		proxy: Proxy | None = None,
 		cors: CORSOptions | None = None,
-		fastapi: dict[str, Any] | None = None,
+		fastapi: FastAPIConfig | None = None,
 		session_timeout: float = 60.0,
 		shell_render_timeout: float = 30.0,
 		prerender_queue_timeout: float = 60.0,
@@ -358,6 +335,8 @@ class App:
 		# socket's disconnect cannot tear down a newer connection.
 		self._socket_to_render = {}
 		self._render_to_socket = {}
+		self._render_to_page_instance = {}
+		self._render_connect_attempts = {}
 		self._connecting_sockets = set()
 		self._pending_socket_messages = {}
 		# Map render_id -> cleanup timer handle for timeout-based expiry
@@ -378,11 +357,32 @@ class App:
 			config=codegen or CodegenConfig(),
 		)
 
+		fastapi_config = fastapi or FastAPIConfig()
+
 		self.fastapi = PulseFastAPI(
-			title="Pulse UI Server",
+			title=fastapi_config.title,
+			summary=fastapi_config.summary,
+			description=fastapi_config.description,
+			version=fastapi_config.version,
+			openapi_url=fastapi_config.openapi_url,
+			docs_url=fastapi_config.docs_url,
+			redoc_url=fastapi_config.redoc_url,
+			swagger_ui_oauth2_redirect_url=(
+				fastapi_config.swagger_ui_oauth2_redirect_url
+			),
+			openapi_tags=fastapi_config.openapi_tags,
+			servers=fastapi_config.servers,
+			terms_of_service=fastapi_config.terms_of_service,
+			contact=fastapi_config.contact,
+			license_info=fastapi_config.license_info,
+			swagger_ui_init_oauth=fastapi_config.swagger_ui_init_oauth,
+			swagger_ui_parameters=fastapi_config.swagger_ui_parameters,
+			separate_input_output_schemas=(
+				fastapi_config.separate_input_output_schemas
+			),
+			openapi_external_docs=fastapi_config.openapi_external_docs,
 			lifespan=self.fastapi_lifespan,
 		)
-		self.fastapi.router.route_class = PulseAPIRoute
 		self.sio = socketio.AsyncServer(
 			async_mode="asgi", cors_allowed_origins="*", async_handlers=False
 		)
@@ -627,19 +627,25 @@ class App:
 					# so dropping the in-memory object is safe.
 					self.close_session_if_inactive(session.sid)
 
-		# Apply prefix to all routes
+		# Pulse built-ins live on a router with PulseFrameworkAPIRoute so
+		# middleware.api never sees prerender/health/forms. App.fastapi stays
+		# PulseAPIRoute for user and plugin routes.
 		prefix = self.api_prefix
+		framework = APIRouter(
+			route_class=PulseFrameworkAPIRoute,
+			include_in_schema=False,
+		)
 
-		@self.fastapi.get(f"{prefix}/health")
+		@framework.get(f"{prefix}/health")
 		def healthcheck():  # pyright: ignore[reportUnusedFunction]
 			return {"health": "ok", "message": "Pulse server is running"}
 
-		@self.fastapi.get(f"{prefix}/set-cookies")
+		@framework.get(f"{prefix}/set-cookies")
 		def set_cookies():  # pyright: ignore[reportUnusedFunction]
 			return {"health": "ok", "message": "Cookies updated"}
 
 		# RouteInfo is the request body
-		@self.fastapi.post(f"{prefix}/prerender")
+		@framework.post(f"{prefix}/prerender")
 		async def prerender(payload: PrerenderPayload, request: Request):  # pyright: ignore[reportUnusedFunction]
 			"""
 			POST /prerender
@@ -749,7 +755,7 @@ class App:
 			# Fallback (shouldn't happen)
 			raise ValueError("Unexpected prerender result type")
 
-		@self.fastapi.post(f"{prefix}/forms/{{render_id}}/{{form_id}}")
+		@framework.post(f"{prefix}/forms/{{render_id}}/{{form_id}}")
 		async def handle_form_submit(  # pyright: ignore[reportUnusedFunction]
 			render_id: str, form_id: str, request: Request
 		) -> Response:
@@ -762,6 +768,8 @@ class App:
 				raise HTTPException(status_code=410, detail="Render session expired")
 
 			return await render.forms.handle_submit(form_id, request, session)
+
+		self.fastapi.include_router(framework)
 
 		# Call on_setup hooks after FastAPI routes/middleware are in place
 		for plugin in self.plugins:
@@ -820,20 +828,21 @@ class App:
 			auth: dict[str, str] | None,
 			rid: str | None,
 		):
-			# Parse cookies from environ and ensure a session exists
 			cookie = self.cookie.get_from_socketio(environ)
 			if cookie is None:
 				raise ConnectionRefusedError("Socket connect missing cookie")
 			session = await self.get_or_create_session(cookie)
 
 			if not rid:
-				# Still refuse connections without a renderId
 				self.close_session_if_inactive(session.sid)
 				raise ConnectionRefusedError(
 					f"Socket connect missing render_id session={session.sid}"
 				)
 
-			# Allow reconnects where the provided renderId no longer exists by creating a new RenderSession
+			page_instance_id = auth.get(PAGE_INSTANCE_AUTH_KEY) if auth else None
+			if not isinstance(page_instance_id, str) or not page_instance_id:
+				page_instance_id = None
+
 			render = self.render_sessions.get(rid)
 			created_render = render is None
 			if render is None:
@@ -857,69 +866,103 @@ class App:
 						+ f"owner={owner} session={session.sid}"
 					)
 
-			# Authorize before binding the socket. A denied (re)connect must not
-			# rebind or tear down an existing render that another live socket may
-			# still be using; only the render we created for this attempt is ours
-			# to clean up.
+			# Claim synchronously before connect middleware can yield. A reconnect from
+			# the same page may replace its socket; another page must reload instead.
+			page_instance_claimed = rid not in self._render_to_page_instance
+			if page_instance_claimed:
+				self._render_to_page_instance[rid] = page_instance_id
+			elif self._render_to_page_instance[rid] != page_instance_id:
+				self.close_session_if_inactive(session.sid)
+				raise SocketIOConnectionRefusedError(
+					"Render session is active in another page instance",
+					{"code": RENDER_ID_COLLISION_CODE},
+				)
+			connect_attempt = object()
+			self._render_connect_attempts[rid] = connect_attempt
+
 			connect_error: Exception | None = None
-			with PulseContext.update(session=session, render=render):
+			try:
+				with PulseContext.update(session=session, render=render):
 
-				async def _next():
-					return Ok(None)
+					async def _next():
+						return Ok(None)
 
-				def _normalize_connect_response(res: Any) -> ConnectResponse:
-					if isinstance(res, (Ok, Deny)):
-						return res  # type: ignore[return-value]
-					# Treat any other value as allow
-					return Ok(None)
+					def _normalize_connect_response(res: Any) -> ConnectResponse:
+						if isinstance(res, (Ok, Deny)):
+							return res  # type: ignore[return-value]
+						return Ok(None)
 
-				try:
-					res = await self.middleware.connect(
-						request=PulseRequest.from_socketio_environ(environ, auth),
-						session=session.data,
-						next=_next,
-					)
-					res = _normalize_connect_response(res)
-				except Exception as exc:
-					# Treat a middleware error as allow, but surface it to the
-					# client once the socket is bound (see below).
-					connect_error = exc
-					res = Ok(None)
-				if isinstance(res, Deny):
-					if created_render:
-						self.close_render(rid)
-					else:
-						self.close_session_if_inactive(session.sid)
-					raise ConnectionRefusedError("Socket connection denied")
+					try:
+						res = await self.middleware.connect(
+							request=PulseRequest.from_socketio_environ(environ, auth),
+							session=session.data,
+							next=_next,
+						)
+						res = _normalize_connect_response(res)
+					except Exception as exc:
+						connect_error = exc
+						res = Ok(None)
 
-				# Bind the socket inside the session context so query resume
-				# (and recreated interval effects) capture the same
-				# (session, render) context as initial fetches.
-				def on_message(message: ServerMessage):
-					payload = serialize(message)
-					# `serialize` returns a tuple, which socket.io will mistake for multiple arguments
-					payload = list(payload)
-					self._tasks.create_task(
-						self.sio.emit("message", list(payload), to=sid)
-					)
+					if (
+						self.render_sessions.get(rid) is not render
+						or rid not in self._render_to_page_instance
+						or self._render_to_page_instance[rid] != page_instance_id
+						or self._render_connect_attempts.get(rid) is not connect_attempt
+					):
+						raise SocketIOConnectionRefusedError(
+							"Render session changed during socket connection",
+							{"code": RENDER_ID_COLLISION_CODE},
+						)
+					if isinstance(res, Deny):
+						if created_render:
+							self.close_render(rid)
+						else:
+							self.close_session_if_inactive(session.sid)
+						raise ConnectionRefusedError("Socket connection denied")
 
-				render.connect(on_message)
-				# Map socket sid to renderId for message routing. If the client
-				# reconnected before the old socket's disconnect fired, unmap the
-				# old socket so its late disconnect can't tear down this connection.
-				old_sid = self._render_to_socket.get(rid)
-				if old_sid is not None and old_sid != sid:
-					self._socket_to_render.pop(old_sid, None)
-				self._socket_to_render[sid] = rid
-				self._render_to_socket[rid] = sid
+					def on_message(message: ServerMessage):
+						payload = list(serialize(message))
+						self._tasks.create_task(
+							self.sio.emit("message", payload, to=sid)
+						)
 
-				# Cancel any pending cleanup since session is now connected
-				self._cancel_render_cleanup(rid)
+					old_sid = self._render_to_socket.get(rid)
+					if old_sid is not None and old_sid != sid:
+						# The client reconnected before the old socket's disconnect
+						# fired: unmap the old socket so its late disconnect can't
+						# tear down this connection, and replay the missed disconnect
+						# so attach re-inits and stale queries refetch.
+						self._socket_to_render.pop(old_sid, None)
+						render.resync()
+					render.connect(on_message)
+					self._socket_to_render[sid] = rid
+					self._render_to_socket[rid] = sid
+					self._cancel_render_cleanup(rid)
 
-				# Surface any connect-middleware error now that the socket is bound
-				# (reported pre-bind it would be dropped for a fresh render).
-				if connect_error is not None:
-					render.report_error("/", "connect", connect_error)
+					if connect_error is not None:
+						render.report_error("/", "connect", connect_error)
+			except Exception:
+				owns_connect_attempt = (
+					self._render_connect_attempts.get(rid) is connect_attempt
+				)
+				if owns_connect_attempt:
+					self._render_connect_attempts.pop(rid, None)
+				if (
+					page_instance_claimed
+					and owns_connect_attempt
+					and self.render_sessions.get(rid) is render
+					and self._render_to_socket.get(rid) is None
+					and self._render_to_page_instance.get(rid) == page_instance_id
+				):
+					self._render_to_page_instance.pop(rid, None)
+				if (
+					owns_connect_attempt
+					and self.render_sessions.get(rid) is render
+					and self._render_to_socket.get(rid) is None
+					and not render.connected
+				):
+					self._schedule_render_cleanup(rid)
+				raise
 
 		@self.sio.event
 		def disconnect(sid: str):  # pyright: ignore[reportUnusedFunction]
@@ -1249,6 +1292,8 @@ class App:
 		# Cancel any pending cleanup task
 		self._cancel_render_cleanup(rid)
 		self._render_message_locks.pop(rid, None)
+		self._render_to_page_instance.pop(rid, None)
+		self._render_connect_attempts.pop(rid, None)
 		socket_sid = self._render_to_socket.pop(rid, None)
 		if socket_sid is not None:
 			self._socket_to_render.pop(socket_sid, None)

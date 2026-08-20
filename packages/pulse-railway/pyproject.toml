@@ -1,6 +1,6 @@
 [project]
 name = "pulse-railway"
-version = "0.3.10"
+version = "0.3.13"
 description = "Railway deployment utilities for Pulse applications"
 readme = "README.md"
 authors = [{ name = "Erwin Kuhn", email = "erwin.kuhn@protonmail.com" }]
@@ -9,7 +9,7 @@ dependencies = [
     "aiohttp>=3.12.15",
     "fastapi>=0.116.1",
     "httpx>=0.28.1",
-    "pulse-framework",
+    "pulse-framework>=0.1.109",
     "redis>=6.4.0",
     "uvicorn>=0.35.0",
 ]

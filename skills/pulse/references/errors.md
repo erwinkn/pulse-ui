@@ -365,6 +365,21 @@ Server errors sent to client include:
 - `phase` - "render", "callback", "effect", "navigate", "unmount"
 - `details` - Additional context (callback name, effect name, etc.)
 
+## Dev-Server Errors
+
+Errors seen while iterating with the dev server, usually stale client/server state rather than bugs in your code.
+
+**`[Pulse] Unknown registry key: <N>`** (browser console / error overlay)
+- The browser is running a stale client bundle: server code added/removed imports, transpiled functions, or components, so the registry keys the server references no longer match the loaded JS.
+- Fix: fully reload the tab. A normal refresh can still serve cached JS — close and reopen the tab if the error persists, and/or restart the dev server.
+
+**`rerender called before init for '<path>'`** (server log, `RuntimeError`)
+- A live WebSocket session hit a server worker that reloaded underneath it: the session tries to update a route mount that no longer exists in the fresh process.
+- Fix: hard refresh the page to establish a fresh session.
+
+**Queries stuck loading forever, no error**
+- If a query never resolves and never errors, suspect the WebSocket transport (proxy, load balancer, dropped connection) before the query code — a query whose fetch fails reports `is_error`; one whose messages never arrive just spins.
+
 ## Render Interrupts
 
 Special exceptions for flow control (not errors):

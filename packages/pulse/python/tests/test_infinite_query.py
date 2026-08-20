@@ -1,11 +1,16 @@
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Any, TypedDict
+from typing import Any, TypedDict, final
 
 import pulse as ps
 import pytest
 from pulse.queries.common import ActionError
-from pulse.queries.infinite_query import InfiniteQuery, InfiniteQueryResult, Page
+from pulse.queries.infinite_query import (
+	InfiniteQuery,
+	InfiniteQueryProperty,
+	InfiniteQueryResult,
+	Page,
+)
 from pulse.reactive import Computed
 from pulse.render_session import RenderSession
 from pulse.routing import RouteTree
@@ -41,6 +46,195 @@ def with_render_session(fn: Callable[..., Awaitable[object]]):
 			return await fn(*args, **kwargs)
 
 	return wrapper
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_factory_infinite_queries_use_class_member_identity():
+	initials: list[tuple[int, int]] = []
+	successes: list[tuple[int, int]] = []
+	errors: list[tuple[int, str]] = []
+
+	def make_query(
+		value: int, *, fails: bool = False
+	) -> InfiniteQueryProperty[int, int, ps.State]:
+		async def member(self: ps.State, page_param: int) -> int:
+			if fails:
+				raise RuntimeError(f"failure {value}")
+			return value * 10 + page_param
+
+		member.__name__ = "shared"
+		descriptor = ps.infinite_query(
+			initial_page_param=1,
+			retries=0,
+			fetch_on_mount=False,
+		)(member)
+
+		@descriptor.key
+		def _key(self: ps.State):  # pyright: ignore[reportUnusedFunction]
+			return ("renamed-infinite-query", id(self), value)
+
+		@descriptor.get_next_page_param
+		def _next_page(  # pyright: ignore[reportUnusedFunction]
+			self: ps.State, pages: list[Page[int, int]]
+		) -> int | None:
+			return pages[-1].param + 1 if pages[-1].param < 2 else None
+
+		@descriptor.get_previous_page_param
+		def _previous_page(  # pyright: ignore[reportUnusedFunction]
+			self: ps.State, pages: list[Page[int, int]]
+		) -> int | None:
+			return pages[0].param - 1 if pages[0].param > 0 else None
+
+		@descriptor.initial_data
+		def _initial(  # pyright: ignore[reportUnusedFunction]
+			self: ps.State,
+		) -> list[Page[int, int]]:
+			initials.append((id(self), value))
+			return [Page(-value, 1)]
+
+		@descriptor.on_success
+		async def _success(  # pyright: ignore[reportUnusedFunction]
+			self: ps.State,
+		):
+			await asyncio.sleep(0)
+			successes.append((id(self), value))
+
+		@descriptor.on_error
+		async def _error(  # pyright: ignore[reportUnusedFunction]
+			self: ps.State, error: Exception
+		):
+			await asyncio.sleep(0)
+			errors.append((id(self), str(error)))
+
+		return descriptor
+
+	@final
+	class S(ps.State):
+		first = make_query(1)
+		second = make_query(2)
+		failing = make_query(3, fails=True)
+
+	s = S()
+	first = s.first
+	second = s.second
+	failing = s.failing
+
+	assert first is not second
+	assert first.pages == [-1]
+	assert second.pages == [-2]
+	assert failing.pages == [-3]
+	assert initials == [(id(s), 1), (id(s), 2), (id(s), 3)]
+	assert S.__dict__["first"].name == "first"
+	assert S.__dict__["second"].name == "second"
+	assert S.__dict__["failing"].name == "failing"
+	await first.refetch()
+	await second.refetch()
+	await failing.refetch()
+	await asyncio.sleep(0)
+	assert first.pages == [11]
+	assert second.pages == [21]
+	assert successes == [(id(s), 1), (id(s), 2)]
+	assert errors == [(id(s), "failure 3")]
+
+	await first.fetch_next_page()
+	await first.fetch_previous_page()
+	assert first.pages == [10, 11, 12]
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_descriptor_inheritance_keeps_base_binding():
+	def make_query() -> InfiniteQueryProperty[str, int, ps.State]:
+		async def renamed(self: ps.State, page_param: int) -> str:
+			return f"{type(self).__name__}:{page_param}"
+
+		renamed.__name__ = "shared"
+		descriptor = ps.infinite_query(
+			initial_page_param=0,
+			retries=0,
+			fetch_on_mount=False,
+		)(renamed)
+
+		@descriptor.key
+		def _key(self: ps.State):  # pyright: ignore[reportUnusedFunction]
+			return ("inherited-infinite-query", id(self))
+
+		@descriptor.get_next_page_param
+		def _next(  # pyright: ignore[reportUnusedFunction]
+			self: ps.State, _pages: list[Page[str, int]]
+		) -> None:
+			return None
+
+		return descriptor
+
+	class Base(ps.State):
+		item = make_query()  # pyright: ignore[reportUnannotatedClassAttribute]
+
+	class Left(Base):
+		pass
+
+	class Right(Base):
+		pass
+
+	descriptor = Base.__dict__["item"]
+	states = [Base(), Left(), Right()]
+	results = [state.item for state in states]
+
+	assert descriptor.name == "item"
+	assert len({id(result) for result in results}) == 3
+	for result in results:
+		await result.ensure()
+	assert [result.pages for result in results] == [
+		["Base:0"],
+		["Left:0"],
+		["Right:0"],
+	]
+
+
+@pytest.mark.asyncio
+@with_render_session
+async def test_infinite_query_override_uses_defining_member_identity():
+	class Base(ps.State):
+		@ps.infinite_query(
+			initial_page_param=0,
+			key=("override-infinite-base",),
+			retries=0,
+			fetch_on_mount=False,
+		)
+		async def item(self, page: int) -> int:
+			return page + 1
+
+		@item.get_next_page_param
+		def _base_next(self, _pages: list[Page[int, int]]) -> None:
+			return None
+
+	class Child(Base):
+		@ps.infinite_query(
+			initial_page_param=0,
+			key=("override-infinite-child",),
+			retries=0,
+			fetch_on_mount=False,
+		)
+		async def item(self, _page: int) -> int:
+			base = super().item
+			await base.ensure()
+			pages = base.pages
+			assert pages is not None
+			return pages[0] + 1
+
+		@item.get_next_page_param
+		def _child_next(self, _pages: list[Page[int, int]]) -> None:
+			return None
+
+	state = Child()
+	child = state.item
+	await child.refetch()
+	base = super(Child, state).item
+
+	assert child is not base
+	assert child.pages == [2]
+	assert base.pages == [1]
 
 
 @pytest.mark.asyncio

@@ -724,20 +724,6 @@ class RenderSession:
 			raise ValueError(f"No active route for '{path}'")
 		return mount
 
-	def set_url(self, info: RouteInfo) -> None:
-		"""Record the URL the client is currently displaying.
-
-		Called by every `RouteContext` on creation and on route updates. All
-		mounts report the same URL, so this is last-writer-wins by design.
-		"""
-		self.url.update(
-			{
-				"pathname": info["pathname"],
-				"hash": info["hash"],
-				"queryParams": info["queryParams"],
-			}
-		)
-
 	def get_global_state(self, key: str, factory: Callable[[], Any]) -> Any:
 		"""Return a per-session singleton for the provided key."""
 		inst = self._global_states.get(key)

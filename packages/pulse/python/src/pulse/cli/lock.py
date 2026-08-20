@@ -6,19 +6,44 @@ Provides typed helpers for coordinating exclusive access to a Pulse web root.
 
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import platform as platform_module
 import signal
 import socket
 import time
+from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 
-from pulse.cli.helpers import ensure_gitignore_has
+from pulse.cli.helpers import ensure_gitignore_has, os_family
 
 DEFAULT_LOCK_FILENAME = ".pulse/lock"
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+PROCESS_SYNCHRONIZE = 0x100000
+PROCESS_TERMINATE = 0x1
+ERROR_ACCESS_DENIED = 5
+ERROR_INVALID_PARAMETER = 87
+WAIT_TIMEOUT = 0x102
+
+
+def _kernel32() -> ctypes.WinDLL:
+	kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+	kernel32.OpenProcess.argtypes = [
+		wintypes.DWORD,
+		wintypes.BOOL,
+		wintypes.DWORD,
+	]
+	kernel32.OpenProcess.restype = wintypes.HANDLE
+	kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+	kernel32.WaitForSingleObject.restype = wintypes.DWORD
+	kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+	kernel32.TerminateProcess.restype = wintypes.BOOL
+	kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+	kernel32.CloseHandle.restype = wintypes.BOOL
+	return kernel32
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,32 +140,22 @@ def _coerce_int(value: object) -> int | None:
 
 def is_process_alive(pid: int) -> bool:
 	"""Check if a process with the given PID is running."""
-	if os.name == "nt":
-		import ctypes
-		from ctypes import wintypes
-
-		kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-		kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-		kernel32.OpenProcess.restype = wintypes.HANDLE
-		kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-		kernel32.WaitForSingleObject.restype = wintypes.DWORD
-		kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-		kernel32.CloseHandle.restype = wintypes.BOOL
-
+	if os_family() == "windows":
+		kernel32 = _kernel32()
 		handle = kernel32.OpenProcess(
-			0x00100000 | 0x00001000,
+			PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
 			False,
 			pid,
 		)
 		if not handle:
 			error = ctypes.get_last_error()
-			if error == 5:
+			if error == ERROR_ACCESS_DENIED:
 				return True
-			if error == 87:
+			if error == ERROR_INVALID_PARAMETER:
 				return False
 			return True
 		try:
-			return kernel32.WaitForSingleObject(handle, 0) == 0x00000102
+			return kernel32.WaitForSingleObject(handle, 0) == WAIT_TIMEOUT
 		finally:
 			kernel32.CloseHandle(handle)
 
@@ -207,24 +222,14 @@ def interrupt_active_dev_server(
 
 
 def _interrupt_process(pid: int) -> None:
-	if os.name == "nt":
-		import ctypes
-		from ctypes import wintypes
-
-		kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-		kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-		kernel32.OpenProcess.restype = wintypes.HANDLE
-		kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
-		kernel32.TerminateProcess.restype = wintypes.BOOL
-		kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-		kernel32.CloseHandle.restype = wintypes.BOOL
-
-		handle = kernel32.OpenProcess(0x0001, False, pid)
+	if os_family() == "windows":
+		kernel32 = _kernel32()
+		handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
 		if not handle:
 			error = ctypes.get_last_error()
-			if error == 87:
+			if error == ERROR_INVALID_PARAMETER:
 				return
-			if error == 5:
+			if error == ERROR_ACCESS_DENIED:
 				raise RuntimeError(
 					f"Permission denied interrupting Pulse process {pid}."
 				)
@@ -234,12 +239,12 @@ def _interrupt_process(pid: int) -> None:
 		try:
 			if not kernel32.TerminateProcess(handle, 1):
 				error = ctypes.get_last_error()
-				if error == 87:
-					return
-				if error == 5:
+				if error == ERROR_ACCESS_DENIED:
 					raise RuntimeError(
 						f"Permission denied interrupting Pulse process {pid}."
 					)
+				if error == ERROR_INVALID_PARAMETER:
+					return
 				raise RuntimeError(
 					f"Failed to terminate Pulse process {pid}: {ctypes.WinError(error)}"
 				)

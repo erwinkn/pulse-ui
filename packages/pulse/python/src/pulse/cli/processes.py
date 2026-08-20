@@ -283,7 +283,7 @@ class ManagedProcess:
 		if self._job is not None:
 			self._job.terminate()
 			return
-		if not self.is_alive():
+		if os_family() == "windows":
 			return
 		with contextlib.suppress(ProcessLookupError, PermissionError):
 			os.killpg(self.process.pid, signal.SIGKILL)
@@ -369,6 +369,8 @@ def execute_commands(
 		# Stop the survivors before reading exit codes so every process
 		# contributes one; _stop_processes is idempotent for the finally below.
 		_stop_processes(processes)
+		# On Windows, terminated survivors can report 0xFFFFFFFF and mask
+		# the actual first command failure if their codes are aggregated.
 		return (
 			first_exit_code if first_exit_code is not None else max(exit_codes.values())
 		)

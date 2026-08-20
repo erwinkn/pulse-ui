@@ -4,12 +4,14 @@ import asyncio
 import contextlib
 import signal
 import socket
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast, final
 
 from watchfiles import Change, awatch
 
+from pulse.cli.helpers import os_family
 from pulse.cli.logging import TagMode
 from pulse.cli.models import CommandSpec
 from pulse.cli.processes import ManagedProcess, write_tagged_line
@@ -219,20 +221,20 @@ class DevSupervisor:
 			self.backend = ManagedProcess.start(
 				spec, on_output, on_exit, pass_fds=pass_fds
 			)
-			result = await self._race(
-				"changed",
-				"backend",
-				"web",
-				extra=asyncio.create_task(self._backend_ready.wait()),
-			)
-			if result == "ready":
-				return True
-			await self._stop(self.backend)
-			self.backend = None
-			return False
 		finally:
 			for listener in self.listeners:
 				listener.set_inheritable(False)
+		result = await self._race(
+			"changed",
+			"backend",
+			"web",
+			extra=asyncio.create_task(self._backend_ready.wait()),
+		)
+		if result == "ready":
+			return True
+		await self._stop(self.backend)
+		self.backend = None
+		return False
 
 	async def _wait_vite_signal(
 		self, event: asyncio.Event, *, timeout: float | None
@@ -273,9 +275,18 @@ class DevSupervisor:
 
 		env = dict(web_spec.env)
 		env[ENV_PULSE_SUPERVISED] = "1"
+		web_args = web_spec.args
+		if os_family() != "windows":
+			web_args = [
+				sys.executable,
+				"-m",
+				"pulse.cli.guard",
+				"--",
+				*web_spec.args,
+			]
 		spec = CommandSpec(
 			name=web_spec.name,
-			args=web_spec.args,
+			args=web_args,
 			cwd=web_spec.cwd,
 			env=env,
 		)
@@ -329,8 +340,6 @@ class DevSupervisor:
 				if not task.done():
 					task.cancel()
 			await asyncio.gather(*owned, return_exceptions=True)
-		if extra is not None and extra in done and not extra.cancelled():
-			return "ready"
 		for name, task in waiters.items():
 			if task in done and not task.cancelled():
 				return cast(Wait, name)

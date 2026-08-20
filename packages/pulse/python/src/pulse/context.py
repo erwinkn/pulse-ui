@@ -113,8 +113,9 @@ class PulseContext:
 	def bind(cls, fn: F) -> F:
 		"""Re-enter the current PulseContext on every call.
 
-		Captures ``app`` / ``session`` / ``render`` / ``route`` now. No-op if
-		there is no render session. A returned cleanup callable is also bound.
+		Captures ``app`` / ``session`` / ``render`` / ``route`` and the
+		``source_*`` mount identity. No-op if there is no render session. A
+		returned cleanup callable is also bound.
 		"""
 		current = PULSE_CONTEXT.get()
 		if current is None or current.render is None:
@@ -123,9 +124,20 @@ class PulseContext:
 		session = current.session
 		render = current.render
 		route = current.route
+		source_route_path = current.source_route_path
+		source_path = current.source_path
+		source_mount_id = current.source_mount_id
 
 		def enter() -> PulseContext:
-			return PulseContext(app=app, session=session, render=render, route=route)
+			return PulseContext(
+				app=app,
+				session=session,
+				render=render,
+				route=route,
+				source_route_path=source_route_path,
+				source_path=source_path,
+				source_mount_id=source_mount_id,
+			)
 
 		def bind_cleanup(result: Any) -> Any:
 			if not callable(result):

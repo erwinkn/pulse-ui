@@ -37,7 +37,7 @@ def make_session(pathname: str = "/"):
 
 class TestEffectPulseContext:
 	def test_state_effect_reenters_render_and_route(self):
-		seen: list[tuple[object, object]] = []
+		seen: list[tuple[object, ...]] = []
 
 		class Tracked(ps.State):
 			n: int = 0
@@ -46,17 +46,36 @@ class TestEffectPulseContext:
 			def track(self):
 				_ = self.n
 				ctx = PulseContext.get()
-				seen.append((ctx.render, ctx.route))
+				seen.append(
+					(
+						ctx.render,
+						ctx.route,
+						ctx.source_route_path,
+						ctx.source_path,
+						ctx.source_mount_id,
+					)
+				)
 
 		app, session, route_ctx = make_session()
-		with ps.PulseContext(app=app, render=session, route=route_ctx):
+		mount = session.route_mounts["/"]
+		with ps.PulseContext(
+			app=app,
+			render=session,
+			route=route_ctx,
+			source_route_path=route_ctx.route_path,
+			source_path=route_ctx.pathname,
+			source_mount_id=mount.mount_id,
+		):
 			state = Tracked()
 		flush_effects()
-		assert seen == [(session, route_ctx)]
+		assert seen == [
+			(session, route_ctx, route_ctx.route_path, "/", mount.mount_id)
+		]
 
 		state.n += 1
 		flush_effects()
-		assert seen == [(session, route_ctx), (session, route_ctx)]
+		identity = (session, route_ctx, route_ctx.route_path, "/", mount.mount_id)
+		assert seen == [identity, identity]
 
 	def test_state_effect_sees_updated_route(self):
 		pathnames: list[str] = []
@@ -83,7 +102,7 @@ class TestEffectPulseContext:
 		assert pathnames == ["/", "/next"]
 
 	def test_global_state_effect_has_render_but_no_route(self):
-		seen: list[tuple[object, object]] = []
+		seen: list[tuple[object, ...]] = []
 
 		class Tracked(ps.State):
 			n: int = 0
@@ -92,18 +111,34 @@ class TestEffectPulseContext:
 			def track(self):
 				_ = self.n
 				ctx = PulseContext.get()
-				seen.append((ctx.render, ctx.route))
+				seen.append(
+					(
+						ctx.render,
+						ctx.route,
+						ctx.source_route_path,
+						ctx.source_path,
+						ctx.source_mount_id,
+					)
+				)
 
 		session_state = ps.global_state(Tracked)
 		app, session, route_ctx = make_session()
-		with ps.PulseContext(app=app, render=session, route=route_ctx):
+		mount = session.route_mounts["/"]
+		with ps.PulseContext(
+			app=app,
+			render=session,
+			route=route_ctx,
+			source_route_path=route_ctx.route_path,
+			source_path=route_ctx.pathname,
+			source_mount_id=mount.mount_id,
+		):
 			state = session_state()
 		flush_effects()
-		assert seen == [(session, None)]
+		assert seen == [(session, None, None, None, None)]
 
 		state.n += 1
 		flush_effects()
-		assert seen == [(session, None), (session, None)]
+		assert seen == [(session, None, None, None, None)] * 2
 
 	def test_cleanup_reenters_context(self):
 		cleaned: list[object] = []

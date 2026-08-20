@@ -466,6 +466,7 @@ def global_state(
 				"ps.global_state must be called inside a Pulse render/callback context"
 			)
 		key = base_key if id is None else f"{base_key}|{id}"
+
 		def factory() -> S:
 			# Session-scoped: do not pin the creating mount's RouteContext.
 			with PulseContext.update(route=None):

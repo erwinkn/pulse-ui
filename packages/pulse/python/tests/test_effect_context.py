@@ -1,3 +1,4 @@
+# pyright: reportUnusedFunction=false
 from __future__ import annotations
 
 import pulse as ps
@@ -66,7 +67,9 @@ class TestEffectPulseContext:
 			@ps.effect
 			def track(self):
 				_ = self.n
-				pathnames.append(PulseContext.get().route.pathname)
+				route = PulseContext.get().route
+				assert route is not None
+				pathnames.append(route.pathname)
 
 		app, session, route_ctx = make_session("/")
 		with ps.PulseContext(app=app, render=session, route=route_ctx):

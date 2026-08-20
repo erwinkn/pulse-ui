@@ -555,7 +555,7 @@ describe("PulseSocketIOClient attach ack", () => {
 	});
 
 	it("keeps one page identity across reconnects and client remounts", async () => {
-		const client = await makeClient(undefined, {
+		const client = await makeClient(undefined, undefined, {
 			socketio: { auth: { tenant: "stoneware" } },
 		});
 		const connected = client.connect();

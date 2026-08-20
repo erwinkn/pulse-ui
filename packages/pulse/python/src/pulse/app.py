@@ -49,9 +49,9 @@ from pulse.helpers import (
 )
 from pulse.hooks.core import hooks
 from pulse.messages import (
+	ChannelConnectMessage,
+	ChannelDisconnectMessage,
 	ClientChannelMessage,
-	ClientChannelRequestMessage,
-	ClientChannelResponseMessage,
 	ClientMessage,
 	ClientPulseMessage,
 	Prerender,
@@ -1050,8 +1050,13 @@ class App:
 			if render.connected:
 				self._cancel_render_cleanup(rid)
 			try:
-				if msg["type"] == "channel_message":
-					await self._handle_channel_message(render, session, msg)
+				if msg["type"] == "channel":
+					await self._handle_channel_message(
+						render,
+						session,
+						msg,
+						socket_sid=sid,
+					)
 				else:
 					await self._handle_pulse_message(render, session, msg)
 			except Exception as e:
@@ -1079,7 +1084,6 @@ class App:
 				render.execute_callback(msg["path"], msg["callback"], msg["args"])
 			elif msg["type"] == "detach":
 				render.detach(msg["path"])
-				render.channels.remove_route(msg["path"])
 			elif msg["type"] == "api_result":
 				render.handle_api_result(dict(msg))
 			elif msg["type"] == "js_result":
@@ -1116,41 +1120,149 @@ class App:
 				)
 
 	async def _handle_channel_message(
-		self, render: RenderSession, session: UserSession, msg: ClientChannelMessage
+		self,
+		render: RenderSession,
+		session: UserSession,
+		msg: ClientChannelMessage,
+		*,
+		socket_sid: str | None = None,
 	) -> None:
-		if msg.get("responseTo"):
-			msg = cast(ClientChannelResponseMessage, msg)
+		if msg["action"] == "disconnect":
+			await self._handle_channel_lifecycle(
+				render,
+				session,
+				msg,
+				event="disconnect",
+				socket_sid=socket_sid,
+			)
+			return
+		if msg["action"] == "connect":
+			await self._handle_channel_lifecycle(
+				render,
+				session,
+				msg,
+				event="connect",
+				socket_sid=socket_sid,
+			)
+			return
+		if msg["action"] == "response":
 			render.channels.handle_client_response(msg)
-		else:
-			channel_id = str(msg.get("channel", ""))
-			msg = cast(ClientChannelRequestMessage, msg)
+			return
+		if msg["action"] not in ("event", "request"):
+			logger.warning("Unknown channel action received: %s", msg["action"])
+			return
 
-			async def _next() -> Ok[None]:
-				render.channels.handle_client_event(
-					render=render, session=session, message=msg
+		channel_id = str(msg.get("channel", ""))
+		request_id = msg["requestId"] if msg["action"] == "request" else None
+
+		async def _next() -> Ok[None]:
+			if (
+				socket_sid is not None
+				and self._render_to_socket.get(render.id) != socket_sid
+			):
+				return Ok(None)
+			render.channels.handle_client_event(
+				render=render, session=session, message=msg
+			)
+			return Ok(None)
+
+		def _normalize_message_response(res: Any) -> Ok[None] | Deny:
+			if isinstance(res, (Ok, Deny)):
+				return res  # type: ignore[return-value]
+			# Treat any other value as allow
+			return Ok(None)
+
+		with PulseContext.update(session=session, render=render):
+			res = await self.middleware.channel(
+				channel_id=channel_id,
+				event=msg.get("event", ""),
+				payload=msg.get("payload"),
+				request_id=request_id,
+				session=session.data,
+				next=_next,
+			)
+			res = _normalize_message_response(res)
+
+		if isinstance(res, Deny):
+			if request_id:
+				render.channels.send_error(channel_id, request_id, "Denied")
+
+	async def _handle_channel_lifecycle(
+		self,
+		render: RenderSession,
+		session: UserSession,
+		msg: ChannelConnectMessage | ChannelDisconnectMessage,
+		*,
+		event: Literal["connect", "disconnect"],
+		socket_sid: str | None,
+	) -> None:
+		channel_id = str(msg.get("channel", ""))
+		handled = False
+
+		async def _next() -> Ok[None]:
+			nonlocal handled
+			if handled:
+				return Ok(None)
+			handled = True
+			if (
+				socket_sid is not None
+				and self._render_to_socket.get(render.id) != socket_sid
+			):
+				return Ok(None)
+			if msg["action"] == "connect":
+				render.channels.handle_client_connect(
+					render=render,
+					session=session,
+					message=msg,
 				)
-				return Ok(None)
+			else:
+				render.channels.handle_client_disconnect(
+					render=render,
+					session=session,
+					message=msg,
+				)
+			return Ok(None)
 
-			def _normalize_message_response(res: Any) -> Ok[None] | Deny:
-				if isinstance(res, (Ok, Deny)):
-					return res  # type: ignore[return-value]
-				# Treat any other value as allow
-				return Ok(None)
-
+		try:
 			with PulseContext.update(session=session, render=render):
 				res = await self.middleware.channel(
 					channel_id=channel_id,
-					event=msg.get("event", ""),
-					payload=msg.get("payload"),
-					request_id=msg.get("requestId"),
+					event=event,
+					payload=msg.get("owner"),
+					request_id=None,
 					session=session.data,
 					next=_next,
 				)
-				res = _normalize_message_response(res)
+		except Exception:
+			logger.exception("Error in channel lifecycle middleware")
+			if not handled:
+				if msg["action"] == "connect":
+					render.channels.reject_client_connect(
+						msg, "Channel subscription failed"
+					)
+				else:
+					render.channels.handle_client_disconnect(
+						render=render,
+						session=session,
+						message=msg,
+					)
+			return
 
-			if isinstance(res, Deny):
-				if req_id := msg.get("requestId"):
-					render.channels.send_error(channel_id, req_id, "Denied")
+		if handled:
+			return
+		if msg["action"] == "connect":
+			error = (
+				"Denied"
+				if isinstance(res, Deny)
+				else "Channel subscription not accepted"
+			)
+			render.channels.reject_client_connect(msg, error)
+		else:
+			render.channels.handle_client_disconnect(
+				render=render,
+				session=session,
+				message=msg,
+			)
 
 	def get_route(self, path: str):
 		return self.routes.find(path)

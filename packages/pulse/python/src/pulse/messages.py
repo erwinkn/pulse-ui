@@ -74,24 +74,6 @@ class ServerApiCallMessage(TypedDict):
 	credentials: Literal["include", "omit"]
 
 
-class ServerChannelRequestMessage(TypedDict):
-	type: Literal["channel_message"]
-	channel: str
-	event: str
-	payload: Any
-	requestId: NotRequired[str]
-	error: NotRequired[Any]
-
-
-class ServerChannelResponseMessage(TypedDict):
-	type: Literal["channel_message"]
-	channel: str
-	event: None
-	responseTo: str
-	payload: Any
-	error: NotRequired[Any]
-
-
 class ServerJsExecMessage(TypedDict):
 	"""Execute JavaScript expression on the client."""
 
@@ -138,24 +120,6 @@ class ClientApiResultMessage(TypedDict):
 	body: Any | None
 
 
-class ClientChannelRequestMessage(TypedDict):
-	type: Literal["channel_message"]
-	channel: str
-	event: str
-	payload: Any
-	requestId: NotRequired[str]
-	error: NotRequired[Any]
-
-
-class ClientChannelResponseMessage(TypedDict):
-	type: Literal["channel_message"]
-	channel: str
-	event: None
-	responseTo: str
-	payload: Any
-	error: NotRequired[Any]
-
-
 class ClientJsResultMessage(TypedDict):
 	"""Result of client-side JS execution."""
 
@@ -165,7 +129,85 @@ class ClientJsResultMessage(TypedDict):
 	error: str | None
 
 
-ServerChannelMessage = ServerChannelRequestMessage | ServerChannelResponseMessage
+# ====================
+# Channel messages
+# ====================
+class ChannelConnectMessage(TypedDict):
+	type: Literal["channel"]
+	action: Literal["connect"]
+	channel: str
+	subscriptionId: str
+	owner: NotRequired[str]
+
+
+class ChannelDisconnectMessage(TypedDict):
+	type: Literal["channel"]
+	action: Literal["disconnect"]
+	channel: str
+	subscriptionId: str
+	owner: NotRequired[str]
+
+
+class ChannelConnectAckMessage(TypedDict):
+	type: Literal["channel"]
+	action: Literal["connect_ack"]
+	channel: str
+	subscriptionId: str
+	accepted: bool
+	error: NotRequired[str]
+
+
+class ChannelCloseMessage(TypedDict):
+	type: Literal["channel"]
+	action: Literal["close"]
+	channel: str
+	subscriptionId: str
+	reason: NotRequired[str]
+
+
+class ChannelEventMessage(TypedDict):
+	type: Literal["channel"]
+	action: Literal["event"]
+	channel: str
+	event: str
+	payload: NotRequired[Any]
+	subscriptionId: NotRequired[str]
+
+
+class ChannelRequestMessage(TypedDict):
+	type: Literal["channel"]
+	action: Literal["request"]
+	channel: str
+	event: str
+	requestId: str
+	payload: NotRequired[Any]
+	subscriptionId: NotRequired[str]
+
+
+class ChannelResponseMessage(TypedDict):
+	type: Literal["channel"]
+	action: Literal["response"]
+	channel: str
+	responseTo: str
+	payload: NotRequired[Any]
+	error: NotRequired[Any]
+	subscriptionId: NotRequired[str]
+
+
+ClientChannelMessage = (
+	ChannelConnectMessage
+	| ChannelDisconnectMessage
+	| ChannelEventMessage
+	| ChannelRequestMessage
+	| ChannelResponseMessage
+)
+ServerChannelMessage = (
+	ChannelConnectAckMessage
+	| ChannelCloseMessage
+	| ChannelEventMessage
+	| ChannelRequestMessage
+	| ChannelResponseMessage
+)
 ServerMessage = (
 	ServerInitMessage
 	| ServerUpdateMessage
@@ -187,7 +229,6 @@ ClientPulseMessage = (
 	| ClientApiResultMessage
 	| ClientJsResultMessage
 )
-ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage
 ClientMessage = ClientPulseMessage | ClientChannelMessage
 
 

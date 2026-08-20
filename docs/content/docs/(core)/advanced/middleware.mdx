@@ -168,15 +168,24 @@ async def message(self, *, data, session, next):
 
 ### `channel`
 
-Called for pub/sub channel messages. Useful for authorizing access to real-time channels:
+Called for pub/sub channel messages — both when a client subscribes and when it sends data. Useful for authorizing access to real-time channels:
 
 ```python
 async def channel(self, *, channel_id, event, payload, session, next):
-    # Only admins can access admin channels
-    if channel_id.startswith("admin:") and not session.get("is_admin"):
+    # Lifecycle: event is "connect" or "disconnect", payload is the owner
+    if event == "connect":
+        if channel_id.startswith("admin:") and not session.get("is_admin"):
+            return ps.Deny()  # subscription rejected
+        return await next()
+
+    # Data-plane: event is the channel event name ("message", "syncValues", …)
+    if event == "delete" and not session.get("can_delete"):
         return ps.Deny()
+
     return await next()
 ```
+
+`event` is `"connect"` or `"disconnect"` for lifecycle, or the data event name otherwise. `ps.Deny()` on connect rejects the subscription. `ps.Deny()` on disconnect still disconnects — you can't keep a client subscribed.
 
 ## Return values
 

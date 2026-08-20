@@ -107,7 +107,10 @@ Hook to subscribe to a Pulse channel for bidirectional communication. Channels e
 ```ts
 import { usePulseChannel } from "pulse-ui-client";
 
-function usePulseChannel(channelId: string): ChannelBridge
+function usePulseChannel(
+  channelId: string,
+  lifetime: "route" | "tab" = "route",
+): ChannelBridge
 ```
 
 ### Parameters
@@ -115,10 +118,12 @@ function usePulseChannel(channelId: string): ChannelBridge
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `channelId` | `string` | Non-empty string identifying the channel |
+| `lifetime` | `"route" \| "tab"` | Must match the server channel lifetime. Defaults to `"route"`. |
 
 ### Returns
 
-Returns a `ChannelBridge` instance for sending and receiving messages.
+Returns a `ChannelBridge` on the first render. The hook interns the bridge
+immediately and subscribes after commit.
 
 ### Throws
 
@@ -129,11 +134,28 @@ Returns a `ChannelBridge` instance for sending and receiving messages.
 
 The hook manages channel subscription automatically:
 
-1. On mount: acquires a reference to the channel
-2. On unmount: releases the reference
-3. When all references are released: channel closes
+1. On render: intern a stable `ChannelBridge` for this channel id
+2. On mount: subscribe to the server
+3. On unmount: unsubscribe. This does not close the bridge.
+4. The server closes the channel only at its configured lifetime boundary or after `Channel.close()`
 
-Multiple components can subscribe to the same channel. The channel stays open as long as at least one component is subscribed.
+`emit()` queues up to 64 events while the subscription is not ready.
+It no-ops after the server closes the channel. `request()` fails immediately
+when the channel is disconnected or closed and is not replayed.
+
+Use the same lifetime on both sides:
+
+```python
+channel = ps.channel("notifications", lifetime="tab")
+```
+
+```ts
+const channel = usePulseChannel("notifications", "tab");
+```
+
+More than one component can subscribe to the same channel.
+If all client subscriptions stop, Pulse unsubscribes the bridge.
+This does not close the server channel.
 
 ### Example: Chat Room
 

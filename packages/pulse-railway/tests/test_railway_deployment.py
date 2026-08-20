@@ -155,6 +155,7 @@ def test_railway_up_command_targets_service_context() -> None:
 		"--service",
 		"backend",
 		"--ci",
+		"--detach",
 		"--path-as-root",
 	]
 
@@ -1361,6 +1362,7 @@ async def test_deploy_source_happy_path_on_ready_stack(
 				"--service",
 				"prod-260402-120000",
 				"--ci",
+				"--detach",
 				"--path-as-root",
 			),
 			str(tmp_path),

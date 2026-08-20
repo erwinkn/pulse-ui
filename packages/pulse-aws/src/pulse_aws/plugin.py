@@ -160,7 +160,7 @@ class AWSECSPlugin(ps.Plugin):
 	def on_setup(self, app: ps.App) -> None:
 		"""Expose deployment metadata for affinity verification."""
 
-		@app.fastapi.get(DEPLOYMENT_META_PATH)
+		@app.fastapi.get(DEPLOYMENT_META_PATH, include_in_schema=False)
 		def deployment_info():  # pyright: ignore[reportUnusedFunction]
 			if not self.enabled:
 				raise HTTPException(

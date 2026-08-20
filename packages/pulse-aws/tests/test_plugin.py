@@ -70,3 +70,4 @@ async def test_plugin_exposes_deployment_metadata_endpoint():
 		"deployment_id": "prod-20260306-150000Z",
 		"api_prefix": "/_pulse",
 	}
+	assert app.fastapi.openapi()["paths"] == {}

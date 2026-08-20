@@ -71,6 +71,17 @@ Recharts wrappers. See `references/charts.md`.
 LineChart(h=300, data=data, dataKey="date", series=[{"name": "value", "color": "blue"}])
 ```
 
+### Dropzone (`@mantine/dropzone`)
+Drag-and-drop file uploads. See `references/dropzone.md`.
+
+```python
+Dropzone(name="attachments", accept=PDF_MIME_TYPE, maxSize=5 * 1024**2)[
+    DropzoneIdle()[Text("Drop PDFs here")],
+]
+# Inside a MantineForm, files arrive as ps.UploadFile on submit.
+# onDrop/onReject callbacks receive metadata only, never file bytes.
+```
+
 ## Common Patterns
 
 **Wrap app with provider:**
@@ -110,11 +121,13 @@ notifications.show(title="Success", message="Done", color="green")
 **Dynamic form lists:**
 ```python
 form = MantineForm(
-    initialValues={"items": [{"name": ""}]},
+    initialValues={"items": [{"id": uuid.uuid4().hex, "name": ""}]},
     syncMode="change",  # enables form.values access
+    onSyncValues=on_sync,  # optional: called with values dict on every sync
 )
 # Use form.insert_list_item(), form.remove_list_item()
 # Access via form.values.get("items")
+# Use the per-item id as the row key (index keys go stale in uncontrolled mode)
 ```
 
 **Nested field paths:**
@@ -143,7 +156,8 @@ TextInput(name="members.0.pets.1.name")  # deeply nested
 
 For detailed API docs:
 - `references/core.md` - All core components by category
-- `references/forms.md` - MantineForm, validators, form actions
+- `references/forms.md` - MantineForm, validators, form actions, sync, file uploads
 - `references/dates.md` - Date/time picker components
 - `references/charts.md` - Chart components and data format
+- `references/dropzone.md` - Drag-and-drop file uploads
 - `references/notifications.md` - Notifications imperative API

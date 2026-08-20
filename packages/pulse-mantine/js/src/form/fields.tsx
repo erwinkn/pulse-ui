@@ -2,11 +2,13 @@ import {
 	AngleSlider as MantineAngleSlider,
 	Autocomplete as MantineAutocomplete,
 	Checkbox as MantineCheckbox,
+	CheckboxGroup as MantineCheckboxGroup,
 	Chip as MantineChip,
 	ColorInput as MantineColorInput,
 	ColorPicker as MantineColorPicker,
 	FileInput as MantineFileInput,
 	JsonInput as MantineJsonInput,
+	MultiSelect as MantineMultiSelect,
 	NativeSelect as MantineNativeSelect,
 	NumberInput as MantineNumberInput,
 	PasswordInput as MantinePasswordInput,
@@ -18,6 +20,7 @@ import {
 	Select as MantineSelect,
 	Slider as MantineSlider,
 	Switch as MantineSwitch,
+	TagsInput as MantineTagsInput,
 	Textarea as MantineTextarea,
 	TextInput as MantineTextInput,
 } from "@mantine/core";
@@ -32,6 +35,8 @@ export const Autocomplete = createConnectedField(MantineAutocomplete, {
 	debounceOnChange: true,
 	coerceEmptyString: true,
 });
+export const MultiSelect = createConnectedField(MantineMultiSelect);
+export const TagsInput = createConnectedField(MantineTagsInput);
 export const NumberInput = createConnectedField(MantineNumberInput, {
 	inputType: "input",
 	debounceOnChange: true,
@@ -40,6 +45,7 @@ export const NumberInput = createConnectedField(MantineNumberInput, {
 export const Checkbox = createConnectedField(MantineCheckbox, {
 	inputType: "checkbox",
 });
+export const CheckboxGroup = createConnectedField(MantineCheckboxGroup);
 export const SegmentedControl = createConnectedField(MantineSegmentedControl);
 export const Select = createConnectedField(MantineSelect);
 export const Textarea = createConnectedField(MantineTextarea, {

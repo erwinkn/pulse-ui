@@ -31,6 +31,7 @@ Server-driven UI model: Python components render to VDOM, synced to React via We
 ```
 src/pulse/
 ├── app.py              # Main App class, FastAPI + Socket.IO setup
+├── api_router.py       # FastAPI route/router classes (user API + /_pulse)
 ├── channel.py          # Bidirectional real-time channels
 ├── routing.py          # Route/Layout definitions, URL matching
 ├── vdom.py             # VDOM node types (Element, Component, Node)
@@ -166,7 +167,7 @@ def handle_message(data):
 
 ## Main Exports
 
-- `App`, `Route`, `Layout` - app/routing
+- `App`, `FastAPIConfig`, `Route`, `Layout` - app/routing
 - `component` - server-side component decorator
 - `states`, `effects`, `setup`, `init` - hooks
 - `query`, `mutation`, `infinite_query` - data fetching

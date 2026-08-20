@@ -1,12 +1,18 @@
 import json
+import math
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
+from datetime import date, datetime
 from typing import (
 	TYPE_CHECKING,
+	Any,
 	Never,
+	TypeAlias,
 	TypedDict,
 	Unpack,
+	cast,
 	override,
 )
 
@@ -27,6 +33,10 @@ from pulse.transpiler.imports import Import
 from pulse.transpiler.nodes import Node
 from pulse.types.event_handler import EventHandler1
 
+_PULSE_DATA_FIELD = "__pulse_data__"
+_PULSE_FILES_FIELD = "__pulse_files__"
+_PULSE_FILE_PART_PREFIX = f"{_PULSE_FILES_FIELD}."
+
 if TYPE_CHECKING:
 	from pulse.render_session import RenderSession
 	from pulse.user_session import UserSession
@@ -36,6 +46,7 @@ __all__ = [
 	"Form",
 	"ManualForm",
 	"FormData",
+	"FormScalar",
 	"FormValue",
 	"UploadFile",
 	"FormRegistry",
@@ -43,14 +54,23 @@ __all__ = [
 	"internal_forms_hook",
 ]
 
-FormValue = str | UploadFile
-"""Individual form field value: ``str | UploadFile``."""
+FormScalar: TypeAlias = str | int | float | bool | date | datetime | UploadFile | None
+"""Scalar value supported by native or structured form submissions."""
 
-FormData = dict[str, FormValue | list[FormValue]]
+FormValue: TypeAlias = (
+	FormScalar
+	| Sequence["FormValue"]
+	| Mapping[str, "FormValue"]
+	| AbstractSet["FormValue"]
+)
+"""Native or structured form field value."""
+
+FormData = dict[str, FormValue]
 """Parsed form submission data.
 
-Values are either single or multiple (for repeated field names).
-Type alias for ``dict[str, FormValue | list[FormValue]]``.
+Native fields are strings or uploads, with repeated names grouped into lists.
+Structured integrations can also submit nested dictionaries, lists, sets,
+numbers, booleans, dates, and null values.
 """
 
 
@@ -79,6 +99,17 @@ class FormRegistration:
 	route_path: str
 	session_id: str
 	on_submit: Callable[[FormData], Awaitable[None]]
+
+
+class _InvalidFormPayload(ValueError):
+	pass
+
+
+def _parse_finite_json_number(value: str) -> float:
+	parsed = float(value)
+	if not math.isfinite(parsed):
+		raise ValueError("Form payload numbers must be finite")
+	return parsed
 
 
 class FormRegistry(Disposable):
@@ -150,8 +181,8 @@ class FormRegistry(Disposable):
 			HTTP response (204 on success).
 
 		Raises:
-			HTTPException: If form not found (404), session mismatch (403),
-				or route unmounted (410).
+			HTTPException: If the payload is malformed (400), form not found (404),
+				session mismatch (403), or route unmounted (410).
 		"""
 		registration = self._handlers.get(form_id)
 		if registration is None:
@@ -163,20 +194,13 @@ class FormRegistry(Disposable):
 			)
 
 		raw_form = await request.form()
-		data = normalize_form_data(raw_form)
-
-		# Deserialize complex data from __data__ field if present
-		if "__data__" in data:
-			data_value = data["__data__"]
-			if isinstance(data_value, str):
-				serialized_data = json.loads(data_value)
-				deserialized_data = deserialize(serialized_data)
-				# Merge deserialized data into form data, excluding __data__
-				for key, value in deserialized_data.items():
-					if key != "__data__":
-						data[key] = value
-				# Remove the __data__ field
-				del data["__data__"]
+		try:
+			data = _decode_structured_form_data(normalize_form_data(raw_form))
+		except _InvalidFormPayload as exc:
+			raise HTTPException(
+				status_code=400,
+				detail="Invalid Pulse form payload",
+			) from exc
 
 		try:
 			mount = self._render.get_route_mount(registration.route_path)
@@ -197,6 +221,164 @@ class FormRegistry(Disposable):
 			await call_flexible(registration.on_submit, data)
 
 		return Response(status_code=204)
+
+
+def _decode_structured_form_data(data: FormData) -> dict[str, Any]:
+	has_data = _PULSE_DATA_FIELD in data
+	has_files = _PULSE_FILES_FIELD in data
+	if not has_data and not has_files:
+		return dict(data)
+	if not has_data or not has_files:
+		missing = _PULSE_FILES_FIELD if has_data else _PULSE_DATA_FIELD
+		raise _InvalidFormPayload(
+			f"Pulse structured form payload is missing reserved field '{missing}'"
+		)
+
+	data_value = data[_PULSE_DATA_FIELD]
+	files_value = data[_PULSE_FILES_FIELD]
+	if not isinstance(data_value, str) or not isinstance(files_value, str):
+		raise _InvalidFormPayload(
+			"Pulse structured form metadata fields must occur exactly once"
+		)
+
+	try:
+		deserialized = deserialize(
+			json.loads(
+				data_value,
+				parse_float=_parse_finite_json_number,
+				parse_constant=_parse_finite_json_number,
+			)
+		)
+	except (
+		AssertionError,
+		OverflowError,
+		RecursionError,
+		TypeError,
+		ValueError,
+	) as exc:
+		raise _InvalidFormPayload("Invalid Pulse serialized form data") from exc
+	if not isinstance(deserialized, dict):
+		raise _InvalidFormPayload("Form payload must deserialize to an object")
+	deserialized = cast(dict[str, Any], deserialized)
+	for key in (_PULSE_DATA_FIELD, _PULSE_FILES_FIELD):
+		if key in deserialized:
+			raise _InvalidFormPayload(f"Form field '{key}' is reserved by Pulse")
+
+	try:
+		manifest = json.loads(
+			files_value,
+			parse_float=_parse_finite_json_number,
+			parse_constant=_parse_finite_json_number,
+		)
+	except (RecursionError, ValueError) as exc:
+		raise _InvalidFormPayload("Invalid Pulse form file manifest") from exc
+	if not isinstance(manifest, list):
+		raise _InvalidFormPayload("Pulse form file manifest must be a list")
+
+	used_parts: set[str] = set()
+	for raw_entry in cast(list[Any], manifest):
+		entry = cast(dict[str, Any], raw_entry)
+		if not isinstance(raw_entry, dict):
+			raise _InvalidFormPayload(
+				"Pulse form file manifest entries must be objects"
+			)
+		part = entry.get("part")
+		path = entry.get("path")
+		if (
+			not isinstance(part, str)
+			or not part.startswith(_PULSE_FILE_PART_PREFIX)
+			or not part.removeprefix(_PULSE_FILE_PART_PREFIX).isdigit()
+		):
+			raise _InvalidFormPayload(
+				"Pulse form file manifest contains an invalid part name"
+			)
+		if part in used_parts:
+			raise _InvalidFormPayload(
+				f"Pulse form file part '{part}' is referenced more than once"
+			)
+		if not isinstance(path, list) or not path:
+			raise _InvalidFormPayload(
+				"Pulse form file manifest contains an invalid path"
+			)
+		if any(
+			isinstance(segment, bool) or not isinstance(segment, (str, int))
+			for segment in path
+		):
+			raise _InvalidFormPayload(
+				"Pulse form file paths may contain only strings and integers"
+			)
+		path = cast(list[str | int], path)
+
+		file = data.get(part)
+		if not isinstance(file, UploadFile):
+			raise _InvalidFormPayload(
+				f"Pulse form file part '{part}' is missing or repeated"
+			)
+		_hydrate_form_file(deserialized, path, file)
+		used_parts.add(part)
+
+	received_parts = {key for key in data if key.startswith(_PULSE_FILE_PART_PREFIX)}
+	if received_parts != used_parts:
+		raise _InvalidFormPayload("Pulse form payload contains unreferenced file parts")
+
+	result: dict[str, Any] = {
+		key: value
+		for key, value in data.items()
+		if key not in {_PULSE_DATA_FIELD, _PULSE_FILES_FIELD} and key not in used_parts
+	}
+	for key, value in deserialized.items():
+		if key in result:
+			raise _InvalidFormPayload(
+				f"Form field '{key}' occurs in both encoded and multipart data"
+			)
+		result[key] = value
+	return result
+
+
+def _hydrate_form_file(
+	values: dict[str, Any], path: list[str | int], file: UploadFile
+) -> None:
+	current: Any = values
+	for segment in path[:-1]:
+		if isinstance(current, dict) and isinstance(segment, str):
+			current_dict = cast(dict[str, Any], current)
+			if segment not in current_dict:
+				raise _InvalidFormPayload(
+					"Pulse form file path does not exist in encoded data"
+				)
+			current = current_dict[segment]
+		elif (
+			isinstance(current, list)
+			and isinstance(segment, int)
+			and 0 <= segment < len(cast(list[Any], current))
+		):
+			current = cast(list[Any], current)[segment]
+		else:
+			raise _InvalidFormPayload(
+				"Pulse form file path does not match encoded data"
+			)
+
+	leaf = path[-1]
+	if isinstance(current, dict) and isinstance(leaf, str):
+		current_dict = cast(dict[str, Any], current)
+		if leaf not in current_dict or current_dict[leaf] is not None:
+			raise _InvalidFormPayload(
+				"Pulse form file path must reference a null placeholder"
+			)
+		current_dict[leaf] = file
+	elif (
+		isinstance(current, list)
+		and isinstance(leaf, int)
+		and 0 <= leaf < len(cast(list[Any], current))
+	):
+		current_list = cast(list[Any], current)
+		if current_list[leaf] is not None:
+			raise _InvalidFormPayload(
+				"Pulse form file path must reference a null placeholder"
+			)
+		current_list[leaf] = file
+	else:
+		raise _InvalidFormPayload("Pulse form file path does not match encoded data")
 
 
 def normalize_form_data(raw: StarletteFormData) -> FormData:

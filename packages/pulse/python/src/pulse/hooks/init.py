@@ -395,12 +395,13 @@ def rewrite_init_blocks(func: Callable[..., Any]) -> Callable[..., Any]:
 
 	init_names, init_modules = _resolve_init_bindings(func)
 
+	source_name = func.__code__.co_name
 	target_def: ast.FunctionDef | ast.AsyncFunctionDef | None = None
 	# Remove decorators so the re-exec'd function isn't double-wrapped.
 	for node in ast.walk(tree):
 		if (
 			isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-			and node.name == func.__name__
+			and node.name == source_name
 		):
 			node.decorator_list = []
 			target_def = node
@@ -464,6 +465,31 @@ def rewrite_init_blocks(func: Callable[..., Any]) -> Callable[..., Any]:
 		rewriter = InitFallbackRewriter(init_names, init_modules)
 
 	tree = rewriter.visit(tree)
+	closure_names = func.__code__.co_freevars
+	factory_name = "_pulse_rewrite_factory"
+	if closure_names:
+		factory = ast.FunctionDef(
+			name=factory_name,
+			args=ast.arguments(
+				posonlyargs=[],
+				args=[ast.arg(arg=name) for name in closure_names],
+				kwonlyargs=[],
+				kw_defaults=[],
+				defaults=[],
+			),
+			body=[
+				*tree.body,
+				ast.Return(value=ast.Name(id=source_name, ctx=ast.Load())),
+			],
+			decorator_list=[],
+			returns=None,
+			type_comment=None,
+			type_params=[],
+		)
+		tree = ast.Module(
+			body=cast(list[ast.stmt], [factory]),
+			type_ignores=[],
+		)
 	ast.fix_missing_locations(tree)
 
 	filename = inspect.getsourcefile(func) or "<rewrite>"
@@ -474,8 +500,6 @@ def rewrite_init_blocks(func: Callable[..., Any]) -> Callable[..., Any]:
 	# freezes the names that existed at decoration time, so components using
 	# ps.init() cannot reference helpers/classes defined later in the module.
 	global_ns = func.__globals__
-	closure_vars = inspect.getclosurevars(func)
-	global_ns.update(closure_vars.nonlocals)
 	# Ensure `ps` resolves during exec.
 	if "ps" not in global_ns:
 		try:
@@ -486,7 +510,13 @@ def rewrite_init_blocks(func: Callable[..., Any]) -> Callable[..., Any]:
 			pass
 	local_ns: dict[str, Any] = {}
 	exec(compiled, global_ns, local_ns)
-	rewritten = local_ns.get(func.__name__) or global_ns[func.__name__]
+	if closure_names:
+		assert func.__closure__ is not None
+		rewritten = local_ns[factory_name](
+			*(cell.cell_contents for cell in func.__closure__)
+		)
+	else:
+		rewritten = local_ns.get(source_name) or global_ns[source_name]
 	functools.update_wrapper(rewritten, func)
 	return rewritten
 

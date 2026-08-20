@@ -349,7 +349,7 @@ class QueryParamProperty(StateProperty):
 		self.param_name = name
 
 	@override
-	def _get_signal(self, _obj: Any) -> Signal[Any]:
+	def _get_signal(self, obj: Any) -> Signal[Any]:
 		ctx = PulseContext.get()
 		if ctx.render is None:
 			raise RuntimeError(

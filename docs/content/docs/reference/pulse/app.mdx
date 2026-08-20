@@ -26,6 +26,7 @@ class App:
         cors: CORSOptions | None = None,
         fastapi: FastAPIConfig | None = None,
         session_timeout: float = 60.0,
+        shell_render_timeout: float = 30.0,
         prerender_queue_timeout: float = 60.0,
         disconnect_queue_timeout: float = 300.0,
         connection_status: ConnectionStatusConfig | None = None,
@@ -52,6 +53,7 @@ class App:
 | `cors` | `CORSOptions` | `None` | CORS configuration |
 | `fastapi` | `FastAPIConfig` | `None` | Generated FastAPI docs and OpenAPI configuration |
 | `session_timeout` | `float` | `60.0` | How long a disconnected render session stays resumable before being closed (seconds) |
+| `shell_render_timeout` | `float` | `30.0` | How long a mount-less "shell" render (minted on a stale-render-id reconnect, only tells the client to reload) is kept after disconnect before being reaped (seconds) |
 | `prerender_queue_timeout` | `float` | `60.0` | How long a prerendered route waits for the client to attach before its render tree is released (seconds) |
 | `disconnect_queue_timeout` | `float` | `300.0` | How long updates are queued for a disconnected client before the route suspends — rendering pauses but state is kept; reconnecting within `session_timeout` resumes without a reload (seconds) |
 | `connection_status` | `ConnectionStatusConfig` | `None` | Connection status UI timing |

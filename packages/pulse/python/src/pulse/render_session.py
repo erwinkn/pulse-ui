@@ -22,7 +22,6 @@ from pulse.queries.store import QueryStore
 from pulse.reactive import (
 	REACTIVE_CONTEXT,
 	Effect,
-	Scope,
 	Untrack,
 	flush_effects,
 )

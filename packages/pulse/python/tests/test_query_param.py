@@ -398,7 +398,7 @@ class TestQueryParam:
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			state = QState()
 			sig = QState.__dict__["q"].get_signal(state)
-		with pytest.raises(RuntimeError, match="PULSE_CONTEXT is not set"):
+		with pytest.raises(RuntimeError, match="require a render context"):
 			_ = state.q
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			assert QState.__dict__["q"].get_signal(state) is sig

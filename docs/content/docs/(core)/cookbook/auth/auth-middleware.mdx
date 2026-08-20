@@ -82,6 +82,8 @@ async def api_login(request: Request):
     return {"ok": True}
 ```
 
+To protect those FastAPI routes themselves (without also wrapping prerender), override `api` on the same middleware class. See [Advanced: Middleware](/docs/advanced/middleware).
+
 ## See also
 
 - [Advanced: Middleware](/docs/advanced/middleware)

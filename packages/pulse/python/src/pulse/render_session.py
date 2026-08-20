@@ -39,7 +39,6 @@ from pulse.scheduling import (
 )
 from pulse.state.query_param import QueryParamSync
 from pulse.state.state import State
-from pulse.transpiler.id import next_id
 from pulse.transpiler.nodes import Expr
 
 if TYPE_CHECKING:
@@ -940,7 +939,7 @@ class RenderSession:
 			)
 
 		ctx = PulseContext.get()
-		exec_id = next_id()
+		exec_id = uuid.uuid4().hex
 
 		# Get route pattern path (e.g., "/users/:id") not pathname (e.g., "/users/123")
 		# This must match the path used to key views on the client side

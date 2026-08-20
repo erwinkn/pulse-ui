@@ -8,6 +8,7 @@ that updates from one session do not leak into the other.
 
 import asyncio
 import gc
+import uuid
 from collections.abc import Callable, Iterator
 from typing import Any, cast, override
 
@@ -1331,6 +1332,7 @@ async def test_run_js_success_before_timeout():
 	js_msgs = [m for m in messages if m.get("type") == "js_exec"]
 	assert len(js_msgs) == 1
 	exec_id = cast(Any, js_msgs[0])["id"]
+	assert uuid.UUID(hex=exec_id).hex == exec_id
 
 	# Simulate client response
 	session.replies.apply({"type": "reply", "id": exec_id, "payload": 42})

@@ -281,7 +281,7 @@ class App:
 		session_timeout: float = 60.0,
 		prerender_queue_timeout: float = 60.0,
 		disconnect_queue_timeout: float = 300.0,
-		socket_send_queue_limit: int = 100,
+		socket_send_queue_limit: int = 10_000,
 		connection_status: ConnectionStatusConfig | None = None,
 		render_loop_limit: int = 50,
 	):

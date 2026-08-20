@@ -483,7 +483,7 @@ class RenderSession:
 		prerender_queue_timeout: float = 60.0,
 		dev_strict_mode_detach_timeout: float = 0.0,
 		disconnect_queue_timeout: float = 300.0,
-		pending_message_limit: int = 100,
+		pending_message_limit: int = 10_000,
 		render_loop_limit: int = 50,
 	) -> None:
 		from pulse.channel import ChannelsManager

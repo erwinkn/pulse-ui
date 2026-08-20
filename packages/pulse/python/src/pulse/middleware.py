@@ -4,6 +4,8 @@ import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Generic, TypeVar, overload, override
 
+from starlette.responses import Response
+
 from pulse.env import env
 from pulse.messages import (
 	ClientMessage,
@@ -95,6 +97,9 @@ PrerenderResponse = Ok[Prerender] | Redirect | NotFound
 ConnectResponse = Ok[None] | Deny
 """Response type for WebSocket connection: ``Ok[None] | Deny``."""
 
+ApiResponse = Response
+"""Response type for user-defined FastAPI routes: a Starlette/FastAPI ``Response``."""
+
 
 class PulseMiddleware:
 	"""Base middleware class with pass-through defaults.
@@ -121,6 +126,13 @@ class PulseMiddleware:
 	        if path.startswith("/admin") and not session.get("is_admin"):
 	            return ps.Redirect("/login")
 	        return await next()
+
+	    async def api(self, *, request, session, next):
+	        try:
+	            return await next()
+	        except Exception as exc:
+	            report_user_api_error(exc, request)
+	            raise
 
 	    async def connect(self, *, request, session, next):
 	        if not session.get("user_id"):
@@ -151,6 +163,37 @@ class PulseMiddleware:
 
 		Receives the full PrerenderPayload (all paths). Call next() to get the
 		Prerender result and can modify it (views and directives) before returning.
+		"""
+		return await next()
+
+	async def api(
+		self,
+		*,
+		request: PulseRequest,
+		session: dict[str, Any],
+		next: Callable[[], Awaitable[ApiResponse]],
+	) -> ApiResponse:
+		"""Handle user-defined FastAPI routes.
+
+		Runs only for routes registered on ``app.fastapi`` by the application
+		(including included routers and plugin routes added in ``on_setup``).
+		Does not run for Pulse framework endpoints (``/_pulse/*``), generated
+		OpenAPI/docs routes, or the React proxy.
+
+		``next()`` invokes the route handler and returns its HTTP response.
+		Return that response, replace it, or raise after inspecting it.
+		Exceptions from the handler propagate through this hook, so you can
+		report them without also intercepting prerender errors.
+
+		Args:
+			request: Normalized request object. Use ``request.raw`` for the
+				underlying FastAPI request (body, path params, etc.).
+			session: Session data dictionary.
+			next: Callable to continue the middleware chain and invoke the
+				route handler.
+
+		Returns:
+			A Starlette/FastAPI ``Response``.
 		"""
 		return await next()
 
@@ -280,6 +323,26 @@ class MiddlewareStack(PulseMiddleware):
 		return await dispatch(0)
 
 	@override
+	async def api(
+		self,
+		*,
+		request: PulseRequest,
+		session: dict[str, Any],
+		next: Callable[[], Awaitable[ApiResponse]],
+	) -> ApiResponse:
+		async def dispatch(index: int) -> ApiResponse:
+			if index >= len(self._middlewares):
+				return await next()
+			mw = self._middlewares[index]
+
+			async def _next() -> ApiResponse:
+				return await dispatch(index + 1)
+
+			return await mw.api(request=request, session=session, next=_next)
+
+		return await dispatch(0)
+
+	@override
 	async def connect(
 		self,
 		*,
@@ -399,6 +462,7 @@ class LatencyMiddleware(PulseMiddleware):
 	"""
 
 	prerender_ms: float
+	api_ms: float
 	connect_ms: float
 	message_ms: float
 	channel_ms: float
@@ -407,6 +471,7 @@ class LatencyMiddleware(PulseMiddleware):
 		self,
 		*,
 		prerender_ms: float = 80.0,
+		api_ms: float = 25.0,
 		connect_ms: float = 40.0,
 		message_ms: float = 25.0,
 		channel_ms: float = 20.0,
@@ -415,12 +480,14 @@ class LatencyMiddleware(PulseMiddleware):
 
 		Args:
 			prerender_ms: Latency for batch prerender requests (HTTP). Default: 80ms
+			api_ms: Latency for user-defined FastAPI routes. Default: 25ms
 			connect_ms: Latency for WebSocket connections. Default: 40ms
 			message_ms: Latency for WebSocket messages (including API calls). Default: 25ms
 			channel_ms: Latency for channel messages. Default: 20ms
 		"""
 		super().__init__(dev=True)
 		self.prerender_ms = prerender_ms
+		self.api_ms = api_ms
 		self.connect_ms = connect_ms
 		self.message_ms = message_ms
 		self.channel_ms = channel_ms
@@ -436,6 +503,18 @@ class LatencyMiddleware(PulseMiddleware):
 	) -> PrerenderResponse:
 		if self.prerender_ms > 0:
 			await asyncio.sleep(self.prerender_ms / 1000.0)
+		return await next()
+
+	@override
+	async def api(
+		self,
+		*,
+		request: PulseRequest,
+		session: dict[str, Any],
+		next: Callable[[], Awaitable[ApiResponse]],
+	) -> ApiResponse:
+		if self.api_ms > 0:
+			await asyncio.sleep(self.api_ms / 1000.0)
 		return await next()
 
 	@override

@@ -1302,6 +1302,9 @@ from pulse.messages import SocketIODirectives as SocketIODirectives
 
 # Middleware
 from pulse.middleware import (
+	ApiResponse as ApiResponse,
+)
+from pulse.middleware import (
 	ConnectResponse as ConnectResponse,
 )
 from pulse.middleware import (

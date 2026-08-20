@@ -3,6 +3,7 @@ import { useForm } from "@mantine/form";
 import {
 	submitForm,
 	usePulseClient,
+	usePulseDirectivesSource,
 	type ChannelBridge,
 } from "pulse-ui-client";
 import {
@@ -64,6 +65,7 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 	...formProps
 }: MantineFormProps<TValues>) {
 	const client = usePulseClient();
+	const directives = usePulseDirectivesSource();
 	const channelRef = useRef<ChannelBridge | null>(null);
 	const formRef = useRef<UseFormReturnType<TValues> | null>(null);
 	// Timers for server-validation per path
@@ -404,11 +406,12 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 					onSubmit: userOnSubmit,
 					action: actionUrl ?? "",
 					values,
+					directives,
 					// Mantine will have already called event.preventDefault(), we want to ignore that
 					force: true,
 				});
 			}),
-		[form, userOnSubmit, action],
+		[form, userOnSubmit, action, directives],
 	);
 
 	const resetHandler = useCallback(

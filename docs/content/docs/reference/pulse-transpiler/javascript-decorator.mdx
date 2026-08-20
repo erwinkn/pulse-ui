@@ -67,7 +67,7 @@ A transpiled JavaScript function. Wraps a Python function with a unique identifi
 @property
 def js_name(self) -> str
 ```
-Returns the unique JS identifier (e.g., `"myFunc_1"`).
+Returns the unique JS identifier (e.g., `"myFunc_1"`). Its readable prefix uses the callable name captured when wrapped; later changes to the callable's `__name__` do not rename emitted JavaScript.
 
 **Methods:**
 

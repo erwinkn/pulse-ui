@@ -14,11 +14,11 @@ class GlobalCounter(ps.State):
 		self.count -= 1
 
 
-# Accessors
-# - session_counter(): per-session singleton
-# - shared_counter(id): cross-session shared by id
+# Accessors. Both are scoped to the render session (one browser tab):
+# - session_counter(): one instance for the whole session
+# - room_counter(id): one instance per id, still within the session
 session_counter = ps.global_state(GlobalCounter)
-shared_counter = ps.global_state(GlobalCounter)
+room_counter = ps.global_state(GlobalCounter)
 
 
 @ps.component
@@ -40,17 +40,19 @@ def GlobalStateDemo():
 	server = ps.server_address()
 	room = ps.route()["pathParams"].get("room")
 
-	# Per-session singleton
+	# One instance for the whole session
 	a = session_counter(label="Session")
 
-	# Shared across sessions by id; default to "global" when no room provided
-	shared_id = room or "global"
-	b = shared_counter(shared_id, label="Shared")
+	# One instance per room, within this session; default to "global"
+	room_id = room or "global"
+	b = room_counter(room_id, label="Room")
 
 	return ps.div(
 		ps.h1("Global State Demo", className="text-2xl font-bold mb-4"),
 		ps.p(
-			"Session-local counters are isolated per browser session. Shared counters are keyed by id.",
+			"Both counters are isolated per browser session. Open a second tab to see "
+			"that nothing is shared. The second counter is keyed by room, so navigating "
+			"between rooms switches instances while keeping each room's count.",
 			className="text-sm text-gray-600 mb-4",
 		),
 		ps.div(
@@ -58,8 +60,8 @@ def GlobalStateDemo():
 			className="text-xs text-gray-500 mb-4",
 		),
 		ps.div(
-			CounterRow("Session Counter (isolated)", a),
-			CounterRow(f"Shared Counter (id={shared_id})", b),
+			CounterRow("Session Counter (one per session)", a),
+			CounterRow(f"Room Counter (id={room_id})", b),
 			className="grid gap-4 max-w-xl",
 		),
 		ps.div(

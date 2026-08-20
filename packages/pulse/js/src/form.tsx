@@ -1,4 +1,7 @@
 import { type ComponentPropsWithoutRef, type FormEvent, forwardRef, useCallback } from "react";
+import type { DirectivesSource } from "./http";
+import { pulseFetch } from "./http";
+import { usePulseDirectivesSource } from "./pulse";
 import { serialize } from "./serialize/serializer";
 
 const PULSE_DATA_FIELD = "__pulse_data__";
@@ -25,14 +28,16 @@ export const PulseForm = forwardRef<HTMLFormElement, PulseFormProps>(function Pu
 	{ onSubmit, action, ...rest },
 	ref,
 ) {
+	const directives = usePulseDirectivesSource();
 	return (
 		<form
 			{...rest}
 			action={action}
 			ref={ref}
 			onSubmit={useCallback(
-				(event: FormEvent<HTMLFormElement>) => submitForm({ event, action, onSubmit }),
-				[action, onSubmit],
+				(event: FormEvent<HTMLFormElement>) =>
+					submitForm({ event, action, onSubmit, directives }),
+				[action, directives, onSubmit],
 			)}
 		/>
 	);
@@ -43,6 +48,7 @@ interface SubmitFormBase {
 	action: string;
 	onSubmit?: PulseFormProps["onSubmit"];
 	force?: boolean;
+	directives?: DirectivesSource;
 }
 
 type SubmitForm = SubmitFormBase &
@@ -158,7 +164,7 @@ export class FormSubmissionError extends Error {
 }
 
 export async function submitForm(options: SubmitForm) {
-	const { event, action, onSubmit, force } = options;
+	const { event, action, onSubmit, force, directives } = options;
 	let { formData } = options;
 	onSubmit?.(event);
 	if (!force && event.defaultPrevented) {
@@ -175,9 +181,9 @@ export async function submitForm(options: SubmitForm) {
 	} else if (!formData) {
 		formData = new FormData(form, nativeEvent.submitter);
 	}
-	const url = new URL(action, window.location.href);
 	try {
-		const response = await fetch(url, {
+		const response = await pulseFetch(action, {
+			directives,
 			method: "POST",
 			// Required for our hosting scenarios of same host + different ports or 2 subdomains
 			credentials: "include",

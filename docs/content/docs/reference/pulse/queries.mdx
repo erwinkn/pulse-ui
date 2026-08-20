@@ -13,6 +13,10 @@ QueryKey: TypeAlias = tuple[Hashable, ...]
 
 Tuple of hashable values identifying a query in the store.
 
+### State member binding
+
+On each State instance, `@query`, `@infinite_query`, and `@mutation` store a separate result wrapper per descriptor. This is independent of `QueryKey`: query keys still determine shared query data. Inheritance preserves the defining descriptor; a fresh same-name descriptor on a subclass gets a separate wrapper, including through `super()`. Assigning one descriptor object to multiple members or classes raises `TypeError`; create a fresh descriptor for each member. Descriptors must be defined in the class body — assigning one to an existing State class also raises `TypeError`.
+
 ### QueryStatus
 
 ```python

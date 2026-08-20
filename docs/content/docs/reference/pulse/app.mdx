@@ -24,7 +24,7 @@ class App:
         mode: PulseMode = "single-server",
         proxy: Proxy | None = None,
         cors: CORSOptions | None = None,
-        fastapi: dict[str, Any] | None = None,
+        fastapi: FastAPIConfig | None = None,
         session_timeout: float = 60.0,
         prerender_queue_timeout: float = 60.0,
         disconnect_queue_timeout: float = 300.0,
@@ -51,7 +51,7 @@ class App:
 | `mode` | `PulseMode` | `"single-server"` | Deployment mode |
 | `proxy` | `Proxy` | `None` | Single-server proxy tuning |
 | `cors` | `CORSOptions` | `None` | CORS configuration |
-| `fastapi` | `dict` | `None` | Additional FastAPI options |
+| `fastapi` | `FastAPIConfig` | `None` | Generated FastAPI docs and OpenAPI configuration |
 | `session_timeout` | `float` | `60.0` | How long a disconnected render session stays resumable before being closed (seconds) |
 | `prerender_queue_timeout` | `float` | `60.0` | How long a prerendered route waits for the client to attach before its render tree is released (seconds) |
 | `disconnect_queue_timeout` | `float` | `300.0` | How long updates are queued for a disconnected client before the route suspends — rendering pauses but state is kept; reconnecting within `session_timeout` resumes without a reload (seconds) |
@@ -60,6 +60,31 @@ class App:
 | `serializer` | `Serializer` | `None` | Serializer used for client messages and render sessions |
 
 Framework routes live under the reserved `/_pulse/*` namespace and are not configurable.
+
+FastAPI's generated API reference also uses this namespace by default:
+
+- Swagger UI: `/_pulse/docs`
+- OpenAPI schema: `/_pulse/openapi.json`
+
+ReDoc is disabled by default. Enable it or configure different URLs with
+`FastAPIConfig`:
+
+```python
+app = ps.App(
+    routes=[...],
+    fastapi=ps.FastAPIConfig(
+        title="My API",
+        docs_url="/api/docs",
+        redoc_url=None,
+        openapi_url="/api/openapi.json",
+        swagger_ui_oauth2_redirect_url="/api/docs/oauth2-redirect",
+    ),
+)
+```
+
+The generated schema includes endpoints registered on `app.fastapi` and omits
+Pulse's framework endpoints. Custom URLs outside `/_pulse/*` can shadow Pulse
+page routes at the same path.
 
 ### Attributes
 
@@ -148,6 +173,38 @@ Deployment mode for the application.
 |-------|-------------|
 | `"single-server"` | Python and React on same origin (default) |
 | `"subdomains"` | Python API on subdomain (e.g., `api.example.com`) |
+
+---
+
+## FastAPIConfig
+
+Configuration for FastAPI's generated OpenAPI schema and documentation.
+
+```python
+@dataclass
+class FastAPIConfig:
+    title: str = "Pulse UI Server"
+    summary: str | None = None
+    description: str = ""
+    version: str = "0.1.0"
+    openapi_url: str | None = "/_pulse/openapi.json"
+    docs_url: str | None = "/_pulse/docs"
+    redoc_url: str | None = None
+    swagger_ui_oauth2_redirect_url: str | None = "/_pulse/docs/oauth2-redirect"
+    openapi_tags: list[dict[str, Any]] | None = None
+    servers: list[dict[str, Any]] | None = None
+    terms_of_service: str | None = None
+    contact: dict[str, Any] | None = None
+    license_info: dict[str, Any] | None = None
+    swagger_ui_init_oauth: dict[str, Any] | None = None
+    swagger_ui_parameters: dict[str, Any] | None = None
+    separate_input_output_schemas: bool = True
+    openapi_external_docs: dict[str, Any] | None = None
+```
+
+Set `docs_url` and `openapi_url` to `None` to disable the generated reference.
+Set `redoc_url` to a path to enable ReDoc. Pulse owns FastAPI routing order and
+lifecycle; configure advanced runtime behavior directly through `app.fastapi`.
 
 ---
 

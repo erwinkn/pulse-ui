@@ -152,7 +152,7 @@ class RailwayPlugin(ps.Plugin):
 	def on_setup(self, app: ps.App) -> None:
 		self.attach_app(app)
 
-		@app.fastapi.get(DEPLOYMENT_META_PATH)
+		@app.fastapi.get(DEPLOYMENT_META_PATH, include_in_schema=False)
 		def deployment_info():  # pyright: ignore[reportUnusedFunction]
 			if not self.enabled:
 				raise HTTPException(
@@ -164,7 +164,7 @@ class RailwayPlugin(ps.Plugin):
 				"api_prefix": app.api_prefix,
 			}
 
-		@app.fastapi.get(INTERNAL_SESSIONS_PATH)
+		@app.fastapi.get(INTERNAL_SESSIONS_PATH, include_in_schema=False)
 		def deployment_sessions(  # pyright: ignore[reportUnusedFunction]
 			x_internal_token: str | None = Header(
 				default=None, alias=INTERNAL_TOKEN_HEADER
@@ -186,7 +186,7 @@ class RailwayPlugin(ps.Plugin):
 				"session_timeout_seconds": app.session_timeout,
 			}
 
-		@app.fastapi.post(INTERNAL_RELOAD_PATH)
+		@app.fastapi.post(INTERNAL_RELOAD_PATH, include_in_schema=False)
 		async def reload_deployment_clients(  # pyright: ignore[reportUnusedFunction]
 			x_internal_token: str | None = Header(
 				default=None, alias=INTERNAL_TOKEN_HEADER

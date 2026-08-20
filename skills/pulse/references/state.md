@@ -71,6 +71,9 @@ class CartState(ps.State):
 - Only recalculates when dependencies change
 - Dependencies tracked automatically
 - Can depend on other computed properties
+- Each instance caches one computed per descriptor; fresh same-name subclass descriptors get separate entries, including through `super()`
+- Assigning one descriptor object to multiple members or classes raises `TypeError`; create a fresh descriptor for each member
+- Descriptors must be defined in the class body; assigning one to an existing State class raises `TypeError`
 
 ### When to Use
 
@@ -121,7 +124,6 @@ class SubscriptionState(ps.State):
     immediate=True,      # Run sync instead of batched (sync only)
     lazy=True,           # Don't run on creation
     interval=5.0,        # Re-run every N seconds (polling)
-    name="my_effect",    # Debug name
 )
 def my_effect(self):
     pass
@@ -143,7 +145,9 @@ Async effects auto-cancel previous task when dependencies change.
 
 ## `@ps.global_state` Decorator
 
-Create app-wide singleton state shared across components.
+Create session-wide state shared across components. The instance is scoped to the
+render session (one browser tab) and disposed when it closes — never shared
+across tabs or users. Use `ps.session()` to coordinate a single user's tabs.
 
 ```python
 @ps.global_state
@@ -172,21 +176,23 @@ cache = UserCache(user_id="123")
 
 ### ID-Based Instances
 
-Share state across sessions or scope by ID:
+Keep one instance per entity, within the session:
 
 ```python
 session_counter = ps.global_state(CounterState)
-shared_counter = ps.global_state(CounterState)
+room_counter = ps.global_state(CounterState)
 
-# Per-session (no id)
-a = session_counter(label="Session")  # Isolated per browser session
+# One instance for the whole session (no id)
+a = session_counter(label="Session")
 
-# Shared by id
-b = shared_counter("room-1", label="Shared")  # Same instance for all with id="room-1"
-c = shared_counter("room-2", label="Shared")  # Different instance
+# One instance per id
+b = room_counter("room-1", label="Room")  # Distinct from...
+c = room_counter("room-2", label="Room")  # ...this one
 ```
 
-Without `id`, state is scoped to the current session. With `id`, state is shared globally across all sessions using that ID.
+`id` is a keying discriminator *within* the session, not a scope switch: two
+tabs (or two users) never see each other's instances. Cross-user shared state is
+not supported.
 
 ### Factory Function
 
@@ -200,6 +206,21 @@ get_config = ps.global_state(create_config)
 
 # Usage
 config = get_config()
+```
+
+The default accessor identity is the factory module plus qualified name. Factories created repeatedly from the same lexical definition need unique, non-empty keys:
+
+```python
+def make_config_accessor(namespace: str):
+    def create_config() -> ConfigState:
+        state = ConfigState()
+        state.load_defaults()
+        return state
+
+    return ps.global_state(create_config, key=f"config:{namespace}")
+
+tenant_config = make_config_accessor("tenant")
+admin_config = make_config_accessor("admin")
 ```
 
 ## State Lifecycle

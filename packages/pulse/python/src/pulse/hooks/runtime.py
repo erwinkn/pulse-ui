@@ -381,7 +381,7 @@ S = TypeVar("S", covariant=True, bound=State)
 class GlobalStateAccessor(Protocol, Generic[P, S]):
 	"""Protocol for global state accessor functions.
 
-	A callable that returns the shared state instance, optionally scoped
+	A callable that returns the render session's instance, optionally keyed
 	by an instance ID.
 	"""
 
@@ -390,29 +390,33 @@ class GlobalStateAccessor(Protocol, Generic[P, S]):
 	) -> S: ...
 
 
-GLOBAL_STATES: dict[str, State] = {}
-"""Global dictionary storing state instances keyed by their qualified names."""
-
-
 def global_state(
 	factory: Callable[P, S] | type[S], key: str | None = None
 ) -> GlobalStateAccessor[P, S]:
-	"""Create a globally shared state accessor.
+	"""Create a state accessor shared across the current render session.
 
-	Creates a decorator or callable that provides access to a shared state
-	instance. The state is shared across all components that use the same
-	accessor.
+	Creates a decorator or callable that returns one instance per render
+	session (one browser tab): every component and callback in that session
+	sees the same instance, and the instance is disposed when the session
+	closes.
+
+	The scope is the render session, never the process. Two browser tabs, and
+	two users, always get separate instances. Use ``ps.session()``
+	(``UserSession``) to coordinate state across a single user's tabs.
 
 	Can be used as a decorator on a State class or with a factory function.
 
 	Args:
 		factory: State class or factory function that creates the state instance.
-		key: Optional custom key for the global state. If not provided, a key
-			is derived from the factory's module and qualified name.
+		key: Optional custom key for the accessor. If not provided, a key
+			is derived from the factory's module and qualified name. Factories
+			created repeatedly from one lexical definition must pass unique, non-empty keys.
+		id: (on the returned accessor) Distinguishes instances *within* the
+			session, so one accessor can hold one instance per entity. It does
+			not widen the scope beyond the session.
 
 	Returns:
-		GlobalStateAccessor: A callable that returns the shared state instance.
-			Call with ``id=`` parameter for per-entity global state.
+		GlobalStateAccessor: A callable that returns the session's instance.
 
 	Example:
 
@@ -423,7 +427,7 @@ def global_state(
 	    language: str = "en"
 
 	def settings_panel():
-	    settings = AppSettings()  # Same instance across all components
+	    settings = AppSettings()  # Same instance everywhere in this session
 	    return m.Select(
 	        value=settings.theme,
 	        data=["light", "dark"],
@@ -431,7 +435,7 @@ def global_state(
 	    )
 	```
 
-	With instance ID for per-entity global state:
+	With an instance ID, for one instance per entity within the session:
 
 	```python
 	@ps.global_state
@@ -439,7 +443,7 @@ def global_state(
 	    data: dict = {}
 
 	def user_profile(user_id: str):
-	    cache = UserCache(id=user_id)  # Shared per user_id
+	    cache = UserCache(id=user_id)  # One per user_id, still session-scoped
 	    return m.Text(cache.data.get("name", "Loading..."))
 	```
 	"""
@@ -458,22 +462,13 @@ def global_state(
 	base_key = key or default_key
 
 	def accessor(id: str | None = None, *args: P.args, **kwargs: P.kwargs) -> S:
-		if id is not None:
-			shared_key = f"{base_key}|{id}"
-			inst = cast(S | None, GLOBAL_STATES.get(shared_key))
-			if inst is None:
-				inst = mk(*args, **kwargs)
-				GLOBAL_STATES[shared_key] = inst
-			return inst
-
 		ctx = PulseContext.get()
 		if ctx.render is None:
 			raise RuntimeError(
 				"ps.global_state must be called inside a Pulse render/callback context"
 			)
-		return cast(
-			S, ctx.render.get_global_state(base_key, lambda: mk(*args, **kwargs))
-		)
+		key = base_key if id is None else f"{base_key}|{id}"
+		return cast(S, ctx.render.get_global_state(key, lambda: mk(*args, **kwargs)))
 
 	return accessor
 
@@ -493,6 +488,5 @@ __all__ = [
 	"server_address",
 	"client_address",
 	"global_state",
-	"GLOBAL_STATES",
 	"GlobalStateAccessor",
 ]

@@ -87,6 +87,7 @@ async def test_plugin_exposes_deployment_metadata_endpoint(monkeypatch) -> None:
 		"deployment_id": "prod-260402-120000",
 		"api_prefix": "/_pulse",
 	}
+	assert app.fastapi.openapi()["paths"] == {}
 
 
 @pytest.mark.asyncio

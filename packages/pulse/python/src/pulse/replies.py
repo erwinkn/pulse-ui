@@ -36,20 +36,21 @@ class PendingReplies:
 	def register(
 		self,
 		reply_id: str,
-		future: asyncio.Future[Any],
 		*,
 		cancel_key: str | None = None,
-	) -> None:
-		"""Park `future` until the client reply for `reply_id` arrives.
+	) -> asyncio.Future[Any]:
+		"""Create and park a future until the client reply for `reply_id` arrives.
 
 		`cancel_key` groups requests that die together (e.g. all inflight
 		requests of one channel), failed via `reject_where`.
 		"""
 		if reply_id in self._futures:
 			raise ValueError(f"Duplicate pending reply id {reply_id!r}")
+		future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
 		self._futures[reply_id] = future
 		if cancel_key is not None:
 			self._cancel_keys[reply_id] = cancel_key
+		return future
 
 	def apply(self, message: ReplyMessage) -> None:
 		"""Resolve or reject from a `reply` packet. Missing ids are no-ops."""

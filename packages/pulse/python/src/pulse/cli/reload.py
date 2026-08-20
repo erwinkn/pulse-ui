@@ -277,6 +277,7 @@ class DevSupervisor:
 		env[ENV_PULSE_SUPERVISED] = "1"
 		web_args = web_spec.args
 		if os_family() != "windows":
+			# POSIX uses guard for orphan cleanup; Windows job objects reap descendants.
 			web_args = [
 				sys.executable,
 				"-m",

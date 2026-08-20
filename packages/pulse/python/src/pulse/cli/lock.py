@@ -29,7 +29,6 @@ WAIT_TIMEOUT = 0x102
 
 
 def _kernel32() -> Any:
-	# ctypes.wintypes is importable on Windows only.
 	import ctypes
 	from ctypes import wintypes
 

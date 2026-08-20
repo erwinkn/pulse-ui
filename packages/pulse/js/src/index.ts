@@ -38,7 +38,12 @@ export type {
 } from "./messages";
 export type { PulseConfig, PulsePrerender, PulseProviderProps } from "./pulse";
 // Core React bindings
-export { PulseProvider, PulseView, usePulseClient } from "./pulse";
+export {
+	PulseProvider,
+	PulseView,
+	usePulseClient,
+	usePulseDirectivesSource,
+} from "./pulse";
 // Renderer helpers
 // Renderer (structural expressions + eval-keyed props)
 export { VDOMRenderer } from "./renderer";

@@ -4,6 +4,7 @@ import { deserialize } from "./serialize/serializer";
 
 const originalFetch = globalThis.fetch;
 const originalNodeEnv = process.env.NODE_ENV;
+const originalReload = Object.getOwnPropertyDescriptor(window.location, "reload");
 
 function makeSubmitEvent() {
 	const form = document.createElement("form");
@@ -28,6 +29,11 @@ describe("submitForm", () => {
 	afterEach(() => {
 		globalThis.fetch = originalFetch;
 		process.env.NODE_ENV = originalNodeEnv;
+		if (originalReload) {
+			Object.defineProperty(window.location, "reload", originalReload);
+		} else {
+			Reflect.deleteProperty(window.location, "reload");
+		}
 		vi.restoreAllMocks();
 	});
 
@@ -49,6 +55,43 @@ describe("submitForm", () => {
 				body: formData,
 			}),
 		);
+	});
+
+	it("applies current directives to form POSTs and keeps directive values authoritative", async () => {
+		const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+		globalThis.fetch = fetchMock as any;
+		const event = makeSubmitEvent();
+		const formData = new FormData();
+		formData.set("name", "Ada");
+		let currentDirectives = {
+			query: {
+				pulse_deployment: "prod-b",
+				router: "stable",
+			},
+			headers: {
+				"x-pulse-test": "yes",
+			},
+		};
+
+		await submitForm({
+			event,
+			action: "http://pulse.test/submit?foo=1&pulse_deployment=prod-a",
+			formData,
+			directives: () => currentDirectives,
+		});
+
+		const call = fetchMock.mock.calls[0];
+		expect(call).toBeDefined();
+		const [url, init] = call as unknown as [URL, RequestInit];
+		expect(url).toEqual(
+			new URL(
+				"http://pulse.test/submit?foo=1&pulse_deployment=prod-b&router=stable",
+				window.location.href,
+			),
+		);
+		const headers = new Headers(init.headers);
+		expect(headers.get("x-pulse-test")).toBe("yes");
+		expect(headers.has("content-type")).toBe(false);
 	});
 
 	it("encodes structured values and files as Pulse multipart data", async () => {
@@ -145,6 +188,32 @@ describe("submitForm", () => {
 			"[Pulse] Form submission failed",
 			error,
 		);
+	});
+
+	it("reloads when a form POST reaches a drained deployment", async () => {
+		const reload = vi.fn();
+		Object.defineProperty(window.location, "reload", {
+			configurable: true,
+			value: reload,
+		});
+		globalThis.fetch = vi.fn(
+			async () =>
+				new Response("stale", {
+					status: 409,
+					headers: { "x-pulse-stale-affinity": "1" },
+				}),
+		) as any;
+		vi.spyOn(console, "error").mockImplementation(() => {});
+
+		await expect(
+			submitForm({
+				event: makeSubmitEvent(),
+				action: "http://pulse.test/submit",
+				formData: new FormData(),
+			}),
+		).rejects.toBeInstanceOf(FormSubmissionError);
+
+		expect(reload).toHaveBeenCalledTimes(1);
 	});
 
 	it("does not submit when user onSubmit prevents default", async () => {

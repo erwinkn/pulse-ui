@@ -22,7 +22,7 @@ interface PendingRequest {
 	reject: (error: any) => void;
 }
 
-function randomId(): string {
+export function createRandomId(): string {
 	if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
 		return crypto.randomUUID().replace(/-/g, "");
 	}
@@ -65,7 +65,7 @@ export class ChannelBridge {
 
 	request(event: string, payload: any = null): Promise<any> {
 		this.ensureOpen();
-		const requestId = randomId();
+		const requestId = createRandomId();
 		return new Promise((resolve, reject) => {
 			this.pending.set(requestId, { resolve, reject });
 			this.client.sendMessage({

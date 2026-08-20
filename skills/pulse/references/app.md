@@ -34,11 +34,32 @@ app = ps.App(
 | `not_found` | `str` | `"/not-found"` | 404 page path |
 | `mode` | `"single-server" \| "subdomains"` | `"single-server"` | Deployment mode |
 | `proxy` | `Proxy` | `None` | Single-server proxy tuning |
-| `api_prefix` | `str` | `"/_pulse"` | API route prefix |
 | `cors` | `CORSOptions` | Auto | CORS configuration |
-| `fastapi` | `dict` | `None` | FastAPI constructor options |
+| `fastapi` | `FastAPIConfig` | `None` | Generated FastAPI docs and OpenAPI configuration |
 | `session_timeout` | `float` | `60.0` | How long a disconnected render session stays resumable before being closed (seconds) |
 | `serializer` | `Serializer` | `None` | Serializer used for client messages and render sessions |
+
+FastAPI's generated reference defaults to `/_pulse/docs` and
+`/_pulse/openapi.json`; ReDoc is disabled. Configure different URLs or enable
+ReDoc with `FastAPIConfig`:
+
+```python
+app = ps.App(
+    routes=[...],
+    fastapi=ps.FastAPIConfig(
+        title="My API",
+        docs_url="/api/docs",
+        redoc_url=None,
+        openapi_url="/api/openapi.json",
+        swagger_ui_oauth2_redirect_url="/api/docs/oauth2-redirect",
+    ),
+)
+```
+
+The schema includes user endpoints registered on `app.fastapi` and excludes
+Pulse framework endpoints. Set `docs_url` and `openapi_url` to `None` to disable
+the generated reference. Custom URLs outside `/_pulse/*` can shadow Pulse page
+routes.
 
 ## Deployment Modes
 

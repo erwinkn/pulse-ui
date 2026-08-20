@@ -168,6 +168,8 @@ def ClientWidget(*, name: str):
     ]
 ```
 
+The emitted JavaScript symbol uses the callable name captured by `@ps.javascript`. Changing the Python callable's `__name__` afterward does not rename that symbol.
+
 ### React Hooks in Transpiled Code
 
 ```python

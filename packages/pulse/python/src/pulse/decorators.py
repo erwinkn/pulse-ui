@@ -25,26 +25,12 @@ P = ParamSpec("P")
 
 
 @overload
-def computed(fn: Callable[[], T], *, name: str | None = None) -> Computed[T]: ...
+def computed(fn: Callable[[], T]) -> Computed[T]: ...
 @overload
-def computed(
-	fn: Callable[[TState], T], *, name: str | None = None
-) -> ComputedProperty[T]: ...
-@overload
-def computed(
-	fn: None = None, *, name: str | None = None
-) -> Callable[[Callable[[], T]], Computed[T]]: ...
+def computed(fn: Callable[[TState], T]) -> ComputedProperty[T]: ...
 
 
-def computed(
-	fn: Callable[..., Any] | None = None,
-	*,
-	name: str | None = None,
-) -> (
-	Computed[T]
-	| ComputedProperty[T]
-	| Callable[[Callable[..., Any]], Computed[T] | ComputedProperty[T]]
-):
+def computed(fn: Callable[..., Any]) -> Computed[T] | ComputedProperty[T]:
 	"""
 	Decorator for computed (derived) properties.
 
@@ -58,10 +44,9 @@ def computed(
 
 	Args:
 		fn: The function to compute the value. Must take no arguments (standalone) or only `self` (State method).
-		name: Optional debug name for the computed. Defaults to the function name.
 
 	Returns:
-		Computed wrapper or decorator depending on usage.
+		Computed or ComputedProperty depending on usage.
 
 	Raises:
 		TypeError: If the function takes arguments other than `self`.
@@ -83,32 +68,18 @@ def computed(
 		    @ps.computed
 		    def doubled():
 		        return signal() * 2
-
-		With explicit name:
-
-		    @ps.computed(name="my_computed")
-		    def doubled(self):
-		        return self.count * 2
 	"""
-
-	# The type checker is not happy if I don't specify the `/` here.
-	def decorator(fn: Callable[..., Any], /):
-		sig = inspect.signature(fn)
-		params = list(sig.parameters.values())
-		# Check if it's a method with exactly one argument called 'self'
-		if len(params) == 1 and params[0].name == "self":
-			return ComputedProperty(fn.__name__, fn)
-		# If it has any arguments at all, it's not allowed (except for 'self')
-		if len(params) > 0:
-			raise TypeError(
-				f"@computed: Function '{fn.__name__}' must take no arguments or a single 'self' argument"
-			)
-		return Computed(fn, name=name or fn.__name__)
-
-	if fn is not None:
-		return decorator(fn)
-	else:
-		return decorator
+	sig = inspect.signature(fn)
+	params = list(sig.parameters.values())
+	# Check if it's a method with exactly one argument called 'self'
+	if len(params) == 1 and params[0].name == "self":
+		return ComputedProperty(fn.__name__, fn)
+	# If it has any arguments at all, it's not allowed (except for 'self')
+	if len(params) > 0:
+		raise TypeError(
+			f"@computed: Function '{fn.__name__}' must take no arguments or a single 'self' argument"
+		)
+	return Computed(fn, name=fn.__name__)
 
 
 StateEffectFn = Callable[[TState], EffectCleanup | None]
@@ -117,20 +88,23 @@ AsyncStateEffectFn = Callable[[TState], Awaitable[EffectCleanup | None]]
 
 class EffectBuilder(Protocol):
 	@overload
-	def __call__(self, fn: EffectFn | StateEffectFn[Any]) -> Effect: ...
+	def __call__(self, fn: EffectFn) -> Effect: ...
 	@overload
-	def __call__(self, fn: AsyncEffectFn | AsyncStateEffectFn[Any]) -> AsyncEffect: ...
+	def __call__(self, fn: AsyncEffectFn) -> AsyncEffect: ...
+	@overload
+	def __call__(
+		self, fn: StateEffectFn[Any] | AsyncStateEffectFn[Any]
+	) -> StateEffect[Any]: ...
 	def __call__(
 		self,
 		fn: EffectFn | StateEffectFn[Any] | AsyncEffectFn | AsyncStateEffectFn[Any],
-	) -> Effect | AsyncEffect: ...
+	) -> Effect | AsyncEffect | StateEffect[Any]: ...
 
 
 @overload
 def effect(
 	fn: EffectFn,
 	*,
-	name: str | None = None,
 	immediate: bool = False,
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
@@ -145,7 +119,6 @@ def effect(
 def effect(
 	fn: AsyncEffectFn,
 	*,
-	name: str | None = None,
 	immediate: bool = False,
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
@@ -154,17 +127,12 @@ def effect(
 	interval: float | None = None,
 	key: str | None = None,
 ) -> AsyncEffect: ...
-# In practice this overload returns a StateEffect, but it gets converted into an
-# Effect at state instantiation.
 @overload
-def effect(fn: StateEffectFn[Any]) -> Effect: ...
-@overload
-def effect(fn: AsyncStateEffectFn[Any]) -> AsyncEffect: ...
+def effect(fn: StateEffectFn[Any] | AsyncStateEffectFn[Any]) -> StateEffect[Any]: ...
 @overload
 def effect(
 	fn: None = None,
 	*,
-	name: str | None = None,
 	immediate: bool = False,
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
@@ -178,7 +146,6 @@ def effect(
 def effect(
 	fn: Callable[..., Any] | None = None,
 	*,
-	name: str | None = None,
 	immediate: bool = False,
 	lazy: bool = False,
 	on_error: Callable[[Exception], None] | None = None,
@@ -203,7 +170,6 @@ def effect(
 	Args:
 		fn: The effect function. Must take no arguments (standalone) or only
 		        `self` (State method). Can return a cleanup function.
-		name: Optional debug name. Defaults to "ClassName.method_name" or function name.
 		immediate: If True, run synchronously when scheduled instead of batching.
 		        Only valid for sync effects.
 		lazy: If True, don't run on creation; wait for first dependency change.
@@ -266,7 +232,6 @@ def effect(
 		if len(params) == 1 and params[0].name == "self":
 			return StateEffect(
 				func,
-				name=name,
 				immediate=immediate,
 				lazy=lazy,
 				on_error=on_error,
@@ -291,7 +256,7 @@ def effect(
 			if inspect.iscoroutinefunction(func):
 				return AsyncEffect(
 					func,  # type: ignore[arg-type]
-					name=name or func.__name__,
+					name=func.__name__,
 					lazy=lazy,
 					on_error=on_error,
 					deps=deps,
@@ -300,7 +265,7 @@ def effect(
 				)
 			return Effect(
 				func,  # type: ignore[arg-type]
-				name=name or func.__name__,
+				name=func.__name__,
 				immediate=immediate,
 				lazy=lazy,
 				on_error=on_error,

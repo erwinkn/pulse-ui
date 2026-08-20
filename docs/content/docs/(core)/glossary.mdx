@@ -262,7 +262,10 @@ Repeatedly fetching data at fixed intervals. Implemented with `repeat()` for sim
 ## Architecture
 
 **Middleware**
-Code that runs before/after the main request handler. Used for authentication, logging, error handling, or modifying requests/responses.
+Code that runs before/after the main request handler. Used for authentication, logging, error handling, or modifying requests/responses. Pulse middleware hooks cover prerender, user-defined FastAPI routes (`api`), WebSocket connect, messages, and channels.
+
+**User API route**
+A FastAPI endpoint registered on `app.fastapi` (or via `include_router`). Distinct from Pulse framework endpoints under `/_pulse/*` (prerender, health, forms) and from page prerender. The `api` middleware hook intercepts these routes.
 
 **Context**
 A way to pass data through the component tree without explicitly passing props at every level. Useful for themes, user data, or other "global" state.

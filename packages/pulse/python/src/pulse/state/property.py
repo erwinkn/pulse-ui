@@ -49,7 +49,49 @@ class InitializableProperty(ABC):
 	def initialize(self, state: "State", name: str) -> Any: ...
 
 
-class ComputedProperty(Generic[T]):
+MEMBER_CACHE_ATTR = "_pulse_member_cache"
+
+
+class StateMemberDescriptor:
+	"""Descriptor for reactive members (computed, query, mutation) on State classes.
+
+	Per-instance results live in a dict keyed by the descriptor object, so each
+	defining class member keeps its own cache entry even when a subclass
+	overrides a same-name member (e.g. base access through ``super()``).
+	"""
+
+	_bound_owner: type[Any] | None = None
+	_bound_name: str | None = None
+	_callable_name: str
+
+	def __init__(self, callable_name: str) -> None:
+		self._callable_name = callable_name
+
+	def __set_name__(self, owner: type[Any], name: str) -> None:
+		if self._bound_owner is not None:
+			raise TypeError(
+				f"{type(self).__name__} is already bound to "
+				+ f"'{self._bound_owner.__qualname__}.{self._bound_name}' and cannot also "
+				+ f"be bound to '{owner.__qualname__}.{name}'. Create a new descriptor "
+				+ "for each State member."
+			)
+		self._bound_owner = owner
+		self._bound_name = name
+
+	@property
+	def name(self) -> str:
+		"""Human-readable name for diagnostics."""
+		return self._bound_name or self._callable_name
+
+	def instance_cache(self, obj: Any) -> "dict[StateMemberDescriptor, Any]":
+		cache = obj.__dict__.get(MEMBER_CACHE_ATTR)
+		if cache is None:
+			cache = {}
+			obj.__dict__[MEMBER_CACHE_ATTR] = cache
+		return cache
+
+
+class ComputedProperty(StateMemberDescriptor, Generic[T]):
 	"""
 	Descriptor for computed (derived) properties on State classes.
 
@@ -60,7 +102,7 @@ class ComputedProperty(Generic[T]):
 	Created automatically when using the @ps.computed decorator on a State method.
 
 	Args:
-		name: The property name (used for debugging and the private storage key).
+		callable_name: The callable name, used for diagnostics before the descriptor is bound.
 		fn: The method that computes the value. Must take only `self` as argument.
 
 	Example:
@@ -80,14 +122,10 @@ class ComputedProperty(Generic[T]):
 	```
 	"""
 
-	name: str
-	private_name: str
 	fn: "Callable[[State], T]"
 
-	def __init__(self, name: str, fn: "Callable[[State], T]"):
-		self.name = name
-		self.private_name = f"__computed_{name}"
-		# The computed_template holds the original method
+	def __init__(self, callable_name: str, fn: "Callable[[State], T]"):
+		super().__init__(callable_name)
 		self.fn = fn
 
 	def get_computed(self, obj: Any) -> Computed[T]:
@@ -97,15 +135,17 @@ class ComputedProperty(Generic[T]):
 			raise ValueError(
 				f"Computed property {self.name} defined on a non-State class"
 			)
-		if not hasattr(obj, self.private_name):
+		cache = self.instance_cache(obj)
+		computed: Computed[T] | None = cache.get(self)
+		if computed is None:
 			# Create the computed on first access for this instance
 			bound_method = self.fn.__get__(obj, obj.__class__)
-			new_computed = Computed(
+			computed = Computed(
 				bound_method,
 				name=f"{obj.__class__.__name__}.{self.name}",
 			)
-			setattr(obj, self.private_name, new_computed)
-		return getattr(obj, self.private_name)
+			cache[self] = computed
+		return computed
 
 	def __get__(self, obj: Any, objtype: Any = None) -> T:
 		if obj is None:
@@ -117,7 +157,7 @@ class ComputedProperty(Generic[T]):
 		raise AttributeError(f"Cannot set computed property '{self.name}'")
 
 
-class StateEffect(Generic[T], InitializableProperty):
+class StateEffect(StateMemberDescriptor, Generic[T], InitializableProperty):
 	"""
 	Descriptor for side effects on State classes.
 
@@ -132,7 +172,6 @@ class StateEffect(Generic[T], InitializableProperty):
 			fn: The effect function. Must take only `self` as argument.
 			        Can return a cleanup function that runs before the next execution
 			        or when the effect is disposed.
-		name: Debug name for the effect. Defaults to "ClassName.method_name".
 		immediate: If True, run synchronously when scheduled (sync effects only).
 		lazy: If True, don't run on creation; wait for first dependency change.
 		on_error: Callback for handling errors during effect execution.
@@ -162,7 +201,6 @@ class StateEffect(Generic[T], InitializableProperty):
 	"""
 
 	fn: "Callable[[State], T]"
-	name: str | None
 	immediate: bool
 	on_error: "Callable[[Exception], None] | None"
 	lazy: bool
@@ -173,7 +211,6 @@ class StateEffect(Generic[T], InitializableProperty):
 	def __init__(
 		self,
 		fn: "Callable[[State], T]",
-		name: str | None = None,
 		immediate: bool = False,
 		lazy: bool = False,
 		on_error: "Callable[[Exception], None] | None" = None,
@@ -181,8 +218,8 @@ class StateEffect(Generic[T], InitializableProperty):
 		update_deps: bool | None = None,
 		interval: float | None = None,
 	):
+		super().__init__(fn.__name__)
 		self.fn = fn
-		self.name = name
 		self.immediate = immediate
 		self.on_error = on_error
 		self.lazy = lazy
@@ -191,13 +228,17 @@ class StateEffect(Generic[T], InitializableProperty):
 		self.interval = interval
 
 	@override
-	def initialize(self, state: "State", name: str):
+	def initialize(self, state: "State", name: str) -> Effect:
+		cache = self.instance_cache(state)
+		effect: Effect | None = cache.get(self)
+		if effect is not None:
+			return effect
 		bound_method = self.fn.__get__(state, state.__class__)
 		# Select sync/async effect type based on bound method
 		if inspect.iscoroutinefunction(bound_method):
-			effect: Effect = AsyncEffect(
+			effect = AsyncEffect(
 				bound_method,  # type: ignore[arg-type]
-				name=self.name or f"{state.__class__.__name__}.{name}",
+				name=f"{state.__class__.__name__}.{self.name}",
 				lazy=self.lazy,
 				on_error=self.on_error,
 				deps=self.deps,
@@ -207,7 +248,7 @@ class StateEffect(Generic[T], InitializableProperty):
 		else:
 			effect = Effect(
 				bound_method,  # type: ignore[arg-type]
-				name=self.name or f"{state.__class__.__name__}.{name}",
+				name=f"{state.__class__.__name__}.{self.name}",
 				immediate=self.immediate,
 				lazy=self.lazy,
 				on_error=self.on_error,
@@ -215,4 +256,18 @@ class StateEffect(Generic[T], InitializableProperty):
 				update_deps=self.update_deps,
 				interval=self.interval,
 			)
-		setattr(state, name, effect)
+		cache[self] = effect
+		return effect
+
+	def __get__(self, obj: Any, objtype: Any = None) -> Effect:
+		if obj is None:
+			return self  # pyright: ignore[reportReturnType]
+		effect: Effect | None = self.instance_cache(obj).get(self)
+		if effect is None:
+			raise RuntimeError(
+				f"Effect '{self.name}' accessed before state initialization"
+			)
+		return effect
+
+	def __set__(self, obj: Any, value: Any) -> Never:
+		raise AttributeError(f"Cannot set effect '{self.name}'")

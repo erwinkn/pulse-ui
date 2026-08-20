@@ -20,6 +20,7 @@ from starlette.datastructures import UploadFile as UploadFile
 
 # Core app/session
 from pulse.app import App as App
+from pulse.app import FastAPIConfig as FastAPIConfig
 from pulse.app import PulseMode as PulseMode
 from pulse.channel import (
 	Channel as Channel,
@@ -1218,9 +1219,6 @@ from pulse.hooks.init import (
 	init as init,
 )
 from pulse.hooks.runtime import (
-	GLOBAL_STATES as GLOBAL_STATES,
-)
-from pulse.hooks.runtime import (
 	GlobalStateAccessor as GlobalStateAccessor,
 )
 from pulse.hooks.runtime import (
@@ -1303,6 +1301,9 @@ from pulse.messages import PrerenderPayload as PrerenderPayload
 from pulse.messages import SocketIODirectives as SocketIODirectives
 
 # Middleware
+from pulse.middleware import (
+	ApiResponse as ApiResponse,
+)
 from pulse.middleware import (
 	ConnectResponse as ConnectResponse,
 )

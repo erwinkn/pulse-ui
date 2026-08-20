@@ -58,6 +58,19 @@ Create a new context with updated values, inheriting unspecified values from cur
 
 **Returns:** New `PulseContext` instance.
 
+##### bind
+
+```python
+@classmethod
+def bind(cls, fn: F) -> F
+```
+
+Re-enter the PulseContext that is current when `bind` is called, on every later invocation. Captures `app`, `session`, `render`, `route`, and the `source_*` mount identity. No-op if there is no render session. A cleanup callable returned by `fn` is bound too.
+
+`@ps.effect` uses this so effect bodies and cleanups see the creating render (and route, when the effect is route-scoped).
+
+**Returns:** The original function, or a wrapper that mounts the captured context.
+
 #### Context Manager
 
 `PulseContext` can be used as a context manager to temporarily set the active context:

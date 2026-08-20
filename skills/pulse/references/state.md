@@ -100,6 +100,8 @@ class TrackerState(ps.State):
             self.results = await api.search(self.query)
 ```
 
+Created under a render session, the effect re-enters that session on every run (and cleanup). Mount-local `ps.state` also keeps the creating route; `ps.global_state` does not.
+
 ### Cleanup Pattern
 
 Return a cleanup function from effects:

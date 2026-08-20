@@ -13,19 +13,18 @@ from collections.abc import Awaitable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import IntEnum
-from functools import wraps
-from typing import Any, Callable, Literal, TypeVar, cast, override
+from typing import Any, Callable, Literal, TypeVar, cast
 
 import socketio
 import uvicorn
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.routing import APIRoute
 from socketio.exceptions import ConnectionRefusedError as SocketIOConnectionRefusedError
 from starlette.types import ASGIApp
 from starlette.websockets import WebSocket
 
+from pulse.api_router import PulseFastAPI, PulseFrameworkAPIRoute
 from pulse.codegen.codegen import Codegen, CodegenConfig
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.cookies import (
@@ -74,7 +73,6 @@ from pulse.middleware import (
 )
 from pulse.plugin import Plugin
 from pulse.proxy import Proxy, ReactProxy
-from pulse.reactive_extensions import unwrap
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
@@ -93,7 +91,6 @@ FRAMEWORK_API_PREFIX = "/_pulse"
 PAGE_INSTANCE_AUTH_KEY = "__pulse_page_instance_id"
 RENDER_ID_COLLISION_CODE = "render_id_collision"
 MAX_PENDING_SOCKET_MESSAGES = 100
-PULSE_ENDPOINT_UNWRAP_MARKER = "__pulse_endpoint_unwrap__"
 
 
 class AppStatus(IntEnum):
@@ -165,56 +162,6 @@ class FastAPIConfig:
 	swagger_ui_parameters: dict[str, Any] | None = None
 	separate_input_output_schemas: bool = True
 	openapi_external_docs: dict[str, Any] | None = None
-
-
-class PulseAPIRoute(APIRoute):
-	def __init__(
-		self,
-		path: str,
-		endpoint: Callable[..., Any],
-		**kwargs: Any,
-	) -> None:
-		super().__init__(path, _wrap_fastapi_endpoint(endpoint), **kwargs)
-
-
-class PulseFastAPI(FastAPI):
-	@override
-	def include_router(self, router: APIRouter, **kwargs: Any) -> None:
-		_wrap_router_endpoints(router)
-		super().include_router(router, **kwargs)
-
-
-def _wrap_router_endpoints(router: APIRouter) -> None:
-	for route in router.routes:
-		if isinstance(route, APIRoute):
-			route.endpoint = _wrap_fastapi_endpoint(route.endpoint)
-
-
-def _wrap_fastapi_endpoint(endpoint: Callable[..., Any]) -> Callable[..., Any]:
-	if endpoint.__dict__.get(PULSE_ENDPOINT_UNWRAP_MARKER):
-		return endpoint
-
-	if asyncio.iscoroutinefunction(endpoint):
-
-		@wraps(endpoint)
-		async def async_endpoint(*args: Any, **kwargs: Any) -> Any:
-			return _unwrap_fastapi_response(await endpoint(*args, **kwargs))
-
-		async_endpoint.__dict__[PULSE_ENDPOINT_UNWRAP_MARKER] = True
-		return async_endpoint
-
-	@wraps(endpoint)
-	def sync_endpoint(*args: Any, **kwargs: Any) -> Any:
-		return _unwrap_fastapi_response(endpoint(*args, **kwargs))
-
-	sync_endpoint.__dict__[PULSE_ENDPOINT_UNWRAP_MARKER] = True
-	return sync_endpoint
-
-
-def _unwrap_fastapi_response(value: Any) -> Any:
-	if isinstance(value, Response):
-		return value
-	return unwrap(value, untrack=True)
 
 
 class App:
@@ -429,7 +376,6 @@ class App:
 			openapi_external_docs=fastapi_config.openapi_external_docs,
 			lifespan=self.fastapi_lifespan,
 		)
-		self.fastapi.router.route_class = PulseAPIRoute
 		self.sio = socketio.AsyncServer(
 			async_mode="asgi", cors_allowed_origins="*", async_handlers=False
 		)
@@ -674,19 +620,25 @@ class App:
 					# so dropping the in-memory object is safe.
 					self.close_session_if_inactive(session.sid)
 
-		# Apply prefix to all routes
+		# Pulse built-ins live on a router with PulseFrameworkAPIRoute so
+		# middleware.api never sees prerender/health/forms. App.fastapi stays
+		# PulseAPIRoute for user and plugin routes.
 		prefix = self.api_prefix
+		framework = APIRouter(
+			route_class=PulseFrameworkAPIRoute,
+			include_in_schema=False,
+		)
 
-		@self.fastapi.get(f"{prefix}/health", include_in_schema=False)
+		@framework.get(f"{prefix}/health")
 		def healthcheck():  # pyright: ignore[reportUnusedFunction]
 			return {"health": "ok", "message": "Pulse server is running"}
 
-		@self.fastapi.get(f"{prefix}/set-cookies", include_in_schema=False)
+		@framework.get(f"{prefix}/set-cookies")
 		def set_cookies():  # pyright: ignore[reportUnusedFunction]
 			return {"health": "ok", "message": "Cookies updated"}
 
 		# RouteInfo is the request body
-		@self.fastapi.post(f"{prefix}/prerender", include_in_schema=False)
+		@framework.post(f"{prefix}/prerender")
 		async def prerender(payload: PrerenderPayload, request: Request):  # pyright: ignore[reportUnusedFunction]
 			"""
 			POST /prerender
@@ -796,10 +748,7 @@ class App:
 			# Fallback (shouldn't happen)
 			raise ValueError("Unexpected prerender result type")
 
-		@self.fastapi.post(
-			f"{prefix}/forms/{{render_id}}/{{form_id}}",
-			include_in_schema=False,
-		)
+		@framework.post(f"{prefix}/forms/{{render_id}}/{{form_id}}")
 		async def handle_form_submit(  # pyright: ignore[reportUnusedFunction]
 			render_id: str, form_id: str, request: Request
 		) -> Response:
@@ -812,6 +761,8 @@ class App:
 				raise HTTPException(status_code=410, detail="Render session expired")
 
 			return await render.forms.handle_submit(form_id, request, session)
+
+		self.fastapi.include_router(framework)
 
 		# Call on_setup hooks after FastAPI routes/middleware are in place
 		for plugin in self.plugins:

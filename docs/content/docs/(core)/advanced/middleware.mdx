@@ -85,7 +85,7 @@ The key pattern is calling `await next()` to pass control to the next middleware
 
 ## Middleware hooks
 
-Middleware can intercept five different points in the request lifecycle. You only need to override the ones you care about.
+Middleware can intercept six different points in the request lifecycle. You only need to override the ones you care about.
 
 ### `prerender`
 
@@ -109,6 +109,29 @@ async def prerender_route(self, *, path, route_info, request, session, next):
         return ps.Redirect("/login")
     return await next()
 ```
+
+### `api`
+
+Called for HTTP requests to FastAPI routes you registered on `app.fastapi` (including routers you include). This is the hook you want for API auth, logging, or error reporting.
+
+It does **not** run for Pulse's own endpoints (`/_pulse/prerender`, health, forms), generated OpenAPI/docs routes, or the React proxy. That's the point: wrapping FastAPI with HTTP middleware catches prerender too, so the same exception can get reported twice.
+
+```python
+from fastapi.responses import JSONResponse
+
+async def api(self, *, request, session, next):
+    # Auth for your API only
+    if request.path.startswith("/api/admin") and not session.get("is_admin"):
+        return JSONResponse({"detail": "forbidden"}, status_code=403)
+
+    try:
+        return await next()
+    except Exception as exc:
+        report_api_error(exc, request)
+        raise
+```
+
+`next()` runs your route handler and returns its HTTP response. Return that, replace it, or let exceptions propagate after you inspect them. Use `request.raw` when you need the underlying FastAPI request (body, path params).
 
 ### `connect`
 
@@ -164,6 +187,7 @@ Middleware can return different values to control what happens next:
 | Return value | Effect |
 |--------------|--------|
 | `await next()` | Continue to the next middleware or handler |
+| `Response` / `JSONResponse` | HTTP response (`api` hook) |
 | `ps.Redirect("/path")` | Redirect the client (prerender hooks only) |
 | `ps.NotFound()` | Return a 404 page (prerender hooks only) |
 | `ps.Deny()` | Reject the request (connect, message, channel hooks) |

@@ -35,7 +35,6 @@ from pulse.scheduling import (
 	TaskRegistry,
 	TimerHandleLike,
 	TimerRegistry,
-	create_future,
 )
 from pulse.state.query_param import QueryParamSync
 from pulse.state.state import State
@@ -862,8 +861,7 @@ class RenderSession:
 			api_path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
 			url = f"{base}{api_path}"
 		corr_id = uuid.uuid4().hex
-		fut = create_future()
-		self.replies.register(corr_id, fut)
+		fut = self.replies.register(corr_id)
 		headers = headers or {}
 		headers["x-pulse-render-id"] = self.id
 		self.send(
@@ -955,9 +953,7 @@ class RenderSession:
 			self.send(msg)
 			return None
 
-		loop = asyncio.get_running_loop()
-		future: asyncio.Future[object] = loop.create_future()
-		self.replies.register(exec_id, future)
+		future = self.replies.register(exec_id)
 
 		def _on_timeout() -> None:
 			self.replies.reject(exec_id, asyncio.TimeoutError())

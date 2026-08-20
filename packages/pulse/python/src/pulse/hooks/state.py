@@ -5,6 +5,7 @@ from typing import Any, TypeVar, override
 
 from pulse.component import is_component_code
 from pulse.hooks.core import HookMetadata, HookState, hooks
+from pulse.resources import suspend_resource_scope
 from pulse.state.state import State
 
 S = TypeVar("S", bound=State)
@@ -75,23 +76,22 @@ class StateHookState(HookState):
 				"`pulse.state` received a disposed State instance. "
 				+ "Do not dispose states passed to `pulse.state`."
 			)
+		# The hook owns cached states, wherever they were constructed.
+		self.resources.own(instance)
 		self.instances[full_identity] = instance
 		return instance
 
 	@override
-	def dispose(self) -> None:
-		for instance in self.instances.values():
-			try:
-				if not instance.__disposed__:
-					instance.dispose()
-			except RuntimeError:
-				# Already disposed, ignore
-				pass
+	def on_dispose(self) -> None:
 		self.instances.clear()
 
 
 def _instantiate_state(arg: State | Callable[[], State]) -> State:
-	instance = arg() if callable(arg) else arg
+	if callable(arg):
+		with suspend_resource_scope():
+			instance = arg()
+	else:
+		instance = arg
 	if not isinstance(instance, State):
 		raise TypeError(
 			"`pulse.state` expects a State instance or a callable returning a State instance"

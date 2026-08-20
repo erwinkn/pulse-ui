@@ -16,6 +16,7 @@ from pulse.reactive import (
 	EffectFn,
 	Signal,
 )
+from pulse.resources import current_resource_scope
 from pulse.state.property import ComputedProperty, StateEffect
 from pulse.state.state import State
 
@@ -274,8 +275,8 @@ def effect(
 				interval=interval,
 			)
 
-		if ctx is None:
-			# Not in component - create standalone effect (current behavior)
+		if ctx is None or current_resource_scope() is not None:
+			# Outside a component, or owned by a one-time initializer.
 			return create_effect()
 
 		# In component render - use inline caching

@@ -142,7 +142,7 @@ def effect(fn: AsyncEffectFn, ...) -> AsyncEffect: ...
 def effect(fn: StateEffectFn[Any] | AsyncStateEffectFn[Any]) -> StateEffect[Any]: ...
 ```
 
-On a State method, `@ps.effect` leaves a `StateEffect` descriptor on the class; accessing it on an instance returns the per-instance `Effect`. The effect's debug name is always `"ClassName.method_name"`.
+On a State method, `@ps.effect` leaves a `StateEffect` descriptor on the class; accessing it on an instance returns the per-instance `Effect`. The effect's debug name is always `"ClassName.method_name"`. If the state was created under a render session, each run (and cleanup) re-enters that session. Mount-local state also keeps the creating `RouteContext`; `ps.global_state` does not.
 
 ### Parameters
 

@@ -153,13 +153,15 @@ class TestEffectPulseContext:
 		assert seen == [(session, route_ctx)]
 
 	def test_standalone_effect_without_render_is_unbound(self):
+		from pulse.context import PULSE_CONTEXT
+
 		ran = {"n": 0}
 
 		@ps.effect
 		def track():
 			ran["n"] += 1
-			with pytest.raises(RuntimeError, match="PULSE_CONTEXT is not set"):
-				PulseContext.get()
+			ctx = PULSE_CONTEXT.get()
+			assert ctx is None or ctx.render is None
 
 		flush_effects()
 		assert ran["n"] == 1

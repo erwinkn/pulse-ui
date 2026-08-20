@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import json
 import os
 import sys
@@ -39,6 +40,20 @@ from pulse.transpiler.imports import Import, clear_import_registry
 from typer.testing import CliRunner
 
 runner = CliRunner()
+
+
+@pytest.mark.parametrize(
+	"module_name",
+	(
+		"pulse.cli.lock",
+		"pulse.cli.processes",
+		"pulse.cli.protocol",
+		"pulse.cli.guard",
+		"pulse.cli.reload",
+	),
+)
+def test_cli_modules_import(module_name: str) -> None:
+	importlib.import_module(module_name)
 
 
 def install_recording_supervisor(

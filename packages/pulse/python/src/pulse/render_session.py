@@ -129,7 +129,7 @@ class RouteMount:
 	) -> None:
 		self.render = render
 		self.path = ensure_absolute_path(path)
-		self.route = RouteContext(route_info, route, render, self.path)
+		self.route = RouteContext(route_info, route, self.path)
 		self.effect = None
 		self._pulse_ctx = None
 		self.tree = RenderTree(route.render())
@@ -499,6 +499,9 @@ class RenderSession:
 		for path in normalized:
 			route = self.routes.find(path)
 			info = route_info or route.default_route_info()
+			# Session-scoped URL data is split off at the message boundary;
+			# mounts only ever receive it, never report it back up.
+			self.set_url(info)
 			mount = self.route_mounts.get(path)
 
 			if mount is None:
@@ -545,6 +548,7 @@ class RenderSession:
 			self.send({"type": "reload"})
 			return False
 
+		self.set_url(route_info)
 		mount.update_route(route_info)
 		if mount.state == "suspended":
 			return self._resume_mount(mount, path)
@@ -580,6 +584,7 @@ class RenderSession:
 			# the authoritative RouteInfo, so replaying/stashing is unnecessary.
 			return
 		try:
+			self.set_url(route_info)
 			mount.update_route(route_info)
 			if mount.state == "pending" and self._send_message:
 				mount.activate(self._send_message)
@@ -745,8 +750,10 @@ class RenderSession:
 	def set_url(self, info: RouteInfo) -> None:
 		"""Record the URL the client is currently displaying.
 
-		Called by every `RouteContext` on creation and on route updates. All
-		mounts report the same URL, so this is last-writer-wins by design.
+		Called at the session's message boundaries (prerender/attach/
+		update_route) before the info is handed to a mount. Every client
+		message reports the same URL for the same navigation, so this is
+		last-writer-wins by design.
 		"""
 		self.url.update(
 			{

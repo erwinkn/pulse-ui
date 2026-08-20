@@ -125,17 +125,30 @@ def custom_form():
 Parsed form submission data.
 
 ```python
-FormData = dict[str, FormValue | list[FormValue]]
+FormData = dict[str, FormValue]
 ```
 
-Values are either single or multiple (for repeated field names).
+Native fields are strings or uploads. Repeated native fields are lists. Structured integrations can also submit nested values.
+
+### FormScalar
+
+A non-container form value.
+
+```python
+FormScalar = str | int | float | bool | date | datetime | UploadFile | None
+```
 
 ### FormValue
 
-Individual form field value.
+A scalar, sequence, mapping, or set submitted by a form integration.
 
 ```python
-FormValue = str | UploadFile
+FormValue = (
+    FormScalar
+    | Sequence[FormValue]
+    | Mapping[str, FormValue]
+    | AbstractSet[FormValue]
+)
 ```
 
 ### UploadFile
@@ -169,31 +182,23 @@ async def handle_upload(data: ps.FormData):
 
 ---
 
-## Complex Form Data
+## Structured form data
 
-Forms can include serialized complex data via a hidden `__data__` field. This is automatically deserialized and merged into the form data.
+Form integrations can submit nested values through Pulse's structured multipart transport. The transport serializes non-file values, sends files as binary multipart parts, and reconstructs the complete value in `FormRegistry` before calling your handler.
 
-```python
-def form_with_complex_data():
-    return ps.Form(
-        # Hidden field with JSON-serialized data
-        m.input(
-            type="hidden",
-            name="__data__",
-            value=json.dumps({"items": [1, 2, 3], "nested": {"key": "value"}}),
-        ),
-        m.TextInput(name="name"),
-        m.Button("Submit", type="submit"),
-        key="complex-form",
-        onSubmit=handle_submit,
-    )
+The transport reserves these multipart field names:
 
-async def handle_submit(data: ps.FormData):
-    # data["items"] = [1, 2, 3]
-    # data["nested"] = {"key": "value"}
-    # data["name"] = "user input"
-    pass
-```
+- `__pulse_data__` contains the Pulse-serialized value.
+- `__pulse_files__` contains the file manifest.
+- `__pulse_files__.N` contains the binary file referenced by manifest entry `N`.
+
+<Callout type="warn">
+  `__pulse_data__` and `__pulse_files__` are reserved. Using either as a top-level form value raises an error. These fields are an internal transport detail; don't construct them manually.
+</Callout>
+
+Nested objects, empty or single-element lists, and uploaded files retain their structure when your `onSubmit` handler receives them.
+
+Malformed structured payloads return HTTP 400 and don't call the submit handler.
 
 ---
 

@@ -1,0 +1,63 @@
+# https://docs.devin.ai/onboard-devin/environment-yaml
+runs-on: default
+# One-time setup (e.g., install system tools, global CLIs).
+initialize: |
+  # uv and bun are not preinstalled; both land in the user profile.
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  curl -fsSL https://bun.sh/install | bash
+  echo "PATH=\"$HOME/.local/bin:$HOME/.bun/bin:$PATH\"" >> $ENVRC
+# Install project dependencies (runs during builds, surfaced to agent at session start).
+maintenance: |
+  # Run serially: concurrent uv/bun invocations contend on .venv/.lock and the bun cache.
+  uv sync --all-packages --dev
+  bun install
+  uv run prek install
+knowledge:
+  - name: lint
+    contents: |
+      uv run ruff check .
+      uv run basedpyright
+      bunx biome lint
+      bunx tsc --noEmit -p packages/pulse/js/tsconfig.json
+  - name: test
+    contents: |
+      uv run pytest packages/pulse/python/tests
+      bun test
+  - name: build
+    contents: |
+      bun run build
+  - name: notes
+    contents: |
+      `bun run build` is required before `pulse run`: vite.config.ts imports pulse-ui-client/dist.
+
+---
+runs-on: windows
+# Blueprint steps run in bash (Git Bash) on Windows too; use powershell.exe for the native installers.
+initialize: |
+  # uv and bun are not preinstalled; both land in the user profile.
+  powershell -NoProfile -Command "irm https://astral.sh/uv/install.ps1 | iex"
+  powershell -NoProfile -Command "irm https://bun.sh/install.ps1 | iex"
+  echo "PATH=\"$HOME/.local/bin:$HOME/.bun/bin:$PATH\"" >> $ENVRC
+maintenance: |
+  # Run serially: concurrent uv/bun invocations contend on .venv/.lock and the bun cache.
+  uv sync --all-packages --dev
+  bun install
+  uv run prek install
+knowledge:
+  - name: lint
+    contents: |
+      uv run ruff check .
+      uv run basedpyright
+      bunx biome lint
+      bunx tsc --noEmit -p packages/pulse/js/tsconfig.json
+  - name: test
+    contents: |
+      uv run pytest packages/pulse/python/tests
+      bun test
+  - name: build
+    contents: |
+      bun run build
+  - name: notes
+    contents: |
+      make is unavailable on Windows; run the Makefile commands directly.
+      `bun run build` is required before `pulse run`: vite.config.ts imports pulse-ui-client/dist.

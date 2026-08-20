@@ -25,7 +25,7 @@ const CHANNEL_QUEUE_LIMIT = 10_000;
 const CHANNEL_QUEUE_OVERFLOW_MESSAGE =
 	"Pulse channel queue exceeded 10,000 messages; channel was reset";
 
-function randomId(): string {
+export function createRandomId(): string {
 	if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
 		return crypto.randomUUID().replace(/-/g, "");
 	}
@@ -85,7 +85,7 @@ export class ChannelBridge {
 		if (!this.reserveQueueSlot()) {
 			return Promise.reject(new PulseChannelResetError(CHANNEL_QUEUE_OVERFLOW_MESSAGE));
 		}
-		const requestId = randomId();
+		const requestId = createRandomId();
 		return new Promise((resolve, reject) => {
 			this.pending.set(requestId, { resolve, reject });
 			try {

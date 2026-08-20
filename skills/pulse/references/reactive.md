@@ -132,7 +132,7 @@ class Tracker(ps.State):
 With options:
 
 ```python
-@ps.effect(name="fetcher", lazy=True, interval=10.0)
+@ps.effect(lazy=True, interval=10.0)
 async def fetch_data(self):
     self.data = await api.get_data()
 ```
@@ -193,14 +193,18 @@ count = Signal(0)
 other = Signal(0)
 
 def log():
-    print(f"Count: {count()}")  # Creates dependency
-    with Untrack():
+    with Untrack() as tracking:
         print(f"Other: {other()}")  # No dependency
+        with tracking.resume():
+            print(f"Count: {count()}")  # Creates dependency
 
 Effect(log)
 count.write(1)  # Triggers effect
 other.write(1)  # Does NOT trigger effect
 ```
+
+Use `tracking.resume(replace=True)` when repeated tracked attempts
+should keep only the latest attempt's dependencies.
 
 ## Scope
 

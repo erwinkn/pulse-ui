@@ -9,7 +9,6 @@ from pulse.reactive_extensions import ReactiveDict
 
 if TYPE_CHECKING:
 	from pulse.render_session import RenderSession
-	from pulse.state.query_param import QueryParamSync
 
 # angle brackets cannot appear in a regular URL path, this ensures no name conflicts
 LAYOUT_INDICATOR = "<layout>"
@@ -549,7 +548,7 @@ class RouteContext:
 	info: RouteInfo
 	pulse_route: Route | Layout
 	route_path: str
-	query_param_sync: "QueryParamSync"
+	render: "RenderSession"
 
 	def __init__(
 		self,
@@ -561,9 +560,10 @@ class RouteContext:
 		self.info = cast(RouteInfo, cast(object, ReactiveDict(info)))
 		self.pulse_route = pulse_route
 		self.route_path = ensure_absolute_path(route_path or pulse_route.unique_path())
-		from pulse.state.query_param import QueryParamSync
-
-		self.query_param_sync = QueryParamSync(render, self)
+		self.render = render
+		# The session, not the mount, owns URL-derived state (query param
+		# bindings outlive any single mount).
+		render.set_url(info)
 
 	def update(self, info: RouteInfo) -> None:
 		"""Update the route info with new values.
@@ -572,6 +572,7 @@ class RouteContext:
 			info: New route info to apply.
 		"""
 		self.info.update(info)
+		self.render.set_url(info)
 
 	@property
 	def pathname(self) -> str:

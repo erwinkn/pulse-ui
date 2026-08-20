@@ -49,9 +49,9 @@ Use `Import` for npm packages and local files.
 useState = ps.Import("useState", "react")
 useEffect = ps.Import("useEffect", "react")
 
-# Default export
+# Default export — single argument (name == src ⇒ default import)
 React = ps.Import("react")
-lodash = ps.Import("lodash", kind="default")
+lodash = ps.Import("lodash")
 
 # Namespace import (import * as X)
 utils = ps.Import("*", "lodash")

@@ -13,7 +13,7 @@ from typing import (
 from pulse.helpers import call_flexible, maybe_await
 from pulse.queries.common import OnErrorFn, OnSuccessFn, bind_state
 from pulse.reactive import Signal
-from pulse.state.property import InitializableProperty
+from pulse.state.property import InitializableProperty, StateMemberDescriptor
 from pulse.state.state import State
 
 T = TypeVar("T")
@@ -109,7 +109,9 @@ class MutationResult(Generic[T, P]):
 			self._is_running.write(False)
 
 
-class MutationProperty(Generic[T, TState, P], InitializableProperty):
+class MutationProperty(
+	StateMemberDescriptor, Generic[T, TState, P], InitializableProperty
+):
 	"""Descriptor for state-bound mutations created by the @mutation decorator.
 
 	MutationProperty is the return type of the ``@mutation`` decorator. It acts
@@ -143,7 +145,6 @@ class MutationProperty(Generic[T, TState, P], InitializableProperty):
 
 	_on_success_fn: Callable[[TState, T], Any] | None
 	_on_error_fn: Callable[[TState, Exception], Any] | None
-	name: str
 	fn: Callable[Concatenate[TState, P], Awaitable[T]]
 
 	def __init__(
@@ -161,7 +162,7 @@ class MutationProperty(Generic[T, TState, P], InitializableProperty):
 			on_success: Optional success callback.
 			on_error: Optional error callback.
 		"""
-		self.name = name
+		super().__init__(name)
 		self.fn = fn
 		self._on_success_fn = on_success  # pyright: ignore[reportAttributeAccessIssue]
 		self._on_error_fn = on_error  # pyright: ignore[reportAttributeAccessIssue]
@@ -201,32 +202,29 @@ class MutationProperty(Generic[T, TState, P], InitializableProperty):
 	def __get__(self, obj: Any, objtype: Any = None) -> MutationResult[T, P]:
 		if obj is None:
 			return self  # pyright: ignore[reportReturnType]
+		return self.initialize(obj, self.name)
 
-		# Cache the result on the instance
-		cache_key = f"__mutation_{self.name}"
-		if not hasattr(obj, cache_key):
+	@override
+	def initialize(self, state: Any, name: str) -> MutationResult[T, P]:
+		# Return cached mutation instance if present
+		cache = self.instance_cache(state)
+		result: MutationResult[T, P] | None = cache.get(self)
+		if result is None:
 			# Bind methods to state
-			bound_fn = bind_state(obj, self.fn)
+			bound_fn = bind_state(state, self.fn)
 			bound_on_success = (
-				bind_state(obj, self._on_success_fn) if self._on_success_fn else None
+				bind_state(state, self._on_success_fn) if self._on_success_fn else None
 			)
 			bound_on_error = (
-				bind_state(obj, self._on_error_fn) if self._on_error_fn else None
+				bind_state(state, self._on_error_fn) if self._on_error_fn else None
 			)
-
 			result = MutationResult[T, P](
 				fn=bound_fn,
 				on_success=bound_on_success,
 				on_error=bound_on_error,
 			)
-			setattr(obj, cache_key, result)
-
-		return getattr(obj, cache_key)
-
-	@override
-	def initialize(self, state: State, name: str) -> MutationResult[T, P]:
-		# For compatibility with InitializableProperty, but mutations don't need special initialization
-		return self.__get__(state, state.__class__)
+			cache[self] = result
+		return result
 
 
 @overload

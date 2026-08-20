@@ -1,9 +1,9 @@
 import type { UseFormInput, UseFormReturnType } from "@mantine/form";
 import { useForm } from "@mantine/form";
 import {
-	serialize,
 	submitForm,
 	usePulseClient,
+	usePulseDirectivesSource,
 	type ChannelBridge,
 } from "pulse-ui-client";
 import {
@@ -16,7 +16,7 @@ import {
 	useRef,
 } from "react";
 import { FormProvider } from "./context";
-import { extractDataAndFiles, stripFilesForSync } from "./payload";
+import { stripFilesForSync } from "./payload";
 import { isValidatorSchema, splitValidationSchema, type ValidatorSchema } from "./validators";
 
 type SyncMode = "none" | "blur" | "change";
@@ -65,6 +65,7 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 	...formProps
 }: MantineFormProps<TValues>) {
 	const client = usePulseClient();
+	const directives = usePulseDirectivesSource();
 	const channelRef = useRef<ChannelBridge | null>(null);
 	const formRef = useRef<UseFormReturnType<TValues> | null>(null);
 	// Timers for server-validation per path
@@ -399,32 +400,18 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 	const submitHandler = useMemo(
 		() =>
 			form.onSubmit((values: TValues, event) => {
-				// Split values into serializable data and files
-				const { dataWithoutFiles, filesByPath } = extractDataAndFiles(values);
-
-				// Serialize complex data (dates, sets, maps, refs) using v3 serializer
-				const serialized = serialize(dataWithoutFiles);
-				const formData = new FormData();
-				formData.set("__data__", JSON.stringify(serialized));
-
-				// Append files under their path; multiple files -> multiple entries with same key
-				for (const [path, files] of filesByPath.entries()) {
-					for (const file of files) {
-						formData.append(path, file);
-					}
-				}
-
 				const actionUrl = typeof action === "string" ? action : undefined;
 				submitForm({
 					event: event!,
 					onSubmit: userOnSubmit,
 					action: actionUrl ?? "",
-					formData,
+					values,
+					directives,
 					// Mantine will have already called event.preventDefault(), we want to ignore that
 					force: true,
 				});
 			}),
-		[form, userOnSubmit, action],
+		[form, userOnSubmit, action, directives],
 	);
 
 	const resetHandler = useCallback(

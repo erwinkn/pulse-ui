@@ -148,7 +148,7 @@ class DevSupervisor:
 					self.backend_spec.on_ready()
 				result = await self._race("changed", "backend", "web")
 				if result == "web":
-					return self._web_code or 1
+					return self._web_code if self._web_code is not None else 1
 				if result == "shutdown":
 					break
 				if result == "backend" and not self.changed.is_set():

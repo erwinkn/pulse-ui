@@ -51,6 +51,8 @@ describe("pulse", () => {
 		for (const name of ENV_NAMES) delete process.env[name];
 		const plugin = pulse();
 		const server = createHttpServer();
+		// Bun's node:http server registers its own "listening" listener.
+		const baseline = server.listenerCount("listening");
 		try {
 			expect(
 				hook(plugin.config).call({} as never, {} as never, {} as never),
@@ -58,7 +60,7 @@ describe("pulse", () => {
 			expect(
 				hook(plugin.configureServer).call({} as never, viteServer(server)),
 			).toBeUndefined();
-			expect(server.listenerCount("listening")).toBe(0);
+			expect(server.listenerCount("listening")).toBe(baseline);
 		} finally {
 			server.close();
 		}

@@ -1,8 +1,10 @@
 # pyright: reportImportCycles=false
+import inspect
+from collections.abc import Callable
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
 from pulse.routing import RouteContext
 
@@ -12,6 +14,7 @@ if TYPE_CHECKING:
 	from pulse.user_session import UserSession
 
 _UNSET = object()
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 @dataclass
@@ -105,6 +108,48 @@ class PulseContext:
 				ctx.source_mount_id if source_mount_id is _UNSET else source_mount_id
 			),
 		)
+
+	@classmethod
+	def bind(cls, fn: F) -> F:
+		"""Re-enter the current PulseContext on every call.
+
+		Captures ``app`` / ``session`` / ``render`` / ``route`` now. No-op if
+		there is no render session. A returned cleanup callable is also bound.
+		"""
+		current = PULSE_CONTEXT.get()
+		if current is None or current.render is None:
+			return fn
+		app = current.app
+		session = current.session
+		render = current.render
+		route = current.route
+
+		def enter() -> PulseContext:
+			return PulseContext(app=app, session=session, render=render, route=route)
+
+		def bind_cleanup(result: Any) -> Any:
+			if not callable(result):
+				return result
+
+			def cleanup() -> None:
+				with enter():
+					result()
+
+			return cleanup
+
+		if inspect.iscoroutinefunction(fn):
+
+			async def wrapped_async(*args: Any, **kwargs: Any) -> Any:
+				with enter():
+					return bind_cleanup(await fn(*args, **kwargs))
+
+			return cast(F, wrapped_async)
+
+		def wrapped(*args: Any, **kwargs: Any) -> Any:
+			with enter():
+				return bind_cleanup(fn(*args, **kwargs))
+
+		return cast(F, wrapped)
 
 	def __enter__(self):
 		self._token = PULSE_CONTEXT.set(self)

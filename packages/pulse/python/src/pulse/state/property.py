@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Generic, Never, TypeVar, override
 
+from pulse.context import PulseContext
 from pulse.reactive import AsyncEffect, Computed, Effect, Signal
 from pulse.reactive_extensions import ReactiveProperty
 
@@ -233,7 +234,7 @@ class StateEffect(StateMemberDescriptor, Generic[T], InitializableProperty):
 		effect: Effect | None = cache.get(self)
 		if effect is not None:
 			return effect
-		bound_method = self.fn.__get__(state, state.__class__)
+		bound_method = PulseContext.bind(self.fn.__get__(state, state.__class__))
 		# Select sync/async effect type based on bound method
 		if inspect.iscoroutinefunction(bound_method):
 			effect = AsyncEffect(

@@ -466,7 +466,12 @@ def global_state(
 				"ps.global_state must be called inside a Pulse render/callback context"
 			)
 		key = base_key if id is None else f"{base_key}|{id}"
-		return cast(S, ctx.render.get_global_state(key, lambda: mk(*args, **kwargs)))
+		def factory() -> S:
+			# Session-scoped: do not pin the creating mount's RouteContext.
+			with PulseContext.update(route=None):
+				return mk(*args, **kwargs)
+
+		return cast(S, ctx.render.get_global_state(key, factory))
 
 	return accessor
 

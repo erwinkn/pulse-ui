@@ -274,4 +274,4 @@ An architecture where the server controls what the UI shows. The client is a thi
 Converting data structures to a format that can be transmitted (like JSON). Pulse serializes VDOM on the server and deserializes it in the browser.
 
 **Reply**
-A `{type: "reply", id}` packet that completes a pending request (`call_api`, `run_js`, `Channel.request`). Same shape in both directions: `payload` on success, `error` on failure.
+A `{type: "reply", id}` packet that completes a pending request (`call_api`, `run_js`, `Channel.request`). Same shape in both directions: `payload` on success, `error` on failure. Skips `message` middleware — `PendingReplies.apply` resolves it directly.

@@ -23,7 +23,7 @@ from pulse.context import PulseContext
 from pulse.helpers import values_equal
 from pulse.reactive import Signal
 from pulse.reactive_extensions import reactive, unwrap
-from pulse.state.property import InitializableProperty, StateProperty
+from pulse.state.property import StateProperty
 
 T = TypeVar("T")
 
@@ -325,7 +325,7 @@ def extract_query_param(annotation: Any) -> tuple[Any, bool]:
 	return annotation, False
 
 
-class QueryParamProperty(StateProperty, InitializableProperty):
+class QueryParamProperty(StateProperty):
 	value_type: Any
 	param_name: str
 	codec: QueryParamCodec
@@ -365,7 +365,3 @@ class QueryParamProperty(StateProperty, InitializableProperty):
 
 	def hydrate(self, state: "State") -> None:
 		self._get_signal(state)
-
-	@override
-	def initialize(self, state: "State", name: str) -> None:
-		_ = (state, name)

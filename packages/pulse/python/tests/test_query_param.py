@@ -43,7 +43,7 @@ def make_context(route_info: RouteInfo):
 
 def flush_query_param_sync(session: RenderSession) -> None:
 	flush_effects()
-	effect = session.url._state_effect  # pyright: ignore[reportPrivateUsage]
+	effect = session.url._sync_effect  # pyright: ignore[reportPrivateUsage]
 	if effect is not None:
 		effect.flush()
 

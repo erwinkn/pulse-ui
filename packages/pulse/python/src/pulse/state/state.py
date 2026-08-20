@@ -250,10 +250,19 @@ class State(Disposable, metaclass=StateMeta):
 
 	def __new__(cls, *args: Any, **kwargs: Any):
 		instance = super().__new__(cls)
-		for _, attr in instance._initializable_properties():
-			if isinstance(attr, QueryParamProperty):
-				attr.hydrate(instance)
+		for attr in instance._query_param_properties():
+			attr.hydrate(instance)
 		return instance
+
+	def _query_param_properties(self) -> Iterator[QueryParamProperty]:
+		for cls in self.__class__.__mro__:
+			if cls is State or cls is ABC:
+				continue
+			for name, attr in cls.__dict__.items():
+				if getattr(self.__class__, name, attr) is not attr:
+					continue
+				if isinstance(attr, QueryParamProperty):
+					yield attr
 
 	def _initializable_properties(
 		self,
@@ -279,17 +288,12 @@ class State(Disposable, metaclass=StateMeta):
 		setattr(self, STATE_STATUS_FIELD, StateStatus.INITIALIZING)
 
 		self._scope = Scope()
-		needs_query_param_prime = False
 		with self._scope:
 			for name, attr in self._initializable_properties():
-				if isinstance(attr, QueryParamProperty):
-					needs_query_param_prime = True
-					continue
 				attr.initialize(self, name)
-		if needs_query_param_prime:
-			ctx = PulseContext.get()
-			if ctx.render is not None:
-				ctx.render.url.prime()
+		ctx = PulseContext.get()
+		if ctx.render is not None and any(self._query_param_properties()):
+			ctx.render.url.prime()
 
 		setattr(self, STATE_STATUS_FIELD, StateStatus.INITIALIZED)
 

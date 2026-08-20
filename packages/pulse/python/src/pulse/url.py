@@ -1,14 +1,15 @@
 """The URL currently displayed by a render session's browser tab."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, override
 from urllib.parse import urlencode
 
-from pulse.helpers import values_equal
+from pulse.helpers import Disposable, values_equal
 from pulse.messages import ServerNavigateToMessage
-from pulse.reactive import Effect, Scope, Signal, Untrack
-from pulse.reactive_extensions import ReactiveDict, reactive, unwrap
+from pulse.reactive import Effect, Scope, Signal
+from pulse.reactive_extensions import reactive, unwrap
+from pulse.routing import RouteInfo
 from pulse.state.query_param import (
 	QueryParamCodec,
 	parse_query_param_value,
@@ -23,7 +24,7 @@ class _QueryParamSlot:
 	signal: Signal[Any]
 
 
-class SessionUrl(ReactiveDict[str, Any]):
+class SessionUrl(Disposable):
 	"""The URL currently displayed by the session's browser tab.
 
 	A render session is one browser tab, so it has exactly one URL. Every
@@ -34,24 +35,39 @@ class SessionUrl(ReactiveDict[str, Any]):
 	Typed ``QueryParam`` fields share one Signal per name via ``param()``.
 	"""
 
+	pathname: str
+	hash: str
+	query_params: dict[str, str]
 	_send: Callable[[ServerNavigateToMessage], Any]
 	_slots: dict[str, _QueryParamSlot]
-	_route_effect: Effect | None
-	_state_effect: Effect | None
+	_sync_effect: Effect | None
 
 	def __init__(self, send: Callable[[ServerNavigateToMessage], Any]) -> None:
-		super().__init__({"pathname": "", "hash": "", "queryParams": {}})
+		self.pathname = ""
+		self.hash = ""
+		self.query_params = {}
 		self._send = send
 		self._slots = {}
-		self._route_effect = None
-		self._state_effect = None
+		self._sync_effect = None
+
+	def apply(self, info: RouteInfo) -> None:
+		"""Record the URL the client is currently displaying.
+
+		Called by every `RouteContext` on creation and on route updates. All
+		mounts report the same URL, so this is last-writer-wins by design.
+		"""
+		self.pathname = info["pathname"]
+		self.hash = info["hash"]
+		self.query_params = dict(info["queryParams"])
+		for name, slot in self._slots.items():
+			self._apply_slot(name, slot)
 
 	def param(self, name: str, codec: QueryParamCodec, default: Any) -> Signal[Any]:
 		if not name:
 			raise RuntimeError("QueryParam param name was not resolved")
 		slot = self._slots.get(name)
 		if slot is None:
-			raw = self["queryParams"].get(name)
+			raw = self.query_params.get(name)
 			value: Any = parse_query_param_value(
 				raw,
 				default=default,
@@ -67,7 +83,7 @@ class SessionUrl(ReactiveDict[str, Any]):
 				),
 			)
 			self._slots[name] = slot
-			self._ensure_effects()
+			self._ensure_sync()
 			return slot.signal
 		if slot.codec != codec or not values_equal(slot.default, default):
 			raise ValueError(
@@ -77,38 +93,28 @@ class SessionUrl(ReactiveDict[str, Any]):
 		return slot.signal
 
 	def prime(self) -> None:
-		if self._route_effect and self._route_effect.runs == 0:
-			self._route_effect.run()
-		if self._state_effect:
-			self._state_effect.run()
+		if self._sync_effect:
+			self._sync_effect.run()
 
+	@override
 	def dispose(self) -> None:
-		if self._route_effect:
-			self._route_effect.dispose()
-			self._route_effect = None
-		if self._state_effect:
-			self._state_effect.dispose()
-			self._state_effect = None
+		if self._sync_effect:
+			self._sync_effect.dispose()
+			self._sync_effect = None
 		self._slots.clear()
 
-	def _ensure_effects(self) -> None:
-		if self._route_effect is None or self._state_effect is None:
-			with Scope():
-				if self._route_effect is None:
-					self._route_effect = Effect(
-						self._sync_from_route,
-						name="SessionUrl:query_param:route",
-						lazy=True,
-					)
-				if self._state_effect is None:
-					self._state_effect = Effect(
-						self._sync_to_route,
-						name="SessionUrl:query_param:state",
-						lazy=True,
-					)
+	def _ensure_sync(self) -> None:
+		if self._sync_effect is not None:
+			return
+		with Scope():
+			self._sync_effect = Effect(
+				self._sync_to_route,
+				name="SessionUrl:query_param",
+				lazy=True,
+			)
 
-	def _apply_route_to_slot(self, name: str, slot: _QueryParamSlot) -> None:
-		raw = self["queryParams"].get(name)
+	def _apply_slot(self, name: str, slot: _QueryParamSlot) -> None:
+		raw = self.query_params.get(name)
 		parsed = parse_query_param_value(
 			raw,
 			default=slot.default,
@@ -119,20 +125,10 @@ class SessionUrl(ReactiveDict[str, Any]):
 			return
 		slot.signal.write(reactive(parsed))
 
-	def _sync_from_route(self) -> None:
-		_ = self["queryParams"]
-		if self._route_effect and self._route_effect.runs == 0:
-			return
-		for name, slot in self._slots.items():
-			self._apply_route_to_slot(name, slot)
-
 	def _sync_to_route(self) -> None:
-		with Untrack():
-			current_params = dict(cast(Mapping[str, str], self["queryParams"]))
-			pathname = self["pathname"]
-			hash_frag = self["hash"]
-		if not pathname:
+		if not self.pathname:
 			return
+		current_params = dict(self.query_params)
 		query_params = dict(current_params)
 		for name, slot in self._slots.items():
 			value = slot.signal.read()
@@ -151,21 +147,21 @@ class SessionUrl(ReactiveDict[str, Any]):
 
 		if query_params == current_params:
 			return
-		path = pathname
+		path = self.pathname
 		query = urlencode(query_params)
 		if query:
 			path += "?" + query
-		if hash_frag:
-			if hash_frag.startswith("#"):
-				path += hash_frag
+		if self.hash:
+			if self.hash.startswith("#"):
+				path += self.hash
 			else:
-				path += "#" + hash_frag
+				path += "#" + self.hash
 		self._send(
 			ServerNavigateToMessage(
 				type="navigate_to",
 				path=path,
 				replace=True,
 				hard=False,
-				sourcePath=pathname,
+				sourcePath=self.pathname,
 			)
 		)

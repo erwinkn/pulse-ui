@@ -266,6 +266,10 @@ class ManagedProcess:
 					return
 			self.process.terminate()
 			return
+		# Once the wait thread reaps the child its pid may be reused; never
+		# signal a pgid we no longer own.
+		if not self.is_alive():
+			return
 		with contextlib.suppress(ProcessLookupError, PermissionError):
 			os.killpg(self.process.pid, signal.SIGTERM)
 
@@ -278,6 +282,10 @@ class ManagedProcess:
 	def kill_tree(self) -> None:
 		if self._job is not None:
 			self._job.terminate()
+			return
+		# Orphaned grandchildren are reaped by the stdin-EOF guard, so skipping
+		# the kill for an already-reaped leader never leaks the tree.
+		if not self.is_alive():
 			return
 		with contextlib.suppress(ProcessLookupError, PermissionError):
 			os.killpg(self.process.pid, signal.SIGKILL)

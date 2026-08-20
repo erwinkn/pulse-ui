@@ -1096,6 +1096,10 @@ class App:
 			# session would survive past its timeout.
 			if render.connected:
 				self._cancel_render_cleanup(rid)
+			# Completions skip middleware and apply immediately. A reply is
+			# the other half of a server request, not a command to authorize;
+			# putting apply behind `await` can deadlock if that await waits
+			# on another reply.
 			if msg["type"] == "reply":
 				render.replies.apply(msg)
 				return

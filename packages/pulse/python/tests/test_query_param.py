@@ -421,7 +421,8 @@ class TestQueryParam:
 		assert first.__disposed__
 		assert not second.__disposed__
 		assert "q" in session.url._slots  # pyright: ignore[reportPrivateUsage]
-		assert second.q == ""
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			assert second.q == ""
 
 	def test_state_key_change_disposes_eager_query_param_instance(self):
 		class QState(ps.State):
@@ -439,7 +440,8 @@ class TestQueryParam:
 		assert first.__disposed__
 		assert not second.__disposed__
 		assert "q" in session.url._slots  # pyright: ignore[reportPrivateUsage]
-		assert second.q == ""
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			assert second.q == ""
 
 	def test_path_id_state_key_does_not_collide(self):
 		"""Same mount, new path id: keyed ps.state must release the old binding."""
@@ -483,7 +485,8 @@ class TestQueryParam:
 		assert first.__disposed__
 		assert not created[1].__disposed__
 		assert "q" in session.url._slots  # pyright: ignore[reportPrivateUsage]
-		assert created[1].q == "hello"
+		with ps.PulseContext(app=app, render=session):
+			assert created[1].q == "hello"
 
 	def test_path_id_key_change_keeps_unkeyed_sibling(self):
 		class Shared(ps.State):

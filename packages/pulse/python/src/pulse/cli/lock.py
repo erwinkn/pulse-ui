@@ -115,6 +115,35 @@ def _coerce_int(value: object) -> int | None:
 
 def is_process_alive(pid: int) -> bool:
 	"""Check if a process with the given PID is running."""
+	if os.name == "nt":
+		import ctypes
+		from ctypes import wintypes
+
+		kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+		kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+		kernel32.OpenProcess.restype = wintypes.HANDLE
+		kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+		kernel32.WaitForSingleObject.restype = wintypes.DWORD
+		kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+		kernel32.CloseHandle.restype = wintypes.BOOL
+
+		handle = kernel32.OpenProcess(
+			0x00100000 | 0x00001000,
+			False,
+			pid,
+		)
+		if not handle:
+			error = ctypes.get_last_error()
+			if error == 5:
+				return True
+			if error == 87:
+				return False
+			return True
+		try:
+			return kernel32.WaitForSingleObject(handle, 0) == 0x00000102
+		finally:
+			kernel32.CloseHandle(handle)
+
 	try:
 		# On POSIX, signal 0 checks for existence without killing
 		os.kill(pid, 0)
@@ -178,6 +207,46 @@ def interrupt_active_dev_server(
 
 
 def _interrupt_process(pid: int) -> None:
+	if os.name == "nt":
+		import ctypes
+		from ctypes import wintypes
+
+		kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+		kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+		kernel32.OpenProcess.restype = wintypes.HANDLE
+		kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+		kernel32.TerminateProcess.restype = wintypes.BOOL
+		kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+		kernel32.CloseHandle.restype = wintypes.BOOL
+
+		handle = kernel32.OpenProcess(0x0001, False, pid)
+		if not handle:
+			error = ctypes.get_last_error()
+			if error == 87:
+				return
+			if error == 5:
+				raise RuntimeError(
+					f"Permission denied interrupting Pulse process {pid}."
+				)
+			raise RuntimeError(
+				f"Failed to open Pulse process {pid}: {ctypes.WinError(error)}"
+			)
+		try:
+			if not kernel32.TerminateProcess(handle, 1):
+				error = ctypes.get_last_error()
+				if error == 87:
+					return
+				if error == 5:
+					raise RuntimeError(
+						f"Permission denied interrupting Pulse process {pid}."
+					)
+				raise RuntimeError(
+					f"Failed to terminate Pulse process {pid}: {ctypes.WinError(error)}"
+				)
+		finally:
+			kernel32.CloseHandle(handle)
+		return
+
 	try:
 		os.kill(pid, signal.SIGINT)
 	except ProcessLookupError:

@@ -179,6 +179,12 @@ class ManagedProcess:
 		*,
 		pass_fds: tuple[int, ...] = (),
 	) -> ManagedProcess:
+		"""Start a managed process with optional inherited descriptors.
+
+		On Windows, pass_fds contains inheritable OS handles rather than CRT
+		descriptors; callers own their inheritability. On POSIX, pass_fds
+		contains file descriptors passed through subprocess.
+		"""
 		windows = os_family() == "windows"
 		creationflags = 0
 		args = spec.args
@@ -188,8 +194,6 @@ class ManagedProcess:
 			launcher = os.path.join(os.path.dirname(__file__), "_windows_launcher.py")
 			args = [sys.executable, "-I", launcher, *spec.args]
 			if pass_fds:
-				for fd in pass_fds:
-					os.set_inheritable(fd, True)
 				kwargs["close_fds"] = False
 		else:
 			kwargs["start_new_session"] = True
@@ -279,6 +283,8 @@ class ManagedProcess:
 		if self._job is not None:
 			self._job.terminate()
 			return
+		if not self.is_alive():
+			return
 		with contextlib.suppress(ProcessLookupError, PermissionError):
 			os.killpg(self.process.pid, signal.SIGKILL)
 
@@ -328,6 +334,7 @@ def execute_commands(
 	previous_sigterm = signal.signal(signal.SIGTERM, interrupt_on_sigterm)
 	processes: list[ManagedProcess] = []
 	exit_codes: dict[str, int] = {}
+	first_exit_code: int | None = None
 	exited = threading.Event()
 
 	def start(spec: CommandSpec) -> ManagedProcess:
@@ -344,7 +351,10 @@ def execute_commands(
 						pass
 
 		def on_exit(code: int) -> None:
+			nonlocal first_exit_code
 			exit_codes[spec.name] = code
+			if first_exit_code is None:
+				first_exit_code = code
 			exited.set()
 
 		return ManagedProcess.start(spec, on_output, on_exit)
@@ -359,7 +369,9 @@ def execute_commands(
 		# Stop the survivors before reading exit codes so every process
 		# contributes one; _stop_processes is idempotent for the finally below.
 		_stop_processes(processes)
-		return max(exit_codes.values())
+		return (
+			first_exit_code if first_exit_code is not None else max(exit_codes.values())
+		)
 	except KeyboardInterrupt:
 		sys.stdout.write("\nShutting down...\n")
 		sys.stdout.flush()

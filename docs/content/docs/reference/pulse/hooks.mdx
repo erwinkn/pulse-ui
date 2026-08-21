@@ -56,7 +56,8 @@ def user_profile(user_id):
 - Key must be non-empty string if provided
 - Can only be called once per render at the same location or with the same key
 - Factory is only called on first render; subsequent renders return cached instance
-- State is disposed when component unmounts or when key changes
+- State is disposed when the component unmounts, the key changes, or the call is skipped (e.g. a false conditional)
+- A render that raises disposes nothing: it only reached part of its `ps.state` calls
 
 ---
 
@@ -609,7 +610,7 @@ Base class for hook state. Override lifecycle methods:
 ```python
 class HookState(Disposable):
     def on_render_start(self, render_cycle: int) -> None: ...
-    def on_render_end(self, render_cycle: int) -> None: ...
+    def on_render_end(self, render_cycle: int, error: BaseException | None) -> None: ...
     def dispose(self) -> None: ...
 ```
 

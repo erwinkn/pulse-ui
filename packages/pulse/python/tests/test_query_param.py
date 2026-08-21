@@ -5,6 +5,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pulse as ps
 import pytest
+from pulse.hooks.core import HookContext
 from pulse.messages import ServerMessage, ServerNavigateToMessage
 from pulse.reactive import flush_effects
 from pulse.render_session import RenderSession
@@ -409,6 +410,158 @@ class TestQueryParam:
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			assert QState.__dict__["q"].get_signal(state) is sig
 			assert state.q == "hello"
+
+	def test_state_key_change_releases_query_param_binding(self):
+		class QState(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+		session.connect(lambda _msg: None)
+		ctx = HookContext()
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			with ctx:
+				first = ps.state(QState, key="1")
+			with ctx:
+				second = ps.state(QState, key="2")
+
+		assert first.__disposed__
+		assert not second.__disposed__
+		assert "q" in session.url._slots  # pyright: ignore[reportPrivateUsage]
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			assert second.q == ""
+
+	def test_disposed_state_still_uses_session_owned_slot(self):
+		"""Pinned: slots outlive states, so a disposed state reads/writes the live slot."""
+
+		class QState(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+		session.connect(lambda _msg: None)
+		ctx = HookContext()
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			with ctx:
+				stale = ps.state(QState, key="1")
+			with ctx:
+				live = ps.state(QState, key="2")
+
+			assert stale.__disposed__
+			live.q = "from-live"
+			assert stale.q == "from-live"
+			stale.q = "from-stale"
+			assert live.q == "from-stale"
+
+	def test_state_key_change_disposes_eager_query_param_instance(self):
+		class QState(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+		session.connect(lambda _msg: None)
+		ctx = HookContext()
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			with ctx:
+				first = ps.state(QState(), key="1")
+			with ctx:
+				second = ps.state(QState(), key="2")
+
+		assert first.__disposed__
+		assert not second.__disposed__
+		assert "q" in session.url._slots  # pyright: ignore[reportPrivateUsage]
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			assert second.q == ""
+
+	def test_path_id_state_key_does_not_collide(self):
+		"""Same mount, new path id: keyed ps.state must release the old binding."""
+
+		class ItemState(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		created: list[ItemState] = []
+
+		@ps.component
+		def ItemPage():
+			item_id = ps.route()["pathParams"]["id"]
+			item = ps.state(ItemState, key=item_id)
+			created.append(item)
+			return ps.div(item.q)
+
+		route = Route("items/:id", ItemPage)
+		session = RenderSession("test", RouteTree([route]))
+		app = ps.App(routes=[route])
+		mount_path = route.unique_path()
+
+		def info(item_id: str) -> RouteInfo:
+			return {
+				"pathname": f"/items/{item_id}",
+				"hash": "",
+				"query": "",
+				"queryParams": {"q": "hello"},
+				"pathParams": {"id": item_id},
+				"catchall": [],
+			}
+
+		with ps.PulseContext(app=app, render=session):
+			session.prerender([mount_path], info("1"))
+		assert len(created) == 1
+		first = created[0]
+
+		with ps.PulseContext(app=app, render=session):
+			session.prerender([mount_path], info("2"))
+
+		assert len(created) == 2
+		assert first.__disposed__
+		assert not created[1].__disposed__
+		assert "q" in session.url._slots  # pyright: ignore[reportPrivateUsage]
+		with ps.PulseContext(app=app, render=session):
+			assert created[1].q == "hello"
+
+	def test_path_id_key_change_keeps_unkeyed_sibling(self):
+		class Shared(ps.State):
+			n: int = 0
+
+		class ItemState(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		shareds: list[Shared] = []
+		items: list[ItemState] = []
+
+		@ps.component
+		def ItemPage():
+			item_id = ps.route()["pathParams"]["id"]
+			item = ps.state(ItemState, key=item_id)
+			shared = ps.state(Shared)
+			items.append(item)
+			shareds.append(shared)
+			return ps.div(item.q)
+
+		route = Route("items/:id", ItemPage)
+		session = RenderSession("test", RouteTree([route]))
+		app = ps.App(routes=[route])
+		mount_path = route.unique_path()
+
+		def info(item_id: str) -> RouteInfo:
+			return {
+				"pathname": f"/items/{item_id}",
+				"hash": "",
+				"query": "",
+				"queryParams": {"q": "hello"},
+				"pathParams": {"id": item_id},
+				"catchall": [],
+			}
+
+		with ps.PulseContext(app=app, render=session):
+			session.prerender([mount_path], info("1"))
+		first_item = items[0]
+		first_shared = shareds[0]
+
+		with ps.PulseContext(app=app, render=session):
+			session.prerender([mount_path], info("2"))
+
+		assert len(items) == 2
+		assert first_item.__disposed__
+		assert items[1] is not first_item
+		assert shareds[-1] is first_shared
+		assert not first_shared.__disposed__
 
 
 def test_f1_pending_write_survives_stale_route_update():

@@ -215,7 +215,7 @@ def UserList(user_ids: list[str]):
         items.append(ps.li(user.name, key=uid))
     return ps.ul(*items)
 
-# Dynamic key changes create new instance (useful for reset)
+# Dynamic key changes dispose the old instance and create a new one
 note = ps.state(lambda: NoteState(), key=f"note-v{version}")
 ```
 

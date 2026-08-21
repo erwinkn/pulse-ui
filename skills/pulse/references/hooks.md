@@ -204,7 +204,7 @@ def ConditionalDemo():
         show = ps.Signal(True)
 
     if show():
-        counter = ps.state(CounterState())  # Cached even when hidden
+        counter = ps.state(CounterState())  # Disposed when hidden
     else:
         counter = None
 
@@ -214,7 +214,7 @@ def ConditionalDemo():
     )
 ```
 
-States in conditionals are not disposed when condition becomes false - they remain cached.
+States skipped this render (false conditional, or a key that is no longer used) are disposed. Same rule as `@ps.effect`. A render that raises disposes nothing — only successful renders evict.
 
 ## ps.stable()
 

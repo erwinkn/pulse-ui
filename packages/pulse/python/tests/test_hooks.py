@@ -28,6 +28,10 @@ class DummyState(State):
 		return self._dispose_calls
 
 
+class CountingState(DummyState):
+	count: int = 0
+
+
 def make_route_info(
 	pathname: str, *, query_params: dict[str, str] | None = None, hash: str = ""
 ) -> RouteInfo:
@@ -189,7 +193,131 @@ def test_state_creates_different_instances_for_different_keys():
 		second = state(DummyState, key="b")
 
 	assert first is not second
-	assert first.dispose_calls == 0  # States not disposed on key change
+	assert first.dispose_calls == 1
+	assert second.dispose_calls == 0
+
+
+def test_state_loop_key_reorder_keeps_surviving_key():
+	"""[a,b] → [c,a] must keep `a`. Mid-render eviction would kill it when creating `c`."""
+	ctx = HookContext()
+	items = Signal(["a", "b"])
+	seen: dict[str, DummyState] = {}
+
+	@ps.component
+	def Comp():
+		for item in items():
+			seen[item] = state(lambda i=item: DummyState(), key=item)
+		return None
+
+	with ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+	first_a = seen["a"]
+	first_b = seen["b"]
+
+	items.write(["c", "a"])
+	with ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+
+	assert seen["a"] is first_a
+	assert first_a.dispose_calls == 0
+	assert first_b.dispose_calls == 1
+	assert seen["c"] is not first_a
+	assert seen["c"].dispose_calls == 0
+
+
+def test_state_key_change_keeps_unkeyed_sibling():
+	"""Keyed replacement must not dispose an unkeyed sibling called later in the same render."""
+	ctx = HookContext()
+	item_id = Signal("1")
+
+	@ps.component
+	def Comp():
+		keyed = state(DummyState, key=item_id())
+		unkeyed = state(DummyState)
+		return keyed, unkeyed
+
+	with ctx:
+		keyed, unkeyed = Comp.fn()  # type: ignore[attr-defined]
+
+	item_id.write("2")
+	with ctx:
+		keyed2, unkeyed2 = Comp.fn()  # type: ignore[attr-defined]
+
+	assert keyed2 is not keyed
+	assert keyed.dispose_calls == 1
+	assert unkeyed2 is unkeyed
+	assert unkeyed.dispose_calls == 0
+
+
+def test_state_survives_failed_render_and_recovery():
+	"""A render that raises before its `ps.state` call must not evict the state."""
+	ctx = HookContext()
+	fail = Signal(False)
+	seen: list[CountingState] = []
+
+	@ps.component
+	def Comp():
+		if fail():
+			raise RuntimeError("transient")
+		instance = state(CountingState, key="k")
+		seen.append(instance)
+		return None
+
+	with ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+	first = seen[0]
+	first.count = 5
+
+	fail.write(True)
+	with pytest.raises(RuntimeError, match="transient"), ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+
+	assert first.dispose_calls == 0
+
+	fail.write(False)
+	with ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+
+	assert seen[1] is first
+	assert first.count == 5
+	assert first.dispose_calls == 0
+
+
+def test_state_evicted_by_first_successful_render_after_failure():
+	"""A failed render's partial seen-set must not skew the next successful render."""
+	ctx = HookContext()
+	keys = Signal(["a", "b"])
+	fail = Signal(False)
+	seen: dict[str, DummyState] = {}
+
+	@ps.component
+	def Comp():
+		for key in keys():
+			seen[key] = state(DummyState, key=key)
+			if fail() and key == "a":
+				raise RuntimeError("transient")
+		return None
+
+	with ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+	first_a = seen["a"]
+	first_b = seen["b"]
+
+	fail.write(True)
+	with pytest.raises(RuntimeError, match="transient"), ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+
+	assert first_a.dispose_calls == 0
+	assert first_b.dispose_calls == 0
+
+	fail.write(False)
+	keys.write(["a"])
+	with ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+
+	assert seen["a"] is first_a
+	assert first_a.dispose_calls == 0
+	assert first_b.dispose_calls == 1
 
 
 def test_state_disposes_direct_instances():
@@ -306,7 +434,7 @@ def test_state_disposes_all_on_unmount():
 	assert state_c.dispose_calls == 1
 
 
-def test_state_kept_when_not_called_in_render():
+def test_state_disposed_when_not_called_in_render():
 	ctx = HookContext()
 	flag = Signal(True)
 	states: list[DummyState] = []
@@ -329,8 +457,9 @@ def test_state_kept_when_not_called_in_render():
 		Comp.fn()  # type: ignore[attr-defined]
 
 	assert len(states) == 2
-	assert states[0] is states[1]
-	assert states[0].dispose_calls == 0
+	assert states[0] is not states[1]
+	assert states[0].dispose_calls == 1
+	assert states[1].dispose_calls == 0
 
 
 def test_state_branch_disambiguation_with_key():
@@ -356,7 +485,7 @@ def test_state_branch_disambiguation_with_key():
 	assert left is not None
 	assert right is not None
 	assert left is not right
-	assert left.dispose_calls == 0
+	assert left.dispose_calls == 1
 	assert right.dispose_calls == 0
 
 

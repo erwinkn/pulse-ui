@@ -196,7 +196,7 @@ A channel id is just a name. Nothing is created or destroyed on the wire. The on
 - `"route"` (default) — tear down this handle's `on()` set when that route unmounts, even if you stored the object.
 - `"tab"` — do not detach on route unmount. Lives until the render session ends or you call `detach()`.
 
-After a route handle detaches, `on()` raises `ChannelDetached`; queued handlers that have not run are skipped. `emit()` is a debug-logged no-op, while `request()` still addresses the channel name.
+After a route handle detaches, `on()` and `request()` raise `ChannelDetached`; handlers still queued (or awaiting) are cancelled. `emit()` becomes a debug-logged no-op, since background tasks legitimately race an unmount.
 
 On the client, lifetime is React placement: put `useChannel(id)` in a route component to drop listeners on navigation, or in a layout to keep them for the tab. There is no `lifetime` argument on the hook.
 
@@ -206,9 +206,23 @@ Several live handles can share one name. Events fan out to all attached handles.
 chat.detach()
 ```
 
+## Event ordering
+
+Events on a handle are processed one at a time, in arrival order — each event's handlers are awaited before the next event starts. So a slow `async` handler delays later events instead of reordering them, and an event handler must never block indefinitely:
+
+```python
+# ❌ stalls every later event on this handle
+chat.on("ping", lambda _: chat.request("slow"))
+
+# ✅ bounded
+chat.on("ping", lambda _: chat.request("slow", timeout=5.0))
+```
+
+The guarantee covers **events only**. Inbound requests run as independent tasks — they can overtake queued events, and that's deliberate: a request handler often awaits a request back to the client, which would otherwise deadlock the handle. The event backlog is capped at 500 per handle (oldest dropped, one warning) so a stuck handler can't grow it forever.
+
 ## Error handling
 
-`emit()` raises `TypeError` immediately if its payload is not serializable. While the socket is down, events buffer in the session queue, capped at 1000 messages with the oldest dropped past that limit.
+`emit()` raises `TypeError` immediately if its payload is not serializable. While the socket is down, events buffer in the session queue: channel messages get their own 500-message budget (oldest dropped first, so a chatty channel can never evict control-plane messages like `reload` or `navigate_to`) inside an overall 1000-message bound.
 
 `request()` fails immediately if the socket is down. If the peer has no handler, you get a `ChannelRemoteError` with code `no_handler`. Middleware `Deny` is `denied`; a middleware exception is `handler_error`. The client timeout defaults to 30 seconds. Detaching the client handle rejects its in-flight requests with `PulseChannelDetachedError`.
 

@@ -21,6 +21,7 @@ Composite context accessible to hooks and internals. Manages per-request state v
 | `session` | `UserSession \| None` | Per-user session (set during HTTP requests and WebSocket connections) |
 | `render` | `RenderSession \| None` | Per-connection render session (set during render sessions) |
 | `route` | `RouteContext \| None` | Active route context (set when rendering a route) |
+| `session_scoped_effects` | `bool` | Marks effects created while constructing session-scoped state; nested effects omit route identity |
 
 #### Class Methods
 
@@ -46,6 +47,7 @@ def update(
     session: UserSession | None = None,
     render: RenderSession | None = None,
     route: RouteContext | None = None,
+    session_scoped_effects: bool = False,
 ) -> PulseContext
 ```
 
@@ -55,6 +57,7 @@ Create a new context with updated values, inheriting unspecified values from cur
 - `session` - New session (optional, inherits if not provided).
 - `render` - New render session (optional, inherits if not provided).
 - `route` - New route context (optional, inherits if not provided).
+- `session_scoped_effects` - Mark effects created in session-scoped state construction as route-free (optional, inherits if not provided).
 
 **Returns:** New `PulseContext` instance.
 
@@ -65,9 +68,11 @@ Create a new context with updated values, inheriting unspecified values from cur
 def bind(cls, fn: F) -> F
 ```
 
-Re-enter the PulseContext that is current when `bind` is called, on every later invocation. Captures `app`, `session`, and `render`, then resolves the live route mount on each invocation. No-op if there is no render session. A cleanup callable returned by `fn` is bound too.
+Re-enter the PulseContext that is current when `bind` is called, on every later invocation. Captures `app`, `session`, `render`, and the creating `RouteContext`, then resolves the mount generation on each invocation. No-op if there is no render session. A cleanup callable returned by `fn` is bound too.
 
-`@ps.effect` uses this so effect bodies and cleanups see the creating render. Route-scoped effects resolve the current mount identity; if that mount no longer exists, they run without route metadata.
+`@ps.effect` uses this so effect bodies and cleanups see the creating render. A same-generation mount provides its current route and mount identity, including after a successful StrictMode replay. A detached grace-window generation keeps its creation-time identity and is stale, so route-bound navigation is dropped. If the generation is gone or replaced, the effect runs route-free instead of reading another generation's route.
+
+Effects created while a `ps.global_state` factory constructs a state keep the render session but run route-free. This marker is inherited by nested states because they remain owned by the session-scoped state.
 
 **Returns:** The original function, or a wrapper that mounts the captured context.
 

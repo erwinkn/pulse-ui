@@ -15,14 +15,16 @@ from pulse.test_helpers import wait_for
 
 
 def make_route_info(
-	pathname: str, query_params: dict[str, str] | None = None
+	pathname: str,
+	query_params: dict[str, str] | None = None,
+	path_params: dict[str, str] | None = None,
 ) -> RouteInfo:
 	return {
 		"pathname": pathname,
 		"hash": "",
 		"query": "",
 		"queryParams": query_params or {},
-		"pathParams": {},
+		"pathParams": path_params or {},
 		"catchall": [],
 	}
 
@@ -241,9 +243,94 @@ class TestEffectPulseContext:
 		app, session, route_ctx = make_session()
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			state = Tracked()
+		assert await wait_for(lambda: state.track.runs == 1, timeout=0.2)
+		state.n += 1
+		assert await wait_for(lambda: cleaned == [session], timeout=0.2)
+
+	@pytest.mark.asyncio
+	async def test_sync_effect_async_cleanup_is_scheduled(self):
+		cleaned: list[object] = []
+
+		class Tracked(ps.State):
+			n: int = 0
+
+			@ps.effect
+			def track(self):
+				_ = self.n
+
+				async def cleanup():
+					cleaned.append(PulseContext.get().render)
+
+				return cleanup
+
+		app, session, route_ctx = make_session()
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			state = Tracked()
 			assert await wait_for(lambda: state.track.runs == 1, timeout=0.2)
 			state.n += 1
 			assert await wait_for(lambda: cleaned == [session], timeout=0.2)
+
+	@pytest.mark.asyncio
+	async def test_nested_async_effect_async_cleanup_is_scheduled(self):
+		cleaned: list[str] = []
+		trigger = ps.Signal(0)
+
+		class Tracked(ps.State):
+			n: int = 0
+
+			@ps.effect
+			async def track(self):
+				_ = self.n
+
+				@ps.effect
+				async def child():
+					_ = trigger()
+
+					async def cleanup():
+						cleaned.append("child")
+
+					return cleanup
+
+				_ = child
+
+		app, session, route_ctx = make_session()
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			state = Tracked()
+			assert await wait_for(lambda: state.track.runs == 1, timeout=0.2)
+			state.n += 1
+			assert await wait_for(lambda: cleaned == ["child"], timeout=0.2)
+
+	def test_nested_state_in_global_state_init_is_session_scoped(self):
+		seen: list[tuple[object, object]] = []
+
+		class Child(ps.State):
+			@ps.effect
+			def watch(self):
+				ctx = PulseContext.get()
+				seen.append((ctx.render, ctx.route))
+
+		class Holder(ps.State):
+			child: Any = None
+
+			def __init__(self):
+				super().__init__()
+				self.child = Child()
+
+		accessor = ps.global_state(Holder)
+		app, session, route_ctx = make_session("/a")
+		mount = session.route_mounts["/a"]
+		with ps.PulseContext(
+			app=app,
+			render=session,
+			route=route_ctx,
+			source_route_path=route_ctx.route_path,
+			source_path=route_ctx.pathname,
+			source_mount_id=mount.mount_id,
+		):
+			accessor()
+			flush_effects()
+		assert seen == [(session, None)]
+		session.close()
 
 
 class TestEffectMountIdentity:
@@ -251,11 +338,13 @@ class TestEffectMountIdentity:
 
 	def test_navigate_survives_strict_mode_replay(self):
 		trigger = ps.Signal(0)
+		stamped_mount_ids: list[str | None] = []
 
 		@ps.component
 		def Page():
 			@ps.effect
 			def go():
+				stamped_mount_ids.append(PulseContext.get().source_mount_id)
 				if trigger() > 0:
 					ps.navigate("/b")
 
@@ -271,14 +360,110 @@ class TestEffectMountIdentity:
 		with ps.PulseContext(app=app, render=session):
 			session.prerender(["/a"], make_route_info("/a"))
 			session.attach("/a", make_route_info("/a"))
+			session.flush()
+			flush_effects()
+			creation_mount_id = session.route_mounts["/a"].mount_id
 			# React StrictMode replays attach -> detach -> attach; detach renews
 			# the mount id without re-rendering.
 			session.detach("/a")
 			session.attach("/a", make_route_info("/a"))
+			live_mount_id = session.route_mounts["/a"].mount_id
 			trigger.write(1)
 			session.flush()
 			flush_effects()
 		assert navigations(msgs) == ["/b"]
+		assert live_mount_id != creation_mount_id
+		assert stamped_mount_ids[-1] == live_mount_id
+		session.close()
+
+	def test_detached_mount_effect_cannot_navigate(self):
+		trigger = ps.Signal(0)
+		runs: list[int] = []
+		stamped_mount_ids: list[str | None] = []
+
+		@ps.component
+		def Page():
+			@ps.effect
+			def go():
+				runs.append(trigger())
+				stamped_mount_ids.append(PulseContext.get().source_mount_id)
+				if trigger() > 0:
+					ps.navigate("/b")
+
+			return ps.div()["page"]
+
+		routes = [Route("a", Page), Route("b", ps.component(lambda: ps.div()))]
+		app = ps.App(routes=routes)
+		session = RenderSession(
+			"s", RouteTree(routes), dev_strict_mode_detach_timeout=5.0
+		)
+		msgs: list[ServerMessage] = []
+		session.connect(msgs.append)
+		with ps.PulseContext(app=app, render=session):
+			session.prerender(["/a"], make_route_info("/a"))
+			session.attach("/a", make_route_info("/a"))
+			session.flush()
+			flush_effects()
+			creation_mount_id = session.route_mounts["/a"].mount_id
+			session.detach("/a")
+			renewed_mount_id = session.route_mounts["/a"].mount_id
+			trigger.write(1)
+			session.flush()
+			flush_effects()
+		assert runs[-1] == 1
+		assert stamped_mount_ids[-1] == creation_mount_id
+		assert renewed_mount_id != creation_mount_id
+		assert navigations(msgs) == []
+		session.close()
+
+	def test_effect_does_not_adopt_a_different_mount_generation(self):
+		seen: list[dict[str, str] | None] = []
+		holder: list[Any] = []
+
+		class Item(ps.State):
+			n: int = 0
+
+			@ps.effect
+			def watch(self):
+				_ = self.n
+				route = PulseContext.get().route
+				seen.append(None if route is None else dict(route.info["pathParams"]))
+				if self.n > 0:
+					ps.navigate("/c")
+
+		@ps.component
+		def UserPage():
+			def create():
+				holder.append(Item())
+
+			return ps.div(onClick=create)["users"]
+
+		routes = [
+			Route("users/:id", UserPage),
+			Route("c", ps.component(lambda: ps.div())),
+		]
+		app = ps.App(routes=routes)
+		session = RenderSession("s", RouteTree(routes))
+		msgs: list[ServerMessage] = []
+		session.connect(msgs.append)
+		with ps.PulseContext(app=app, render=session):
+			key_path = "/users/:id"
+			info1 = make_route_info("/users/1", path_params={"id": "1"})
+			session.prerender([key_path], info1)
+			session.attach(key_path, info1)
+			callback = next(iter(session.route_mounts[key_path].tree.callbacks))
+			session.execute_callback(key_path, callback, [])
+			session.flush()
+			flush_effects()
+			session.detach(key_path)
+			info2 = make_route_info("/users/2", path_params={"id": "2"})
+			session.prerender([key_path], info2)
+			session.attach(key_path, info2)
+			holder[0].n = 1
+			session.flush()
+			flush_effects()
+		assert seen[-1] is None
+		assert navigations(msgs) == ["/c"]
 		session.close()
 
 	def test_state_outliving_creating_mount_can_navigate(self):

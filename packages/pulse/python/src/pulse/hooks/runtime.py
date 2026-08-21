@@ -402,6 +402,10 @@ def global_state(
 	two users, always get separate instances. Use ``ps.session()``
 	(``UserSession``) to coordinate state across a single user's tabs.
 
+	States constructed while a global-state factory runs are owned by that
+	session-scoped state. Their effects therefore keep the render session but
+	omit route identity, including for nested state construction.
+
 	Can be used as a decorator on a State class or with a factory function.
 
 	Args:

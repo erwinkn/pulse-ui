@@ -15,6 +15,11 @@ def test_app_prerender_queue_timeout_config():
 	session.dispose()
 
 
+def test_app_rejects_negative_shell_render_timeout():
+	with pytest.raises(ValueError, match="shell_render_timeout"):
+		ps.App(shell_render_timeout=-1.0)
+
+
 def test_app_proxy_config():
 	proxy = ps.Proxy(
 		max_concurrency=7,

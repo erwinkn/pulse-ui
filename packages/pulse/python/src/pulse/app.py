@@ -345,6 +345,8 @@ class App:
 		self._tasks = TaskRegistry(name="app")
 		self._timers = TimerRegistry(tasks=self._tasks, name="app")
 		self._proxy = None
+		if shell_render_timeout < 0:
+			raise ValueError("shell_render_timeout must be >= 0")
 		self.session_timeout = session_timeout
 		self.shell_render_timeout = shell_render_timeout
 		self.prerender_queue_timeout = prerender_queue_timeout
@@ -668,17 +670,22 @@ class App:
 			client_addr: str | None = get_client_address(request)
 			# Reuse render session from header (set by middleware) or create new one
 			render = PulseContext.get().render
+			if render is not None and self.render_sessions.get(render.id) is not render:
+				# The render was closed (e.g. its cleanup timer fired) between the
+				# HTTP middleware resolving it and this handler running. Mint a
+				# fresh one instead of prerendering on a dead render.
+				render = None
 			if render is not None:
 				render_id = render.id
+				# Hold the render alive while prerendering; rescheduled below once
+				# mount state is final.
+				self._cancel_render_cleanup(render_id)
 			else:
 				# Create new render session
 				render_id = new_sid()
 				render = self.create_render(
 					render_id, session, client_address=client_addr
 				)
-			# Schedule cleanup timeout (will cancel/reschedule on activity)
-			if not render.connected:
-				self._schedule_render_cleanup(render_id)
 
 			def _normalize_prerender_result(
 				captured: ServerInitMessage | ServerNavigateToMessage,
@@ -695,46 +702,53 @@ class App:
 				# Fallback: shouldn't happen, return not found to be safe
 				return NotFound()
 
-			with PulseContext.update(render=render):
-				# Call top-level prerender middleware, which wraps the route processing
-				async def _process_routes() -> PrerenderResponse:
-					result_data: Prerender = {
-						"views": {},
-						"directives": {
-							"headers": {"X-Pulse-Render-Id": render_id},
-							"query": {},
-							"socketio": {
-								"auth": {"render_id": render_id},
-								"headers": {},
+			try:
+				with PulseContext.update(render=render):
+					# Call top-level prerender middleware, which wraps the route processing
+					async def _process_routes() -> PrerenderResponse:
+						result_data: Prerender = {
+							"views": {},
+							"directives": {
+								"headers": {"X-Pulse-Render-Id": render_id},
 								"query": {},
+								"socketio": {
+									"auth": {"render_id": render_id},
+									"headers": {},
+									"query": {},
+								},
 							},
-						},
-					}
+						}
 
-					captured = render.prerender(paths, route_info)
+						captured = render.prerender(paths, route_info)
 
-					for p in paths:
-						res = _normalize_prerender_result(captured[p])
-						if isinstance(res, Ok):
-							# Aggregate results
-							result_data["views"][p] = res.payload
-						elif isinstance(res, Redirect):
-							# Return redirect immediately
-							return Redirect(path=res.path or "/")
-						elif isinstance(res, NotFound):
-							# Return not found immediately
-							return NotFound()
-						else:
-							raise ValueError("Unexpected prerender response:", res)
+						for p in paths:
+							res = _normalize_prerender_result(captured[p])
+							if isinstance(res, Ok):
+								# Aggregate results
+								result_data["views"][p] = res.payload
+							elif isinstance(res, Redirect):
+								# Return redirect immediately
+								return Redirect(path=res.path or "/")
+							elif isinstance(res, NotFound):
+								# Return not found immediately
+								return NotFound()
+							else:
+								raise ValueError("Unexpected prerender response:", res)
 
-					return Ok(result_data)
+						return Ok(result_data)
 
-				result = await self.middleware.prerender(
-					payload=payload,
-					request=PulseRequest.from_fastapi(request),
-					session=session.data,
-					next=_process_routes,
-				)
+					result = await self.middleware.prerender(
+						payload=payload,
+						request=PulseRequest.from_fastapi(request),
+						session=session.data,
+						next=_process_routes,
+					)
+			finally:
+				# (Re)schedule cleanup now that mount state is final, so a shell
+				# that stayed mount-less gets the short TTL and a shell-turned-real
+				# gets the full session_timeout.
+				if not render.connected:
+					self._schedule_render_cleanup(render_id)
 
 			# Handle redirect/notFound responses
 			if isinstance(result, Redirect):
@@ -976,13 +990,8 @@ class App:
 				render = self.render_sessions.get(rid)
 				if render:
 					render.disconnect()
-					# Schedule cleanup after timeout (will keep session alive for
-					# reuse). A mount-less shell render (minted on stale-render-id
-					# reconnect, only ever told the client to reload) can never
-					# reconnect usefully, so reap it on the short shell TTL instead
-					# of holding it for the full session_timeout grace window.
-					timeout = self.shell_render_timeout if render.is_shell else None
-					self._schedule_render_cleanup(rid, timeout=timeout)
+					# Schedule cleanup after timeout (will keep session alive for reuse)
+					self._schedule_render_cleanup(rid)
 
 		@self.sio.event
 		async def message(sid: str, data: Serialized):  # pyright: ignore[reportUnusedFunction]
@@ -998,8 +1007,16 @@ class App:
 				cleanup_handle.cancel()
 			self._timers.discard(cleanup_handle)
 
-	def _schedule_render_cleanup(self, rid: str, *, timeout: float | None = None):
-		"""Schedule cleanup of a RenderSession after the configured timeout."""
+	def _schedule_render_cleanup(self, rid: str):
+		"""Schedule cleanup of a RenderSession after the configured timeout.
+
+		A mount-less shell render (minted on stale-render-id reconnect, only
+		ever told the client to reload) can never reconnect usefully, so it is
+		reaped on the short shell_render_timeout instead of being held for the
+		full session_timeout grace window. The decision is made here, from the
+		render's current mount state, so every scheduling path (disconnect,
+		failed connect, prerender) picks the right timeout.
+		"""
 		render = self.render_sessions.get(rid)
 		if render is None:
 			return
@@ -1010,7 +1027,7 @@ class App:
 		# Cancel any existing cleanup task for this render session
 		self._cancel_render_cleanup(rid)
 
-		delay = self.session_timeout if timeout is None else timeout
+		delay = self.shell_render_timeout if render.is_shell else self.session_timeout
 
 		# Schedule new cleanup task
 		def _cleanup():

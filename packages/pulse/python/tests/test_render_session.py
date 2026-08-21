@@ -1276,6 +1276,47 @@ def test_snapshot_reattach_preserves_queued_non_vdom_messages():
 	session.close()
 
 
+def test_reattach_drops_timed_out_result_js_exec():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"], make_route_info("/a"))
+	attach_mount(session, "/a")
+	mount = session.route_mounts["/a"]
+	client_revision = mount.revision
+	session.disconnect()
+
+	stale: ServerMessage = {
+		"type": "js_exec",
+		"path": "/a",
+		"viewId": mount.view_id,
+		"id": "timed-out",
+		"expr": "1",
+		"wantsResult": True,
+	}
+	fire_and_forget: ServerMessage = {
+		"type": "js_exec",
+		"path": "/a",
+		"viewId": mount.view_id,
+		"id": "no-result",
+		"expr": "2",
+	}
+	session.send(stale)
+	session.send(fire_and_forget)
+
+	messages.clear()
+	session.connect(messages.append)
+	ack = attach_mount(session, "/a", revision=client_revision)
+	assert ack is not None
+	assert stale not in messages
+	assert fire_and_forget in messages
+
+	session.close()
+
+
 def test_pending_overflow_keeps_non_vdom_messages():
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes, pending_message_limit=2)
@@ -1310,6 +1351,66 @@ def test_pending_overflow_keeps_non_vdom_messages():
 	assert ack is not None
 	assert ack.get("snapshot") is not None
 	assert js_exec in messages
+
+	session.close()
+
+
+def test_pending_queue_non_vdom_saturation_forces_reload():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes, pending_message_limit=2)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"], make_route_info("/a"))
+	attach_mount(session, "/a")
+	mount = session.route_mounts["/a"]
+	session.disconnect()
+
+	def js_exec(i: int) -> ServerMessage:
+		return {
+			"type": "js_exec",
+			"path": "/a",
+			"viewId": mount.view_id,
+			"id": f"queued-js-{i}",
+			"expr": "1",
+		}
+
+	session.send(js_exec(1))
+	session.send(js_exec(2))
+
+	assert mount.queue == []
+	assert mount.snapshot_required is True
+
+	messages.clear()
+	session.connect(messages.append)
+	assert {"type": "reload"} in messages
+
+	session.close()
+
+
+def test_global_queue_overflow_forces_reload_on_reconnect():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes, pending_message_limit=2)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	session.disconnect()
+
+	def channel_message(i: int) -> ServerMessage:
+		return {
+			"type": "channel_message",
+			"channel": "chan",
+			"event": f"evt-{i}",
+			"payload": None,
+		}
+
+	session.send(channel_message(1))
+	session.send(channel_message(2))
+	session.send(channel_message(3))
+
+	messages.clear()
+	session.connect(messages.append)
+	assert messages == [{"type": "reload"}]
 
 	session.close()
 

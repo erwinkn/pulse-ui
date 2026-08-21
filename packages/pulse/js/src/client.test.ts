@@ -1201,4 +1201,32 @@ describe("PulseSocketIOClient channels across reconnects", () => {
 		expect(fresh).not.toBe(bridge);
 		expect(fresh.isClosed).toBe(false);
 	});
+
+	it("does not resurrect a server-closed channel on a late message", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+
+		const bridge = client.acquireChannel("chan-4");
+		bridge.on("evt", () => {});
+		receive({ type: "channel_message", channel: "chan-4", event: "__close__" });
+		expect(bridge.isClosed).toBe(true);
+
+		receive({ type: "channel_message", channel: "chan-4", event: "evt", payload: 1 });
+		expect(client.acquireChannel("chan-4").isClosed).toBe(false);
+		// The late message must not have re-opened the old bridge.
+		expect(bridge.isClosed).toBe(true);
+	});
+
+	it("drops messages for channels that were never acquired", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+
+		expect(() =>
+			receive({ type: "channel_message", channel: "chan-5", event: "evt" }),
+		).not.toThrow();
+	});
 });

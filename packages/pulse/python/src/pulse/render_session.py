@@ -346,10 +346,20 @@ class RouteMount:
 		if self.queue:
 			for msg in self.queue:
 				# With flush=False a snapshot supersedes queued VDOM deltas, but
-				# non-VDOM traffic (js_exec, api_call, channel messages, errors)
-				# cannot be reconstructed from a snapshot and must still go out.
-				if flush or msg["type"] != "vdom_update":
-					send_message(msg)
+				# other queued traffic (js_exec, server_error) cannot be
+				# reconstructed from a snapshot and must still go out.
+				if not flush and msg["type"] == "vdom_update":
+					continue
+				# A result-bearing js_exec whose awaiting future already timed
+				# out is dead: executing its side effect now would surprise a
+				# caller that already saw the call fail.
+				if (
+					msg["type"] == "js_exec"
+					and msg.get("wantsResult")
+					and not self.render.has_pending_js_result(msg["id"])
+				):
+					continue
+				send_message(msg)
 		self.queue = None
 		self.snapshot_required = False
 		self.state = "active"
@@ -373,20 +383,38 @@ class RouteMount:
 		if self.state == "pending":
 			if self.queue is None:
 				raise RuntimeError(f"Pending mount missing queue for {self.path!r}")
-			if self.snapshot_required and message["type"] == "vdom_update":
-				return
-			# Leave one sender-queue slot for the attach acknowledgement.
-			if len(self.queue) >= self.render.pending_message_limit - 1:
-				# Collapse VDOM deltas into a snapshot; keep non-VDOM traffic,
-				# which a snapshot cannot reconstruct.
-				self.queue = [m for m in self.queue if m["type"] != "vdom_update"]
-				self.snapshot_required = True
-				if (
-					message["type"] == "vdom_update"
-					or len(self.queue) >= self.render.pending_message_limit - 1
-				):
+			if message["type"] == "vdom_update":
+				if self.snapshot_required:
 					return
-			self.queue.append(message)
+				# Leave one sender-queue slot for the attach acknowledgement.
+				if len(self.queue) >= self.render.pending_message_limit - 1:
+					# Collapse VDOM deltas: the snapshot sent on reattach
+					# supersedes them.
+					self.queue = [m for m in self.queue if m["type"] != "vdom_update"]
+					self.snapshot_required = True
+					return
+				self.queue.append(message)
+				return
+			queue = self.queue
+			if len(queue) >= self.render.pending_message_limit - 1:
+				remaining: list[ServerMessage] = [
+					m for m in queue if m["type"] != "vdom_update"
+				]
+				if len(remaining) < len(queue):
+					self.queue = queue = remaining
+					self.snapshot_required = True
+				if len(queue) >= self.render.pending_message_limit - 1:
+					# Saturated with messages a snapshot cannot reconstruct:
+					# the client can no longer be brought back in sync.
+					logger.error(
+						"Pending queue for %r saturated with non-VDOM messages; forcing a client reload",
+						self.path,
+					)
+					queue.clear()
+					self.snapshot_required = True
+					self.render.send({"type": "reload"})
+					return
+			queue.append(message)
 			return
 		if self.state == "active":
 			send_message(message)
@@ -480,6 +508,7 @@ class RenderSession:
 	_ref_channels_by_route: dict[str, Channel]
 	_global_states: dict[str, State]
 	_global_queue: list[ServerMessage]
+	_global_queue_overflowed: bool
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
 
@@ -515,6 +544,7 @@ class RenderSession:
 		self._send_message = None
 		self._global_states = {}
 		self._global_queue = []
+		self._global_queue_overflowed = False
 		self.connected = False
 		self.channels = ChannelsManager(self)
 		self.forms = FormRegistry(self)
@@ -556,7 +586,12 @@ class RenderSession:
 		"""WebSocket connected. Set sender, don't auto-flush (attach does that)."""
 		self._send_message = send_message
 		self.connected = True
-		if self._global_queue:
+		if self._global_queue_overflowed:
+			# Session-level messages were lost while disconnected; the client
+			# cannot be brought back in sync incrementally.
+			self._global_queue_overflowed = False
+			send_message({"type": "reload"})
+		elif self._global_queue:
 			queued = self._global_queue
 			self._global_queue = []
 			for msg in queued:
@@ -584,6 +619,24 @@ class RenderSession:
 
 	# ---- Message routing ----
 
+	def _queue_global(self, message: ServerMessage) -> None:
+		"""Queue a session-level message while disconnected, bounded like the
+		per-mount and socket-sender queues. Unlike VDOM deltas, these messages
+		cannot be reconstructed from a snapshot: overflow forces a client
+		reload on reconnect instead of silently dropping the excess."""
+		if self._global_queue_overflowed:
+			return
+		if len(self._global_queue) >= self.pending_message_limit:
+			logger.error(
+				"Global message queue for render %r exceeded %d messages while disconnected; forcing a client reload on reconnect",
+				self.id,
+				self.pending_message_limit,
+			)
+			self._global_queue = []
+			self._global_queue_overflowed = True
+			return
+		self._global_queue.append(message)
+
 	def send(self, message: ServerMessage):
 		"""Route message based on mount state."""
 		# Forced navigation is global. Origin-bound navigation is dropped once
@@ -600,7 +653,7 @@ class RenderSession:
 			if self._send_message:
 				self._send_message(message)
 			else:
-				self._global_queue.append(message)
+				self._queue_global(message)
 			return
 		# Global messages (not path-specific) go directly if connected
 		path = message.get("path")
@@ -608,7 +661,7 @@ class RenderSession:
 			if self._send_message:
 				self._send_message(message)
 			else:
-				self._global_queue.append(message)
+				self._queue_global(message)
 			return
 
 		# Normalize path for lookup
@@ -753,8 +806,10 @@ class RenderSession:
 			viewId=mount.view_id,
 			revision=mount.revision,
 		)
+		if self._send_message is None:
+			# update_route() can run effects that disconnect the session.
+			return None
 		if mount.state == "pending" and mount.can_replay_from(revision):
-			assert self._send_message is not None
 			mount.activate(self._send_message)
 			ack["revision"] = mount.revision
 			return ack
@@ -779,8 +834,10 @@ class RenderSession:
 			self.send(message)
 			self.dispose_mount(path, mount)
 			return None
+		if self._send_message is None:
+			# Rendering can run effects that disconnect the session.
+			return None
 		if mount.state == "pending":
-			assert self._send_message is not None
 			mount.activate(self._send_message, flush=False)
 		return {
 			"viewId": message["viewId"],
@@ -974,6 +1031,7 @@ class RenderSession:
 		# Close any timer that may have been scheduled during cleanup (ex: query GC)
 		self._timers.cancel_all()
 		self._global_queue = []
+		self._global_queue_overflowed = False
 		self._send_message = None
 		self.connected = False
 
@@ -1237,31 +1295,33 @@ class RenderSession:
 		# This must match the path used to key views on the client side
 		path = ctx.route.pulse_route.unique_path() if ctx.route else "/"
 
-		self.send(
-			ServerJsExecMessage(
-				type="js_exec",
-				path=path,
-				viewId=ctx.origin["viewId"],
-				id=exec_id,
-				expr=expr.render(),
-			)
+		message = ServerJsExecMessage(
+			type="js_exec",
+			path=path,
+			viewId=ctx.origin["viewId"],
+			id=exec_id,
+			expr=expr.render(),
 		)
+		if not result:
+			self.send(message)
+			return None
 
-		if result:
-			loop = asyncio.get_running_loop()
-			future: asyncio.Future[object] = loop.create_future()
-			self._pending_js_results[exec_id] = (ctx.origin["viewId"], future)
+		message["wantsResult"] = True
+		loop = asyncio.get_running_loop()
+		future: asyncio.Future[object] = loop.create_future()
+		self._pending_js_results[exec_id] = (ctx.origin["viewId"], future)
 
-			def _on_timeout() -> None:
-				self._pending_js_results.pop(exec_id, None)
-				if not future.done():
-					future.set_exception(asyncio.TimeoutError())
+		def _on_timeout() -> None:
+			self._pending_js_results.pop(exec_id, None)
+			if not future.done():
+				future.set_exception(asyncio.TimeoutError())
 
-			self._timers.later(timeout, _on_timeout)
+		self._timers.later(timeout, _on_timeout)
+		self.send(message)
+		return future
 
-			return future
-
-		return None
+	def has_pending_js_result(self, exec_id: str) -> bool:
+		return exec_id in self._pending_js_results
 
 	def handle_js_result(self, data: dict[str, Any]) -> None:
 		"""Handle js_result message from client."""

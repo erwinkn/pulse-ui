@@ -124,6 +124,9 @@ class ServerJsExecMessage(TypedDict):
 	viewId: str
 	id: str
 	expr: VDOMNode
+	# True when a js_result is awaited server-side; lets queued messages be
+	# dropped once the awaiting future has timed out.
+	wantsResult: NotRequired[bool]
 
 
 # ====================

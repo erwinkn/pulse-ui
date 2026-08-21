@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
+from pulse.reactive import Untrack
 from pulse.routing import RouteContext
 
 if TYPE_CHECKING:
@@ -29,6 +30,7 @@ class PulseContext:
 		session: Per-user session (UserSession or None).
 		render: Per-connection render session (RenderSession or None).
 		route: Active route context (RouteContext or None).
+		session_scoped_effects: Whether bound effects should omit route identity.
 		source_route_path: Route mount path that originated the active callback/effect.
 		source_path: URL pathname that originated the active callback/effect.
 		source_mount_id: Route mount lifecycle id that originated the active callback/effect.
@@ -47,6 +49,7 @@ class PulseContext:
 	session: "UserSession | None" = None
 	render: "RenderSession | None" = None
 	route: "RouteContext | None" = None
+	session_scoped_effects: bool = False
 	source_route_path: str | None = None
 	source_path: str | None = None
 	source_mount_id: str | None = None
@@ -73,6 +76,7 @@ class PulseContext:
 		session: Any = _UNSET,
 		render: Any = _UNSET,
 		route: Any = _UNSET,
+		session_scoped_effects: Any = _UNSET,
 		source_route_path: Any = _UNSET,
 		source_path: Any = _UNSET,
 		source_mount_id: Any = _UNSET,
@@ -85,6 +89,7 @@ class PulseContext:
 			session: New session (optional, inherits if not provided).
 			render: New render session (optional, inherits if not provided).
 			route: New route context (optional, inherits if not provided).
+			session_scoped_effects: Whether bound effects omit route identity.
 			source_route_path: New source route path (optional, inherits if not provided).
 			source_path: New source URL path (optional, inherits if not provided).
 			source_mount_id: New source mount id (optional, inherits if not provided).
@@ -98,6 +103,11 @@ class PulseContext:
 			session=ctx.session if session is _UNSET else session,
 			render=ctx.render if render is _UNSET else render,
 			route=ctx.route if route is _UNSET else route,
+			session_scoped_effects=(
+				ctx.session_scoped_effects
+				if session_scoped_effects is _UNSET
+				else session_scoped_effects
+			),
 			source_route_path=(
 				ctx.source_route_path
 				if source_route_path is _UNSET
@@ -113,8 +123,8 @@ class PulseContext:
 	def bind(cls, fn: F) -> F:
 		"""Re-enter the current PulseContext on every call.
 
-		Captures ``app`` / ``session`` / ``render`` / ``route`` and the
-		``source_*`` mount identity. No-op if there is no render session. A
+		Captures ``app`` / ``session`` / ``render`` and resolves the current
+		route mount on every call. No-op if there is no render session. A
 		returned cleanup callable is also bound.
 		"""
 		current = PULSE_CONTEXT.get()
@@ -123,12 +133,25 @@ class PulseContext:
 		app = current.app
 		session = current.session
 		render = current.render
-		route = current.route
-		source_route_path = current.source_route_path
-		source_path = current.source_path
-		source_mount_id = current.source_mount_id
+		route_path = (
+			None
+			if current.session_scoped_effects or current.route is None
+			else current.route.route_path
+		)
 
 		def enter() -> PulseContext:
+			route = None
+			source_route_path = None
+			source_path = None
+			source_mount_id = None
+			if route_path is not None:
+				mount = render.route_mounts.get(route_path)
+				if mount is not None:
+					route = mount.route
+					source_route_path = route_path
+					with Untrack():
+						source_path = mount.route.pathname
+						source_mount_id = mount.mount_id
 			return PulseContext(
 				app=app,
 				session=session,
@@ -143,11 +166,19 @@ class PulseContext:
 			if not callable(result):
 				return result
 
-			def cleanup() -> None:
+			if inspect.iscoroutinefunction(result):
+
+				async def bound_async_cleanup() -> None:
+					with enter():
+						await result()
+
+				return bound_async_cleanup
+
+			def bound_cleanup() -> None:
 				with enter():
 					result()
 
-			return cleanup
+			return bound_cleanup
 
 		if inspect.iscoroutinefunction(fn):
 

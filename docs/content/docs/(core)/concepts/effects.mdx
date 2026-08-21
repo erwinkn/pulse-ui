@@ -29,7 +29,7 @@ class ToggleState(ps.State):
 
 Pulse tracks what the effect reads. When `self.enabled` changes, the effect runs again automatically.
 
-If the effect was created during a render, Pulse puts you back in that render session on every run — including cleanup. Route-scoped effects (component `@ps.effect`, `ps.state(...)`) also get that mount's `RouteContext`. `ps.global_state` effects get the session but not a route.
+If the effect was created during a render, Pulse puts you back in that render session on every run — including cleanup. Route-scoped effects (component `@ps.effect`, `ps.state(...)`) resolve their live mount and get its `RouteContext`; if the mount is gone, they run without route metadata. `ps.global_state` effects get the session but not a route.
 
 ### With cleanup
 

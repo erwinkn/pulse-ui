@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from types import SimpleNamespace
 from typing import Any, cast, override
 
@@ -6,6 +7,7 @@ import pulse as ps
 import pytest
 from pulse.app import App
 from pulse.channel import (
+	MAX_QUEUED_EVENTS,
 	ChannelDetached,
 	ChannelDisconnected,
 	ChannelRemoteError,
@@ -1147,4 +1149,114 @@ async def test_detach_skips_pending_handlers():
 	channel.detach()
 	for _ in range(10):
 		await asyncio.sleep(0)
-	assert seen == ["first"]
+	# detach cancels the pump mid-await, so neither the suspended handler nor the
+	# ones queued behind it resume.
+	assert seen == []
+
+
+@pytest.mark.asyncio
+async def test_malformed_response_is_dropped():
+	app, dummy, _session, render, user = build_middleware_session(PulseMiddleware())
+	errors: list[Any] = []
+
+	def report_error(*args: Any, **kwargs: Any) -> None:
+		errors.append(args)
+
+	render.report_error = report_error  # pyright: ignore[reportAttributeAccessIssue]
+
+	for message in (
+		{"type": "channel", "action": "response", "channel": "c"},
+		{"type": "channel", "action": "response", "responseTo": "req-1"},
+		{"type": "channel", "action": "response", "channel": "c", "responseTo": 3},
+	):
+		await app._handle_channel_message(  # pyright: ignore[reportPrivateUsage]
+			render, user, as_response(message)
+		)
+	assert dummy.sent == []
+	assert errors == []
+
+
+@pytest.mark.asyncio
+async def test_event_backlog_drops_oldest_with_one_warning(
+	caplog: pytest.LogCaptureFixture,
+):
+	app, _dummy, session, render, _route = build_session()
+	release = asyncio.Event()
+	seen: list[Any] = []
+
+	async def blocked(payload: Any) -> None:
+		seen.append(payload)
+		await release.wait()
+
+	with ctx(app, session, render):
+		channel = ps.channel("backlog", lifetime="tab")
+		channel.on("ping", blocked)
+
+	with caplog.at_level(logging.WARNING):
+		for i in range(MAX_QUEUED_EVENTS + 5):
+			render.channels.handle_event(
+				as_event(
+					{
+						"type": "channel",
+						"action": "event",
+						"channel": "backlog",
+						"event": "ping",
+						"payload": i,
+					},
+				)
+			)
+		await asyncio.sleep(0)
+		# One event is in flight on the blocked handler, the rest wait in the queue.
+		assert len(channel._events) == MAX_QUEUED_EVENTS - 1  # pyright: ignore[reportPrivateUsage]
+	warnings = [r for r in caplog.records if "event backlog" in r.getMessage()]
+	assert len(warnings) == 1
+	release.set()
+	await wait_for(lambda: len(seen) == MAX_QUEUED_EVENTS)
+	# The 5 oldest events were shed; the newest survive, in order.
+	assert seen == list(range(5, MAX_QUEUED_EVENTS + 5))
+
+
+@pytest.mark.asyncio
+async def test_detach_cancels_event_pump():
+	app, _dummy, session, render, _route = build_session()
+	release = asyncio.Event()
+	seen: list[Any] = []
+
+	async def blocked(payload: Any) -> None:
+		seen.append(payload)
+		await release.wait()
+
+	with ctx(app, session, render):
+		channel = ps.channel("cancel-pump", lifetime="tab")
+		channel.on("ping", blocked)
+	for i in range(2):
+		render.channels.handle_event(
+			as_event(
+				{
+					"type": "channel",
+					"action": "event",
+					"channel": "cancel-pump",
+					"event": "ping",
+					"payload": i,
+				},
+			)
+		)
+	await asyncio.sleep(0)
+	pump = channel._pump  # pyright: ignore[reportPrivateUsage]
+	assert pump is not None and not pump.done()
+	channel.detach()
+	release.set()
+	await wait_for(lambda: pump.cancelled())
+	assert pump.cancelled()
+	assert seen == [0]
+
+
+@pytest.mark.asyncio
+async def test_connected_emit_still_fails_on_unserializable_payload():
+	app, _dummy, session, render, _route = build_session(connected=True)
+	# The live socket serializes in the emitter's frame; nothing to validate twice.
+	render.send = lambda message: serialize(message)  # pyright: ignore[reportAttributeAccessIssue]
+	with ctx(app, session, render):
+		channel = ps.channel("live-bad", lifetime="tab")
+		with pytest.raises(TypeError):
+			channel.emit("ping", {"cls": object})

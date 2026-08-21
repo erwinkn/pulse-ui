@@ -19,7 +19,7 @@ from pulse.hooks.core import HookContext
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import ServerMessage
 from pulse.reactive import Effect
-from pulse.render_session import MAX_DISCONNECT_QUEUE, RenderSession
+from pulse.render_session import MAX_QUEUED_CHANNEL_MESSAGES, RenderSession
 from pulse.routing import Route, RouteInfo, RouteTree
 from pulse.test_helpers import wait_for
 from pulse.transpiler.nodes import Element, PulseNode
@@ -2223,19 +2223,31 @@ def test_report_error_fans_out_when_path_is_unmounted():
 	session.close()
 
 
-def test_disconnect_queue_drops_oldest_with_one_warning(
+def test_disconnect_queue_drops_oldest_channel_events_with_one_warning(
 	caplog: pytest.LogCaptureFixture,
 ):
 	app = ps.App()
 	session = ps.RenderSession("render-cap", app.routes)
 	with caplog.at_level(logging.WARNING):
-		for i in range(MAX_DISCONNECT_QUEUE + 5):
+		for i in range(MAX_QUEUED_CHANNEL_MESSAGES + 5):
 			session.channels.send_event("cap", f"e{i}", None)
 	queue = session._global_queue  # pyright: ignore[reportPrivateUsage]
-	assert len(queue) == MAX_DISCONNECT_QUEUE
+	assert len(queue) == MAX_QUEUED_CHANNEL_MESSAGES
 	assert cast(Any, queue[0])["event"] == "e5"
 	warnings = [r for r in caplog.records if "disconnect queue" in r.getMessage()]
 	assert len(warnings) == 1
+
+
+def test_channel_overflow_keeps_control_plane_messages():
+	app = ps.App()
+	session = ps.RenderSession("render-control", app.routes)
+	session.send({"type": "reload"})
+	for i in range(MAX_QUEUED_CHANNEL_MESSAGES + 50):
+		session.channels.send_event("cap", f"e{i}", None)
+	queue = session._global_queue  # pyright: ignore[reportPrivateUsage]
+	assert [m["type"] for m in queue].count("reload") == 1
+	assert len(queue) == MAX_QUEUED_CHANNEL_MESSAGES + 1
+	assert cast(Any, queue[1])["event"] == "e50"
 
 
 def test_connect_drain_survives_undeliverable_message():

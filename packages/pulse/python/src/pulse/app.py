@@ -1119,17 +1119,25 @@ class App:
 		self, render: RenderSession, session: UserSession, msg: ClientChannelMessage
 	) -> None:
 		action = msg.get("action")
-		if action == "response":
-			render.channels.handle_response(cast(ClientChannelResponseMessage, msg))
-			return
-		if action not in ("event", "request"):
+		if action not in ("event", "request", "response"):
 			logger.warning("Unknown channel action received: %s", msg)
 			return
 
 		channel_id = msg.get("channel")
+		if not isinstance(channel_id, str):
+			logger.warning("Dropping channel message without channel: %s", msg)
+			return
+
+		if action == "response":
+			if not isinstance(msg.get("responseTo"), str):
+				logger.warning("Dropping channel response without responseTo: %s", msg)
+				return
+			render.channels.handle_response(cast(ClientChannelResponseMessage, msg))
+			return
+
 		event = msg.get("event")
-		if not isinstance(channel_id, str) or not isinstance(event, str):
-			logger.warning("Dropping malformed channel message: %s", msg)
+		if not isinstance(event, str):
+			logger.warning("Dropping channel message without event: %s", msg)
 			return
 		request_id = None
 		if action == "request":

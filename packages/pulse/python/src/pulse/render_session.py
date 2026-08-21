@@ -47,8 +47,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__file__)
 
-# Cap on messages buffered while the socket is down (drop-oldest past this).
+# Caps on messages buffered while the socket is down (drop-oldest past these).
+# Channel events get their own budget so a chatty channel cannot evict
+# control-plane messages (reload, navigate_to, server_error).
 MAX_DISCONNECT_QUEUE = 1000
+MAX_QUEUED_CHANNEL_MESSAGES = 500
 
 
 class JsExecError(Exception):
@@ -282,7 +285,7 @@ class RenderSession:
 	_pending_js_results: dict[str, asyncio.Future[Any]]
 	_global_states: dict[str, State]
 	_global_queue: list[ServerMessage]
-	_global_queue_overflowed: bool
+	_queue_trim_warned: set[str]
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
 
@@ -317,7 +320,7 @@ class RenderSession:
 		self._send_message = None
 		self._global_states = {}
 		self._global_queue = []
-		self._global_queue_overflowed = False
+		self._queue_trim_warned = set()
 		self.connected = False
 		self.channels = ChannelsManager(self)
 		self.forms = FormRegistry(self)
@@ -356,7 +359,7 @@ class RenderSession:
 		self.connected = True
 		queued = self._global_queue
 		self._global_queue = []
-		self._global_queue_overflowed = False
+		self._queue_trim_warned.clear()
 		for msg in queued:
 			# One undeliverable message must not abort the drain: the rest of the
 			# queue would be lost and the session left connected without a socket.
@@ -471,19 +474,39 @@ class RenderSession:
 			mount.deliver(message, lambda _: None)
 
 	def _queue_global(self, message: ServerMessage) -> None:
-		"""Buffer a message for the disconnect grace period, dropping oldest on overflow."""
+		"""Buffer a message for the disconnect grace period, dropping oldest on overflow.
+
+		Channel messages overflow against their own budget: they are the chatty ones,
+		and losing a reload / navigate_to / server_error to them would be far worse.
+		"""
 		self._global_queue.append(message)
-		overflow = len(self._global_queue) - MAX_DISCONNECT_QUEUE
-		if overflow <= 0:
+		if len(self._global_queue) <= MAX_QUEUED_CHANNEL_MESSAGES:
 			return
-		del self._global_queue[:overflow]
-		if not self._global_queue_overflowed:
-			self._global_queue_overflowed = True
-			logger.warning(
-				"Render session %s disconnect queue hit %d messages; dropping oldest",
-				self.id,
-				MAX_DISCONNECT_QUEUE,
-			)
+		channel_positions = [
+			i for i, msg in enumerate(self._global_queue) if msg["type"] == "channel"
+		]
+		drop = len(channel_positions) - MAX_QUEUED_CHANNEL_MESSAGES
+		if drop > 0:
+			dropped = set(channel_positions[:drop])
+			self._global_queue = [
+				msg for i, msg in enumerate(self._global_queue) if i not in dropped
+			]
+			self._warn_queue_trim("channel", MAX_QUEUED_CHANNEL_MESSAGES)
+		overflow = len(self._global_queue) - MAX_DISCONNECT_QUEUE
+		if overflow > 0:
+			del self._global_queue[:overflow]
+			self._warn_queue_trim("total", MAX_DISCONNECT_QUEUE)
+
+	def _warn_queue_trim(self, kind: str, cap: int) -> None:
+		if kind in self._queue_trim_warned:
+			return
+		self._queue_trim_warned.add(kind)
+		logger.warning(
+			"Render session %s disconnect queue hit its %s cap (%d); dropping oldest",
+			self.id,
+			kind,
+			cap,
+		)
 
 	def _error_report_paths(self, path: str | None) -> list[str]:
 		# Wire `path` must match a live client view. Tab / connect / middleware

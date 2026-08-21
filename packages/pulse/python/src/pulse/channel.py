@@ -36,6 +36,10 @@ ChannelInternKey = tuple[ChannelLifetime, str, str | None]
 ChannelHandler = Callable[[Any], Any | Awaitable[Any]]
 ChannelHandlerRemover = Callable[[], None]
 
+# Cap on events waiting on a handle's serial pump (drop-oldest past this): a
+# handler that awaits for a long time must not grow the backlog without bound.
+MAX_QUEUED_EVENTS = 500
+
 
 class ChannelTimeout(Exception):
 	timeout: float
@@ -76,6 +80,7 @@ class Channel:
 	_detached: bool
 	_events: deque[tuple[str, Any]]
 	_pump: asyncio.Task[None] | None
+	_events_overflowed: bool
 
 	def __init__(
 		self,
@@ -91,8 +96,9 @@ class Channel:
 		self._route_path = route_path
 		self._handlers = {}
 		self._detached = False
-		self._events = deque()
+		self._events = deque(maxlen=MAX_QUEUED_EVENTS)
 		self._pump = None
+		self._events_overflowed = False
 
 	@property
 	def id(self) -> str:
@@ -163,6 +169,9 @@ class Channel:
 		self._detached = True
 		self._handlers.clear()
 		self._events.clear()
+		if self._pump is not None:
+			self._pump.cancel()
+			self._pump = None
 		self._session.channels.forget_handle(self)
 
 	def _report_task_error(self, task: asyncio.Task[Any]) -> None:
@@ -180,6 +189,14 @@ class Channel:
 		"""Queue an event. One serial pump per handle keeps events in arrival order."""
 		if self._detached:
 			return
+		if len(self._events) == MAX_QUEUED_EVENTS and not self._events_overflowed:
+			# Nothing sensible to do but shed load: a handler is holding the pump.
+			self._events_overflowed = True
+			logger.warning(
+				"Channel %s event backlog hit %d; dropping oldest events",
+				self._id,
+				MAX_QUEUED_EVENTS,
+			)
 		self._events.append((event, payload))
 		if self._pump is not None and not self._pump.done():
 			return
@@ -325,7 +342,7 @@ class ChannelsManager:
 			"event": event,
 		}
 		if payload is not None:
-			message["payload"] = _wire_payload(channel_id, event, payload)
+			message["payload"] = self._wire_payload(channel_id, event, payload)
 		self._session.send(message)
 
 	def send_request(
@@ -339,7 +356,7 @@ class ChannelsManager:
 			"requestId": request_id,
 		}
 		if payload is not None:
-			message["payload"] = _wire_payload(channel_id, event, payload)
+			message["payload"] = self._wire_payload(channel_id, event, payload)
 		self._session.send(message)
 
 	def send_response(
@@ -358,7 +375,7 @@ class ChannelsManager:
 		if error is not None:
 			message["error"] = error
 		elif payload is not None:
-			message["payload"] = _wire_payload(channel_id, request_id, payload)
+			message["payload"] = self._wire_payload(channel_id, request_id, payload)
 		self._session.send(message)
 
 	def send_error(
@@ -453,19 +470,20 @@ class ChannelsManager:
 			return
 		future.set_result(message.get("payload"))
 
-
-def _wire_payload(channel_id: str, label: str, payload: Any) -> Any:
-	if isinstance(payload, ReactiveDict | ReactiveList | ReactiveSet):
-		payload = unwrap(payload)
-	# Serialize eagerly to fail at the emitter: a bad payload sitting on the
-	# disconnect queue would otherwise blow up at flush time, far from its origin.
-	try:
-		serialize(payload)
-	except (TypeError, ValueError) as exc:
-		raise TypeError(
-			f"Channel {channel_id!r} payload for {label!r} is not serializable: {exc}"
-		) from exc
-	return payload
+	def _wire_payload(self, channel_id: str, label: str, payload: Any) -> Any:
+		if isinstance(payload, ReactiveDict | ReactiveList | ReactiveSet):
+			payload = unwrap(payload)
+		if not self._session.connected:
+			# The message goes on the disconnect queue, where a serialization
+			# failure would only surface at flush time, far from its origin.
+			# While connected the socket serializes it here, in the caller's frame.
+			try:
+				serialize(payload)
+			except (TypeError, ValueError) as exc:
+				raise TypeError(
+					f"Channel {channel_id!r} payload for {label!r} is not serializable: {exc}"
+				) from exc
+		return payload
 
 
 def channel(

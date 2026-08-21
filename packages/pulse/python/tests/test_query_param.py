@@ -43,9 +43,13 @@ def make_context(route_info: RouteInfo):
 
 def flush_query_param_sync(session: RenderSession) -> None:
 	flush_effects()
-	effect = session.query_param_sync._state_effect  # pyright: ignore[reportPrivateUsage]
+	effect = session.url._sync_effect  # pyright: ignore[reportPrivateUsage]
 	if effect is not None:
 		effect.flush()
+
+
+def navigations(messages: list[ServerMessage]) -> list[ServerNavigateToMessage]:
+	return [m for m in messages if m["type"] == "navigate_to"]
 
 
 class TestQueryParam:
@@ -85,9 +89,8 @@ class TestQueryParam:
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			state = QState()
 			flush_query_param_sync(session)
-
-		assert state.q == "from-constructor"
-		assert state.page == 3
+			assert state.q == "from-constructor"
+			assert state.page == 3
 		assert len(messages) == 1
 		msg = messages[0]
 		assert msg["type"] == "navigate_to"
@@ -296,19 +299,513 @@ class TestQueryParam:
 				state = TimeState()
 				assert state.ts.tzinfo == timezone.utc
 
-	def test_duplicate_param_in_same_route_raises(self):
+	def test_same_route_states_share_query_param(self):
 		class First(ps.State):
 			q: ps.QueryParam[str] = ""
 
 		class Second(ps.State):
 			q: ps.QueryParam[str] = ""
 
+		app, session, route_ctx = make_context(
+			make_route_info("/", query_params={"q": "hello"})
+		)
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			first = First()
+			second = Second()
+			assert first.q == "hello"
+			assert second.q == "hello"
+			assert First.__dict__["q"].get_signal(first) is Second.__dict__[
+				"q"
+			].get_signal(second)
+			flush_effects()
+			messages.clear()
+
+			first.q = "from-first"
+			assert second.q == "from-first"
+			flush_query_param_sync(session)
+			navs = navigations(messages)
+			assert len(navs) == 1
+			assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["from-first"]
+
+			messages.clear()
+			second.q = "from-second"
+			assert first.q == "from-second"
+			flush_query_param_sync(session)
+			navs = navigations(messages)
+			assert len(navs) == 1
+			assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == [
+				"from-second"
+			]
+
+		assert "q" in session.url._slots  # pyright: ignore[reportPrivateUsage]
+
+	def test_same_route_sibling_unregister_keeps_remaining_writer(self):
+		class First(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		class Second(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		app, session, route_ctx = make_context(
+			make_route_info("/", query_params={"q": "hello"})
+		)
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			first = First()
+			second = Second()
+			flush_effects()
+			first.dispose()
+			flush_effects()
+			messages.clear()
+			second.q = "only-second"
+			flush_query_param_sync(session)
+
+		navs = navigations(messages)
+		assert len(navs) == 1
+		assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["only-second"]
+		assert "q" in session.url._slots  # pyright: ignore[reportPrivateUsage]
+
+	def test_conflicting_codec_or_default_uses_independent_views(self):
+		class AsStr(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		class AsInt(ps.State):
+			q: ps.QueryParam[int] = 0
+
+		class OtherDefault(ps.State):
+			q: ps.QueryParam[str] = "other"
+
 		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
 		session.connect(lambda _msg: None)
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
-			_first = First()
-			with pytest.raises(ValueError, match="'q' is already bound"):
-				_second = Second()
+			first = AsStr()
+			second = AsInt()
+			third = OtherDefault()
+			assert first.q == ""
+			assert second.q == 0
+			assert third.q == "other"
+			first.q = "12"
+			flush_query_param_sync(session)
+			assert first.q == "12"
+			assert second.q == 12
+			assert third.q == "12"
+
+	def test_query_param_access_requires_pulse_context(self):
+		class QState(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		app, session, route_ctx = make_context(
+			make_route_info("/", query_params={"q": "hello"})
+		)
+		session.connect(lambda _msg: None)
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			state = QState()
+			sig = QState.__dict__["q"].get_signal(state)
+		with pytest.raises(RuntimeError, match="require a render context"):
+			_ = state.q
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			assert QState.__dict__["q"].get_signal(state) is sig
+			assert state.q == "hello"
+
+
+def test_f1_pending_write_survives_stale_route_update():
+	class QState(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	app, session, route_ctx = make_context(
+		make_route_info("/", query_params={"q": "hello"})
+	)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		state = QState()
+		flush_query_param_sync(session)
+		messages.clear()
+		state.q = "user-typed"
+		route_ctx.update(make_route_info("/", query_params={"q": "hello"}))
+		flush_query_param_sync(session)
+		assert state.q == "user-typed"
+		navs = navigations(messages)
+		assert len(navs) == 1
+		assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["user-typed"]
+
+
+def test_f2_reconnect_echo_does_not_revert_server_write():
+	class QState(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		state = QState()
+		flush_query_param_sync(session)
+		messages.clear()
+		state.q = "server-write"
+		flush_query_param_sync(session)
+		assert len(navigations(messages)) == 1
+	session.disconnect()
+	session.connect(messages.append)
+	session.update_route("/", make_route_info("/", query_params={}))
+	flush_query_param_sync(session)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		assert state.q == "server-write"
+	assert len(navigations(messages)) == 2
+	assert parse_qs(urlparse(str(navigations(messages)[-1]["path"])).query)["q"] == [
+		"server-write"
+	]
+
+
+def test_r1_stale_command_does_not_block_client_navigation():
+	class QState(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	app, session, route_ctx = make_context(
+		make_route_info("/", query_params={"q": "a"})
+	)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		state = QState()
+		state.q = "b"
+		flush_query_param_sync(session)
+		messages.clear()
+		route_ctx.update(make_route_info("/", query_params={"q": "c"}))
+		flush_query_param_sync(session)
+		messages.clear()
+		route_ctx.update(make_route_info("/", query_params={"q": "b"}))
+		flush_query_param_sync(session)
+		assert state.q == "b"
+		assert navigations(messages) == []
+
+
+def test_r8_foreign_param_does_not_prevent_command_ack():
+	class QState(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	app, session, route_ctx = make_context(
+		make_route_info("/", query_params={"q": "a", "utm": "x"})
+	)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		state = QState()
+		state.q = "b"
+		flush_query_param_sync(session)
+		route_ctx.update(make_route_info("/", query_params={"q": "b"}))
+		flush_query_param_sync(session)
+		messages.clear()
+		route_ctx.update(make_route_info("/", query_params={"q": "c"}))
+		flush_query_param_sync(session)
+		route_ctx.update(make_route_info("/", query_params={"q": "b"}))
+		flush_query_param_sync(session)
+		assert state.q == "b"
+		assert navigations(messages) == []
+
+
+def test_r2_pending_commands_preserve_latest_write():
+	class QState(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		state = QState()
+		flush_query_param_sync(session)
+		messages.clear()
+		state.q = "first"
+		flush_query_param_sync(session)
+		state.q = "second"
+		flush_query_param_sync(session)
+		messages.clear()
+		route_ctx.update(make_route_info("/", query_params={"q": "first"}))
+		flush_query_param_sync(session)
+		assert state.q == "second"
+		assert [message["path"] for message in navigations(messages)] == ["/?q=second"]
+		messages.clear()
+		route_ctx.update(make_route_info("/", query_params={"q": "second"}))
+		flush_query_param_sync(session)
+		assert state.q == "second"
+		assert navigations(messages) == []
+
+
+def test_r3_bad_codec_commits_route_snapshot_and_valid_views():
+	class Multi(ps.State):
+		page: ps.QueryParam[int] = 1
+		q: ps.QueryParam[str] = ""
+
+	route_a = Route("a", ps.component(lambda: ps.div()))
+	route_b = Route("b", ps.component(lambda: ps.div()))
+	routes = RouteTree([route_a, route_b])
+	app = ps.App(routes=[route_a, route_b])
+	session = RenderSession("test", routes)
+	session.connect(lambda _message: None)
+	session.prerender(
+		["/a"], make_route_info("/a", query_params={"page": "2", "q": "x"})
+	)
+	route_ctx = session.route_mounts["/a"].route
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		state = Multi()
+		flush_query_param_sync(session)
+		with pytest.raises(ValueError, match="expected int"):
+			route_ctx.update(
+				make_route_info("/b", query_params={"page": "abc", "q": "y"})
+			)
+		assert session.url.pathname == "/b"
+		assert session.url._applied_params == {  # pyright: ignore[reportPrivateUsage]
+			"page": "abc",
+			"q": "y",
+		}
+		assert session.url.query_params == {"page": "abc", "q": "y"}
+		assert state.page == 2
+		assert state.q == "y"
+
+
+def test_r4_writing_one_default_resets_sibling_defaults():
+	class First(ps.State):
+		page: ps.QueryParam[int] = 1
+
+	class Second(ps.State):
+		page: ps.QueryParam[int] = 2
+
+	app, session, route_ctx = make_context(
+		make_route_info("/", query_params={"page": "7"})
+	)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		first = First()
+		second = Second()
+		flush_query_param_sync(session)
+		assert first.page == 7
+		assert second.page == 7
+		messages.clear()
+		first.page = 1
+		flush_query_param_sync(session)
+		assert first.page == 1
+		assert second.page == 2
+		assert [message["path"] for message in navigations(messages)] == ["/"]
+
+
+def test_r5_new_view_converges_after_unflushed_write():
+	class First(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	class Second(ps.State):
+		q: ps.QueryParam[str] = "other-default"
+
+	app, session, route_ctx = make_context(
+		make_route_info("/", query_params={"q": "url"})
+	)
+	session.connect(lambda _message: None)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		first = First()
+		flush_query_param_sync(session)
+		first.q = "typed"
+		second = Second()
+		assert first.q == "typed"
+		assert second.q == "url"
+		flush_query_param_sync(session)
+		assert second.q == "typed"
+
+
+def test_r9_bad_route_update_activates_mount_and_delivers_error():
+	class Multi(ps.State):
+		page: ps.QueryParam[int] = 1
+
+	def render():
+		Multi()
+		return ps.div()
+
+	route = Route("/", ps.component(render))
+	routes = RouteTree([route])
+	session = RenderSession("test", routes)
+	session.prerender(["/"], make_route_info("/", query_params={"page": "2"}))
+	mount = session.route_mounts["/"]
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	messages.clear()
+	session.update_route("/", make_route_info("/", query_params={"page": "abc"}))
+	flush_query_param_sync(session)
+	assert mount.state == "active"
+	assert any(message["type"] == "server_error" for message in messages)
+	assert session.url._applied_params == {  # pyright: ignore[reportPrivateUsage]
+		"page": "abc"
+	}
+	assert session.url.query_params == {"page": "abc"}
+
+
+def test_client_can_renavigate_to_previously_commanded_value():
+	class QState(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	app, session, route_ctx = make_context(
+		make_route_info("/", query_params={"q": "hello"})
+	)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		state = QState()
+		flush_query_param_sync(session)
+		state.q = "world"
+		flush_query_param_sync(session)
+		route_ctx.update(make_route_info("/", query_params={"q": "world"}))
+		flush_query_param_sync(session)
+		route_ctx.update(make_route_info("/", query_params={"q": "hello"}))
+		flush_query_param_sync(session)
+		messages.clear()
+		route_ctx.update(make_route_info("/", query_params={"q": "world"}))
+		flush_query_param_sync(session)
+		assert state.q == "world"
+		assert navigations(messages) == []
+
+
+def test_f3_write_before_first_route_info_survives_initial_apply():
+	class QState(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	def render():
+		return ps.div()
+
+	route = Route("/", ps.component(render))
+	routes = RouteTree([route])
+	session = RenderSession("test", routes)
+	app = ps.App(routes=[route])
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session):
+		state = QState()
+		state.q = "set-before-route"
+		flush_query_param_sync(session)
+	session.prerender(["/"], make_route_info("/", query_params={}))
+	flush_query_param_sync(session)
+	with ps.PulseContext(
+		app=app, render=session, route=session.route_mounts["/"].route
+	):
+		assert state.q == "set-before-route"
+	assert len(navigations(messages)) == 1
+	assert parse_qs(urlparse(str(navigations(messages)[0]["path"])).query)["q"] == [
+		"set-before-route"
+	]
+
+
+def test_f4_failed_constructor_keeps_immediate_shared_write():
+	class Boom(ps.State):
+		q: ps.QueryParam[str] = ""
+
+		def __init__(self):
+			self.q = "half-written"
+			raise RuntimeError("boom")
+
+	class Later(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		with pytest.raises(RuntimeError, match="boom"):
+			Boom()
+		flush_query_param_sync(session)
+		messages.clear()
+		later = Later()
+		flush_query_param_sync(session)
+		assert later.q == "half-written"
+	assert len(navigations(messages)) == 1
+	assert parse_qs(urlparse(str(navigations(messages)[0]["path"])).query)["q"] == [
+		"half-written"
+	]
+
+
+def test_f5_cross_route_declarations_have_independent_defaults():
+	class FiltersA(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	class FiltersB(ps.State):
+		q: ps.QueryParam[str] = "fallback"
+
+	app, session = make_two_route_session()
+	session.connect(lambda _msg: None)
+	session.prerender(["/a"], make_route_info("/a", query_params={}))
+	with ps.PulseContext(
+		app=app, render=session, route=session.route_mounts["/a"].route
+	):
+		first = FiltersA()
+		flush_query_param_sync(session)
+		assert first.q == ""
+	session.prerender(["/b"], make_route_info("/b", query_params={}))
+	with ps.PulseContext(
+		app=app, render=session, route=session.route_mounts["/b"].route
+	):
+		second = FiltersB()
+		assert second.q == "fallback"
+
+
+def test_f5b_subclass_override_has_independent_default_and_shared_raw():
+	class Base(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	class Sub(Base):
+		q: ps.QueryParam[str] = "sub-default"
+
+	app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+	session.connect(lambda _msg: None)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		base = Base()
+		sub = Sub()
+		assert base.q == ""
+		assert sub.q == "sub-default"
+		base.q = "x"
+		flush_query_param_sync(session)
+		assert sub.q == "x"
+
+
+def test_f6_nested_state_construction_coalesces_navigation():
+	class Inner(ps.State):
+		page: ps.QueryParam[int] = 1
+
+	class Outer(ps.State):
+		q: ps.QueryParam[str] = ""
+		_inner: Inner
+
+		def __init__(self):
+			self.q = "outer"
+			self._inner = Inner()
+			self._inner.page = 5
+
+	app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		Outer()
+		flush_query_param_sync(session)
+	navs = navigations(messages)
+	assert len(navs) == 1
+	query = parse_qs(urlparse(str(navs[0]["path"])).query)
+	assert query["q"] == ["outer"]
+	assert query["page"] == ["5"]
+
+
+def test_f7_close_is_idempotent_and_prevents_resurrection():
+	class QState(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+	session.connect(lambda _msg: None)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		QState()
+		flush_query_param_sync(session)
+	session.close()
+	session.close()
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		with pytest.raises(RuntimeError, match="SessionUrl is closed"):
+			QState()
+	assert session.url._slots == {}  # pyright: ignore[reportPrivateUsage]
+	assert session.url._sync_effect is None  # pyright: ignore[reportPrivateUsage]
 
 
 def make_two_route_session():
@@ -322,10 +819,6 @@ def make_two_route_session():
 	routes = RouteTree([route_a, route_b])
 	app = ps.App(routes=[route_a, route_b])
 	return app, RenderSession("test", routes)
-
-
-def navigations(messages: list[ServerMessage]) -> list[ServerNavigateToMessage]:
-	return [m for m in messages if m["type"] == "navigate_to"]
 
 
 class TestQueryParamAcrossMounts:
@@ -377,12 +870,14 @@ class TestQueryParamAcrossMounts:
 			"/b", make_route_info("/b", query_params={"q": "world", "other": "1"})
 		)
 		flush_effects()
-		assert state.q == "world"
-
-		# state -> URL still works, against the *current* route.
-		messages.clear()
-		state.q = "next"
-		flush_query_param_sync(session)
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/b"].route
+		):
+			assert state.q == "world"
+			# state -> URL still works, against the *current* route.
+			messages.clear()
+			state.q = "next"
+			flush_query_param_sync(session)
 		navs = navigations(messages)
 		assert len(navs) == 1
 		assert navs[0].get("sourcePath") == "/b"
@@ -414,12 +909,15 @@ class TestQueryParamAcrossMounts:
 		# The URL stays the source of truth: a route without the param means default.
 		self.navigate(session, "/b", {}, detach="/a")
 		flush_effects()
-		assert state.q == "fallback"
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/b"].route
+		):
+			assert state.q == "fallback"
 
 		session.close()
 
-	def test_same_param_on_another_route_takes_over(self):
-		"""Overlapping mounts must not collide; the newest binding owns the URL."""
+	def test_same_param_on_another_route_shares_slot(self):
+		"""Overlapping mounts share the session slot; either write updates both."""
 
 		class FiltersA(ps.State):
 			q: ps.QueryParam[str] = ""
@@ -438,7 +936,6 @@ class TestQueryParamAcrossMounts:
 			a = FiltersA()
 			flush_effects()
 
-		# The new route is prerendered while /a is still mounted: no error.
 		info_b = make_route_info("/b", query_params={"q": "hello"})
 		session.prerender(["/b"], info_b)
 		with ps.PulseContext(
@@ -447,35 +944,33 @@ class TestQueryParamAcrossMounts:
 			b = FiltersB()
 			flush_effects()
 
-		# The newest binding writes the URL...
-		messages.clear()
-		b.q = "from-b"
-		flush_query_param_sync(session)
-		navs = navigations(messages)
-		assert len(navs) == 1
-		assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["from-b"]
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/b"].route
+		):
+			assert FiltersA.__dict__["q"].get_signal(a) is FiltersB.__dict__[
+				"q"
+			].get_signal(b)
 
-		# ...the displaced one does not, while it is still mounted.
-		messages.clear()
-		a.q = "from-a"
-		flush_query_param_sync(session)
-		assert navigations(messages) == []
+			messages.clear()
+			b.q = "from-b"
+			assert a.q == "from-b"
+			flush_query_param_sync(session)
+			navs = navigations(messages)
+			assert len(navs) == 1
+			assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["from-b"]
 
-		# Both still follow the URL.
-		session.update_route("/b", make_route_info("/b", query_params={"q": "shared"}))
-		session.update_route("/a", make_route_info("/a", query_params={"q": "shared"}))
-		flush_effects()
-		assert a.q == "shared"
-		assert b.q == "shared"
+			messages.clear()
+			a.q = "from-a"
+			assert b.q == "from-a"
+			flush_query_param_sync(session)
+			navs = navigations(messages)
+			assert len(navs) == 1
+			assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["from-a"]
 
 		session.close()
 
-	def test_restored_binding_regains_url_ownership(self):
-		"""Disposing the owning binding hands the URL back to the previous one.
-
-		The restored binding must be re-tracked by the state effect, or its
-		changes silently stop writing to the URL.
-		"""
+	def test_release_keeps_slot_while_other_state_remains(self):
+		"""Disposing one registrant leaves the session slot for the other."""
 
 		class Filters(ps.State):
 			q: ps.QueryParam[str] = ""
@@ -531,8 +1026,11 @@ class TestQueryParamAcrossMounts:
 		assert navigations(messages) == []
 
 		# ...and its changes write to the URL once more.
-		state.q = "from-restored"
-		flush_query_param_sync(session)
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/c"].route
+		):
+			state.q = "from-restored"
+			flush_query_param_sync(session)
 		navs = navigations(messages)
 		assert len(navs) == 1
 		assert navs[0].get("sourcePath") == "/c"

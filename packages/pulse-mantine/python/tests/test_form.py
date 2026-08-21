@@ -138,7 +138,7 @@ async def test_form_sync_handler_survives_channel_recreation():
 			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
 			message=client_channel_request(
 				{
-					"type": "channel_message",
+					"type": "channel_event",
 					"channel": form._channel.id,  # pyright: ignore[reportPrivateUsage]
 					"event": "syncValues",
 					"payload": {"values": {"query": "xrd"}},

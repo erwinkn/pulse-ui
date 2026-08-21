@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime
 from typing import Any, override
 
 import httpx
@@ -38,6 +39,67 @@ class BlockingSessionStore(ps.SessionStore):
 			self.auth_save_started.set()
 			await self.allow_auth_save.wait()
 		self.data[sid] = dict(session)
+
+
+def test_cookie_session_store_round_trips_json_data() -> None:
+	store = ps.CookieSessionStore(secret="test-secret")
+	session = {"user": {"id": 7}, "roles": ["admin"], "active": True}
+
+	decoded = store.decode(store.encode("sid", session))
+
+	assert decoded is not None
+	assert decoded[0] == "sid"
+	assert dict(decoded[1]) == session
+
+
+def test_cookie_session_store_rejects_non_json_data_without_mutation() -> None:
+	store = ps.CookieSessionStore(secret="test-secret")
+	session = {"last_seen": datetime.now(UTC)}
+
+	with pytest.raises(TypeError, match="JSON-compatible"):
+		store.encode("sid", session)
+
+	assert "last_seen" in session
+
+
+@pytest.mark.parametrize(
+	"value",
+	[
+		("tuple",),
+		{1: "non-string key"},
+		float("inf"),
+	],
+)
+def test_cookie_session_store_rejects_lossy_json_values(value: object) -> None:
+	store = ps.CookieSessionStore(secret="test-secret")
+	session: dict[str, Any] = {"value": value}
+
+	with pytest.raises(TypeError, match="Session data"):
+		store.encode("sid", session)
+
+	assert session["value"] is value
+
+
+def test_cookie_session_store_rejects_cycles_without_mutation() -> None:
+	store = ps.CookieSessionStore(secret="test-secret")
+	value: list[object] = []
+	value.append(value)
+	session: dict[str, Any] = {"value": value}
+
+	with pytest.raises(TypeError, match="cycle"):
+		store.encode("sid", session)
+
+	assert session["value"] is value
+
+
+def test_cookie_session_store_rejects_oversized_data_without_mutation() -> None:
+	store = ps.CookieSessionStore(secret="test-secret", max_cookie_bytes=40)
+	session = {"value": "x" * 100}
+
+	with pytest.raises(ValueError, match="too large"):
+		store.encode("sid", session)
+
+	assert session == {"value": "x" * 100}
 
 
 @pytest.mark.asyncio

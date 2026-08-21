@@ -1,189 +1,306 @@
+from __future__ import annotations
+
 import datetime as dt
+import json
+from dataclasses import FrozenInstanceError, dataclass
+from typing import Any, cast, override
 
 import pytest
-from pulse.serializer import deserialize, serialize
+from pulse.serializer import (
+	PulseSerializable,
+	Serializer,
+	SerializerAdapter,
+	WireMap,
+	deserialize,
+	serialize,
+)
 
 
-def test_primitives_roundtrip_v3():
-	data = [1, "a", True, None, 3.5]
-	payload = serialize(data)
-	parsed = deserialize(payload)
-	assert parsed == data
+def wire_roundtrip(value: object) -> Any:
+	return deserialize(json.loads(json.dumps(serialize(value))))
 
 
-def test_handles_sets_v3():
-	source = {1, 2, "three"}
-	payload = serialize(source)
-	parsed = deserialize(payload)
+def test_serializer_configuration_is_immutable():
+	class Value:
+		pass
 
-	assert isinstance(parsed, set)
-	assert parsed == source
+	adapter = SerializerAdapter(Value, lambda _: {"ok": True})
+	serializer = Serializer([adapter])
 
-
-def test_nested_special_values_and_shared_refs_v3():
-	when = dt.datetime(2024, 2, 2, tzinfo=dt.UTC)
-	shared_set = {when}
-	data = {"s": shared_set, "also": shared_set, "arr": [shared_set, when]}
-
-	payload = serialize(data)
-	parsed = deserialize(payload)
-
-	assert isinstance(parsed["s"], set)
-	items = list(parsed["s"])
-	assert len(items) == 1
-	assert isinstance(items[0], dt.datetime)
-
-	assert parsed["also"] is parsed["s"]
-	assert parsed["arr"][0] is parsed["s"]
-	assert parsed["arr"][1] is items[0]
-
-
-def test_cycles_with_special_types_v3():
-	when = dt.datetime(2024, 3, 3, tzinfo=dt.UTC)
-	root: dict[str, object] = {"when": when}
-	root["self"] = root
-
-	payload = serialize(root)
-	parsed = deserialize(payload)
-
-	assert parsed["self"] is parsed
-	assert isinstance(parsed["when"], dt.datetime)
-	assert parsed["when"].timestamp() == pytest.approx(when.timestamp(), rel=1e-9)
-
-
-def test_multiple_special_types_v3():
-	d1 = dt.datetime(2020, 1, 1, tzinfo=dt.UTC)
-	d2 = dt.datetime(2030, 1, 1, tzinfo=dt.UTC)
-	data = {
-		"list": [{d1}, {"deep": [{d2, d1}]}],
-		"single": d2,
-	}
-
-	payload = serialize(data)
-	parsed = deserialize(payload)
-
-	assert isinstance(parsed["list"][0], set)
-	first_set_items = list(parsed["list"][0])
-	assert all(isinstance(item, dt.datetime) for item in first_set_items)
-
-	assert isinstance(parsed["list"][1]["deep"][0], set)
-	deep_items = list(parsed["list"][1]["deep"][0])
-	assert all(isinstance(item, dt.datetime) for item in deep_items)
-	assert isinstance(parsed["single"], dt.datetime)
-
-
-def test_arrays_and_objects_v3():
-	data = {"a": 1, "b": [2, 3, {"c": "x"}]}
-	payload = serialize(data)
-	parsed = deserialize(payload)
-	assert parsed == data
-
-
-def test_preserves_cycles_and_shared_refs_v3():
-	shared = {"v": 42}
-	root: dict[str, object] = {"left": {"shared": shared}, "right": {"shared": shared}}
-	root["self"] = root
-
-	payload = serialize(root)
-	parsed = deserialize(payload)
-
-	assert parsed["left"]["shared"] is parsed["right"]["shared"]
-	assert parsed["self"] is parsed
-	assert parsed["left"]["shared"]["v"] == 42
-
-
-def test_dates_and_shared_references_v3():
-	when = dt.datetime(2024, 1, 1, tzinfo=dt.UTC)
-	data = {"when": when, "same": when}
-	payload = serialize(data)
-	parsed = deserialize(payload)
-
-	assert isinstance(parsed["when"], dt.datetime)
-	assert parsed["when"].timestamp() == pytest.approx(when.timestamp(), rel=1e-9)
-	assert parsed["when"] is parsed["same"]
-
-
-def test_ref_index_does_not_collide_with_string_primitive_v4():
-	shared = {"domain": ["a", "b"]}
-	data = {"a": shared, "b": shared}
-
-	payload = serialize(data)
-	parsed = deserialize(payload)
-
-	assert parsed["a"]["domain"] == ["a", "b"]
-	assert parsed["a"] is parsed["b"]
-
-
-def test_ref_index_does_not_corrupt_numeric_primitive_v4():
-	shared: list[object] = []
-	data = [shared, 0.0, shared]
-
-	payload = serialize(data)
-	parsed = deserialize(payload)
-
-	assert parsed[0] is parsed[2]
-	assert parsed[1] == 0.0
-	assert parsed[1] is not parsed
-
-
-def test_date_index_does_not_collide_with_string_primitive_v4():
-	day = dt.date(2024, 1, 2)
-	data = {"label": "2024-01-02", "day": day}
-
-	payload = serialize(data)
-	parsed = deserialize(payload)
-
-	assert parsed["label"] == "2024-01-02"
-	assert isinstance(parsed["label"], str)
-	assert parsed["day"] == day
-	assert isinstance(parsed["day"], dt.date)
-
-
-def test_date_roundtrip_v4():
-	day = dt.date(2024, 1, 2)
-	data = {"day": day}
-	payload = serialize(data)
-	parsed = deserialize(payload)
-
-	assert isinstance(parsed["day"], dt.date)
-	assert parsed["day"] == day
-
-
-def test_unsupported_values_raise_v3():
+	with pytest.raises(FrozenInstanceError):
+		serializer._adapter_lookup = {}  # pyright: ignore[reportPrivateUsage,reportAttributeAccessIssue]
 	with pytest.raises(TypeError):
-		serialize({"x": lambda: None})
+		serializer._adapter_lookup[Value] = adapter  # pyright: ignore[reportPrivateUsage,reportIndexIssue]
 
 
-class TestNaNAndInfinity:
-	"""Test handling of NaN and Infinity during serialization."""
+@pytest.mark.parametrize(
+	"target",
+	[
+		object,
+		type(None),
+		bool,
+		int,
+		float,
+		str,
+		list,
+		tuple,
+		dict,
+		set,
+		dt.date,
+		dt.datetime,
+		WireMap,
+	],
+)
+def test_rejects_adapters_for_core_types(target: type[object]):
+	with pytest.raises(ValueError, match="core type"):
+		Serializer([SerializerAdapter(target, lambda value: value)])
 
-	def test_nan_converted_to_none(self):
-		"""NaN floats should be converted to None during serialization."""
-		data = {"value": float("nan")}
-		payload = serialize(data)
-		parsed = deserialize(payload)
-		assert parsed == {"value": None}
 
-	def test_nan_in_nested_structure(self):
-		"""NaN in nested dicts/lists should be converted to None."""
-		data = {"nested": {"value": float("nan")}, "list": [1.0, float("nan"), 3.0]}
-		payload = serialize(data)
-		parsed = deserialize(payload)
-		assert parsed == {"nested": {"value": None}, "list": [1.0, None, 3.0]}
+def test_rejects_duplicate_adapter_targets():
+	class Value:
+		pass
 
-	def test_infinity_raises(self):
-		"""Positive infinity should raise ValueError."""
-		with pytest.raises(ValueError, match="Infinity is not valid JSON"):
-			serialize({"value": float("inf")})
+	with pytest.raises(ValueError, match="Duplicate serializer adapter"):
+		Serializer(
+			[
+				SerializerAdapter(Value, lambda _: 1),
+				SerializerAdapter(Value, lambda _: 2),
+			]
+		)
 
-	def test_negative_infinity_raises(self):
-		"""Negative infinity should raise ValueError."""
-		with pytest.raises(ValueError, match="Infinity is not valid JSON"):
-			serialize({"value": float("-inf")})
 
-	def test_valid_floats_pass_through(self):
-		"""Regular floats should serialize normally."""
-		data = {"pi": 3.14159, "values": [1.0, 2.5, -0.5]}
-		payload = serialize(data)
-		parsed = deserialize(payload)
-		assert parsed == data
+def test_adapter_resolution_uses_exact_then_nearest_mro():
+	class Root:
+		pass
+
+	class Middle(Root):
+		pass
+
+	class Leaf(Middle):
+		pass
+
+	serializer = Serializer(
+		[
+			SerializerAdapter(Root, lambda _: "root"),
+			SerializerAdapter(Middle, lambda _: "middle"),
+		]
+	)
+
+	assert serializer.serialize(Leaf()) == [5, "middle"]
+
+
+def test_configured_adapter_beats_to_pulse_and_dataclass_projection():
+	@dataclass
+	class Value(PulseSerializable):
+		name: str
+
+		@override
+		def to_pulse(self) -> object:
+			return {"source": "self", "name": self.name}
+
+	serializer = Serializer(
+		[
+			SerializerAdapter(
+				Value, lambda value: {"source": "adapter", "name": value.name}
+			)
+		]
+	)
+
+	assert serializer.serialize(Value("x")) == [
+		5,
+		{"source": "adapter", "name": "x"},
+	]
+
+
+def test_to_pulse_precedes_dataclass_projection():
+	@dataclass
+	class Value(PulseSerializable):
+		ignored: str
+
+		@override
+		def to_pulse(self) -> object:
+			return {"kept": True}
+
+	assert serialize(Value("x")) == [5, {"kept": True}]
+
+
+def test_dataclasses_project_fields_and_preserve_cycles():
+	@dataclass
+	class Node:
+		name: str
+		child: object = None
+
+	root = Node("root")
+	root.child = root
+
+	assert serialize(root) == [5, {"name": "root", "child": ["$", 0]}]
+	decoded = wire_roundtrip(root)
+	assert decoded["child"] is decoded
+
+
+def test_structural_adapter_projection_reuses_source_identity():
+	class Node:
+		def __init__(self, name: str) -> None:
+			self.name: str = name
+			self.child: Node | None = None
+
+	root = Node("root")
+	root.child = root
+	serializer = Serializer(
+		[SerializerAdapter(Node, lambda node: {"name": node.name, "child": node.child})]
+	)
+
+	wire = serializer.serialize({"first": root, "second": root})
+	assert wire == [
+		5,
+		{
+			"first": {"name": "root", "child": ["$", 1]},
+			"second": ["$", 1],
+		},
+	]
+	decoded = cast(dict[str, Any], serializer.deserialize(json.loads(json.dumps(wire))))
+	assert decoded["first"] is decoded["second"]
+	assert decoded["first"]["child"] is decoded["first"]
+
+
+def test_fresh_adapter_projections_never_alias_via_id_reuse():
+	class Point:
+		def __init__(self, n: int) -> None:
+			self.n: int = n
+
+	serializer = Serializer([SerializerAdapter(Point, lambda point: {"n": point.n})])
+
+	# Each projection is a temporary; if the encoder tracks identities by id()
+	# without keeping the object alive, CPython reuses the freed address and
+	# later points collapse into back references to the first one.
+	wire = serializer.serialize([Point(n) for n in range(50)])
+	assert wire == [5, [{"n": n} for n in range(50)]]
+
+
+def test_adapter_projection_root_aliases_existing_container_identity():
+	class Wrapper:
+		def __init__(self, value: dict[str, object]) -> None:
+			self.value: dict[str, object] = value
+
+	shared: dict[str, object] = {"ok": True}
+	wrapped = Wrapper(shared)
+	serializer = Serializer([SerializerAdapter(Wrapper, lambda value: value.value)])
+
+	wire = serializer.serialize({"shared": shared, "wrapped": wrapped})
+	assert wire == [5, {"shared": {"ok": True}, "wrapped": ["$", 1]}]
+	decoded = cast(dict[str, Any], serializer.deserialize(wire))
+	assert decoded["shared"] is decoded["wrapped"]
+
+
+def test_scalar_adapter_projection_has_value_semantics():
+	class Value:
+		pass
+
+	value = Value()
+	serializer = Serializer([SerializerAdapter(Value, lambda _: "projected")])
+
+	assert serializer.serialize([value, value]) == [5, ["projected", "projected"]]
+
+
+def test_adapter_output_recursively_uses_other_adapters():
+	class Outer:
+		def __init__(self, inner: Inner) -> None:
+			self.inner: Inner = inner
+
+	class Inner:
+		def __init__(self, value: int) -> None:
+			self.value: int = value
+
+	serializer = Serializer(
+		[
+			SerializerAdapter(Outer, lambda value: value.inner),
+			SerializerAdapter(Inner, lambda value: {"value": value.value}),
+		]
+	)
+
+	assert serializer.serialize(Outer(Inner(3))) == [5, {"value": 3}]
+
+
+def test_adapter_can_project_through_finite_chain_of_same_type():
+	class Box:
+		def __init__(self, value: object) -> None:
+			self.value: object = value
+
+	serializer = Serializer([SerializerAdapter(Box, lambda box: box.value)])
+
+	assert serializer.serialize(Box(Box(Box(3)))) == [5, 3]
+
+
+def test_to_pulse_can_project_through_finite_chain_of_same_type():
+	class Box(PulseSerializable):
+		def __init__(self, value: object) -> None:
+			self.value: object = value
+
+		@override
+		def to_pulse(self) -> object:
+			return self.value
+
+	assert serialize(Box(Box(Box(3)))) == [5, 3]
+
+
+def test_adapter_direct_return_and_projection_cycles_fail():
+	class Left:
+		pass
+
+	class Right:
+		pass
+
+	left = Left()
+	right = Right()
+	direct = Serializer([SerializerAdapter(Left, lambda value: value)])
+	cycle = Serializer(
+		[
+			SerializerAdapter(Left, lambda _: right),
+			SerializerAdapter(Right, lambda _: left),
+		]
+	)
+
+	with pytest.raises(ValueError, match="returned its source"):
+		direct.serialize(left)
+	with pytest.raises(ValueError, match="projection cycle"):
+		cycle.serialize(left)
+
+
+def test_adapter_fresh_object_non_convergence_is_bounded():
+	class Left:
+		pass
+
+	class Right:
+		pass
+
+	serializer = Serializer(
+		[
+			SerializerAdapter(Left, lambda _: Right()),
+			SerializerAdapter(Right, lambda _: Left()),
+		]
+	)
+
+	with pytest.raises(ValueError, match="projection exceeded 64 steps"):
+		serializer.serialize(Left())
+
+
+def test_container_subclasses_use_builtin_storage_after_adapter_resolution():
+	class Values(list[object]):
+		@override
+		def __iter__(self):
+			raise AssertionError("override must not run")
+
+	values = Values([1, 2])
+	assert serialize(values) == [5, [1, 2]]
+
+	serializer = Serializer([SerializerAdapter(Values, lambda _: ["adapted"])])
+	assert serializer.serialize(values) == [5, ["adapted"]]
+
+
+def test_arbitrary_dunder_dict_objects_are_rejected():
+	class Value:
+		def __init__(self) -> None:
+			self.visible: bool = True
+
+	with pytest.raises(TypeError, match="unsupported value of type Value"):
+		serialize(Value())

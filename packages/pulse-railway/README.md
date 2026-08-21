@@ -104,6 +104,8 @@ If your app opts into `pulse_railway.RailwaySessionStore()`:
 
 - deploy injects `PULSE_RAILWAY_REDIS_URL` into the backend app
 - the app session store uses that Redis for server-backed sessions
+- session values must be JSON-compatible; store dates and datetimes as ISO strings
+- session keys include a storage generation; incompatible format changes start new empty sessions instead of rewriting records used by draining deployments
 
 When the baseline stack has Redis configured:
 

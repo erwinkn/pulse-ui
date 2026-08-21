@@ -69,7 +69,11 @@ app = ps.App(
 )
 ```
 
-Use `RailwaySessionStore()` when the app needs server-backed sessions that survive redeploys. Do not read `REDIS_URL` directly for app sessions and do not hand-roll a Railway fallback. `pulse-railway deploy` injects `PULSE_RAILWAY_REDIS_URL` when it detects `RailwaySessionStore()`.
+Use `RailwaySessionStore()` when the app needs server-backed sessions that survive redeploys using the same storage generation. Do not read `REDIS_URL` directly for app sessions and do not hand-roll a Railway fallback. `pulse-railway deploy` injects `PULSE_RAILWAY_REDIS_URL` when it detects `RailwaySessionStore()`.
+
+Session values must be JSON-compatible. Store dates and datetimes as ISO strings.
+Session keys include a storage generation. Incompatible format changes start new
+empty sessions instead of rewriting records used by draining deployments.
 
 ## CLI Workflow
 

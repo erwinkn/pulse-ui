@@ -2,6 +2,8 @@
 
 Date and time picker components from `@mantine/dates`.
 
+Date examples use `from datetime import UTC, datetime`.
+
 ## Provider Setup
 
 Wrap app with `DatesProvider` for locale configuration:
@@ -29,8 +31,8 @@ DateInput(
     placeholder="Pick date",
     valueFormat="YYYY-MM-DD",  # dayjs format
     clearable=True,
-    minDate=datetime(2024, 1, 1),
-    maxDate=datetime(2024, 12, 31),
+    minDate=datetime(2024, 1, 1, tzinfo=UTC),
+    maxDate=datetime(2024, 12, 31, tzinfo=UTC),
 )
 ```
 
@@ -81,8 +83,8 @@ YearPickerInput(
     label="Year",
     placeholder="Pick year",
     type="default",
-    minDate=datetime(2020, 1, 1),
-    maxDate=datetime(2030, 1, 1),
+    minDate=datetime(2020, 1, 1, tzinfo=UTC),
+    maxDate=datetime(2030, 1, 1, tzinfo=UTC),
 )
 ```
 
@@ -132,8 +134,8 @@ Full calendar display.
 ```python
 Calendar(
     getDayProps=lambda date: {"selected": date == selected, "onClick": lambda: select(date)},
-    minDate=datetime(2024, 1, 1),
-    maxDate=datetime(2024, 12, 31),
+    minDate=datetime(2024, 1, 1, tzinfo=UTC),
+    maxDate=datetime(2024, 12, 31, tzinfo=UTC),
     excludeDate=lambda d: d.weekday() in [5, 6],  # exclude weekends
     firstDayOfWeek=1,  # Monday
     weekendDays=[5, 6],
@@ -191,11 +193,11 @@ All date pickers share these props:
 # Value/onChange
 value=date_value,
 onChange=set_date,
-defaultValue=datetime.now(),
+defaultValue=datetime.now(UTC).replace(microsecond=0),
 
 # Constraints
-minDate=datetime(2024, 1, 1),
-maxDate=datetime(2024, 12, 31),
+minDate=datetime(2024, 1, 1, tzinfo=UTC),
+maxDate=datetime(2024, 12, 31, tzinfo=UTC),
 excludeDate=lambda d: d.weekday() == 6,  # exclude Sundays
 
 # Display
@@ -337,7 +339,7 @@ def AppointmentPicker():
                 name="date",
                 label="Date",
                 excludeDate=lambda d: d.weekday() in [5, 6],  # weekdays only
-                minDate=datetime.now(),
+                minDate=datetime.now(UTC).replace(microsecond=0),
             ),
             TimeGrid(
                 data=["9:00 AM", "10:00 AM", "11:00 AM", "2:00 PM", "3:00 PM"],

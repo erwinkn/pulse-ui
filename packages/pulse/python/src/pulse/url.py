@@ -91,6 +91,8 @@ class SessionUrl(Disposable):
 				or incoming != self._commanded_params.get(name)
 			):
 				self._set_raw(name, slot, incoming)
+		if incoming_params == self._commanded_params:
+			self._commanded_params = None
 		self._applied_params = incoming_params
 		self.query_params = incoming_params
 		if self._sync_effect is not None:

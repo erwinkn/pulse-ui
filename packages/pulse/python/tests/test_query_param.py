@@ -459,6 +459,31 @@ def test_f2_reconnect_echo_does_not_revert_server_write():
 	]
 
 
+def test_client_can_renavigate_to_previously_commanded_value():
+	class QState(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	app, session, route_ctx = make_context(
+		make_route_info("/", query_params={"q": "hello"})
+	)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		state = QState()
+		flush_query_param_sync(session)
+		state.q = "world"
+		flush_query_param_sync(session)
+		route_ctx.update(make_route_info("/", query_params={"q": "world"}))
+		flush_query_param_sync(session)
+		route_ctx.update(make_route_info("/", query_params={"q": "hello"}))
+		flush_query_param_sync(session)
+		messages.clear()
+		route_ctx.update(make_route_info("/", query_params={"q": "world"}))
+		flush_query_param_sync(session)
+		assert state.q == "world"
+		assert navigations(messages) == []
+
+
 def test_f3_write_before_first_route_info_survives_initial_apply():
 	class QState(ps.State):
 		q: ps.QueryParam[str] = ""

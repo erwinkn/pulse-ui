@@ -286,6 +286,51 @@ def test_managed_process_preserves_io_and_target_exit_code(
 	assert process.returncode == 7
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+def test_kill_tree_kills_grandchildren_after_leader_exit(tmp_path: Path) -> None:
+	lines: list[str] = []
+	exited = threading.Event()
+
+	process = ManagedProcess.start(
+		CommandSpec(
+			name="worker",
+			args=[
+				sys.executable,
+				"-c",
+				(
+					"import subprocess, sys; "
+					"child = subprocess.Popen("
+					f"[{sys.executable!r}, '-c', 'import time; time.sleep(30)']); "
+					"print(child.pid, flush=True)"
+				),
+			],
+			cwd=tmp_path,
+			env=os.environ.copy(),
+		),
+		lines.append,
+		lambda _code: exited.set(),
+	)
+	assert exited.wait(5)
+	deadline = time.monotonic() + 5
+	while not lines and time.monotonic() < deadline:
+		time.sleep(0.01)
+	grandchild_pid = int(lines[0])
+	# The leader has exited, but the surviving grandchild must still be killed.
+	process.kill_tree()
+	process.close()
+
+	deadline = time.monotonic() + 5
+	while time.monotonic() < deadline:
+		try:
+			os.kill(grandchild_pid, 0)
+		except ProcessLookupError:
+			break
+		time.sleep(0.05)
+	else:
+		os.kill(grandchild_pid, 9)
+		pytest.fail("grandchild survived kill_tree after leader exit")
+
+
 def test_managed_process_keeps_last_output_line(tmp_path: Path) -> None:
 	lines: list[str] = []
 	exited = threading.Event()

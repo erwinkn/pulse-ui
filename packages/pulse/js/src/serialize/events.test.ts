@@ -69,6 +69,24 @@ describe("form event extraction", () => {
 		]);
 	});
 
+	it("extracts unknown custom elements via the base extractor", () => {
+		const custom = document.createElement("my-widget");
+		custom.id = "widget-1";
+
+		const extracted = extractEvent({
+			type: "click",
+			target: custom,
+			nativeEvent: {},
+			isDefaultPrevented: () => false,
+		});
+
+		expect(extracted.target).toMatchObject({
+			id: "widget-1",
+			tagName: "my-widget",
+		});
+		expect(() => serialize(extracted)).not.toThrow();
+	});
+
 	it("does not traverse React internals on a large form", () => {
 		const view = render(
 			React.createElement(

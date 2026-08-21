@@ -127,10 +127,28 @@ class ChannelsManager:
 	# ------------------------------------------------------------------
 	def handle_client_response(self, message: ClientChannelResponseMessage) -> None:
 		response_to = message["responseTo"]
-		if message["ok"] is False:
-			self.resolve_pending_error(response_to, message["error"])
+		pending = self.pending_requests.get(response_to)
+		if pending is None:
+			return
+		if pending.channel_id != message.get("channel"):
+			logger.error(
+				"Dropping channel_response for request '%s' on wrong channel '%s'",
+				response_to,
+				message.get("channel"),
+			)
+			return
+		# Validate the discriminant exactly, once, at the edge; both runtimes
+		# use strict equality so e.g. ok=0 means the same thing everywhere.
+		ok = message.get("ok")
+		error = message.get("error")
+		if ok is True:
+			self._resolve_pending_success(response_to, message.get("payload"))
+		elif ok is False and isinstance(error, str):
+			self.resolve_pending_error(response_to, error)
 		else:
-			self._resolve_pending_success(response_to, message["payload"])
+			self.resolve_pending_error(
+				response_to, RuntimeError("Malformed channel response")
+			)
 
 	def handle_client_event(
 		self,

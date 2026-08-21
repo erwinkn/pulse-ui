@@ -943,7 +943,9 @@ function extractHTMLElementByTagName(elt: HTMLElement): object {
 	if (extractor) {
 		return extractor(elt);
 	}
-	throw new Error(`Unexpected HTML element tag: ${tagName} (update .web/custom/serialize.ts)`);
+	// Custom elements / web components have no dedicated extractor; fall back
+	// to the shared HTMLElement projection instead of failing the callback.
+	return extractHTMLElementBase(elt);
 }
 
 function isSameRealmHTMLFormElement(elt: Element): elt is HTMLFormElement {

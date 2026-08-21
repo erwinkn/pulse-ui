@@ -428,6 +428,37 @@ class TestQueryParamAcrossMounts:
 
 		session.close()
 
+	def test_no_mount_for_current_url_drops_navigation(self):
+		"""A state write with no mount displaying the URL must not navigate."""
+
+		class Filters(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		session_filters = ps.global_state(Filters)
+
+		app, session = make_two_route_session()
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
+
+		start = make_route_info("/a", query_params={"q": "hello"})
+		session.prerender(["/a"], start)
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/a"].route
+		):
+			state = session_filters()
+			flush_effects()
+
+		# /a unmounts before any new mount takes over the URL.
+		detach_mount(session, "/a")
+		assert "/a" not in session.route_mounts
+
+		messages.clear()
+		state.q = "late-write"
+		flush_query_param_sync(session)
+		assert navigations(messages) == []
+
+		session.close()
+
 	def test_param_absent_from_new_route_resets_to_default(self):
 		class Filters(ps.State):
 			q: ps.QueryParam[str] = "fallback"

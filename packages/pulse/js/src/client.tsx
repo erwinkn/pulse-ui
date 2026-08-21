@@ -28,6 +28,7 @@ function browserIsOnline(): boolean {
 }
 
 const CLIENT_QUEUE_LIMIT = 10_000;
+const ATTACH_RETRY_LIMIT = 3;
 const CLIENT_QUEUE_OVERFLOW_MESSAGE =
 	"Pulse client queue exceeded 10,000 messages; reloading to restore synchronization";
 
@@ -89,6 +90,7 @@ export class PulseSocketIOClient {
 	#activeAttachIds: Map<string, string>;
 	#ackedAttachIds: Map<string, string>;
 	#pendingCallbacks: Map<string, ClientCallbackMessage[]>;
+	#attachRetries: Map<string, number> = new Map();
 	#pendingCallbackCount = 0;
 	#socket: Socket | null = null;
 	#messageQueue: ClientMessage[];
@@ -347,6 +349,7 @@ export class PulseSocketIOClient {
 		this.#activeViews.delete(path);
 		this.#activeAttachIds.delete(path);
 		this.#ackedAttachIds.delete(path);
+		this.#attachRetries.delete(path);
 		this.#deletePendingCallbacks(path);
 		void this.sendMessage({ type: "detach", path, viewId: view.viewId, instanceId });
 	}
@@ -628,10 +631,10 @@ export class PulseSocketIOClient {
 		refCount: number;
 	} {
 		let entry = this.#channels.get(id);
-		if (!entry) {
+		if (!entry || entry.bridge.isClosed) {
 			entry = {
 				bridge: new ChannelBridge(this, id),
-				refCount: 0,
+				refCount: entry?.refCount ?? 0,
 			};
 			this.#channels.set(id, entry);
 		}
@@ -648,6 +651,7 @@ export class PulseSocketIOClient {
 
 	#handleTransportDisconnect(): void {
 		this.#ackedAttachIds.clear();
+		this.#attachRetries.clear();
 		for (const entry of this.#channels.values()) {
 			entry.bridge.handleDisconnect(new PulseChannelResetError("Connection lost"));
 		}
@@ -690,15 +694,36 @@ export class PulseSocketIOClient {
 				message.snapshot.viewId !== message.viewId ||
 				message.snapshot.revision !== message.revision
 			) {
-				throw new Error("Attach snapshot metadata does not match its acknowledgement");
+				console.error(
+					"Attach snapshot metadata does not match its acknowledgement",
+					message,
+				);
+				this.#retryAttach(path);
+				return;
 			}
 			this.#installSnapshot(path, view, message.snapshot);
 		}
 		if (view.viewId !== message.viewId || view.revision !== message.revision) {
+			this.#retryAttach(path);
 			return;
 		}
+		this.#attachRetries.delete(path);
 		this.#ackedAttachIds.set(path, attachId);
 		this.#flushPendingCallbacks(path);
+	}
+
+	#retryAttach(path: string): void {
+		const attempts = (this.#attachRetries.get(path) ?? 0) + 1;
+		if (attempts >= ATTACH_RETRY_LIMIT) {
+			console.error(
+				`Pulse attach for ${path} failed ${attempts} times; reloading page`,
+			);
+			if (typeof window !== "undefined") window.location.reload();
+			return;
+		}
+		this.#attachRetries.set(path, attempts);
+		this.#activeAttachIds.delete(path);
+		this.#sendAttach(path);
 	}
 
 	#installSnapshot(path: string, view: ActiveView, snapshot: ViewSnapshot): void {

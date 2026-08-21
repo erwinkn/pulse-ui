@@ -159,7 +159,15 @@ export class ChannelBridge {
 	}
 
 	handleDisconnect(reason: PulseChannelResetError): void {
-		this.close(reason);
+		// A transport loss resets in-flight state but keeps the bridge usable:
+		// the channel identity survives the reconnect on the server, and mounted
+		// consumers keep their handlers registered on this same bridge.
+		if (this.closed) return;
+		for (const request of this.pending.values()) {
+			request.reject(reason);
+		}
+		this.pending.clear();
+		this.backlog = [];
 	}
 
 	dispose(reason: PulseChannelResetError): void {

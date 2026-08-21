@@ -1052,3 +1052,153 @@ describe("PulseProvider connection handling", () => {
 		mounted.unmount();
 	});
 });
+
+describe("PulseSocketIOClient attach recovery", () => {
+	beforeEach(() => {
+		io.mockClear();
+	});
+
+	it("re-attaches when the ack metadata mismatches without a snapshot", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		client.attach("/", snapshot, "instance-1", view);
+		socket.trigger("connect");
+		await connected;
+
+		const firstAttach = sentMessages().find((m: any) => m.type === "attach") as any;
+		receive({
+			type: "attach_ack",
+			path: "/",
+			attachId: firstAttach.attachId,
+			viewId: "view-1",
+			revision: 3,
+		});
+
+		const attaches = sentMessages().filter((m: any) => m.type === "attach") as any[];
+		expect(attaches.length).toBe(2);
+		expect(attaches.at(-1)).toMatchObject({ viewId: "view-1", revision: 0 });
+
+		// A consistent ack for the new attach recovers the path.
+		receive({
+			type: "attach_ack",
+			path: "/",
+			attachId: attaches.at(-1)!.attachId,
+			viewId: "view-1",
+			revision: 0,
+		});
+		client.invokeCallback("/", "view-1", 0, "onClick", []);
+		expect(sentMessages().at(-1)).toMatchObject({ type: "callback", callback: "onClick" });
+	});
+
+	it("recovers from malformed snapshot metadata instead of throwing", async () => {
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+		const client = await makeClient();
+		const connected = client.connect();
+		client.attach("/", snapshot, "instance-1", view);
+		socket.trigger("connect");
+		await connected;
+
+		const firstAttach = sentMessages().find((m: any) => m.type === "attach") as any;
+		receive({
+			type: "attach_ack",
+			path: "/",
+			attachId: firstAttach.attachId,
+			viewId: "view-1",
+			revision: 4,
+			snapshot: { viewId: "view-1", revision: 5, vdom: "bad" },
+		});
+
+		const attaches = sentMessages().filter((m: any) => m.type === "attach") as any[];
+		expect(attaches.length).toBe(2);
+		consoleError.mockRestore();
+	});
+
+	it("reloads after repeated attach failures", async () => {
+		const reload = vi.fn();
+		Object.defineProperty(window.location, "reload", {
+			configurable: true,
+			value: reload,
+		});
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+		const client = await makeClient();
+		const connected = client.connect();
+		client.attach("/", snapshot, "instance-1", view);
+		socket.trigger("connect");
+		await connected;
+
+		for (let i = 0; i < 3; i++) {
+			const attach = sentMessages()
+				.filter((m: any) => m.type === "attach")
+				.at(-1) as any;
+			receive({
+				type: "attach_ack",
+				path: "/",
+				attachId: attach.attachId,
+				viewId: "view-1",
+				revision: 99,
+			});
+		}
+		expect(reload).toHaveBeenCalledTimes(1);
+		consoleError.mockRestore();
+	});
+});
+
+describe("PulseSocketIOClient channels across reconnects", () => {
+	beforeEach(() => {
+		io.mockClear();
+	});
+
+	it("keeps channels usable after a transport disconnect and reconnect", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+
+		const bridge = client.acquireChannel("chan-1");
+		bridge.on("evt", () => {});
+		const pending = bridge.request("op", {});
+
+		socket.trigger("disconnect");
+		await expect(pending).rejects.toMatchObject({ name: "PulseChannelResetError" });
+		socket.trigger("connect");
+
+		expect(bridge.isClosed).toBe(false);
+		expect(() => bridge.emit("evt", { after: "reconnect" })).not.toThrow();
+		expect(sentMessages().at(-1)).toMatchObject({
+			type: "channel_message",
+			channel: "chan-1",
+			event: "evt",
+		});
+	});
+
+	it("keeps channels usable after suspend and resume", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+
+		const bridge = client.acquireChannel("chan-2");
+		client.suspend();
+		void client.resume();
+		socket.trigger("connect");
+
+		expect(bridge.isClosed).toBe(false);
+		expect(client.acquireChannel("chan-2")).toBe(bridge);
+		expect(() => bridge.emit("evt")).not.toThrow();
+	});
+
+	it("hands out a fresh bridge after a channel is closed by the server", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+
+		const bridge = client.acquireChannel("chan-3");
+		receive({ type: "channel_message", channel: "chan-3", event: "__close__" });
+		expect(bridge.isClosed).toBe(true);
+
+		const fresh = client.acquireChannel("chan-3");
+		expect(fresh).not.toBe(bridge);
+		expect(fresh.isClosed).toBe(false);
+	});
+});

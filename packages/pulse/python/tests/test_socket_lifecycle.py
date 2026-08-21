@@ -16,9 +16,10 @@ import pytest
 from pulse.messages import ServerMessage
 from pulse.queries.query import KeyedQueryResult
 from pulse.reactive import Computed
+from pulse.render_session import RenderSession
 from pulse.serializer import Serialized, deserialize, serialize
 from pulse.test_helpers import wait_for
-from pulse.user_session import CookieSessionStore
+from pulse.user_session import CookieSessionStore, UserSession
 from socketio.exceptions import ConnectionRefusedError as SocketIOConnectionRefusedError
 
 type ConnectHandler = Callable[
@@ -920,10 +921,17 @@ async def test_prerender_on_render_reaped_mid_request_mints_fresh_render(
 	disconnect("socket-a")
 	stale = app.render_sessions["shell-1"]
 
-	# Simulate the TTL firing while the request is in flight: the render is
-	# closed before the prerender handler runs.
+	# Simulate the TTL firing while the request is in flight: the HTTP
+	# middleware resolved the render, then it was closed before the prerender
+	# handler ran. Pin the middleware's resolution to the stale object so the
+	# handler's identity check is what detects the dead render.
 	app.close_render("shell-1")
 	assert "shell-1" not in app.render_sessions
+
+	def resolve_stale(render_id: str | None, session: UserSession) -> RenderSession:
+		return stale
+
+	monkeypatch.setattr(app, "_get_render_for_session", resolve_stale)
 
 	resp = await _post_prerender(app, environ, "shell-1", "/a")
 	assert resp.status_code == 200

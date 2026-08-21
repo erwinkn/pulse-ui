@@ -33,7 +33,7 @@ During a live route mount, `ps.channel("foo")` returns the same handle. `on(even
 self.channel.emit("server:notify", {"type": "update", "data": {...}})
 ```
 
-If the WebSocket is down, emit uses the session global queue. No per-channel buffer.
+If the WebSocket is down, emit uses the session global queue (capped at 1000 messages, drop-oldest). No per-channel buffer. Payloads are serialized at emit time: unserializable payload → `TypeError` at the emitter.
 
 Do not emit during prerender / first server render and expect the client to hear it. `useChannel` attaches in an effect, so events emitted before that effect runs can drop — no listener yet.
 
@@ -63,7 +63,11 @@ cleanup = self.channel.on("client:ping", self._on_ping)
 cleanup()
 ```
 
-`on()` after `detach()` raises `ChannelDetached`. `emit` / `request` still address the channel name.
+After `detach()`: `on()` and `request()` raise `ChannelDetached`, `emit()` is a debug-logged no-op (emits race detach from background tasks). Queued handlers not yet run are skipped.
+
+Events on one handle are FIFO: each event's handlers are awaited before the next event runs. Inbound requests run as independent tasks (a request handler may `await` a client request, which must not block the session).
+
+Several live handles can share a name, including a `"tab"` and a `"route"` handle. Events fan out to all. A request goes to the first attached handle with a handler for the event (registration order).
 
 ## Client-side
 

@@ -82,6 +82,10 @@ def snapshot(value: object, seen: dict[int, int] | None = None) -> object:
 	if isinstance(value, bool):
 		return ["bool", value]
 	if isinstance(value, int | float):
+		# JS has no int/float distinction; the canonical snapshot (and set
+		# sort key) uses the integer form for integral values.
+		if isinstance(value, float) and value.is_integer() and abs(value) <= 2**53:
+			return ["number", int(value)]
 		return ["number", value]
 	if isinstance(value, str):
 		return ["string", value]
@@ -114,7 +118,14 @@ def snapshot(value: object, seen: dict[int, int] | None = None) -> object:
 	if isinstance(value, set):
 		value = cast(set[object], value)
 		items = [snapshot(item, seen) for item in value]
-		items.sort(key=lambda item: json.dumps(item, separators=(",", ":")))
+		# Match the JS harness: raw characters (ensure_ascii=False) compared
+		# by UTF-16 code units (utf-16-be bytes), since JS string comparison
+		# orders astral-plane characters below U+E000..U+FFFF.
+		items.sort(
+			key=lambda item: json.dumps(
+				item, separators=(",", ":"), ensure_ascii=False
+			).encode("utf-16-be")
+		)
 		return ["set", node_id, items]
 	if isinstance(value, dict):
 		value = cast(dict[str, object], value)
@@ -124,6 +135,16 @@ def snapshot(value: object, seen: dict[int, int] | None = None) -> object:
 			[[key, snapshot(value[key], seen)] for key in sorted(value)],
 		]
 	raise AssertionError(f"Unsupported snapshot value: {type(value)!r}")
+
+
+def canonical(wire: object) -> str:
+	# Python `==` equates 1/1.0 and 0/-0.0, which would hide int/float wire
+	# divergences between the runtimes; canonical JSON text is type-strict.
+	return json.dumps(wire, separators=(",", ":"), ensure_ascii=False)
+
+
+def canonical_all(wires: list[object]) -> list[str]:
+	return [canonical(wire) for wire in wires]
 
 
 def run_javascript(request: dict[str, object]) -> object:
@@ -256,11 +277,32 @@ def fixed_cases() -> list[Descriptor]:
 	]
 
 
+STRING_POOL = [
+	"",
+	"$",
+	"$$",
+	"value",
+	"__proto__",
+	"constructor",
+	"prototype",
+	"caf\u00e9",
+	"\u65e5\u672c\u8a9e",
+	"\U0001f600",
+	"\ue000",
+	"a\u0301",
+	"line\nbreak",
+]
+
+KEY_POOL = ["0", "1", "2", "10", "key", "__proto__", "constructor", "$", "caf\u00e9"]
+
+FLOAT_POOL = [0.5, -2.25, 1.0, -1.0, 0.0, -0.0, 3.141592653589793, 1e-10, 12345.6789]
+
+
 def random_cases(count: int, seed: int = 20260714) -> list[Descriptor]:
 	rng = random.Random(seed)
 
 	def leaf() -> Descriptor:
-		kind = rng.randrange(6)
+		kind = rng.randrange(8)
 		if kind == 0:
 			return {"t": "null"}
 		if kind == 1:
@@ -268,41 +310,84 @@ def random_cases(count: int, seed: int = 20260714) -> list[Descriptor]:
 		if kind == 2:
 			return {"t": "number", "value": rng.randrange(-10_000, 10_001)}
 		if kind == 3:
-			return {"t": "string", "value": f"value-{rng.randrange(20)}"}
+			return {"t": "number", "value": rng.choice(FLOAT_POOL)}
 		if kind == 4:
+			return {"t": "string", "value": rng.choice(STRING_POOL)}
+		if kind == 5:
+			return {"t": "string", "value": f"value-{rng.randrange(20)}"}
+		if kind == 6:
 			return {"t": "date", "value": f"{rng.randrange(1, 10_000):04d}-01-01"}
 		return {
 			"t": "datetime",
 			"value": f"{rng.randrange(1, 10_000):04d}-01-01T00:00:00.000Z",
 		}
 
-	def build(depth: int) -> Descriptor:
-		if depth == 0 or rng.random() < 0.35:
+	def set_items(size: int) -> list[Descriptor]:
+		# Bools are excluded: a JS Set holds true and 1 as distinct members,
+		# which the encoder rejects as a cross-runtime equality collision.
+		items: list[Descriptor] = []
+		seen: set[str] = set()
+		for _ in range(size):
+			candidate = leaf()
+			while candidate["t"] == "bool":
+				candidate = leaf()
+			if candidate["t"] == "number":
+				key = f"number:{float(candidate['value'])}"
+			else:
+				key = f"{candidate['t']}:{candidate.get('value')}"
+			if key in seen:
+				continue
+			seen.add(key)
+			items.append(candidate)
+		return items
+
+	def build(depth: int, shared: list[str], counter: list[int]) -> Descriptor:
+		if shared and rng.random() < 0.08:
+			return {"t": "ref", "id": rng.choice(shared)}
+		if depth == 0 or rng.random() < 0.3:
 			return leaf()
 		kind = rng.randrange(4)
 		size = rng.randrange(4)
+		identifier: str | None = None
+		if kind != 3 and rng.random() < 0.25:
+			counter[0] += 1
+			identifier = f"node-{counter[0]}"
 		if kind == 0:
-			return {"t": "array", "items": [build(depth - 1) for _ in range(size)]}
-		if kind == 1:
-			return {
+			result: Descriptor = {
+				"t": "array",
+				"items": [build(depth - 1, shared, counter) for _ in range(size)],
+			}
+		elif kind == 1:
+			keys = rng.sample(KEY_POOL, size)
+			result = {
 				"t": "record",
-				"entries": [[str(index), build(depth - 1)] for index in range(size)],
+				"entries": [[key, build(depth - 1, shared, counter)] for key in keys],
 			}
-		if kind == 2:
-			return {
+		elif kind == 2:
+			keys = rng.sample(KEY_POOL, size)
+			result = {
 				"t": "map",
-				"entries": [
-					[f"key-{index}", build(depth - 1)] for index in range(size)
-				],
+				"entries": [[key, build(depth - 1, shared, counter)] for key in keys],
 			}
-		return {
-			"t": "set",
-			"items": [
-				{"t": "string", "value": f"set-{index}"} for index in range(size)
-			],
-		}
+		else:
+			result = {"t": "set", "items": set_items(size)}
+		if identifier is not None:
+			result["id"] = identifier
+			# Only reference nodes that are fully materialized by the time the
+			# ref is reached: children were built above, so parents register
+			# before later siblings/descendants can reference them.
+			shared.append(identifier)
+		return result
 
-	return [build(4) for _ in range(count)]
+	def deep_case() -> Descriptor:
+		result: Descriptor = leaf()
+		for _ in range(rng.randrange(30, 64)):
+			result = {"t": "array", "items": [result]}
+		return result
+
+	cases = [build(4, [], [0]) for _ in range(count)]
+	cases.extend(deep_case() for _ in range(5))
+	return cases
 
 
 def malformed_wires() -> list[object]:
@@ -351,7 +436,9 @@ def test_javascript_to_python_serializer_interop():
 	python_wires = [
 		json.loads(json.dumps(serialize(materialize(case)))) for case in cases
 	]
-	assert [result["wire"] for result in encoded] == python_wires
+	assert canonical_all([result["wire"] for result in encoded]) == canonical_all(
+		python_wires
+	)
 
 	javascript_wires = [result["wire"] for result in encoded]
 	python_values = [deserialize(cast(Serialized, wire)) for wire in javascript_wires]
@@ -360,13 +447,15 @@ def test_javascript_to_python_serializer_interop():
 	python_roundtrip_wires = [
 		json.loads(json.dumps(serialize(value))) for value in python_values
 	]
-	assert python_roundtrip_wires == javascript_wires
+	assert canonical_all(python_roundtrip_wires) == canonical_all(javascript_wires)
 	roundtripped = cast(
 		list[dict[str, object]],
 		run_javascript({"op": "transcode", "wires": javascript_wires}),
 	)
 	assert [result["snapshot"] for result in roundtripped] == expected
-	assert [result["wire"] for result in roundtripped] == javascript_wires
+	assert canonical_all([result["wire"] for result in roundtripped]) == canonical_all(
+		javascript_wires
+	)
 
 
 def test_python_to_javascript_serializer_interop():
@@ -380,7 +469,9 @@ def test_python_to_javascript_serializer_interop():
 		run_javascript({"op": "transcode", "wires": wires}),
 	)
 	assert [result["snapshot"] for result in transcoded] == expected
-	assert [result["wire"] for result in transcoded] == wires
+	assert canonical_all([result["wire"] for result in transcoded]) == canonical_all(
+		cast(list[object], wires)
+	)
 
 	python_roundtrips = [
 		deserialize(cast(Serialized, result["wire"])) for result in transcoded

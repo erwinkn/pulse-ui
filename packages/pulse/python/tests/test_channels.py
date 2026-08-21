@@ -130,6 +130,99 @@ async def test_channel_request_resolves_on_response():
 
 
 @pytest.mark.asyncio
+async def test_channel_response_on_wrong_channel_is_dropped():
+	app = ps.App()
+	render = DummyRender()
+	session = SimpleNamespace(sid="session-wrong-channel")
+	real_render = ps.RenderSession(render.id, app.routes)
+	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
+
+	with ps.PulseContext(
+		app=app,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		render=real_render,
+	):
+		channel = real_render.channels.create("right-channel")
+		pending = asyncio.create_task(channel.request("get"))
+
+	await asyncio.sleep(0)
+	request_id = cast(str, render.sent[0]["requestId"])
+
+	real_render.channels.handle_client_response(
+		message=cast(
+			ClientChannelResponseMessage,
+			cast(
+				object,
+				{
+					"type": "channel_response",
+					"channel": "other-channel",
+					"responseTo": request_id,
+					"ok": True,
+					"payload": "spoofed",
+				},
+			),
+		)
+	)
+	await asyncio.sleep(0)
+	assert not pending.done()
+
+	real_render.channels.handle_client_response(
+		message=cast(
+			ClientChannelResponseMessage,
+			cast(
+				object,
+				{
+					"type": "channel_response",
+					"channel": "right-channel",
+					"responseTo": request_id,
+					"ok": True,
+					"payload": "real",
+				},
+			),
+		)
+	)
+	assert await pending == "real"
+
+
+@pytest.mark.asyncio
+async def test_channel_response_with_malformed_ok_rejects():
+	app = ps.App()
+	render = DummyRender()
+	session = SimpleNamespace(sid="session-malformed-ok")
+	real_render = ps.RenderSession(render.id, app.routes)
+	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
+
+	with ps.PulseContext(
+		app=app,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		render=real_render,
+	):
+		channel = real_render.channels.create("malformed-ok-channel")
+		pending = asyncio.create_task(channel.request("get"))
+
+	await asyncio.sleep(0)
+	request_id = cast(str, render.sent[0]["requestId"])
+
+	real_render.channels.handle_client_response(
+		message=cast(
+			ClientChannelResponseMessage,
+			cast(
+				object,
+				{
+					"type": "channel_response",
+					"channel": "malformed-ok-channel",
+					"responseTo": request_id,
+					"ok": 1,
+					"payload": "sneaky",
+				},
+			),
+		)
+	)
+	with pytest.raises(RuntimeError, match="Malformed channel response"):
+		await pending
+
+
+@pytest.mark.asyncio
 async def test_channel_request_defaults_payload_to_none():
 	app = ps.App()
 	render = DummyRender()

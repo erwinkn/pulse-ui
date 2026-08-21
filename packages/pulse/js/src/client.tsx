@@ -503,11 +503,20 @@ export class PulseSocketIOClient {
 
 	public invokeCallback(path: string, callback: string, args: any[]) {
 		if (!this.#activeViews.has(path)) return;
+		let extracted: any[];
+		try {
+			extracted = args.map(extractEvent);
+		} catch (err) {
+			// An extraction bug must degrade one callback, not throw inside
+			// React's event dispatch.
+			console.error(`Failed to extract arguments for callback '${callback}'`, err);
+			return;
+		}
 		const message: ClientCallbackMessage = {
 			type: "callback",
 			path,
 			callback,
-			args: args.map(extractEvent),
+			args: extracted,
 		};
 		if (this.#isAttachAcked(path)) {
 			this.sendMessage(message);
@@ -589,7 +598,7 @@ export class PulseSocketIOClient {
 	#handleTransportDisconnect(): void {
 		this.#ackedAttachIds.clear();
 		for (const entry of this.#channels.values()) {
-			entry.bridge.handleDisconnect(new PulseChannelResetError("Connection lost"));
+			entry.bridge.resetForReconnect(new PulseChannelResetError("Connection lost"));
 		}
 	}
 

@@ -64,10 +64,20 @@ class Encoder:
 		if math.isnan(value):
 			return None
 		validate_finite(value, self.path, "serialize")
-		if value == 0:
-			return 0.0
 		if abs(value) > MAX_SAFE_INTEGER:
+			# JSON.stringify prints integral doubles below 1e21 as integer
+			# literals; mirror that inside the marker so both runtimes emit
+			# identical bytes (larger magnitudes use exponent notation in
+			# both runtimes already).
+			if value.is_integer() and abs(value) < 1e21:
+				return ["$", "f", int(value)]
 			return ["$", "f", value]
+		if value.is_integer():
+			# JS has a single number type and emits integral doubles as
+			# integer literals; the canonical wire form is the integer, so
+			# both runtimes produce identical bytes for the same value.
+			# This also normalizes -0.0 to 0.
+			return int(value)
 		return value
 
 	def _resolve_custom(self, value: object) -> tuple[object, tuple[object, ...]]:

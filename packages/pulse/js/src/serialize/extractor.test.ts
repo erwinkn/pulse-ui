@@ -30,4 +30,30 @@ describe("createExtractor", () => {
 			},
 		);
 	});
+
+	it("normalizes list-like host objects (e.g. DOMTokenList) to arrays", () => {
+		class FakeTokenList {
+			length = 2;
+			0 = "btn";
+			1 = "active";
+		}
+		const extract = createExtractor<{ classList: unknown }>()(["classList"]);
+
+		expect(extract({ classList: new FakeTokenList() }) as object).toEqual({
+			classList: ["btn", "active"],
+		});
+	});
+
+	it("stringifies non-list-like host objects instead of throwing", () => {
+		class FakeHostObject {
+			toString() {
+				return "host-object";
+			}
+		}
+		const extract = createExtractor<{ value: unknown }>()(["value"]);
+
+		expect(extract({ value: new FakeHostObject() }) as object).toEqual({
+			value: "host-object",
+		});
+	});
 });

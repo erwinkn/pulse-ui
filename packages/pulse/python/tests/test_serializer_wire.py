@@ -288,15 +288,26 @@ def test_rejects_invalid_numeric_values_on_encode(value: float | int):
 
 def test_normalizes_negative_zero_to_positive_zero():
 	root = serialize(-0.0)
-	assert root == [5, 0.0]
-	assert math.copysign(1.0, cast(float, root[1])) > 0
+	assert root == [5, 0]
+	assert isinstance(root[1], int)
 
 	wire = serialize({-0.0})
 
-	assert wire == [5, ["$", "s", [0.0]]]
+	assert wire == [5, ["$", "s", [0]]]
 	encoded_zero = cast(list[Any], cast(list[Any], wire[1])[2])[0]
-	assert math.copysign(1.0, cast(float, encoded_zero)) > 0
-	assert math.copysign(1.0, next(iter(cast(set[float], deserialize(wire))))) > 0
+	assert isinstance(encoded_zero, int)
+	assert next(iter(cast(set[float], deserialize(wire)))) == 0
+
+
+def test_integral_floats_encode_as_canonical_integers():
+	# JS has a single number type; both runtimes emit integral doubles as
+	# integer literals so identical values produce identical wire bytes.
+	wire = serialize({"a": 1.0, "b": -3.0, "c": 2.5})
+	body = cast(dict[str, Any], wire[1])
+	assert body == {"a": 1, "b": -3, "c": 2.5}
+	assert isinstance(body["a"], int)
+	assert isinstance(body["b"], int)
+	assert isinstance(body["c"], float)
 
 
 def test_big_floats_round_trip_through_the_float_marker():
@@ -310,6 +321,9 @@ def test_big_floats_round_trip_through_the_float_marker():
 			"set": ["$", "s", [["$", "f", 1e300]]],
 		},
 	]
+	# Integral big floats below 1e21 use JS's integer-literal form.
+	edge_marker = cast(list[Any], cast(dict[str, Any], wire[1])["edge"])
+	assert isinstance(edge_marker[2], int)
 	assert deserialize(json.loads(json.dumps(wire))) == {
 		"big": 1e300,
 		"edge": edge,

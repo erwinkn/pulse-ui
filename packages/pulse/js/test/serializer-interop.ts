@@ -118,9 +118,13 @@ function snapshot(value: unknown, seen = new Map<object, number>()): unknown {
 	}
 	if (value instanceof Set) {
 		const items = [...value].map((item) => snapshot(item, seen));
-		items.sort((left, right) =>
-			JSON.stringify(left).localeCompare(JSON.stringify(right)),
-		);
+		// Ordinal comparison; localeCompare is locale-aware and would diverge
+		// from Python's code-point sort (e.g. around hyphens).
+		items.sort((left, right) => {
+			const a = JSON.stringify(left);
+			const b = JSON.stringify(right);
+			return a < b ? -1 : a > b ? 1 : 0;
+		});
 		return ["set", id, items];
 	}
 

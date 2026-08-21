@@ -682,7 +682,7 @@ class FormStorage(HookState):
 		self.render_mark = render_cycle
 
 	@override
-	def on_render_end(self, render_cycle: int) -> None:
+	def on_render_end(self, render_cycle: int, error: BaseException | None) -> None:
 		if not self.prev_forms:
 			return
 		for form in self.prev_forms.values():

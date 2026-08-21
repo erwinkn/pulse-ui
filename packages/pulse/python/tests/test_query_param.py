@@ -424,6 +424,27 @@ class TestQueryParam:
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			assert second.q == ""
 
+	def test_disposed_state_still_uses_session_owned_slot(self):
+		"""Pinned: slots outlive states, so a disposed state reads/writes the live slot."""
+
+		class QState(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+		session.connect(lambda _msg: None)
+		ctx = HookContext()
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			with ctx:
+				stale = ps.state(QState, key="1")
+			with ctx:
+				live = ps.state(QState, key="2")
+
+			assert stale.__disposed__
+			live.q = "from-live"
+			assert stale.q == "from-live"
+			stale.q = "from-stale"
+			assert live.q == "from-stale"
+
 	def test_state_key_change_disposes_eager_query_param_instance(self):
 		class QState(ps.State):
 			q: ps.QueryParam[str] = ""

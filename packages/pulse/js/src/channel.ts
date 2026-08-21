@@ -1,10 +1,5 @@
 import { useEffect, useState } from "react";
-import type { PulseSocketIOClient } from "./client";
-import type {
-	ServerChannelMessage,
-	ServerChannelRequestMessage,
-	ServerChannelResponseMessage,
-} from "./messages";
+import type { ClientMessage, ReplyMessage, ServerChannelRequestMessage } from "./messages";
 import { usePulseClient } from "./pulse";
 
 export class PulseChannelResetError extends Error {
@@ -16,9 +11,12 @@ export class PulseChannelResetError extends Error {
 
 export type ChannelEventHandler = (payload: any) => any | Promise<any>;
 
-interface PendingRequest {
-	resolve: (value: any) => void;
-	reject: (error: any) => void;
+export interface ChannelHost {
+	sendMessage(message: ClientMessage): void | Promise<void>;
+	replies: {
+		register(id: string): Promise<any>;
+		reject(id: string, error: unknown): void;
+	};
 }
 
 export function createRandomId(): string {
@@ -38,26 +36,14 @@ function formatError(error: unknown): string {
 	}
 }
 
-function isServerResponseMessage(
-	message: ServerChannelMessage,
-): message is ServerChannelResponseMessage {
-	return typeof (message as ServerChannelResponseMessage).responseTo === "string";
-}
-
-function isServerRequestMessage(
-	message: ServerChannelMessage,
-): message is ServerChannelRequestMessage {
-	return typeof (message as ServerChannelRequestMessage).event === "string";
-}
-
 export class ChannelBridge {
 	private handlers = new Map<string, Set<ChannelEventHandler>>();
-	private pending = new Map<string, PendingRequest>();
+	private pendingIds = new Set<string>();
 	private backlog: ServerChannelRequestMessage[] = [];
 	private closed = false;
 
 	constructor(
-		private client: PulseSocketIOClient,
+		private client: ChannelHost,
 		public readonly id: string,
 	) {}
 
@@ -74,15 +60,17 @@ export class ChannelBridge {
 	request(event: string, payload?: any): Promise<any> {
 		this.ensureOpen();
 		const requestId = createRandomId();
-		return new Promise((resolve, reject) => {
-			this.pending.set(requestId, { resolve, reject });
-			this.client.sendMessage({
-				type: "channel_message",
-				channel: this.id,
-				event,
-				payload,
-				requestId,
-			});
+		this.pendingIds.add(requestId);
+		const pending = this.client.replies.register(requestId);
+		this.client.sendMessage({
+			type: "channel_message",
+			channel: this.id,
+			event,
+			payload,
+			requestId,
+		});
+		return pending.finally(() => {
+			this.pendingIds.delete(requestId);
 		});
 	}
 
@@ -105,16 +93,9 @@ export class ChannelBridge {
 		};
 	}
 
-	handleServerMessage(message: ServerChannelMessage): boolean {
-		if (isServerResponseMessage(message)) {
-			this.resolvePending(message);
-			return this.closed;
-		}
+	handleServerMessage(message: ServerChannelRequestMessage): boolean {
 		if (this.closed) {
 			return true;
-		}
-		if (!isServerRequestMessage(message)) {
-			return this.closed;
 		}
 
 		if (message.event === "__close__") {
@@ -200,36 +181,11 @@ export class ChannelBridge {
 				}
 			}
 		}
-		if (error) {
-			this.client.sendMessage({
-				type: "channel_message",
-				channel: this.id,
-				event: undefined,
-				responseTo: message.requestId,
-				error: formatError(error),
-			});
-			return;
-		}
-		this.client.sendMessage({
-			type: "channel_message",
-			channel: this.id,
-			event: undefined,
-			responseTo: message.requestId,
-			payload: response,
-		});
-	}
-
-	private resolvePending(message: ServerChannelResponseMessage): void {
-		const entry = message.responseTo ? this.pending.get(message.responseTo) : undefined;
-		if (!entry) {
-			return;
-		}
-		this.pending.delete(message.responseTo!);
-		if (message.error !== undefined && message.error !== null) {
-			entry.reject(new PulseChannelResetError(String(message.error)));
-		} else {
-			entry.resolve(message.payload);
-		}
+		const reply: ReplyMessage =
+			error !== undefined
+				? { type: "reply", id: message.requestId, error: formatError(error) }
+				: { type: "reply", id: message.requestId, payload: response };
+		this.client.sendMessage(reply);
 	}
 
 	private close(reason: PulseChannelResetError): void {
@@ -237,13 +193,12 @@ export class ChannelBridge {
 			return;
 		}
 		this.closed = true;
-		for (const request of this.pending.values()) {
-			request.reject(reason);
+		for (const id of this.pendingIds) {
+			this.client.replies.reject(id, reason);
 		}
-		this.pending.clear();
+		this.pendingIds.clear();
 		this.handlers.clear();
 		this.backlog = [];
-		// No-op: owning client manages registry lifecycle.
 	}
 }
 

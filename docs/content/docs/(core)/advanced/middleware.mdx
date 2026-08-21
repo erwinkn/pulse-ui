@@ -156,7 +156,7 @@ async def connect(self, *, request, session, next):
 
 ### `message`
 
-Called for each WebSocket message. This includes button clicks, form submissions, navigation, and any other interaction.
+Called for each client-initiated WebSocket command — clicks, form submissions, navigation, attach, and so on. `{type: "reply"}` completions skip this hook and resolve immediately. They're the other half of a server request (`call_api`, `run_js`, `Channel.request`), not something you authorize.
 
 ```python
 async def message(self, *, data, session, next):

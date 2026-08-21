@@ -152,7 +152,7 @@ async def message(
 ) -> Ok[None] | Deny
 ```
 
-Handle per-message authorization.
+Handle per-message authorization for client-initiated commands. `{type: "reply"}` completions skip this hook.
 
 **Parameters:**
 - `data` - Client message data.

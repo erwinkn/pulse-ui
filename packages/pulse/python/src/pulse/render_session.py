@@ -22,6 +22,7 @@ from pulse.queries.store import QueryStore
 from pulse.reactive import REACTIVE_CONTEXT, Effect, Untrack, flush_effects
 from pulse.reactive_extensions import ReactiveDict
 from pulse.renderer import RenderTree
+from pulse.replies import PendingReplies
 from pulse.routing import (
 	Layout,
 	Route,
@@ -34,11 +35,9 @@ from pulse.scheduling import (
 	TaskRegistry,
 	TimerHandleLike,
 	TimerRegistry,
-	create_future,
 )
 from pulse.state.query_param import QueryParamSync
 from pulse.state.state import State
-from pulse.transpiler.id import next_id
 from pulse.transpiler.nodes import Expr
 
 if TYPE_CHECKING:
@@ -46,10 +45,6 @@ if TYPE_CHECKING:
 	from pulse.forms import FormRegistry
 
 logger = logging.getLogger(__file__)
-
-
-class JsExecError(Exception):
-	"""Raised when client-side JS execution fails."""
 
 
 class RenderLoopError(RuntimeError):
@@ -275,8 +270,7 @@ class RenderSession:
 	_server_address: str | None
 	_client_address: str | None
 	_send_message: Callable[[ServerMessage], Any] | None
-	_pending_api: dict[str, asyncio.Future[dict[str, Any]]]
-	_pending_js_results: dict[str, asyncio.Future[Any]]
+	replies: PendingReplies
 	_ref_channel: Channel | None
 	_ref_channels_by_route: dict[str, Channel]
 	_global_states: dict[str, State]
@@ -318,8 +312,7 @@ class RenderSession:
 		self.connected = False
 		self.channels = ChannelsManager(self)
 		self.forms = FormRegistry(self)
-		self._pending_api = {}
-		self._pending_js_results = {}
+		self.replies = PendingReplies()
 		self._ref_channel = None
 		self._ref_channels_by_route = {}
 		self._tasks = TaskRegistry(name=f"render:{id}")
@@ -719,14 +712,7 @@ class RenderSession:
 			if channel:
 				channel.closed = True
 				self.channels.dispose_channel(channel, reason="render.close")
-		for fut in self._pending_api.values():
-			if not fut.done():
-				fut.cancel()
-		self._pending_api.clear()
-		for fut in self._pending_js_results.values():
-			if not fut.done():
-				fut.cancel()
-		self._pending_js_results.clear()
+		self.replies.cancel_all()
 		self._ref_channel = None
 		self._ref_channels_by_route.clear()
 		# Close any timer that may have been scheduled during cleanup (ex: query GC)
@@ -875,8 +861,7 @@ class RenderSession:
 			api_path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
 			url = f"{base}{api_path}"
 		corr_id = uuid.uuid4().hex
-		fut = create_future()
-		self._pending_api[corr_id] = fut
+		fut = self.replies.register(corr_id)
 		headers = headers or {}
 		headers["x-pulse-render-id"] = self.id
 		self.send(
@@ -893,25 +878,9 @@ class RenderSession:
 		try:
 			result = await asyncio.wait_for(fut, timeout=timeout)
 		except asyncio.TimeoutError:
-			self._pending_api.pop(corr_id, None)
+			self.replies.discard(corr_id)
 			raise
 		return result
-
-	def handle_api_result(self, data: dict[str, Any]):
-		id_ = data.get("id")
-		if id_ is None:
-			return
-		id_ = str(id_)
-		fut = self._pending_api.pop(id_, None)
-		if fut and not fut.done():
-			fut.set_result(
-				{
-					"ok": data.get("ok", False),
-					"status": data.get("status", 0),
-					"headers": data.get("headers", {}),
-					"body": data.get("body"),
-				}
-			)
 
 	# ---- JS Execution ----
 
@@ -968,48 +937,33 @@ class RenderSession:
 			)
 
 		ctx = PulseContext.get()
-		exec_id = next_id()
+		exec_id = uuid.uuid4().hex
 
 		# Get route pattern path (e.g., "/users/:id") not pathname (e.g., "/users/123")
 		# This must match the path used to key views on the client side
 		path = ctx.route.pulse_route.unique_path() if ctx.route else "/"
 
-		self.send(
-			ServerJsExecMessage(
-				type="js_exec",
-				path=path,
-				id=exec_id,
-				expr=expr.render(),
-			)
+		msg = ServerJsExecMessage(
+			type="js_exec",
+			path=path,
+			id=exec_id,
+			expr=expr.render(),
 		)
+		if not result:
+			self.send(msg)
+			return None
 
-		if result:
-			loop = asyncio.get_running_loop()
-			future: asyncio.Future[object] = loop.create_future()
-			self._pending_js_results[exec_id] = future
+		future = self.replies.register(exec_id)
 
-			def _on_timeout() -> None:
-				self._pending_js_results.pop(exec_id, None)
-				if not future.done():
-					future.set_exception(asyncio.TimeoutError())
+		def _on_timeout() -> None:
+			self.replies.reject(exec_id, asyncio.TimeoutError())
 
-			self._timers.later(timeout, _on_timeout)
+		handle = self._timers.later(timeout, _on_timeout)
 
-			return future
+		def _cancel_timeout(_: asyncio.Future[object]) -> None:
+			handle.cancel()
+			self._timers.discard(handle)
 
-		return None
-
-	def handle_js_result(self, data: dict[str, Any]) -> None:
-		"""Handle js_result message from client."""
-		exec_id = data.get("id")
-		if exec_id is None:
-			return
-		exec_id = str(exec_id)
-		fut = self._pending_js_results.pop(exec_id, None)
-		if fut is None or fut.done():
-			return
-		error = data.get("error")
-		if error is not None:
-			fut.set_exception(JsExecError(error))
-		else:
-			fut.set_result(data.get("result"))
+		future.add_done_callback(_cancel_timeout)
+		self.send(msg)
+		return future

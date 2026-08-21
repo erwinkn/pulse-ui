@@ -256,12 +256,15 @@ class DevSupervisor:
 			# Await the reader before closing its fd: the write end lives only
 			# in the child, so once the child is stopped the read returns EOF
 			# promptly. Closing first could hand the fd number to a concurrent
-			# open while the pool thread still reads from it.
+			# open while the pool thread still reads from it. Bounded: a
+			# group-escaping descendant holding the write end must not wedge
+			# the supervisor.
 			if ready is not None and not ready.done():
 				with contextlib.suppress(Exception):
-					await ready
-			with contextlib.suppress(OSError):
-				os.close(ready_r)
+					await asyncio.wait_for(asyncio.shield(ready), timeout=5)
+			if ready is None or ready.done():
+				with contextlib.suppress(OSError):
+					os.close(ready_r)
 
 	def _close_vite_ready_fd(self) -> None:
 		fd = self._vite_ready_r

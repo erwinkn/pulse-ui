@@ -81,14 +81,16 @@ class Deny:
 
 
 def _coerce_decision(res: Any) -> "Ok[None] | Deny":
-	"""User hooks may return anything; only Ok/Deny are decisions.
+	"""Decision hooks must return Ok or Deny; anything else fails closed.
 
 	Applied once, where each middleware returns — so `MiddlewareStack`
 	honors its declared return types and callers never re-normalize.
 	"""
 	if isinstance(res, (Ok, Deny)):
 		return res  # type: ignore[return-value]
-	return Ok(None)
+	raise TypeError(
+		f"Middleware decision hook must return Ok or Deny, got {type(res).__name__}"
+	)
 
 
 PrerenderResponse = Ok[Prerender] | Redirect | NotFound
@@ -229,7 +231,8 @@ class PulseMiddleware:
 			data: Client message data.
 			session: Session data dictionary.
 			next: Callable to continue the middleware chain. Returns the
-				downstream decision; return it as-is or override it.
+				downstream decision. A downstream ``Deny`` is final: the
+				command never ran, so returning ``Ok`` cannot override it.
 
 		Returns:
 			``Ok[None]`` to allow, ``Deny`` to block.
@@ -255,7 +258,8 @@ class PulseMiddleware:
 			request_id: Request ID if awaiting response.
 			session: Session data dictionary.
 			next: Callable to continue the middleware chain. Returns the
-				downstream decision; return it as-is or override it.
+				downstream decision. A downstream ``Deny`` is final: the
+				command never ran, so returning ``Ok`` cannot override it.
 
 		Returns:
 			``Ok[None]`` to allow, ``Deny`` to block.
@@ -354,13 +358,21 @@ class MiddlewareStack(PulseMiddleware):
 			if index >= len(self._middlewares):
 				return await next()
 			mw = self._middlewares[index]
+			denied = False
 
 			async def _next() -> ConnectResponse:
-				return await dispatch(index + 1)
+				nonlocal denied
+				res = await dispatch(index + 1)
+				if isinstance(res, Deny):
+					denied = True
+				return res
 
-			return _coerce_decision(
+			res = _coerce_decision(
 				await mw.connect(request=request, session=session, next=_next)
 			)
+			# A downstream Deny is final: the connection was never accepted,
+			# so an outer Ok cannot un-deny it.
+			return Deny() if denied and not isinstance(res, Deny) else res
 
 		return await dispatch(0)
 
@@ -376,13 +388,21 @@ class MiddlewareStack(PulseMiddleware):
 			if index >= len(self._middlewares):
 				return await next()
 			mw = self._middlewares[index]
+			denied = False
 
 			async def _next() -> Ok[None] | Deny:
-				return await dispatch(index + 1)
+				nonlocal denied
+				res = await dispatch(index + 1)
+				if isinstance(res, Deny):
+					denied = True
+				return res
 
-			return _coerce_decision(
+			res = _coerce_decision(
 				await mw.message(session=session, data=data, next=_next)
 			)
+			# A downstream Deny is final: the command never ran, so an outer
+			# Ok cannot claim it was allowed.
+			return Deny() if denied and not isinstance(res, Deny) else res
 
 		return await dispatch(0)
 
@@ -401,11 +421,16 @@ class MiddlewareStack(PulseMiddleware):
 			if index >= len(self._middlewares):
 				return await next()
 			mw = self._middlewares[index]
+			denied = False
 
 			async def _next() -> Ok[None] | Deny:
-				return await dispatch(index + 1)
+				nonlocal denied
+				res = await dispatch(index + 1)
+				if isinstance(res, Deny):
+					denied = True
+				return res
 
-			return _coerce_decision(
+			res = _coerce_decision(
 				await mw.channel(
 					channel_id=channel_id,
 					event=event,
@@ -415,6 +440,9 @@ class MiddlewareStack(PulseMiddleware):
 					next=_next,
 				)
 			)
+			# A downstream Deny is final: the command never ran, so an outer
+			# Ok cannot claim it was allowed.
+			return Deny() if denied and not isinstance(res, Deny) else res
 
 		return await dispatch(0)
 

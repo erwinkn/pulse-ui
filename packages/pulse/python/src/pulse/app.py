@@ -5,6 +5,7 @@ This module provides the main App class that users instantiate in their main.py
 to define routes and configure their Pulse application.
 """
 
+import asyncio
 import logging
 import os
 from collections import defaultdict
@@ -242,7 +243,8 @@ class App:
 	_render_to_page_instance: dict[str, str | None]
 	_render_connect_attempts: dict[str, object]
 	_connecting_sockets: set[str]
-	_pending_socket_messages: dict[str, list[Serialized]]
+	_pending_socket_messages: dict[str, list[ClientMessage]]
+	_command_locks: dict[str, dict[str, asyncio.Lock]]
 	_render_cleanups: dict[str, TimerHandleLike]
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
@@ -328,6 +330,9 @@ class App:
 		self._render_connect_attempts = {}
 		self._connecting_sockets = set()
 		self._pending_socket_messages = {}
+		# render id -> command target key -> lock, so commands for one route
+		# or channel keep arrival order while unrelated work runs concurrently
+		self._command_locks = {}
 		# Map render_id -> cleanup timer handle for timeout-based expiry
 		self._render_cleanups = {}
 		self._tasks = TaskRegistry(name="app")
@@ -996,30 +1001,55 @@ class App:
 		self._render_cleanups[rid] = handle
 
 	async def _handle_socket_message(self, sid: str, data: Serialized) -> None:
+		msg = cast(ClientMessage, deserialize(data))
 		if sid in self._connecting_sockets:
 			# Connect middleware is still running; the render is not mapped
 			# yet. _drain_pending_socket_messages replays these in order.
-			queue = self._pending_socket_messages.setdefault(sid, [])
-			if len(queue) >= MAX_PENDING_SOCKET_MESSAGES:
-				logger.warning(
-					"Dropping socket message for %s while connect is pending; queue is full",
-					sid,
-				)
-			else:
-				queue.append(data)
+			# Replies resolve server-parked futures by correlation id; they
+			# never wait behind queued commands. Apply immediately once the
+			# socket is mapped to its render.
+			if msg["type"] == "reply":
+				rid = self._socket_to_render.get(sid)
+				render = self.render_sessions.get(rid) if rid else None
+				if render is not None:
+					render.replies.apply(msg)
+					return
+			self._queue_pending_socket_message(sid, msg)
 			return
-		await self._deliver_socket_message(sid, data)
+		await self._deliver_socket_message(sid, msg)
+
+	def _queue_pending_socket_message(self, sid: str, msg: ClientMessage) -> None:
+		queue = self._pending_socket_messages.setdefault(sid, [])
+		# Never drop replies: a dropped reply orphans its pending future for
+		# the full request timeout.
+		if msg["type"] != "reply" and len(queue) >= MAX_PENDING_SOCKET_MESSAGES:
+			logger.warning(
+				"Dropping socket message for %s while connect is pending; queue is full",
+				sid,
+			)
+			return
+		queue.append(msg)
 
 	async def _drain_pending_socket_messages(self, sid: str) -> None:
 		try:
 			while pending := self._pending_socket_messages.pop(sid, []):
-				for data in pending:
+				# Apply queued replies first: they resolve futures without
+				# middleware and must not wait behind commands that may await.
+				rid = self._socket_to_render.get(sid)
+				render = self.render_sessions.get(rid) if rid else None
+				commands: list[ClientMessage] = []
+				for msg in pending:
+					if msg["type"] == "reply" and render is not None:
+						render.replies.apply(msg)
+					else:
+						commands.append(msg)
+				for msg in commands:
 					# First-load replay stays ordered (attach then callback).
-					await self._deliver_socket_message(sid, data)
+					await self._deliver_socket_message(sid, msg)
 		finally:
 			self._connecting_sockets.discard(sid)
 
-	async def _deliver_socket_message(self, sid: str, data: Serialized) -> None:
+	async def _deliver_socket_message(self, sid: str, msg: ClientMessage) -> None:
 		"""Route a packet to its render. `reply` completes a pending
 		request; commands await middleware. Live EVENTs are already tasks
 		(async_handlers). Connect drain awaits this so first-load attach
@@ -1046,23 +1076,39 @@ class App:
 		# the other half of a server request, not a command to authorize;
 		# putting apply behind `await` can deadlock if that await waits
 		# on another reply.
-		msg = cast(ClientMessage, deserialize(data))
 		if msg["type"] == "reply":
 			render.replies.apply(msg)
-		else:
-			await self._run_command(render, session, msg)
+			return
+		await self._run_command(rid, render, session, msg)
 
 	async def _run_command(
-		self, render: RenderSession, session: UserSession, msg: ClientMessage
+		self,
+		rid: str,
+		render: RenderSession,
+		session: UserSession,
+		msg: ClientPulseMessage | ClientChannelRequestMessage,
 	) -> None:
-		try:
-			if msg["type"] == "channel_message":
-				await self._handle_channel_command(render, session, msg)
-			elif msg["type"] != "reply":
-				await self._handle_pulse_command(render, session, msg)
-		except Exception as e:
-			path = msg.get("path", "")
-			render.report_error(path, "server", e)
+		# Commands that target the same route (or channel) must apply in
+		# arrival order: an awaited middleware must not let a later
+		# detach/update overtake an earlier attach. Unrelated targets and
+		# replies stay concurrent.
+		if msg["type"] == "channel_message":
+			key = f"channel:{msg.get('channel', '')}"
+		else:
+			key = f"path:{msg.get('path', '')}"
+		locks = self._command_locks.setdefault(rid, {})
+		lock = locks.setdefault(key, asyncio.Lock())
+		async with lock:
+			if self.render_sessions.get(rid) is not render:
+				return
+			try:
+				if msg["type"] == "channel_message":
+					await self._handle_channel_command(render, session, msg)
+				else:
+					await self._handle_pulse_command(render, session, msg)
+			except Exception as e:
+				path = msg.get("path", "")
+				render.report_error(path, "server", e)
 
 	async def _handle_pulse_command(
 		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
@@ -1097,12 +1143,13 @@ class App:
 					session=session.data,
 					next=_next,
 				)
-			except Exception:
+			except Exception as exc:
 				logger.exception("Error in message middleware")
+				render.report_error(msg.get("path", ""), "server", exc)
 				return
 
 			if isinstance(res, Deny):
-				path = msg.get("path", "api_response")
+				path = msg.get("path", "")
 				render.report_error(
 					path,
 					"server",
@@ -1125,14 +1172,20 @@ class App:
 			return Ok(None)
 
 		with PulseContext.update(session=session, render=render):
-			res = await self.middleware.channel(
-				channel_id=channel_id,
-				event=msg.get("event", ""),
-				payload=msg.get("payload"),
-				request_id=msg.get("requestId"),
-				session=session.data,
-				next=_next,
-			)
+			try:
+				res = await self.middleware.channel(
+					channel_id=channel_id,
+					event=msg.get("event", ""),
+					payload=msg.get("payload"),
+					request_id=msg.get("requestId"),
+					session=session.data,
+					next=_next,
+				)
+			except Exception as exc:
+				logger.exception("Error in channel middleware")
+				if req_id := msg.get("requestId"):
+					render.channels.send_error(req_id, str(exc))
+				return
 
 		if isinstance(res, Deny):
 			if req_id := msg.get("requestId"):
@@ -1256,6 +1309,7 @@ class App:
 		if socket_sid is not None:
 			self._socket_to_render.pop(socket_sid, None)
 
+		self._command_locks.pop(rid, None)
 		render = self.render_sessions.pop(rid, None)
 		if not render:
 			return

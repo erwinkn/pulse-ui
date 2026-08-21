@@ -337,7 +337,9 @@ app = ps.App(
 )
 ```
 
-Executes in order. Each calls `await next()` to continue the chain. `next()` returns the downstream decision (`Ok` or `Deny`); return it as-is or override it. An inner `Deny` reaches the app unless an outer hook replaces it.
+Executes in order. Each calls `await next()` to continue the chain. `next()` returns the downstream decision (`Ok` or `Deny`). Decision hooks (`connect`/`message`/`channel`) must return `Ok` or `Deny` — anything else raises `TypeError` (fail closed). A downstream `Deny` is final: the command never ran, so an outer `Ok` cannot override it.
+
+Concurrency: `message`/`channel` hooks may await freely. Commands for the same route path (or same channel) still apply in arrival order; commands for other paths and `reply` completions are never blocked by a parked hook.
 
 ## Built-in Middleware
 

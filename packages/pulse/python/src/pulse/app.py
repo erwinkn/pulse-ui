@@ -1126,36 +1126,27 @@ class App:
 			logger.warning("Unknown channel action received: %s", msg)
 			return
 
-		inbound = (
-			cast(ClientChannelEventMessage, msg)
-			if action == "event"
-			else cast(ClientChannelRequestMessage, msg)
-		)
-		channel_id = inbound["channel"]
-		event = inbound["event"]
-		request_id = inbound.get("requestId") if action == "request" else None
+		channel_id = msg.get("channel")
+		event = msg.get("event")
+		if not isinstance(channel_id, str) or not isinstance(event, str):
+			logger.warning("Dropping malformed channel message: %s", msg)
+			return
+		request_id = None
+		if action == "request":
+			request_id = msg.get("requestId")
+			if not isinstance(request_id, str):
+				# Cannot NACK what we cannot address.
+				logger.warning("Dropping channel request without requestId: %s", msg)
+				return
+
+		# Dispatch happens after the chain resolves, never inside `_next`: a
+		# middleware that awaits next() and then denies (or raises) must not
+		# produce a second response nor let the handler commit side effects.
+		reached_end = False
 
 		async def _next() -> Ok[None]:
-			if action == "event":
-				render.channels.handle_event(cast(ClientChannelEventMessage, inbound))
-				return Ok(None)
-			request_msg = cast(ClientChannelRequestMessage, inbound)
-
-			def _on_done(task: asyncio.Task[Any]) -> None:
-				if task.cancelled():
-					return
-				try:
-					exc = task.exception()
-				except asyncio.CancelledError:
-					return
-				if exc is not None:
-					render.report_error(None, "channel", exc)
-
-			render.create_task(
-				render.channels.handle_request(request_msg),
-				name=f"channel-request:{channel_id}:{event}",
-				on_done=_on_done,
-			)
+			nonlocal reached_end
+			reached_end = True
 			return Ok(None)
 
 		def _normalize_message_response(res: Any) -> Ok[None] | Deny:
@@ -1168,22 +1159,44 @@ class App:
 				res = await self.middleware.channel(
 					channel_id=channel_id,
 					event=event,
-					payload=inbound.get("payload"),
+					payload=msg.get("payload"),
 					request_id=request_id,
 					session=session.data,
 					next=_next,
 				)
 				res = _normalize_message_response(res)
 		except Exception as e:
-			if action == "request" and request_id:
+			if request_id is not None:
 				render.channels.send_error(
 					channel_id, request_id, "handler_error", "Channel handler failed"
 				)
 			render.report_error(None, "channel", e)
 			return
 
-		if isinstance(res, Deny) and action == "request" and request_id:
-			render.channels.send_error(channel_id, request_id, "denied", "Denied")
+		if isinstance(res, Deny) or not reached_end:
+			if request_id is not None:
+				render.channels.send_error(channel_id, request_id, "denied", "Denied")
+			return
+
+		if action == "event":
+			render.channels.handle_event(cast(ClientChannelEventMessage, msg))
+			return
+
+		def _on_done(task: asyncio.Task[Any]) -> None:
+			if task.cancelled():
+				return
+			try:
+				exc = task.exception()
+			except asyncio.CancelledError:
+				return
+			if exc is not None:
+				render.report_error(None, "channel", exc)
+
+		render.create_task(
+			render.channels.handle_request(cast(ClientChannelRequestMessage, msg)),
+			name=f"channel-request:{channel_id}:{event}",
+			on_done=_on_done,
+		)
 
 	def get_route(self, path: str):
 		return self.routes.find(path)

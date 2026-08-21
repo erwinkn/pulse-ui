@@ -47,6 +47,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__file__)
 
+# Cap on messages buffered while the socket is down (drop-oldest past this).
+MAX_DISCONNECT_QUEUE = 1000
+
 
 class JsExecError(Exception):
 	"""Raised when client-side JS execution fails."""
@@ -279,6 +282,7 @@ class RenderSession:
 	_pending_js_results: dict[str, asyncio.Future[Any]]
 	_global_states: dict[str, State]
 	_global_queue: list[ServerMessage]
+	_global_queue_overflowed: bool
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
 
@@ -313,6 +317,7 @@ class RenderSession:
 		self._send_message = None
 		self._global_states = {}
 		self._global_queue = []
+		self._global_queue_overflowed = False
 		self.connected = False
 		self.channels = ChannelsManager(self)
 		self.forms = FormRegistry(self)
@@ -349,11 +354,20 @@ class RenderSession:
 		"""WebSocket connected. Set sender, don't auto-flush (attach does that)."""
 		self._send_message = send_message
 		self.connected = True
-		if self._global_queue:
-			queued = self._global_queue
-			self._global_queue = []
-			for msg in queued:
+		queued = self._global_queue
+		self._global_queue = []
+		self._global_queue_overflowed = False
+		for msg in queued:
+			# One undeliverable message must not abort the drain: the rest of the
+			# queue would be lost and the session left connected without a socket.
+			try:
 				self.send(msg)
+			except Exception as exc:
+				logger.error(
+					"Dropping queued %s message on reconnect",
+					msg.get("type"),
+					exc_info=exc,
+				)
 		# Restart query intervals and refetch stale data (no-op on first connect).
 		# Establishes render context here (so resume fetch-tasks register on this
 		# render); the session is inherited from the caller's context, which must
@@ -430,7 +444,7 @@ class RenderSession:
 			if self._send_message:
 				self._send_message(message)
 			else:
-				self._global_queue.append(message)
+				self._queue_global(message)
 			return
 		# Global messages (not path-specific) go directly if connected
 		path = message.get("path")
@@ -438,7 +452,7 @@ class RenderSession:
 			if self._send_message:
 				self._send_message(message)
 			else:
-				self._global_queue.append(message)
+				self._queue_global(message)
 			return
 
 		# Normalize path for lookup
@@ -455,6 +469,21 @@ class RenderSession:
 			return
 		if mount.state == "pending":
 			mount.deliver(message, lambda _: None)
+
+	def _queue_global(self, message: ServerMessage) -> None:
+		"""Buffer a message for the disconnect grace period, dropping oldest on overflow."""
+		self._global_queue.append(message)
+		overflow = len(self._global_queue) - MAX_DISCONNECT_QUEUE
+		if overflow <= 0:
+			return
+		del self._global_queue[:overflow]
+		if not self._global_queue_overflowed:
+			self._global_queue_overflowed = True
+			logger.warning(
+				"Render session %s disconnect queue hit %d messages; dropping oldest",
+				self.id,
+				MAX_DISCONNECT_QUEUE,
+			)
 
 	def _error_report_paths(self, path: str | None) -> list[str]:
 		# Wire `path` must match a live client view. Tab / connect / middleware

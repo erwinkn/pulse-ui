@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -23,6 +24,7 @@ from pulse.reactive_extensions import (
 	ReactiveSet,
 	unwrap,
 )
+from pulse.serializer import serialize
 
 if TYPE_CHECKING:
 	from pulse.render_session import RenderSession
@@ -72,6 +74,8 @@ class Channel:
 	_route_path: str | None
 	_handlers: dict[str, list[ChannelHandler]]
 	_detached: bool
+	_events: deque[tuple[str, Any]]
+	_pump: asyncio.Task[None] | None
 
 	def __init__(
 		self,
@@ -87,6 +91,8 @@ class Channel:
 		self._route_path = route_path
 		self._handlers = {}
 		self._detached = False
+		self._events = deque()
+		self._pump = None
 
 	@property
 	def id(self) -> str:
@@ -119,24 +125,31 @@ class Channel:
 		return remove
 
 	def emit(self, event: str, payload: Any = None) -> None:
+		# Emits legitimately race detach (background tasks): no-op instead of raising.
+		if self._detached:
+			logger.debug("Dropping emit %s on detached channel %s", event, self._id)
+			return
 		self._session.channels.send_event(self._id, event, payload)
 
 	async def request(
 		self, event: str, payload: Any = None, *, timeout: float | None = None
 	) -> Any:
+		self._assert_attached()
 		if not self._session.channels.can_request():
 			raise ChannelDisconnected("No render session is connected")
 		request_id = str(uuid.uuid4())
 		future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
-		self._session.channels.register_pending(request_id, future)
-		self._session.channels.send_request(self._id, event, payload, request_id)
+		self._session.channels.register_pending(request_id, self._id, future)
 		try:
+			self._session.channels.send_request(self._id, event, payload, request_id)
 			if timeout is None:
 				return await future
 			return await asyncio.wait_for(future, timeout)
 		except TimeoutError:
-			self._session.channels.cancel_pending(request_id)
 			raise ChannelTimeout(timeout or 0, event) from None
+		finally:
+			# Covers timeout, caller cancellation and send failures alike.
+			self._session.channels.forget_pending(request_id)
 
 	def is_detached(self) -> bool:
 		return self._detached
@@ -149,6 +162,7 @@ class Channel:
 			return
 		self._detached = True
 		self._handlers.clear()
+		self._events.clear()
 		self._session.channels.forget_handle(self)
 
 	def _report_task_error(self, task: asyncio.Task[Any]) -> None:
@@ -163,16 +177,32 @@ class Channel:
 		self._session.report_error(self._route_path, "channel", exc)
 
 	def dispatch_event(self, event: str, payload: Any) -> None:
+		"""Queue an event. One serial pump per handle keeps events in arrival order."""
 		if self._detached:
 			return
-		for handler in list(self._handlers.get(event, [])):
-			self._session.create_task(
-				self._invoke_handler(handler, payload, required=False),
-				name=f"channel:{self._id}:{event}",
-				on_done=self._report_task_error,
-			)
+		self._events.append((event, payload))
+		if self._pump is not None and not self._pump.done():
+			return
+		self._pump = self._session.create_task(
+			self._pump_events(),
+			name=f"channel:{self._id}",
+			on_done=self._report_task_error,
+		)
+
+	async def _pump_events(self) -> None:
+		while self._events:
+			event, payload = self._events.popleft()
+			for handler in list(self._handlers.get(event, [])):
+				# Detach can land while an earlier handler was awaiting.
+				if self._detached:
+					return
+				try:
+					await self._invoke_handler(handler, payload, required=False)
+				except Exception as exc:
+					self._session.report_error(self._route_path, "channel", exc)
 
 	async def dispatch_request(self, event: str, payload: Any) -> Any:
+		"""Runs outside the event pump: request handlers may await client RPCs."""
 		if self._detached:
 			return None
 		handlers = list(self._handlers.get(event, []))
@@ -225,7 +255,8 @@ class ChannelsManager:
 		# (lifetime, channel_id, route_path) → live handle
 		self._intern: dict[ChannelInternKey, Channel] = {}
 		self._by_name: dict[str, list[Channel]] = {}
-		self._pending: dict[str, asyncio.Future[Any]] = {}
+		# request id → (channel id, future)
+		self._pending: dict[str, tuple[str, asyncio.Future[Any]]] = {}
 
 	def can_request(self) -> bool:
 		return self._session.connected
@@ -294,7 +325,7 @@ class ChannelsManager:
 			"event": event,
 		}
 		if payload is not None:
-			message["payload"] = _serialize_payload(payload)
+			message["payload"] = _wire_payload(channel_id, event, payload)
 		self._session.send(message)
 
 	def send_request(
@@ -308,7 +339,7 @@ class ChannelsManager:
 			"requestId": request_id,
 		}
 		if payload is not None:
-			message["payload"] = _serialize_payload(payload)
+			message["payload"] = _wire_payload(channel_id, event, payload)
 		self._session.send(message)
 
 	def send_response(
@@ -327,7 +358,7 @@ class ChannelsManager:
 		if error is not None:
 			message["error"] = error
 		elif payload is not None:
-			message["payload"] = _serialize_payload(payload)
+			message["payload"] = _wire_payload(channel_id, request_id, payload)
 		self._session.send(message)
 
 	def send_error(
@@ -337,14 +368,16 @@ class ChannelsManager:
 			channel_id, request_id, error={"code": code, "message": message}
 		)
 
-	def register_pending(self, request_id: str, future: asyncio.Future[Any]) -> None:
-		self._pending[request_id] = future
+	def register_pending(
+		self, request_id: str, channel_id: str, future: asyncio.Future[Any]
+	) -> None:
+		self._pending[request_id] = (channel_id, future)
 
-	def cancel_pending(self, request_id: str) -> None:
+	def forget_pending(self, request_id: str) -> None:
 		self._pending.pop(request_id, None)
 
 	def fail_pending(self) -> None:
-		pending = list(self._pending.values())
+		pending = [future for _, future in self._pending.values()]
 		self._pending.clear()
 		for future in pending:
 			if not future.done():
@@ -399,8 +432,20 @@ class ChannelsManager:
 
 	def handle_response(self, message: ClientChannelResponseMessage) -> None:
 		request_id = message["responseTo"]
-		future = self._pending.pop(request_id, None)
-		if future is None or future.done():
+		entry = self._pending.get(request_id)
+		if entry is None:
+			return
+		channel_id, future = entry
+		if message["channel"] != channel_id:
+			logger.warning(
+				"Ignoring response for %s: claims channel %s, expected %s",
+				request_id,
+				message["channel"],
+				channel_id,
+			)
+			return
+		del self._pending[request_id]
+		if future.done():
 			return
 		error = message.get("error")
 		if error is not None:
@@ -409,9 +454,17 @@ class ChannelsManager:
 		future.set_result(message.get("payload"))
 
 
-def _serialize_payload(payload: Any) -> Any:
+def _wire_payload(channel_id: str, label: str, payload: Any) -> Any:
 	if isinstance(payload, ReactiveDict | ReactiveList | ReactiveSet):
-		return unwrap(payload)
+		payload = unwrap(payload)
+	# Serialize eagerly to fail at the emitter: a bad payload sitting on the
+	# disconnect queue would otherwise blow up at flush time, far from its origin.
+	try:
+		serialize(payload)
+	except (TypeError, ValueError) as exc:
+		raise TypeError(
+			f"Channel {channel_id!r} payload for {label!r} is not serializable: {exc}"
+		) from exc
 	return payload
 
 

@@ -63,6 +63,10 @@ def on(self, event: str, handler: ChannelHandler) -> Callable[[], None]
 
 Register a handler on this handle. Idempotent for the same `(event, handler)`.
 
+Inbound events run in arrival order per handle: an event's handlers are awaited before the next event starts. Inbound requests run as independent tasks, so a request handler may itself `await request(...)` without stalling the session.
+
+All live handles on the same name receive every event (fan-out, including a tab handle and a route handle together). A request goes to the first attached handle that has a handler for the event — registration order decides the single winner.
+
 **Raises:** `ChannelDetached` if this handle has been detached.
 
 ##### emit
@@ -71,7 +75,9 @@ Register a handler on this handle. Idempotent for the same `(event, handler)`.
 def emit(self, event: str, payload: Any = None) -> None
 ```
 
-Send a fire-and-forget event to the channel. Still works after detach. If the WebSocket is down, the message uses the session's global queue. Events emitted before the client has rendered `useChannel` are dropped.
+Send a fire-and-forget event to the channel. No-op after detach. If the WebSocket is down, the message uses the session's global queue, capped at 1000 messages (oldest dropped past that). Events emitted before the client has rendered `useChannel` are dropped.
+
+**Raises:** `TypeError` if the payload cannot be serialized — validated here, at the emitter, not at flush time.
 
 ##### request
 
@@ -88,6 +94,7 @@ async def request(
 Send a request and await the peer's response.
 
 **Raises:**
+- `ChannelDetached` if this handle has been detached
 - `ChannelDisconnected` if there is no socket, or it dies mid-flight
 - `ChannelRemoteError` if the peer responds with `no_handler`, `denied`, or `handler_error`
 - `ChannelTimeout` if `timeout` elapses
@@ -100,13 +107,13 @@ A request with no handler NACKs immediately (`no_handler`). Requests are never q
 def detach(self) -> None
 ```
 
-Detach this handle's listeners. Idempotent. Does not destroy the channel name. `on()` after detach raises `ChannelDetached`. `emit` / `request` still address the name.
+Detach this handle's listeners. Idempotent. Does not destroy the channel name. After detach, `on()` and `request()` raise `ChannelDetached` and `emit()` is a no-op (emits legitimately race detach from background tasks). Queued and not-yet-run handlers are skipped.
 
 ## Exceptions
 
 ### ChannelDetached
 
-Raised when `on()` is called on a detached handle.
+Raised when `on()` or `request()` is called on a detached handle.
 
 ### ChannelDisconnected
 

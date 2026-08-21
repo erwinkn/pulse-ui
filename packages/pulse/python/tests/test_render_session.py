@@ -8,6 +8,7 @@ that updates from one session do not leak into the other.
 
 import asyncio
 import gc
+import logging
 from collections.abc import Callable, Iterator
 from typing import Any, cast, override
 
@@ -18,7 +19,7 @@ from pulse.hooks.core import HookContext
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import ServerMessage
 from pulse.reactive import Effect
-from pulse.render_session import RenderSession
+from pulse.render_session import MAX_DISCONNECT_QUEUE, RenderSession
 from pulse.routing import Route, RouteInfo, RouteTree
 from pulse.test_helpers import wait_for
 from pulse.transpiler.nodes import Element, PulseNode
@@ -2220,3 +2221,38 @@ def test_report_error_fans_out_when_path_is_unmounted():
 	assert scoped[0]["path"] == "/dash"
 
 	session.close()
+
+
+def test_disconnect_queue_drops_oldest_with_one_warning(
+	caplog: pytest.LogCaptureFixture,
+):
+	app = ps.App()
+	session = ps.RenderSession("render-cap", app.routes)
+	with caplog.at_level(logging.WARNING):
+		for i in range(MAX_DISCONNECT_QUEUE + 5):
+			session.channels.send_event("cap", f"e{i}", None)
+	queue = session._global_queue  # pyright: ignore[reportPrivateUsage]
+	assert len(queue) == MAX_DISCONNECT_QUEUE
+	assert cast(Any, queue[0])["event"] == "e5"
+	warnings = [r for r in caplog.records if "disconnect queue" in r.getMessage()]
+	assert len(warnings) == 1
+
+
+def test_connect_drain_survives_undeliverable_message():
+	app = ps.App()
+	session = ps.RenderSession("render-drain", app.routes)
+	session.channels.send_event("drain", "bad", None)
+	session.channels.send_event("drain", "good", None)
+	delivered: list[ServerMessage] = []
+
+	def send(message: ServerMessage) -> None:
+		if cast(Any, message).get("event") == "bad":
+			raise RuntimeError("transport blew up")
+		delivered.append(message)
+
+	session.connect(send)
+	assert [cast(Any, m)["event"] for m in delivered] == ["good"]
+	assert session.connected
+	session.channels.send_event("drain", "after", None)
+	assert [cast(Any, m)["event"] for m in delivered] == ["good", "after"]
+	assert session._global_queue == []  # pyright: ignore[reportPrivateUsage]

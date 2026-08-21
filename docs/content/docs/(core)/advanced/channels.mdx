@@ -196,7 +196,11 @@ A channel id is just a name. Nothing is created or destroyed on the wire. The on
 - `"route"` (default) — tear down this handle's `on()` set when that route unmounts, even if you stored the object.
 - `"tab"` — do not detach on route unmount. Lives until the render session ends or you call `detach()`.
 
-After a route handle detaches, `on()` raises `ChannelDetached`. `emit` and `request` still address the channel name.
+After a handle detaches, `on()` and `request()` raise `ChannelDetached`, and `emit()` becomes a no-op (background tasks racing an unmount shouldn't crash). Handlers already queued but not yet run are skipped.
+
+Several live handles can share one name — say a `"tab"` handle in a layout plus a `"route"` handle in a page. Events fan out to all of them. A request goes to just one: the first attached handle that has a handler for that event, in registration order.
+
+Events on a handle run in arrival order, and each event's handlers are awaited before the next event starts, so a slow `async` handler delays later events instead of reordering them. Inbound requests run independently of that queue, so a request handler is free to `await` a request back to the client.
 
 On the client, lifetime is React placement: put `useChannel(id)` in a route component to drop listeners on navigation, or in a layout to keep them for the tab. There is no `lifetime` argument on the hook.
 
@@ -205,6 +209,8 @@ chat.detach()
 ```
 
 ## Error handling
+
+`emit()` raises `TypeError` right away if the payload isn't serializable — you get the error where you emitted, not later at flush time. While the socket is down, events buffer in the session queue (capped at 1000 messages; oldest dropped past that).
 
 `request()` fails immediately if the socket is down. If the peer has no handler, you get a `ChannelRemoteError` with code `no_handler`. Middleware `Deny` is `denied`; a middleware exception is `handler_error`. It never hangs when `timeout=None`.
 

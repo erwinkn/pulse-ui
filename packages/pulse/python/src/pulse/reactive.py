@@ -352,7 +352,7 @@ class Computed(Generic[T_co]):
 		return off
 
 
-EffectCleanup = Callable[[], None]
+EffectCleanup = Callable[[], None | Awaitable[None]]
 # Split effect function types into sync and async for clearer typing
 EffectFn = Callable[[], EffectCleanup | None]
 AsyncEffectFn = Callable[[], Awaitable[EffectCleanup | None]]
@@ -800,7 +800,10 @@ class AsyncEffect(Effect):
 				# Perform cleanups in the new task
 				with Untrack():
 					try:
-						self._cleanup_before_run()
+						for child in self.children:
+							child._cleanup_before_run()
+						if self.cleanup_fn:
+							await maybe_await(self.cleanup_fn())
 					except Exception as e:
 						self.handle_error(e)
 
@@ -887,7 +890,9 @@ class AsyncEffect(Effect):
 		for child in self.children.copy():
 			child.dispose()
 		if self.cleanup_fn:
-			self.cleanup_fn()
+			result = self.cleanup_fn()
+			if inspect.isawaitable(result):
+				create_task(result, name=f"cleanup:{self.name or 'unnamed'}")
 		for dep in self.deps:
 			dep.obs.remove(self)
 		if self.parent and self in self.parent.children:

@@ -330,6 +330,32 @@ def test_kill_tree_kills_grandchildren_after_leader_exit(tmp_path: Path) -> None
 		pytest.fail("grandchild survived kill_tree after leader exit")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+def test_group_signals_are_skipped_after_close_reaps_the_leader(
+	tmp_path: Path,
+) -> None:
+	exited = threading.Event()
+
+	process = ManagedProcess.start(
+		CommandSpec(
+			name="worker",
+			args=[sys.executable, "-c", "raise SystemExit(0)"],
+			cwd=tmp_path,
+			env=os.environ.copy(),
+		),
+		lambda _line: None,
+		lambda _code: exited.set(),
+	)
+	assert exited.wait(5)
+	process.close()
+	# The pid/pgid may be recycled once the leader is reaped: a second stop
+	# pass (e.g. execute_commands' finally) must not signal it.
+	assert process._reaped  # pyright: ignore[reportPrivateUsage]
+	process.request_stop()
+	process.kill_tree()
+	process.close()
+
+
 def test_managed_process_keeps_last_output_line(tmp_path: Path) -> None:
 	lines: list[str] = []
 	exited = threading.Event()

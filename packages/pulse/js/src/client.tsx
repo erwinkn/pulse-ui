@@ -506,9 +506,10 @@ export class PulseSocketIOClient {
 		let extracted: any[];
 		try {
 			extracted = args.map(extractEvent);
+			// Validate serializability now: a bad argument must degrade one
+			// callback, not throw inside React's event dispatch.
+			serialize(extracted);
 		} catch (err) {
-			// An extraction bug must degrade one callback, not throw inside
-			// React's event dispatch.
 			console.error(`Failed to extract arguments for callback '${callback}'`, err);
 			return;
 		}

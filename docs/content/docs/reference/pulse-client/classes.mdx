@@ -63,17 +63,20 @@ channel.emit("typing", { conversationId: "123" });
 Sends a request and waits for the server's response. This is like a remote procedure call.
 
 ```ts
-request(event: string, payload?: any): Promise<any>
+request(event: string, payload?: any, options?: { timeout?: number }): Promise<any>
 ```
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `event` | `string` | Event name |
 | `payload` | `any` | Optional request data |
+| `options.timeout` | `number` | Timeout in milliseconds; defaults to 30,000 |
 
 **Returns:** Promise resolving to the server's response.
 
-**Throws:** `PulseChannelDisconnectedError` if the socket is down or dies mid-flight. `PulseChannelRemoteError` if the peer NACKs (`no_handler`, `denied`, `handler_error`).
+**Throws:** `PulseChannelDisconnectedError` if the socket is down or dies mid-flight, `PulseChannelDetachedError` if this handle detaches while the request is in flight, `PulseChannelRemoteError` if the peer NACKs (`no_handler`, `denied`, `handler_error`), or `PulseChannelTimeoutError` if it exceeds its timeout.
+
+The default timeout is 30 seconds. Pass `options.timeout` to override it.
 
 **Example:**
 
@@ -130,7 +133,7 @@ useEffect(() => {
 }, [channel]);
 ```
 
-Events with no listener are dropped. Requests with no handler NACKs immediately.
+Events with no listener are dropped. Requests with no handler NACK immediately. Requests route to the first attached handle in registration order that has a handler; events fan out to every attached handle for the channel name.
 
 ### Complete Example
 
@@ -201,7 +204,7 @@ class PulseChannelRemoteError extends Error {
 
 ## PulseChannelDetachedError
 
-Unused by current client `on()` — registering while detached is legal (StrictMode). `emit` and `request` still address the channel name.
+Thrown when a handle detaches while one of its requests is in flight. `on()` remains legal while detached, and `emit` still addresses the channel name (with a warning).
 
 ```ts
 class PulseChannelDetachedError extends Error {

@@ -148,7 +148,7 @@ async def get_client_info(chat: ps.Channel):
 
 The `timeout` parameter prevents your code from waiting forever if the client doesn't respond.
 
-Don't `emit` during prerender or the first server render and expect the client to hear it. `useChannel` registers during render, so an emit after the hook has rendered is delivered. Earlier events drop.
+Don't `emit` during prerender or the first server render and expect the client to hear it. `useChannel` attaches in an effect, so events sent before that effect runs can drop.
 
 ## Using channels on the client
 
@@ -206,7 +206,9 @@ chat.detach()
 
 ## Error handling
 
-`request()` fails immediately if the socket is down. If the peer has no handler, you get a `ChannelRemoteError` with code `no_handler`. Middleware `Deny` is `denied`; a middleware exception is `handler_error`. It never hangs when `timeout=None`.
+`request()` fails immediately if the socket is down. If the peer has no handler, you get a `ChannelRemoteError` with code `no_handler`. Middleware `Deny` is `denied`; a middleware exception is `handler_error`. The client timeout defaults to 30 seconds. Detaching the client handle rejects its in-flight requests with `PulseChannelDetachedError`.
+
+Requests use the first attached handle in registration order that has a handler for the event. Events fan out to all attached handles for that channel name.
 
 ```python
 from pulse import ChannelDisconnected, ChannelRemoteError, ChannelTimeout

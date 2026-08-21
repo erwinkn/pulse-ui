@@ -35,7 +35,7 @@ self.channel.emit("server:notify", {"type": "update", "data": {...}})
 
 If the WebSocket is down, emit uses the session global queue. No per-channel buffer.
 
-Do not emit during prerender / first server render and expect the client to hear it. `useChannel` registers during render, so an emit after the client has rendered the hook is delivered. Earlier events drop — no listener yet.
+Do not emit during prerender / first server render and expect the client to hear it. `useChannel` attaches in an effect, so events emitted before that effect runs can drop — no listener yet.
 
 ### Request (with response)
 
@@ -84,9 +84,9 @@ def ChatClient(*, channel_id: str):
     return ps.div(...)
 ```
 
-No `lifetime` argument. Place the hook in a layout to keep listeners across routes. The hook attaches during render (not only in `useEffect`).
+No `lifetime` argument. Place the hook in a layout to keep listeners across routes. The hook attaches in an effect.
 
-Two hooks → two handles, one name. Events fan out. RPC uses the first handler in attach order. Client `on()` is legal while detached (StrictMode). Optional `request(event, payload, { timeout })` is milliseconds.
+Two hooks → two handles, one name. Events fan out to all attached handles. Requests use the first attached handle in registration order that has a handler. Client `on()` is legal while detached (StrictMode). Optional `request(event, payload, { timeout })` is milliseconds; the default is 30 seconds. Detaching a handle rejects its in-flight requests with `PulseChannelDetachedError`; detached `emit()` warns once and still sends.
 
 ## Wire
 

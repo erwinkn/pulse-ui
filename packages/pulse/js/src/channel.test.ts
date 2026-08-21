@@ -79,6 +79,22 @@ describe("ChannelBridge", () => {
 		expect(sent).toEqual([]);
 	});
 
+	it("fails request immediately when detached", async () => {
+		const { bridge, sent } = makeBridgeClient();
+		bridge.detach();
+		await expect(bridge.request("echo")).rejects.toBeInstanceOf(PulseChannelDetachedError);
+		expect(sent).toEqual([]);
+	});
+
+	it("allows requests from a never-attached bridge", async () => {
+		const { bridge, client, sent } = makeBridgeClient();
+		const neverAttached = new ChannelBridge(client as any, "never-attached");
+		const pending = neverAttached.request("echo");
+		const requestId = (sent.at(-1) as { requestId: string }).requestId;
+		client.resolve(requestId, "ok");
+		await expect(pending).resolves.toBe("ok");
+	});
+
 	it("times out an optional request timeout", async () => {
 		const { bridge } = makeBridgeClient();
 		await expect(bridge.request("echo", undefined, { timeout: 1 })).rejects.toBeInstanceOf(
@@ -145,12 +161,17 @@ describe("ChannelBridge", () => {
 	});
 
 	it("warns once when emitting from a detached bridge", () => {
-		const { bridge } = makeBridgeClient();
+		const { bridge, client } = makeBridgeClient();
+		const neverAttached = new ChannelBridge(client as any, "never-attached");
 		const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
-		bridge.emit("beforeAttach");
+		neverAttached.emit("beforeAttach");
 		bridge.detach();
 		bridge.emit("afterDetach");
-		expect(warning).toHaveBeenCalledTimes(1);
+		bridge.emit("afterDetachAgain");
+		bridge.attach();
+		bridge.detach();
+		bridge.emit("afterSecondDetach");
+		expect(warning).toHaveBeenCalledTimes(2);
 		warning.mockRestore();
 	});
 });

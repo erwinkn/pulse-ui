@@ -65,9 +65,9 @@ Create a new context with updated values, inheriting unspecified values from cur
 def bind(cls, fn: F) -> F
 ```
 
-Re-enter the PulseContext that is current when `bind` is called, on every later invocation. Captures `app`, `session`, `render`, `route`, and the `source_*` mount identity. No-op if there is no render session. A cleanup callable returned by `fn` is bound too.
+Re-enter the PulseContext that is current when `bind` is called, on every later invocation. Captures `app`, `session`, and `render`, then resolves the live route mount on each invocation. No-op if there is no render session. A cleanup callable returned by `fn` is bound too.
 
-`@ps.effect` uses this so effect bodies and cleanups see the creating render (and route, when the effect is route-scoped).
+`@ps.effect` uses this so effect bodies and cleanups see the creating render. Route-scoped effects resolve the current mount identity; if that mount no longer exists, they run without route metadata.
 
 **Returns:** The original function, or a wrapper that mounts the captured context.
 

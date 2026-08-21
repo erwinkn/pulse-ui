@@ -78,88 +78,84 @@ function ConnectedTree({
 			channelRef.current?.emit("nodeCollapse", { value });
 		},
 	} as any);
+	const treeRef = useRef(tree);
+	treeRef.current = tree;
 
 	// Server -> client imperative API
 	useEffect(() => {
 		const cleanups = [
 			channel.on("toggleExpanded", (payload: { value: string }) => {
 				if (!payload) return;
-				tree.toggleExpanded(payload.value);
+				treeRef.current.toggleExpanded(payload.value);
 			}),
 			channel.on("expand", (payload: { value: string }) => {
 				if (!payload) return;
-				tree.expand(payload.value);
+				treeRef.current.expand(payload.value);
 			}),
 			channel.on("collapse", (payload: { value: string }) => {
 				if (!payload) return;
-				tree.collapse(payload.value);
+				treeRef.current.collapse(payload.value);
 			}),
-			channel.on("expandAllNodes", () => {
-				tree.expandAllNodes();
-			}),
-			channel.on("collapseAllNodes", () => {
-				tree.collapseAllNodes();
-			}),
+			channel.on("expandAllNodes", () => treeRef.current.expandAllNodes()),
+			channel.on("collapseAllNodes", () => treeRef.current.collapseAllNodes()),
 			channel.on("setExpandedState", (payload: { expandedState: ExpandedState }) => {
 				if (!payload) return;
-				tree.setExpandedState(payload.expandedState ?? {});
+				treeRef.current.setExpandedState(payload.expandedState ?? {});
 			}),
-			channel.on("getCheckedNodes", () => tree.getCheckedNodes()),
-			channel.on("getExpandedState", () => tree.expandedState),
+			channel.on("getCheckedNodes", () => treeRef.current.getCheckedNodes()),
+			channel.on("getExpandedState", () => treeRef.current.expandedState),
 			// Selection API
 			channel.on("toggleSelected", (payload: { value: string }) => {
 				if (!payload) return;
-				tree.toggleSelected(payload.value);
+				treeRef.current.toggleSelected(payload.value);
 			}),
 			channel.on("select", (payload: { value: string }) => {
 				if (!payload) return;
-				tree.select(payload.value);
+				treeRef.current.select(payload.value);
 			}),
 			channel.on("deselect", (payload: { value: string }) => {
 				if (!payload) return;
-				tree.deselect(payload.value);
+				treeRef.current.deselect(payload.value);
 			}),
-			channel.on("clearSelected", () => {
-				tree.clearSelected();
-			}),
+			channel.on("clearSelected", () => treeRef.current.clearSelected()),
 			channel.on("setSelectedState", (payload: { selectedState: string[] }) => {
 				if (!payload) return;
-				tree.setSelectedState(payload.selectedState ?? []);
+				treeRef.current.setSelectedState(payload.selectedState ?? []);
 			}),
-			channel.on("getSelectedState", () => tree.selectedState),
-			channel.on("getAnchorNode", () => tree.anchorNode),
+			channel.on("getSelectedState", () => treeRef.current.selectedState),
+			channel.on("getAnchorNode", () => treeRef.current.anchorNode),
 			// Hover API
 			channel.on("setHoveredNode", (payload: { value?: string | null }) => {
-				tree.setHoveredNode(payload?.value ?? null);
+				treeRef.current.setHoveredNode(payload?.value ?? null);
 			}),
-			channel.on("getHoveredNode", () => tree.hoveredNode),
+			channel.on("getHoveredNode", () => treeRef.current.hoveredNode),
 			// Checked API
 			channel.on("checkNode", (payload: { value: string }) => {
 				if (!payload) return;
-				tree.checkNode(payload.value);
+				treeRef.current.checkNode(payload.value);
 			}),
 			channel.on("uncheckNode", (payload: { value: string }) => {
 				if (!payload) return;
-				tree.uncheckNode(payload.value);
+				treeRef.current.uncheckNode(payload.value);
 			}),
-			channel.on("checkAllNodes", () => tree.checkAllNodes()),
-			channel.on("uncheckAllNodes", () => tree.uncheckAllNodes()),
+			channel.on("checkAllNodes", () => treeRef.current.checkAllNodes()),
+			channel.on("uncheckAllNodes", () => treeRef.current.uncheckAllNodes()),
 			channel.on("setCheckedState", (payload: { checkedState: string[] }) => {
 				if (!payload) return;
-				tree.setCheckedState(payload.checkedState ?? []);
+				treeRef.current.setCheckedState(payload.checkedState ?? []);
 			}),
-			channel.on("getCheckedState", () => tree.checkedState),
+			channel.on("getCheckedState", () => treeRef.current.checkedState),
 			channel.on("isNodeChecked", (payload: { value: string }) =>
-				tree.isNodeChecked(payload?.value),
+				treeRef.current.isNodeChecked(payload?.value),
 			),
 			channel.on("isNodeIndeterminate", (payload: { value: string }) =>
-				tree.isNodeIndeterminate(payload?.value),
+				treeRef.current.isNodeIndeterminate(payload?.value),
 			),
 		];
 		return () => {
 			for (const dispose of cleanups) dispose();
 		};
-	}, [channel, tree]);
+	}, [channel]);
 
 	return <MantineTree {...(rest as any)} tree={tree as any} />;
 }

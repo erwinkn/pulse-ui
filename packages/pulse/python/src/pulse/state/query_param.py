@@ -576,16 +576,11 @@ class QueryParamSync(Disposable):
 				path += hash_frag
 			else:
 				path += "#" + hash_frag
-		message = ServerNavigateToMessage(
-			type="navigate_to",
-			path=path,
-			replace=True,
-			hard=False,
-		)
 		# Session-scoped, so the navigation is not bound to a route mount: the
 		# only staleness question is whether the URL it was built from is still
 		# the one on screen. Bind the origin to a mount currently displaying
-		# that pathname so late navigations are dropped once the URL changes.
+		# that pathname so late navigations are dropped once the URL changes;
+		# without such a mount the URL is already stale, so drop the navigation.
 		mount = next(
 			(
 				m
@@ -594,9 +589,17 @@ class QueryParamSync(Disposable):
 			),
 			None,
 		)
-		if mount is not None:
-			message["origin"] = mount.origin()
-		self.render.send(message)
+		if mount is None:
+			return
+		self.render.send(
+			ServerNavigateToMessage(
+				type="navigate_to",
+				path=path,
+				replace=True,
+				hard=False,
+				origin=mount.origin(),
+			)
+		)
 
 	@override
 	def dispose(self) -> None:

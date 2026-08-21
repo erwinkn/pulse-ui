@@ -28,6 +28,10 @@ class DummyState(State):
 		return self._dispose_calls
 
 
+class CountingState(DummyState):
+	count: int = 0
+
+
 def make_route_info(
 	pathname: str, *, query_params: dict[str, str] | None = None, hash: str = ""
 ) -> RouteInfo:
@@ -243,6 +247,77 @@ def test_state_key_change_keeps_unkeyed_sibling():
 	assert keyed.dispose_calls == 1
 	assert unkeyed2 is unkeyed
 	assert unkeyed.dispose_calls == 0
+
+
+def test_state_survives_failed_render_and_recovery():
+	"""A render that raises before its `ps.state` call must not evict the state."""
+	ctx = HookContext()
+	fail = Signal(False)
+	seen: list[CountingState] = []
+
+	@ps.component
+	def Comp():
+		if fail():
+			raise RuntimeError("transient")
+		instance = state(CountingState, key="k")
+		seen.append(instance)
+		return None
+
+	with ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+	first = seen[0]
+	first.count = 5
+
+	fail.write(True)
+	with pytest.raises(RuntimeError, match="transient"), ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+
+	assert first.dispose_calls == 0
+
+	fail.write(False)
+	with ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+
+	assert seen[1] is first
+	assert first.count == 5
+	assert first.dispose_calls == 0
+
+
+def test_state_evicted_by_first_successful_render_after_failure():
+	"""A failed render's partial seen-set must not skew the next successful render."""
+	ctx = HookContext()
+	keys = Signal(["a", "b"])
+	fail = Signal(False)
+	seen: dict[str, DummyState] = {}
+
+	@ps.component
+	def Comp():
+		for key in keys():
+			seen[key] = state(DummyState, key=key)
+			if fail() and key == "a":
+				raise RuntimeError("transient")
+		return None
+
+	with ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+	first_a = seen["a"]
+	first_b = seen["b"]
+
+	fail.write(True)
+	with pytest.raises(RuntimeError, match="transient"), ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+
+	assert first_a.dispose_calls == 0
+	assert first_b.dispose_calls == 0
+
+	fail.write(False)
+	keys.write(["a"])
+	with ctx:
+		Comp.fn()  # type: ignore[attr-defined]
+
+	assert seen["a"] is first_a
+	assert first_a.dispose_calls == 0
+	assert first_b.dispose_calls == 1
 
 
 def test_state_disposes_direct_instances():

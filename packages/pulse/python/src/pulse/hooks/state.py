@@ -37,8 +37,14 @@ class StateHookState(HookState):
 		self.called_keys.clear()
 
 	@override
-	def on_render_end(self, render_cycle: int) -> None:
-		super().on_render_end(render_cycle)
+	def on_render_end(self, render_cycle: int, error: BaseException | None) -> None:
+		super().on_render_end(render_cycle, error)
+		# A failed render stopped at the raise, so `called_keys` is a partial set:
+		# keys after the failure point are still live. Keep every instance; the
+		# next successful render decides. `called_keys` is rebuilt from scratch on
+		# render start, so the partial set never leaks into that decision.
+		if error is not None:
+			return
 		# Unseen keys only, and only here. Mid-render `called_keys` is "reached
 		# so far", not "live this render" — evicting then would dispose a key
 		# reused later in a loop, or an unkeyed sibling after a keyed replacement.

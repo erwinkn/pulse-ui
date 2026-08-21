@@ -214,7 +214,7 @@ def ConditionalDemo():
     )
 ```
 
-States skipped this render (false conditional, or a key that is no longer used) are disposed. Same rule as `@ps.effect`.
+States skipped this render (false conditional, or a key that is no longer used) are disposed. Same rule as `@ps.effect`. A render that raises disposes nothing — only successful renders evict.
 
 ## ps.stable()
 

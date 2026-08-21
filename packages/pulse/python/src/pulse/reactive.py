@@ -454,7 +454,9 @@ class Effect(Disposable):
 		for child in self.children:
 			child._cleanup_before_run()
 		if self.cleanup_fn:
-			self.cleanup_fn()
+			result = self.cleanup_fn()
+			if inspect.isawaitable(result):
+				create_task(result, name=f"cleanup:{self.name or 'unnamed'}")
 
 	@override
 	def dispose(self):
@@ -463,7 +465,9 @@ class Effect(Disposable):
 		for child in self.children.copy():
 			child.dispose()
 		if self.cleanup_fn:
-			self.cleanup_fn()
+			result = self.cleanup_fn()
+			if inspect.isawaitable(result):
+				create_task(result, name=f"cleanup:{self.name or 'unnamed'}")
 		for dep in self.deps:
 			dep.obs.remove(self)
 		if self.parent and self in self.parent.children:
@@ -882,21 +886,6 @@ class AsyncEffect(Effect):
 				# Effect task was cancelled, check if a new task was started
 				# and continue waiting if so
 				continue
-
-	@override
-	def dispose(self):
-		# Run children cleanups first, then cancel in-flight task and interval
-		self.cancel(cancel_interval=True)
-		for child in self.children.copy():
-			child.dispose()
-		if self.cleanup_fn:
-			result = self.cleanup_fn()
-			if inspect.isawaitable(result):
-				create_task(result, name=f"cleanup:{self.name or 'unnamed'}")
-		for dep in self.deps:
-			dep.obs.remove(self)
-		if self.parent and self in self.parent.children:
-			self.parent.children.remove(self)
 
 
 class Batch:

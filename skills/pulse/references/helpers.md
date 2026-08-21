@@ -209,14 +209,14 @@ original class. Classes that own their wire projection can subclass
 `ps.PulseSerializable` and implement `to_pulse()`.
 
 For Pandas data frames, install the optional `pulse-pandas` package and add its
-records adapter:
+DataFrame adapter (emits a split `{"columns": [...], "rows": [...]}` shape):
 
 ```python
-from pulse_pandas import dataframe_records_adapter
+from pulse_pandas import dataframe_adapter
 
 app = ps.App(
     routes=[...],
-    serializer=ps.Serializer([dataframe_records_adapter]),
+    serializer=ps.Serializer([dataframe_adapter]),
 )
 ```
 

@@ -196,15 +196,19 @@ A channel id is just a name. Nothing is created or destroyed on the wire. The on
 - `"route"` (default) — tear down this handle's `on()` set when that route unmounts, even if you stored the object.
 - `"tab"` — do not detach on route unmount. Lives until the render session ends or you call `detach()`.
 
-After a route handle detaches, `on()` raises `ChannelDetached`. `emit` and `request` still address the channel name.
+After a route handle detaches, `on()` raises `ChannelDetached`; queued handlers that have not run are skipped. `emit()` is a debug-logged no-op, while `request()` still addresses the channel name.
 
 On the client, lifetime is React placement: put `useChannel(id)` in a route component to drop listeners on navigation, or in a layout to keep them for the tab. There is no `lifetime` argument on the hook.
+
+Several live handles can share one name. Events fan out to all attached handles. A request goes to just one: the first attached handle that has a handler for that event, in registration order.
 
 ```python
 chat.detach()
 ```
 
 ## Error handling
+
+`emit()` raises `TypeError` immediately if its payload is not serializable. While the socket is down, events buffer in the session queue, capped at 1000 messages with the oldest dropped past that limit.
 
 `request()` fails immediately if the socket is down. If the peer has no handler, you get a `ChannelRemoteError` with code `no_handler`. Middleware `Deny` is `denied`; a middleware exception is `handler_error`. The client timeout defaults to 30 seconds. Detaching the client handle rejects its in-flight requests with `PulseChannelDetachedError`.
 

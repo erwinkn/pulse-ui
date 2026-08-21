@@ -19,6 +19,7 @@ from pulse.middleware import Deny, PulseMiddleware, stack
 from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteContext, RouteInfo, RouteTree
 from pulse.serializer import serialize
+from pulse.test_helpers import wait_for
 from pulse.user_session import UserSession
 
 
@@ -166,10 +167,8 @@ async def test_new_handle_after_route_detach():
 	render.channels.detach_route("/")
 	with pytest.raises(ChannelDetached):
 		first.on("pong", lambda _: None)
-	first.emit("still-routes")
-	assert dummy.sent[-1]["type"] == "channel"
-	assert dummy.sent[-1]["action"] == "event"
-	assert dummy.sent[-1]["channel"] == "foo"
+	first.emit("dropped")
+	assert dummy.sent == []
 	with ctx(app, session, render, route):
 		second = ps.channel("foo")
 	assert second is not first
@@ -902,3 +901,250 @@ async def test_unserializable_request_result_nacks():
 	)
 	nacks = [msg for msg in dummy.sent if msg.get("type") == "channel"]
 	assert nacks[-1]["error"]["code"] == "handler_error"
+
+
+def build_middleware_session(middleware: PulseMiddleware):
+	app = ps.App(middleware=middleware)
+	dummy = DummyRender()
+	session = SimpleNamespace(sid="session-1", data={})
+	render = ps.RenderSession(dummy.id, app.routes)
+	render.send = dummy.send  # pyright: ignore[reportAttributeAccessIssue]
+	render.connected = True
+	app.render_sessions[render.id] = render
+	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
+	app.user_sessions[session.sid] = session  # pyright: ignore[reportArgumentType]
+	return app, dummy, session, render, cast(UserSession, cast(object, session))
+
+
+@pytest.mark.asyncio
+async def test_deny_after_next_sends_single_nack():
+	class DenyAfterNext(PulseMiddleware):
+		@override
+		async def channel(self, **kwargs: Any):
+			await kwargs["next"]()
+			return Deny()
+
+	app, dummy, session, render, user = build_middleware_session(DenyAfterNext())
+	calls: list[Any] = []
+	with ctx(app, session, render):
+		channel = ps.channel("late-deny", lifetime="tab")
+		channel.on("ping", lambda payload: calls.append(payload))
+
+	await app._handle_channel_message(  # pyright: ignore[reportPrivateUsage]
+		render,
+		user,
+		as_request(
+			{
+				"type": "channel",
+				"action": "request",
+				"channel": "late-deny",
+				"event": "ping",
+				"requestId": "req-late-deny",
+			},
+		),
+	)
+	for _ in range(10):
+		await asyncio.sleep(0)
+	responses = [msg for msg in dummy.sent if msg.get("action") == "response"]
+	assert len(responses) == 1
+	assert responses[0]["error"] == {"code": "denied", "message": "Denied"}
+	assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_raise_after_next_sends_single_nack():
+	class BoomAfterNext(PulseMiddleware):
+		@override
+		async def channel(self, **kwargs: Any):
+			await kwargs["next"]()
+			raise RuntimeError("middleware down")
+
+	app, dummy, session, render, user = build_middleware_session(BoomAfterNext())
+	calls: list[Any] = []
+	with ctx(app, session, render):
+		channel = ps.channel("late-boom", lifetime="tab")
+		channel.on("ping", lambda payload: calls.append(payload))
+
+	await app._handle_channel_message(  # pyright: ignore[reportPrivateUsage]
+		render,
+		user,
+		as_request(
+			{
+				"type": "channel",
+				"action": "request",
+				"channel": "late-boom",
+				"event": "ping",
+				"requestId": "req-late-boom",
+			},
+		),
+	)
+	for _ in range(10):
+		await asyncio.sleep(0)
+	responses = [msg for msg in dummy.sent if msg.get("action") == "response"]
+	assert len(responses) == 1
+	assert responses[0]["error"]["code"] == "handler_error"
+	assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_request_without_request_id_is_dropped():
+	app, dummy, session, render, user = build_middleware_session(PulseMiddleware())
+	with ctx(app, session, render):
+		ps.channel("no-id", lifetime="tab")
+
+	await app._handle_channel_message(  # pyright: ignore[reportPrivateUsage]
+		render,
+		user,
+		as_request(
+			{
+				"type": "channel",
+				"action": "request",
+				"channel": "no-id",
+				"event": "ping",
+			},
+		),
+	)
+	for _ in range(10):
+		await asyncio.sleep(0)
+	assert dummy.sent == []
+
+
+@pytest.mark.asyncio
+async def test_cancelled_request_clears_pending():
+	app, _dummy, session, render, _route = build_session(connected=True)
+	with ctx(app, session, render):
+		channel = ps.channel("cancelled", lifetime="tab")
+		pending = asyncio.create_task(channel.request("get"))
+	await asyncio.sleep(0)
+	assert render.channels._pending  # pyright: ignore[reportPrivateUsage]
+	pending.cancel()
+	with pytest.raises(asyncio.CancelledError):
+		await pending
+	assert render.channels._pending == {}  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
+async def test_timed_out_request_clears_pending():
+	app, _dummy, session, render, _route = build_session(connected=True)
+	with ctx(app, session, render):
+		channel = ps.channel("slow", lifetime="tab")
+		with pytest.raises(ps.ChannelTimeout):
+			await channel.request("get", timeout=0.01)
+	assert render.channels._pending == {}  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
+async def test_unserializable_emit_raises_at_emitter():
+	app, dummy, session, render, _route = build_session()
+	with ctx(app, session, render):
+		channel = ps.channel("bad-emit", lifetime="tab")
+		with pytest.raises(TypeError, match="not serializable"):
+			channel.emit("ping", {"cls": object})
+	assert dummy.sent == []
+	assert render._global_queue == []  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
+async def test_response_channel_mismatch_is_ignored():
+	app, dummy, session, render, _route = build_session(connected=True)
+	with ctx(app, session, render):
+		channel = ps.channel("mine", lifetime="tab")
+		pending = asyncio.create_task(channel.request("get"))
+	await asyncio.sleep(0)
+	request_id = dummy.sent[0]["requestId"]
+	render.channels.handle_response(
+		as_response(
+			{
+				"type": "channel",
+				"action": "response",
+				"channel": "theirs",
+				"responseTo": request_id,
+				"payload": "stolen",
+			},
+		)
+	)
+	await asyncio.sleep(0)
+	assert not pending.done()
+	render.channels.handle_response(
+		as_response(
+			{
+				"type": "channel",
+				"action": "response",
+				"channel": "mine",
+				"responseTo": request_id,
+				"payload": "ok",
+			},
+		)
+	)
+	assert await pending == "ok"
+
+
+@pytest.mark.asyncio
+async def test_detached_handle_rejects_request():
+	app, _dummy, session, render, _route = build_session(connected=True)
+	with ctx(app, session, render):
+		channel = ps.channel("dead", lifetime="tab")
+	channel.detach()
+	with pytest.raises(ChannelDetached):
+		await channel.request("get")
+
+
+@pytest.mark.asyncio
+async def test_events_run_in_arrival_order():
+	app, _dummy, session, render, _route = build_session()
+	seen: list[str] = []
+
+	async def slow(_: Any) -> None:
+		await asyncio.sleep(0.02)
+		seen.append("first")
+
+	async def fast(_: Any) -> None:
+		seen.append("second")
+
+	with ctx(app, session, render):
+		channel = ps.channel("ordered", lifetime="tab")
+		channel.on("first", slow)
+		channel.on("second", fast)
+	for event in ("first", "second"):
+		render.channels.handle_event(
+			as_event(
+				{
+					"type": "channel",
+					"action": "event",
+					"channel": "ordered",
+					"event": event,
+				},
+			)
+		)
+	await wait_for(lambda: len(seen) == 2)
+	assert seen == ["first", "second"]
+
+
+@pytest.mark.asyncio
+async def test_detach_skips_pending_handlers():
+	app, _dummy, session, render, _route = build_session()
+	seen: list[str] = []
+
+	async def first(_: Any) -> None:
+		await asyncio.sleep(0)
+		seen.append("first")
+
+	with ctx(app, session, render):
+		channel = ps.channel("detaching", lifetime="tab")
+		channel.on("ping", first)
+		channel.on("ping", lambda _: seen.append("second"))
+	render.channels.handle_event(
+		as_event(
+			{
+				"type": "channel",
+				"action": "event",
+				"channel": "detaching",
+				"event": "ping",
+			},
+		)
+	)
+	await asyncio.sleep(0)
+	channel.detach()
+	for _ in range(10):
+		await asyncio.sleep(0)
+	assert seen == ["first"]

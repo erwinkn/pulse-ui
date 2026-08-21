@@ -164,6 +164,7 @@ class ManagedProcess:
 		job: _WindowsJob | None,
 	) -> None:
 		self.process = process
+		self._reaped = False
 		self._output_thread: threading.Thread | None = None
 		self._wait_thread: threading.Thread | None = None
 		self._job = job
@@ -233,7 +234,7 @@ class ManagedProcess:
 		def wait_for_exit() -> None:
 			if windows:
 				code = process.wait()
-			else:
+			elif hasattr(os, "waitid"):
 				# Observe the exit without reaping (WNOWAIT): the zombie leader
 				# keeps the pid and pgid pinned until close() reaps it, so
 				# signalling the process group is always race-free.
@@ -247,6 +248,11 @@ class ManagedProcess:
 					code = -info.si_status
 				else:
 					code = process.wait()
+			else:
+				# macOS below Python 3.13 lacks os.waitid: reap immediately and
+				# mark it, so group signals never target a recycled pgid.
+				code = process.wait()
+				managed._reaped = True
 			managed._exit_code = code
 			on_exit(code)
 
@@ -290,8 +296,10 @@ class ManagedProcess:
 					return
 			self.process.terminate()
 			return
-		# Safe even after the leader exits: it stays a zombie (pinning the
-		# pgid) until close() reaps it, so this cannot hit a reused pgid.
+		# Safe after the leader exits but before it is reaped: the zombie pins
+		# the pgid. Once reaped, the pgid may be recycled, so never signal it.
+		if self._reaped:
+			return
 		with contextlib.suppress(ProcessLookupError, PermissionError):
 			os.killpg(self.process.pid, signal.SIGTERM)
 
@@ -307,6 +315,9 @@ class ManagedProcess:
 			return
 		# Kills surviving group members (e.g. grandchildren of a crashed
 		# leader) too: the zombie leader pins the pgid until close() reaps it.
+		# After the reap the pgid may be recycled, so never signal it then.
+		if self._reaped:
+			return
 		with contextlib.suppress(ProcessLookupError, PermissionError):
 			os.killpg(self.process.pid, signal.SIGKILL)
 
@@ -327,10 +338,21 @@ class ManagedProcess:
 		if self.process.stdout is not None:
 			with contextlib.suppress(Exception):
 				self.process.stdout.close()
-		if os_family() != "windows":
+		if os_family() != "windows" and not self._reaped:
 			# Reap the leader last so its pgid stayed ours for every kill above.
-			with contextlib.suppress(ChildProcessError):
-				self.process.wait()
+			# Mark first: once the reap happens the pgid may be recycled, so no
+			# later request_stop()/kill_tree() may signal it.
+			self._reaped = True
+			try:
+				self.process.wait(timeout=PROCESS_KILL_TIMEOUT)
+			except ChildProcessError:
+				pass
+			except subprocess.TimeoutExpired:
+				# A SIGKILLed child stuck in uninterruptible sleep: leave the
+				# zombie rather than hanging shutdown forever.
+				sys.stderr.write(
+					f"Warning: process {self.process.pid} did not exit; leaving it unreaped\n"
+				)
 		if self._job is not None:
 			self._job.close()
 			self._job = None

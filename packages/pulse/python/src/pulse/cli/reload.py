@@ -200,10 +200,6 @@ class DevSupervisor:
 		self._backend_code = code
 		self._backend_exit.set()
 
-	def _note_backend_ready(self, gen: int) -> None:
-		if gen == self._backend_gen:
-			self._backend_ready.set()
-
 	async def _replace_backend(self) -> bool:
 		await self._stop(self.backend)
 		self.backend = None

@@ -468,13 +468,7 @@ def global_state(
 		key = base_key if id is None else f"{base_key}|{id}"
 
 		def factory() -> S:
-			# Session-scoped: do not pin the creating mount.
-			with PulseContext.update(
-				route=None,
-				source_route_path=None,
-				source_path=None,
-				source_mount_id=None,
-			):
+			with PulseContext.update(session_scoped_effects=True):
 				return mk(*args, **kwargs)
 
 		return cast(S, ctx.render.get_global_state(key, factory))

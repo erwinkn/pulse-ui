@@ -54,7 +54,7 @@ export function pulse(): Plugin {
 
 function notify(message: string) {
 	try {
-		process.stdout.write(`\n${PROTOCOL_PREFIX}${message}\n`);
+		process.stdout.write(`${PROTOCOL_PREFIX}${message}\n`);
 	} catch {
 		// Readiness reporting must never prevent Vite from starting.
 	}

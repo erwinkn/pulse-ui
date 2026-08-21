@@ -29,7 +29,7 @@ class ToggleState(ps.State):
 
 Pulse tracks what the effect reads. When `self.enabled` changes, the effect runs again automatically.
 
-If the effect was created during a render, Pulse puts you back in that render session on every run — including cleanup. Route-scoped effects (component `@ps.effect`, `ps.state(...)`) resolve their live mount and get its `RouteContext`; if the mount is gone, they run without route metadata. `ps.global_state` effects get the session but not a route.
+If the effect was created during a render, Pulse puts you back in that render session on every run — including cleanup. Route-scoped effects (component `@ps.effect`, `ps.state(...)`) resolve the creating mount generation: a live or replayed-and-reattached generation gets its current `RouteContext`, while a detached grace-window generation is stale and cannot navigate with its route identity. If the generation is gone or replaced, the effect runs without route metadata. `ps.global_state` effects get the session but not a route; states constructed inside its factory inherit those session-scoped semantics.
 
 ### With cleanup
 
@@ -61,6 +61,8 @@ class TimerState(ps.State):
 Cleanup runs:
 - Before the effect runs again (when tracked dependencies change)
 - When the state is disposed
+
+Async cleanups are awaited by async effects and scheduled by synchronous cleanup paths, so returning an `async def` cleanup does not silently drop it.
 
 <Callout type="info">
 Pulse's `ps.later()` and `ps.repeat()` are automatically cleaned up when the render session closes. Route unmounting does not cancel `ps.later()` callbacks; cancel the returned handle in cleanup if the callback should not run after unmount. See [Scheduling](/docs/reference/pulse/scheduling) for details.

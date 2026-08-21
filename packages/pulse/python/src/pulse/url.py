@@ -42,6 +42,12 @@ class SessionUrl(Disposable):
 	Each declaration gets a typed view of that raw value, so declarations
 	with different codecs or defaults can coexist.
 
+	A parameter name has exactly one raw URL value. Writing a value that
+	serializes as absent (for example, one view's default) resets every other
+	view of that name to its own default. A declaration registered while a
+	write is unflushed seeds from the current raw value and converges on the
+	next sync flush.
+
 	Slot writes are immediate and session-owned. If a State constructor raises
 	after writing a query parameter, its write is intentionally retained for
 	other states sharing the session slot.
@@ -54,7 +60,7 @@ class SessionUrl(Disposable):
 	_slots: dict[str, _QueryParamSlot]
 	_sync_effect: Effect | None
 	_applied_params: dict[str, str]
-	_commanded_params: dict[str, str] | None
+	_pending: list[dict[str, str]]
 	_closed: bool
 	_route_revision: Signal[int]
 	__idempotent_dispose__: ClassVar[bool] = True
@@ -67,7 +73,7 @@ class SessionUrl(Disposable):
 		self._slots = {}
 		self._sync_effect = None
 		self._applied_params = {}
-		self._commanded_params = None
+		self._pending = []
 		self._closed = False
 		self._route_revision = Signal(0, name="SessionUrl:route_revision")
 
@@ -79,24 +85,42 @@ class SessionUrl(Disposable):
 		"""
 		if self._closed:
 			return
+		incoming_params = dict(info["queryParams"])
+		incoming_owned = {name: incoming_params.get(name) for name in self._slots}
+		pending_index = next(
+			(
+				index
+				for index, entry in enumerate(self._pending)
+				if incoming_owned == {name: entry.get(name) for name in self._slots}
+			),
+			None,
+		)
+		if pending_index is None:
+			pending = []
+			updates = [
+				(name, slot, incoming_params.get(name))
+				for name, slot in self._slots.items()
+				if incoming_params.get(name) != self._applied_params.get(name)
+			]
+		else:
+			pending = self._pending[pending_index + 1 :]
+			updates = []
+
 		self.pathname = info["pathname"]
 		self.hash = info["hash"]
-		self._route_revision.write(self._route_revision.value + 1)
-		incoming_params = dict(info["queryParams"])
-		for name, slot in self._slots.items():
-			incoming = incoming_params.get(name)
-			applied = self._applied_params.get(name)
-			if incoming != applied and (
-				self._commanded_params is None
-				or incoming != self._commanded_params.get(name)
-			):
-				self._set_raw(name, slot, incoming)
-		if incoming_params == self._commanded_params:
-			self._commanded_params = None
 		self._applied_params = incoming_params
 		self.query_params = incoming_params
+		self._pending = pending
+		self._route_revision.write(self._route_revision.value + 1)
+		first_error: Exception | None = None
+		for name, slot, raw in updates:
+			errors = self._set_raw(name, slot, raw)
+			if first_error is None and errors:
+				first_error = errors[0]
 		if self._sync_effect is not None:
 			self._sync_effect.schedule()
+		if first_error is not None:
+			raise first_error from None
 
 	def param(self, name: str, codec: QueryParamCodec, default: Any) -> Signal[Any]:
 		if self._closed:
@@ -181,23 +205,32 @@ class SessionUrl(Disposable):
 			param=name,
 		)
 
-	def _set_raw(self, name: str, slot: _QueryParamSlot, raw: str | None) -> None:
+	def _set_raw(
+		self, name: str, slot: _QueryParamSlot, raw: str | None
+	) -> list[Exception]:
 		slot.raw.write(raw)
+		errors: list[Exception] = []
 		for view in slot.views:
-			parsed = self._parse(
-				raw,
-				codec=view.codec,
-				default=view.default,
-				name=name,
-			)
+			try:
+				parsed = self._parse(
+					raw,
+					codec=view.codec,
+					default=view.default,
+					name=name,
+				)
+			except Exception as error:
+				errors.append(error)
+				continue
 			if values_equal(view.signal.value, parsed):
 				continue
 			view.signal.write(reactive(parsed))
+		return errors
 
 	def _sync_to_route(self) -> None:
 		self._route_revision.read()
 		if not self.pathname:
 			return
+		first_error: Exception | None = None
 		for name, slot in self._slots.items():
 			for view in slot.views:
 				value = view.signal.read()
@@ -210,7 +243,9 @@ class SessionUrl(Disposable):
 					param=name,
 				)
 				if serialized != slot.raw.value:
-					self._set_raw(name, slot, serialized)
+					errors = self._set_raw(name, slot, serialized)
+					if first_error is None and errors:
+						first_error = errors[0]
 
 		current_params = dict(self._applied_params)
 		query_params = dict(current_params)
@@ -241,4 +276,6 @@ class SessionUrl(Disposable):
 				sourcePath=self.pathname,
 			)
 		)
-		self._commanded_params = query_params
+		self._pending.append(query_params)
+		if first_error is not None:
+			raise first_error from None

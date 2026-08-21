@@ -270,7 +270,7 @@ value = config_ref()  # Call to get current value
 
 ## Inline @ps.effect
 
-Effects inside component functions. Auto-registered during render. Each run (and cleanup) re-enters the creating render session and resolves the live mount's `RouteContext`.
+Effects inside component functions. Auto-registered during render. Each run (and cleanup) re-enters the creating render session and resolves the creating mount generation. Live and replayed-and-reattached generations provide the current `RouteContext`; detached grace-window generations are stale for navigation; gone or replaced generations run route-free.
 
 ```python
 @ps.component
@@ -285,6 +285,8 @@ def Logger():
 
     return ps.div(...)
 ```
+
+Async cleanups are awaited in async paths and scheduled when invoked from synchronous cleanup paths.
 
 **key parameter for loops:**
 ```python

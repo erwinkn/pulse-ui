@@ -270,7 +270,7 @@ value = config_ref()  # Call to get current value
 
 ## Inline @ps.effect
 
-Effects inside component functions. Auto-registered during render. Each run (and cleanup) re-enters the creating render session and that mount's `RouteContext`.
+Effects inside component functions. Auto-registered during render. Each run (and cleanup) re-enters the creating render session and resolves the live mount's `RouteContext`.
 
 ```python
 @ps.component

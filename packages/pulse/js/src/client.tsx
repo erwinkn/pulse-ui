@@ -13,6 +13,7 @@ import { pulseFetch } from "./http";
 import type {
 	ClientApiResultMessage,
 	ClientCallbackMessage,
+	ClientChannelEventMessage,
 	ClientChannelRequestMessage,
 	ClientJsResultMessage,
 	ClientMessage,
@@ -89,8 +90,10 @@ export class PulseSocketIOClient {
 	#pendingCallbacks: Map<string, ClientCallbackMessage[]>;
 	#socket: Socket | null = null;
 	#messageQueue: ClientMessage[];
+	#channelEventQueues = new Map<string, ClientChannelEventMessage[]>();
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
 	#handles: Map<string, Set<ChannelBridge>> = new Map();
+	#scheduledDetachSweeps = new Set<ChannelBridge>();
 	#pending = new Map<
 		string,
 		{
@@ -249,6 +252,12 @@ export class PulseSocketIOClient {
 					socket.emit("message", serialize(payload));
 				}
 				this.#messageQueue = [];
+				for (const events of this.#channelEventQueues.values()) {
+					for (const event of events) {
+						socket.emit("message", serialize(event));
+					}
+				}
+				this.#channelEventQueues.clear();
 
 				this.#handleConnected();
 				resolve();
@@ -303,19 +312,17 @@ export class PulseSocketIOClient {
 		if (payload.type === "channel" && (payload.action === "request" || payload.action === "response")) {
 			return;
 		}
-		// The protocol has no session identity, so cap rather than drop all offline events.
 		if (payload.type === "channel" && payload.action === "event") {
-			const queuedEvents = this.#messageQueue.filter(
-				(message) => message.type === "channel" && message.action === "event",
-			);
-			if (queuedEvents.length >= OFFLINE_CHANNEL_EVENT_QUEUE_LIMIT) {
-				const oldestEvent = this.#messageQueue.findIndex(
-					(message) => message.type === "channel" && message.action === "event",
-				);
-				if (oldestEvent !== -1) {
-					this.#messageQueue.splice(oldestEvent, 1);
-				}
+			// The protocol has no session identity, so cap rather than drop all offline events.
+			// Channel events flush after other queued messages rather than interleaved.
+			let events = this.#channelEventQueues.get(payload.channel);
+			if (!events) {
+				events = [];
+				this.#channelEventQueues.set(payload.channel, events);
 			}
+			if (events.length >= OFFLINE_CHANNEL_EVENT_QUEUE_LIMIT) events.shift();
+			events.push(payload);
+			return;
 		}
 		this.#messageQueue.push(payload);
 	}
@@ -373,6 +380,7 @@ export class PulseSocketIOClient {
 		this.#clearTimeouts();
 		this.#closeSocket();
 		this.#messageQueue = [];
+		this.#channelEventQueues.clear();
 		this.#connectionListeners.clear();
 		this.#activeViews.clear();
 		this.#activeAttachIds.clear();
@@ -607,11 +615,18 @@ export class PulseSocketIOClient {
 				this.#handles.delete(bridge.id);
 			}
 		}
-		for (const [requestId, pending] of this.#pending) {
-			if (pending.owner !== bridge) continue;
-			this.#pending.delete(requestId);
-			pending.reject(new PulseChannelDetachedError("Channel handle detached"));
-		}
+		if (this.#scheduledDetachSweeps.has(bridge)) return;
+		this.#scheduledDetachSweeps.add(bridge);
+		queueMicrotask(() => {
+			this.#scheduledDetachSweeps.delete(bridge);
+			const currentHandles = this.#handles.get(bridge.id);
+			if (currentHandles?.has(bridge)) return;
+			for (const [requestId, pending] of this.#pending) {
+				if (pending.owner !== bridge) continue;
+				this.#pending.delete(requestId);
+				pending.reject(new PulseChannelDetachedError("Channel handle detached"));
+			}
+		});
 	}
 
 	requestChannel(

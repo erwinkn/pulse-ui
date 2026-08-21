@@ -614,6 +614,7 @@ describe("PulseSocketIOClient channels", () => {
 		const firstPending = first.request("echo");
 		const firstRequest = sentMessages().at(-1) as { requestId: string };
 		first.detach();
+		await Promise.resolve();
 		await expect(firstPending).rejects.toBeInstanceOf(PulseChannelDetachedError);
 
 		const secondPending = second.request("echo");
@@ -641,6 +642,30 @@ describe("PulseSocketIOClient channels", () => {
 			}),
 		);
 		await expect(secondPending).resolves.toBe("live");
+	});
+
+	it("keeps a pending RPC across an immediate detach and reattach", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		const bridge = client.acquireChannel("rpc");
+		const pending = bridge.request("echo");
+		const request = sentMessages().at(-1) as { requestId: string };
+		bridge.detach();
+		bridge.attach();
+		await Promise.resolve();
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel",
+				action: "response",
+				channel: "rpc",
+				responseTo: request.requestId,
+				payload: "live",
+			}),
+		);
+		await expect(pending).resolves.toBe("live");
 	});
 
 	it("queues emit while disconnected on the global client queue", async () => {
@@ -674,6 +699,31 @@ describe("PulseSocketIOClient channels", () => {
 		expect(events).toHaveLength(100);
 		expect(events[0]).toMatchObject({ payload: { n: 1 } });
 		expect(events.at(-1)).toMatchObject({ payload: { n: 100 } });
+	});
+
+	it("caps queued events independently per channel", async () => {
+		const client = await makeClient();
+		const chatty = client.acquireChannel("chatty");
+		const quiet = client.acquireChannel("quiet");
+		for (let n = 0; n < 101; n++) {
+			chatty.emit("ping", { n });
+		}
+		quiet.emit("ping", { n: 1 });
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		const events = sentMessages().filter(
+			(message) => message.type === "channel" && message.action === "event",
+		);
+		const chattyEvents = events.filter((message) => message.channel === "chatty");
+		expect(chattyEvents).toHaveLength(100);
+		expect(chattyEvents[0]).toMatchObject({ payload: { n: 1 } });
+		expect(events).toContainEqual(
+			expect.objectContaining({
+				channel: "quiet",
+				payload: { n: 1 },
+			}),
+		);
 	});
 
 	it("does not flush RPC after a disconnected request", async () => {

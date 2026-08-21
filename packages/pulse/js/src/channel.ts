@@ -68,6 +68,7 @@ export class ChannelBridge {
 	attach(): void {
 		if (this.#attached) return;
 		this.#detached = false;
+		this.#warnedAboutDetachedEmit = false;
 		this.#attached = true;
 		this.client.attachHandle(this);
 	}
@@ -95,7 +96,7 @@ export class ChannelBridge {
 		if (payload !== undefined) {
 			message.payload = payload;
 		}
-		if ((!this.#attached || this.#detached) && !this.#warnedAboutDetachedEmit) {
+		if (this.#detached && !this.#warnedAboutDetachedEmit) {
 			this.#warnedAboutDetachedEmit = true;
 			console.warn(`Pulse channel ${this.id} emitted while detached`);
 		}
@@ -103,6 +104,9 @@ export class ChannelBridge {
 	}
 
 	request(event: string, payload?: any, options?: ChannelRequestOptions): Promise<any> {
+		if (this.#detached) {
+			return Promise.reject(new PulseChannelDetachedError("Channel handle detached"));
+		}
 		if (!this.client.isConnected()) {
 			return Promise.reject(new PulseChannelDisconnectedError("No render session is connected"));
 		}

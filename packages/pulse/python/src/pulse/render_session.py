@@ -565,10 +565,13 @@ class RenderSession:
 			return
 		try:
 			mount.update_route(route_info)
+		except Exception as e:
 			if mount.state == "pending" and self._send_message:
 				mount.activate(self._send_message)
-		except Exception as e:
 			self.report_error(path, "navigate", e)
+			return
+		if mount.state == "pending" and self._send_message:
+			mount.activate(self._send_message)
 
 	def dispose_mount(self, path: str, mount: RouteMount) -> None:
 		current = self.route_mounts.get(path)

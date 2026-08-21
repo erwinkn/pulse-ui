@@ -369,7 +369,7 @@ class TestQueryParam:
 		assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["only-second"]
 		assert "q" in session.url._slots  # pyright: ignore[reportPrivateUsage]
 
-	def test_conflicting_codec_or_default_raises(self):
+	def test_conflicting_codec_or_default_uses_independent_views(self):
 		class AsStr(ps.State):
 			q: ps.QueryParam[str] = ""
 
@@ -382,11 +382,17 @@ class TestQueryParam:
 		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
 		session.connect(lambda _msg: None)
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
-			_first = AsStr()
-			with pytest.raises(ValueError, match="already registered as str"):
-				AsInt()
-			with pytest.raises(ValueError, match="already registered as str"):
-				OtherDefault()
+			first = AsStr()
+			second = AsInt()
+			third = OtherDefault()
+			assert first.q == ""
+			assert second.q == 0
+			assert third.q == "other"
+			first.q = "12"
+			flush_query_param_sync(session)
+			assert first.q == "12"
+			assert second.q == 12
+			assert third.q == "12"
 
 	def test_query_param_access_requires_pulse_context(self):
 		class QState(ps.State):
@@ -556,6 +562,223 @@ class TestQueryParam:
 		assert items[1] is not first_item
 		assert shareds[-1] is first_shared
 		assert not first_shared.__disposed__
+
+
+def test_f1_pending_write_survives_stale_route_update():
+	class QState(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	app, session, route_ctx = make_context(
+		make_route_info("/", query_params={"q": "hello"})
+	)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		state = QState()
+		flush_query_param_sync(session)
+		messages.clear()
+		state.q = "user-typed"
+		route_ctx.update(make_route_info("/", query_params={"q": "hello"}))
+		flush_query_param_sync(session)
+		assert state.q == "user-typed"
+		navs = navigations(messages)
+		assert len(navs) == 1
+		assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["user-typed"]
+
+
+def test_f2_reconnect_echo_does_not_revert_server_write():
+	class QState(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		state = QState()
+		flush_query_param_sync(session)
+		messages.clear()
+		state.q = "server-write"
+		flush_query_param_sync(session)
+		assert len(navigations(messages)) == 1
+	session.disconnect()
+	session.connect(messages.append)
+	session.update_route("/", make_route_info("/", query_params={}))
+	flush_query_param_sync(session)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		assert state.q == "server-write"
+	assert len(navigations(messages)) == 2
+	assert parse_qs(urlparse(str(navigations(messages)[-1]["path"])).query)["q"] == [
+		"server-write"
+	]
+
+
+def test_client_can_renavigate_to_previously_commanded_value():
+	class QState(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	app, session, route_ctx = make_context(
+		make_route_info("/", query_params={"q": "hello"})
+	)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		state = QState()
+		flush_query_param_sync(session)
+		state.q = "world"
+		flush_query_param_sync(session)
+		route_ctx.update(make_route_info("/", query_params={"q": "world"}))
+		flush_query_param_sync(session)
+		route_ctx.update(make_route_info("/", query_params={"q": "hello"}))
+		flush_query_param_sync(session)
+		messages.clear()
+		route_ctx.update(make_route_info("/", query_params={"q": "world"}))
+		flush_query_param_sync(session)
+		assert state.q == "world"
+		assert navigations(messages) == []
+
+
+def test_f3_write_before_first_route_info_survives_initial_apply():
+	class QState(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	def render():
+		return ps.div()
+
+	route = Route("/", ps.component(render))
+	routes = RouteTree([route])
+	session = RenderSession("test", routes)
+	app = ps.App(routes=[route])
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session):
+		state = QState()
+		state.q = "set-before-route"
+		flush_query_param_sync(session)
+	session.prerender(["/"], make_route_info("/", query_params={}))
+	flush_query_param_sync(session)
+	with ps.PulseContext(
+		app=app, render=session, route=session.route_mounts["/"].route
+	):
+		assert state.q == "set-before-route"
+	assert len(navigations(messages)) == 1
+	assert parse_qs(urlparse(str(navigations(messages)[0]["path"])).query)["q"] == [
+		"set-before-route"
+	]
+
+
+def test_f4_failed_constructor_keeps_immediate_shared_write():
+	class Boom(ps.State):
+		q: ps.QueryParam[str] = ""
+
+		def __init__(self):
+			self.q = "half-written"
+			raise RuntimeError("boom")
+
+	class Later(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		with pytest.raises(RuntimeError, match="boom"):
+			Boom()
+		flush_query_param_sync(session)
+		messages.clear()
+		later = Later()
+		flush_query_param_sync(session)
+		assert later.q == "half-written"
+	assert len(navigations(messages)) == 1
+	assert parse_qs(urlparse(str(navigations(messages)[0]["path"])).query)["q"] == [
+		"half-written"
+	]
+
+
+def test_f5_cross_route_declarations_have_independent_defaults():
+	class FiltersA(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	class FiltersB(ps.State):
+		q: ps.QueryParam[str] = "fallback"
+
+	app, session = make_two_route_session()
+	session.connect(lambda _msg: None)
+	session.prerender(["/a"], make_route_info("/a", query_params={}))
+	with ps.PulseContext(
+		app=app, render=session, route=session.route_mounts["/a"].route
+	):
+		first = FiltersA()
+		flush_query_param_sync(session)
+		assert first.q == ""
+	session.prerender(["/b"], make_route_info("/b", query_params={}))
+	with ps.PulseContext(
+		app=app, render=session, route=session.route_mounts["/b"].route
+	):
+		second = FiltersB()
+		assert second.q == "fallback"
+
+
+def test_f5b_subclass_override_has_independent_default_and_shared_raw():
+	class Base(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	class Sub(Base):
+		q: ps.QueryParam[str] = "sub-default"
+
+	app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+	session.connect(lambda _msg: None)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		base = Base()
+		sub = Sub()
+		assert base.q == ""
+		assert sub.q == "sub-default"
+		base.q = "x"
+		flush_query_param_sync(session)
+		assert sub.q == "x"
+
+
+def test_f6_nested_state_construction_coalesces_navigation():
+	class Inner(ps.State):
+		page: ps.QueryParam[int] = 1
+
+	class Outer(ps.State):
+		q: ps.QueryParam[str] = ""
+		_inner: Inner
+
+		def __init__(self):
+			self.q = "outer"
+			self._inner = Inner()
+			self._inner.page = 5
+
+	app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		Outer()
+		flush_query_param_sync(session)
+	navs = navigations(messages)
+	assert len(navs) == 1
+	query = parse_qs(urlparse(str(navs[0]["path"])).query)
+	assert query["q"] == ["outer"]
+	assert query["page"] == ["5"]
+
+
+def test_f7_close_is_idempotent_and_prevents_resurrection():
+	class QState(ps.State):
+		q: ps.QueryParam[str] = ""
+
+	app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+	session.connect(lambda _msg: None)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		QState()
+		flush_query_param_sync(session)
+	session.close()
+	session.close()
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		with pytest.raises(RuntimeError, match="SessionUrl is closed"):
+			QState()
+	assert session.url._slots == {}  # pyright: ignore[reportPrivateUsage]
+	assert session.url._sync_effect is None  # pyright: ignore[reportPrivateUsage]
 
 
 def make_two_route_session():

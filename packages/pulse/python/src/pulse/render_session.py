@@ -272,6 +272,7 @@ class RenderSession:
 	_global_queue: list[ServerMessage]
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
+	_closed: bool
 
 	def __init__(
 		self,
@@ -298,6 +299,7 @@ class RenderSession:
 		self._global_states = {}
 		self._global_queue = []
 		self.connected = False
+		self._closed = False
 		self.channels = ChannelsManager(self)
 		self.forms = FormRegistry(self)
 		self._pending_api = {}
@@ -684,6 +686,9 @@ class RenderSession:
 	# ---- Helpers ----
 
 	def close(self):
+		if self._closed:
+			return
+		self._closed = True
 		# Close all pending timers at the start, to avoid anything firing while we clean up
 		self._timers.cancel_all()
 		self.url.dispose()

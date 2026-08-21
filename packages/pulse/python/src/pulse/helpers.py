@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from functools import wraps
 from typing import (
 	Any,
+	ClassVar,
 	ParamSpec,
 	Self,
 	TypedDict,
@@ -138,6 +139,7 @@ def data(**attrs: Any):
 
 class Disposable(ABC):
 	__disposed__: bool = False
+	__idempotent_dispose__: ClassVar[bool] = False
 
 	@abstractmethod
 	def dispose(self) -> None: ...
@@ -151,7 +153,7 @@ class Disposable(ABC):
 			@wraps(original_dispose)
 			def wrapped_dispose(self: Self, *args: Any, **kwargs: Any):
 				if self.__disposed__:
-					if env.pulse_env == "dev":
+					if not self.__idempotent_dispose__ and env.pulse_env == "dev":
 						cls_name = type(self).__name__
 						raise RuntimeError(
 							f"{self} (type={cls_name}) was disposed twice. This is likely a bug."

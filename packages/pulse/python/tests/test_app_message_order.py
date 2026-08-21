@@ -355,7 +355,7 @@ async def test_attach_sends_ack_after_route_is_attached(
 	monkeypatch.setattr(render, "attach", attach)
 	monkeypatch.setattr(render, "send", send)
 
-	await app._handle_pulse_message(  # pyright: ignore[reportPrivateUsage]
+	await app._handle_pulse_command(  # pyright: ignore[reportPrivateUsage]
 		render,
 		cast(UserSession, cast(object, session)),
 		{
@@ -394,7 +394,7 @@ async def test_attach_does_not_ack_when_route_needs_reload(
 	monkeypatch.setattr(render, "attach", attach)
 	monkeypatch.setattr(render, "send", send)
 
-	await app._handle_pulse_message(  # pyright: ignore[reportPrivateUsage]
+	await app._handle_pulse_command(  # pyright: ignore[reportPrivateUsage]
 		render,
 		cast(UserSession, cast(object, session)),
 		{
@@ -422,12 +422,12 @@ async def test_socket_messages_wait_for_connect_to_finish(
 	app = ps.App()
 	events: list[str] = []
 
-	async def handle_pulse_message(
+	async def handle_pulse_command(
 		_render: RenderSession, _session: UserSession, msg: ClientPulseMessage
 	) -> None:
 		events.append(msg["type"])
 
-	monkeypatch.setattr(app, "_handle_pulse_message", handle_pulse_message)
+	monkeypatch.setattr(app, "_handle_pulse_command", handle_pulse_command)
 
 	app._connecting_sockets.add("socket-1")  # pyright: ignore[reportPrivateUsage]
 
@@ -539,7 +539,7 @@ async def test_connect_queue_overflow_never_drops_replies(
 	async def handle_pulse_message(*_args: object) -> None:
 		pass
 
-	monkeypatch.setattr(app, "_handle_pulse_message", handle_pulse_message)
+	monkeypatch.setattr(app, "_handle_pulse_command", handle_pulse_message)
 	await app._drain_pending_socket_messages(  # pyright: ignore[reportPrivateUsage]
 		"socket-1"
 	)
@@ -575,7 +575,7 @@ async def test_drain_applies_replies_before_parked_commands(
 		started.set()
 		await release.wait()
 
-	monkeypatch.setattr(app, "_handle_pulse_message", handle_pulse_message)
+	monkeypatch.setattr(app, "_handle_pulse_command", handle_pulse_message)
 
 	drain = asyncio.create_task(
 		app._drain_pending_socket_messages(  # pyright: ignore[reportPrivateUsage]

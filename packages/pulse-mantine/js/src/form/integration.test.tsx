@@ -5,7 +5,7 @@ import { useField } from "./connect";
 import { Checkbox, CheckboxGroup, MultiSelect, TagsInput, TextInput } from "./fields";
 
 const channel = {
-	on: () => () => {},
+	on: mock(() => () => {}),
 	emit: mock(),
 };
 const client = {
@@ -29,6 +29,8 @@ mock.module("pulse-ui-client", () => ({
 }));
 
 const { Form } = await import("./form");
+const { Combobox } = await import("../combobox");
+const { Tree } = await import("../tree");
 
 type Sample = {
 	sample_id: string;
@@ -259,5 +261,43 @@ describe("MantineForm submit values", () => {
 			method: "post",
 			id: "record-1",
 		});
+	});
+});
+
+describe("Mantine channel handlers", () => {
+	it("registers Combobox handlers once across re-renders", () => {
+		channel.on.mockClear();
+		const view = render(
+			<MantineProvider>
+				<Combobox channelId="combobox" />
+			</MantineProvider>,
+		);
+		const registrations = channel.on.mock.calls.length;
+		view.rerender(
+			<MantineProvider>
+				<Combobox channelId="combobox" />
+			</MantineProvider>,
+		);
+		expect(registrations).toBeGreaterThan(0);
+		expect(channel.on).toHaveBeenCalledTimes(registrations);
+		view.unmount();
+	});
+
+	it("registers Tree handlers once across re-renders", () => {
+		channel.on.mockClear();
+		const view = render(
+			<MantineProvider>
+				<Tree channelId="tree" data={[]} />
+			</MantineProvider>,
+		);
+		const registrations = channel.on.mock.calls.length;
+		view.rerender(
+			<MantineProvider>
+				<Tree channelId="tree" data={[]} />
+			</MantineProvider>,
+		);
+		expect(registrations).toBeGreaterThan(0);
+		expect(channel.on).toHaveBeenCalledTimes(registrations);
+		view.unmount();
 	});
 });

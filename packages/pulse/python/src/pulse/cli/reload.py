@@ -265,6 +265,13 @@ class DevSupervisor:
 			if ready is None or ready.done():
 				with contextlib.suppress(OSError):
 					os.close(ready_r)
+			else:
+				# A descendant escaped the process group and still holds the
+				# write end: the reader thread and fd stay pinned until it dies.
+				print(
+					"Warning: a leftover backend descendant holds the readiness pipe open; leaking its reader until it exits.",
+					flush=True,
+				)
 
 	def _close_vite_ready_fd(self) -> None:
 		fd = self._vite_ready_r

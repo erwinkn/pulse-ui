@@ -96,6 +96,18 @@ describe("pulse", () => {
 		});
 	});
 
+	it("respects hmr: false", () => {
+		process.env.PULSE_HMR_CLIENT_PORT = "5173";
+		const plugin = pulse();
+		expect(
+			hook(plugin.config).call(
+				{} as never,
+				{ server: { hmr: false } } as never,
+				{} as never,
+			),
+		).toBeUndefined();
+	});
+
 	it("writes configured then listening to stdout", async () => {
 		process.env.PULSE_SUPERVISED = "1";
 		let output = "";

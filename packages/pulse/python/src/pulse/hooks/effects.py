@@ -28,12 +28,19 @@ class EffectState(HookState):
 	@override
 	def on_render_end(self, render_cycle: int, error: BaseException | None) -> None:
 		super().on_render_end(render_cycle, error)
-		# Dispose effects that weren't seen this render (e.g., inside conditionals that became false)
-		for key in list(self.effects.keys()):
-			if key not in self._seen_this_render:
-				self.effects[key].dispose()
-				del self.effects[key]
+		# Dispose effects that weren't seen this render (e.g., inside conditionals
+		# that became false). A failed render stopped at the raise, so effects
+		# declared after that point are unseen but still live: keep them all and
+		# let the next successful render decide. `_seen_this_render` is rebuilt on
+		# render start, so the partial set never leaks into that decision.
+		if error is None:
+			for key in list(self.effects.keys()):
+				if key not in self._seen_this_render:
+					self.effects[key].dispose()
+					del self.effects[key]
 		# Remove inline effects from the active render scope to avoid parent cleanup.
+		# Effects created before a failure need this too, else the render scope
+		# disposes them while they stay cached here.
 		rc = REACTIVE_CONTEXT.get()
 		scope = rc.scope
 		if scope is None or not scope.effects:

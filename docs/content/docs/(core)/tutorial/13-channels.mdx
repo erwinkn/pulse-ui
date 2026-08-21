@@ -65,11 +65,11 @@ def ChatWidget(*, channelId: str):
     ]
 ```
 
-`useChannel` always returns a bridge. There is no `lifetime` argument — put the hook in a layout if listeners should outlive the route. It registers the handle during render, so an emit after the client has rendered this hook is delivered. Emit during prerender / before the first client render is dropped — nothing is listening yet.
+`useChannel` always returns a bridge. There is no `lifetime` argument — put the hook in a layout if listeners should outlive the route. It attaches the handle in an effect, so an emit before that effect runs can be dropped.
 
 ## Request / response
 
-If the peer has no handler, it NACKs immediately with `no_handler`. Requests never hang when you omit `timeout`. If the WebSocket is down, `request` fails immediately with `ChannelDisconnected` / `PulseChannelDisconnectedError`.
+If the peer has no handler, it NACKs immediately with `no_handler`. Client requests time out after 30 seconds by default; detaching the handle rejects in-flight requests with `PulseChannelDetachedError`. If the WebSocket is down, `request` fails immediately with `ChannelDisconnected` / `PulseChannelDisconnectedError`.
 
 ```python
 try:

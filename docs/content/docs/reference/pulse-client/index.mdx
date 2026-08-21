@@ -94,7 +94,8 @@ The package exports several categories of APIs:
 - **VDOMRenderer** - Converts VDOM to React elements
 - **PulseChannelDisconnectedError** - Request failed because the socket is down
 - **PulseChannelRemoteError** - Peer responded with an error
-- **PulseChannelDetachedError** - `on()` called on a detached handle
+- **PulseChannelDetachedError** - An in-flight request's handle was detached
+- **PulseChannelTimeoutError** - A request exceeded its timeout (30 seconds by default)
 
 ### Utilities
 
@@ -119,6 +120,8 @@ React App                          Pulse Server
 ```
 
 When a user interacts with the UI, callbacks are sent to the server. The server updates state and sends VDOM patches back. The client applies these patches incrementally, preserving React's reconciliation benefits.
+
+Channel requests go to the first attached handle in registration order that has a handler for the event. Channel events fan out to every attached handle for that channel name.
 
 ## See Also
 

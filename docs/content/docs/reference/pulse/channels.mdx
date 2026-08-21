@@ -71,7 +71,7 @@ Register a handler on this handle. Idempotent for the same `(event, handler)`.
 def emit(self, event: str, payload: Any = None) -> None
 ```
 
-Send a fire-and-forget event to the channel. Still works after detach. If the WebSocket is down, the message uses the session's global queue. Events emitted before the client has rendered `useChannel` are dropped.
+Send a fire-and-forget event to the channel. Still works after detach. If the WebSocket is down, the message uses the session's global queue. Events emitted before the `useChannel` effect runs can be dropped.
 
 ##### request
 

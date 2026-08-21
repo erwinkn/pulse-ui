@@ -102,7 +102,7 @@ Most of these are used internally by `PulseView`. The most useful for app code a
 
 ## useChannel
 
-Hook that returns a handle on a channel. Client lifetime is React placement: a route component detaches on navigation, a layout keeps the handle for the tab. The handle is registered during render so a live-socket emit is not dropped waiting for `useEffect`.
+Hook that returns a handle on a channel. Client lifetime is React placement: a route component detaches on navigation, a layout keeps the handle for the tab. The handle attaches in an effect and detaches in that effect's cleanup.
 
 ```ts
 import { useChannel } from "pulse-ui-client";
@@ -127,7 +127,9 @@ Returns a `ChannelBridge` instance for sending and receiving messages.
 
 ### Lifecycle
 
-The hook memoizes one `ChannelBridge` per hook instance (`[client, id]`) and attach/detaches that same object. StrictMode reuses it. Two hooks on the same id are two handles, one name. `on()` is legal while detached. Events emitted before this hook has rendered are dropped.
+The hook memoizes one `ChannelBridge` per hook instance (`[client, id]`) and attaches/detaches that same object. StrictMode reuses it. Two hooks on the same id are two handles, one name. `on()` is legal while detached. Events emitted before the effect runs are queued only if the client is offline; otherwise they can be dropped because no handle is attached yet.
+
+Requests route to the first attached handle in registration order that has a handler. Events fan out to every attached handle for the channel name.
 
 There is no `lifetime` argument. Put the hook in a layout if listeners should survive route changes.
 

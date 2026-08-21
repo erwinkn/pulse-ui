@@ -460,6 +460,10 @@ class Channel:
 	) -> Any | None:
 		handlers = list(self._handlers.get(event, ()))
 		if not handlers:
+			if request_id is not None:
+				raise RuntimeError(
+					f"No handler for event {event!r} on channel {self.id!r}"
+				)
 			return None
 
 		last_result: Any | None = None

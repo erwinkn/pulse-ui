@@ -300,6 +300,34 @@ async def test_interrupted_backend_start_cancels_readiness_waiter(
 
 
 @pytest.mark.asyncio
+async def test_backend_output_preserves_text_and_blank_lines_around_marker(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	capsys: pytest.CaptureFixture[str],
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	process = FakeProcess("server1", [])
+
+	def start(
+		_cls: type[ManagedProcess],
+		_spec: CommandSpec,
+		on_output: Callable[[str], None],
+		_on_exit: Callable[[int], None],
+		*,
+		pass_fds: tuple[int, ...] = (),
+	) -> FakeProcess:
+		process.pass_fds = pass_fds
+		on_output(f"ordinary output {PREFIX}{WORKER_READY}")
+		on_output("")
+		return process
+
+	monkeypatch.setattr(ManagedProcess, "start", classmethod(start))
+
+	assert await supervisor._replace_backend()  # pyright: ignore[reportPrivateUsage]
+	assert capsys.readouterr().out == "[server] ordinary output \n[server] \n"
+
+
+@pytest.mark.asyncio
 async def test_vite_crash_returns_its_exit_code(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

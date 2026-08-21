@@ -10,15 +10,17 @@ def _serialize_dataframe(frame: pd.DataFrame) -> dict[str, object]:
 	if len(set(columns)) != len(columns):
 		raise ValueError("DataFrame column names must be unique")
 
-	missing = frame.isna()
+	# Bulk-extract cells; per-cell .iat indexing is microseconds per call and
+	# blocks the event loop for grid-sized frames.
+	missing = frame.isna().to_numpy()
+	cells = frame.to_numpy(dtype=object)
 	rows: list[list[object]] = []
-	for row_index in range(len(frame.index)):
+	for cell_row, missing_row in zip(cells, missing, strict=True):
 		row: list[object] = []
-		for column_index in range(len(columns)):
-			if missing.iat[row_index, column_index]:
+		for value, is_missing in zip(cell_row, missing_row, strict=True):
+			if is_missing:
 				row.append(None)
 				continue
-			value = frame.iat[row_index, column_index]
 			if isinstance(value, pd.Timestamp):
 				if value.microsecond % 1000 != 0 or value.nanosecond != 0:
 					raise ValueError(

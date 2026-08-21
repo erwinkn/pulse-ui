@@ -405,3 +405,23 @@ describe("serialization", () => {
 		}
 	});
 });
+
+describe("maximum nesting depth", () => {
+	function nestedArrays(depth: number): unknown {
+		let value: unknown = [];
+		for (let i = 0; i < depth; i += 1) {
+			value = [value];
+		}
+		return value;
+	}
+
+	it("rejects encoding past the shared depth ceiling", () => {
+		expect(() => serialize(nestedArrays(300))).toThrow("maximum nesting depth");
+		expect(serialize(nestedArrays(100))).toBeDefined();
+	});
+
+	it("rejects decoding past the shared depth ceiling", () => {
+		const wire = JSON.parse(`[5,${"[".repeat(300)}${"]".repeat(300)}]`);
+		expect(() => deserialize(wire)).toThrow("maximum nesting depth");
+	});
+});

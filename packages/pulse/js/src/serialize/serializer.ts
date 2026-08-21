@@ -5,9 +5,31 @@ export type Serialized = [5, WireValue];
 
 const VERSION = 5;
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
+// Spec'd nesting ceiling for the wire format, enforced by encoder and decoder
+// in both runtimes so the accepted input domain does not depend on runtime
+// recursion limits.
+const MAX_DEPTH = 200;
 const DATETIME_RE =
 	/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})Z(?![\s\S])/;
-const isWellFormed = String.prototype.isWellFormed;
+// String.prototype.isWellFormed is ES2024 (Chrome 111+, Safari 16.4+,
+// Node 20+); fall back to a manual surrogate-pair scan on older engines.
+const isWellFormed: (this: string) => boolean =
+	String.prototype.isWellFormed ??
+	function (this: string): boolean {
+		for (let i = 0; i < this.length; i++) {
+			const code = this.charCodeAt(i);
+			if (code >= 0xd800 && code <= 0xdbff) {
+				const next = this.charCodeAt(i + 1);
+				if (!(next >= 0xdc00 && next <= 0xdfff)) {
+					return false;
+				}
+				i++;
+			} else if (code >= 0xdc00 && code <= 0xdfff) {
+				return false;
+			}
+		}
+		return true;
+	};
 
 type PathSegment = string | number;
 type PortableSetValue = Primitive | Date;
@@ -25,6 +47,11 @@ export function serialize(data: unknown): Serialized {
 	const path: PathSegment[] = [];
 
 	function encode(value: unknown): WireValue {
+		if (path.length > MAX_DEPTH) {
+			throw new Error(
+				`Cannot serialize past the maximum nesting depth of ${MAX_DEPTH} at ${formatPath(path)}`,
+			);
+		}
 		if (value === null || value === undefined) {
 			return null;
 		}
@@ -141,6 +168,11 @@ export function deserialize(payload: unknown): unknown {
 	}
 
 	function decode(value: unknown): any {
+		if (path.length > MAX_DEPTH) {
+			throw new Error(
+				`Cannot deserialize past the maximum nesting depth of ${MAX_DEPTH} at ${formatPath(path)}`,
+			);
+		}
 		if (value === null || typeof value === "boolean") {
 			return value;
 		}

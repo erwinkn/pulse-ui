@@ -204,6 +204,13 @@ export class RefRegistry {
 	}
 
 	dispose(): void {
+		if (this.#bridge && !this.#bridge.isClosed) {
+			for (const [refId, entry] of this.#entries) {
+				if (entry.node != null) {
+					this.#bridge.emit("ref:unmounted", { refId });
+				}
+			}
+		}
 		this.#teardown();
 	}
 

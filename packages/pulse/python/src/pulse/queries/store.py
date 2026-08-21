@@ -55,6 +55,19 @@ class QueryStore(Disposable):
 		for result in list(self._unkeyed):
 			result.resume()
 
+	def reconnect_all(self) -> None:
+		"""Stale-check queries after replacing an active client connection.
+
+		Unlike resume_all(), active interval effects are left running.
+		"""
+		if self.suspended:
+			self.resume_all()
+			return
+		for entry in list(self._entries.values()):
+			entry.reconnect()
+		for result in list(self._unkeyed):
+			result.reconnect()
+
 	def items(self):
 		"""Iterate over all (key, query) pairs in the store."""
 		return self._entries.items()

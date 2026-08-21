@@ -642,7 +642,11 @@ export class PulseSocketIOClient {
 	}
 
 	#routeChannelMessage(message: ServerChannelMessage): void {
-		const entry = this.#ensureChannelEntry(message.channel);
+		// Inbound routing must never create or resurrect a channel: only
+		// acquisition hands out bridges. Messages for unknown or closed
+		// channels are dropped.
+		const entry = this.#channels.get(message.channel);
+		if (!entry || entry.bridge.isClosed) return;
 		const closed = entry.bridge.handleServerMessage(message);
 		if (closed && entry.refCount === 0) {
 			this.#channels.delete(message.channel);
@@ -774,8 +778,25 @@ export class PulseSocketIOClient {
 		this.#pendingCallbackCount = 0;
 		this.#closeSocket();
 		this.#setStatus("error");
-		if (typeof window !== "undefined") window.location.reload();
+		this.#reloadWhenVisible();
 		throw new Error(CLIENT_QUEUE_OVERFLOW_MESSAGE);
+	}
+
+	// Reloading a hidden tab would silently discard its state; wait until the
+	// user can see the page, mirroring the reconnect-timeout behavior.
+	#reloadWhenVisible(): void {
+		if (typeof window === "undefined") return;
+		if (!documentIsHidden()) {
+			window.location.reload();
+			return;
+		}
+		document.addEventListener(
+			"visibilitychange",
+			() => {
+				if (!documentIsHidden()) window.location.reload();
+			},
+			{ once: true },
+		);
 	}
 
 	_ensureChannelEntry(id: string): {

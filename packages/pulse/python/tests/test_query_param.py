@@ -459,6 +459,53 @@ class TestQueryParamAcrossMounts:
 
 		session.close()
 
+	def test_pathname_only_route_change_emits_no_navigation(self):
+		"""The mount fence must not become a reactive dependency of the sync
+		effect: a pathname-only route change re-applying stale params would be
+		a dependency leak."""
+
+		class Filters(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		session_filters = ps.global_state(Filters)
+
+		def render():
+			return ps.div()
+
+		route = Route("users/:id", ps.component(render))
+		routes = RouteTree([route])
+		app = ps.App(routes=[route])
+		session = RenderSession("test", routes)
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
+
+		info = make_route_info("/users/1", query_params={"q": "hello"})
+		session.prerender(["/users/:id"], info)
+		attach_mount(session, "/users/:id", info)
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/users/:id"].route
+		):
+			state = session_filters()
+			flush_effects()
+
+		messages.clear()
+		state.q = "next"
+		flush_query_param_sync(session)
+		assert len(navigations(messages)) == 1
+
+		# Client applies the navigation, then moves to another id with the
+		# same query params: no further navigation may be emitted.
+		messages.clear()
+		update_mount_route(
+			session,
+			"/users/:id",
+			make_route_info("/users/2", query_params={"q": "next"}),
+		)
+		flush_query_param_sync(session)
+		assert navigations(messages) == []
+
+		session.close()
+
 	def test_param_absent_from_new_route_resets_to_default(self):
 		class Filters(ps.State):
 			q: ps.QueryParam[str] = "fallback"

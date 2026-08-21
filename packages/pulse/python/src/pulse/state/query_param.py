@@ -581,15 +581,18 @@ class QueryParamSync(Disposable):
 		# the one on screen. Bind the origin to a mount currently displaying
 		# that pathname so late navigations are dropped once the URL changes;
 		# without such a mount the URL is already stale, so drop the navigation.
-		mount = next(
-			(
-				m
-				for m in self.render.route_mounts.values()
-				if m.route.pathname == pathname
-			),
-			None,
-		)
-		if mount is None:
+		# The scan is a point-in-time fence, not a reactive dependency.
+		with Untrack():
+			mount = next(
+				(
+					m
+					for m in self.render.route_mounts.values()
+					if m.route.pathname == pathname
+				),
+				None,
+			)
+			origin = mount.origin() if mount is not None else None
+		if origin is None:
 			return
 		self.render.send(
 			ServerNavigateToMessage(
@@ -597,7 +600,7 @@ class QueryParamSync(Disposable):
 				path=path,
 				replace=True,
 				hard=False,
-				origin=mount.origin(),
+				origin=origin,
 			)
 		)
 

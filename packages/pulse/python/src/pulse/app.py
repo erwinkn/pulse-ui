@@ -244,8 +244,8 @@ class App:
 	_render_connect_attempts: dict[str, object]
 	_connecting_sockets: set[str]
 	_pending_socket_messages: dict[str, list[ClientMessage]]
+	_command_locks: dict[str, dict[str, asyncio.Lock]]
 	_render_cleanups: dict[str, TimerHandleLike]
-	_render_message_locks: dict[str, asyncio.Lock]
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
 	_proxy: ReactProxy | None
@@ -330,9 +330,11 @@ class App:
 		self._render_connect_attempts = {}
 		self._connecting_sockets = set()
 		self._pending_socket_messages = {}
+		# render id -> command target key -> lock, so commands for one route
+		# or channel keep arrival order while unrelated work runs concurrently
+		self._command_locks = {}
 		# Map render_id -> cleanup timer handle for timeout-based expiry
 		self._render_cleanups = {}
-		self._render_message_locks = {}
 		self._tasks = TaskRegistry(name="app")
 		self._timers = TimerRegistry(tasks=self._tasks, name="app")
 		self._proxy = None
@@ -373,8 +375,10 @@ class App:
 			openapi_external_docs=fastapi_config.openapi_external_docs,
 			lifespan=self.fastapi_lifespan,
 		)
+		# EVENT handlers run as tasks so a parked command does not stall
+		# the receive loop. CONNECT is still awaited by python-socketio.
 		self.sio = socketio.AsyncServer(
-			async_mode="asgi", cors_allowed_origins="*", async_handlers=False
+			async_mode="asgi", cors_allowed_origins="*", async_handlers=True
 		)
 		self.asgi = socketio.ASGIApp(self.sio, self.fastapi)
 
@@ -1052,28 +1056,39 @@ class App:
 		rid = self._socket_to_render.get(sid)
 		if not rid:
 			return
-		lock = self._render_message_locks.setdefault(rid, asyncio.Lock())
+		render = self.render_sessions.get(rid)
+		if render is None:
+			return
+		owner_sid = self._render_to_user.get(rid)
+		if owner_sid is None:
+			return
+		session = self.user_sessions.get(owner_sid)
+		if session is None:
+			return
+		# Cancel any leftover cleanup for connected sessions. Never cancel
+		# for disconnected renders: nothing would reschedule it and the
+		# session would survive past its timeout.
+		if render.connected:
+			self._cancel_render_cleanup(rid)
+		# Completions skip middleware and apply immediately. A reply is
+		# the other half of a server request, not a command to authorize;
+		# putting apply behind `await` can deadlock if that await waits
+		# on another reply.
+		if msg["type"] == "reply":
+			render.replies.apply(msg)
+			return
+		# Commands that target the same route (or channel) must apply in
+		# arrival order: an awaited middleware must not let a later
+		# detach/update overtake an earlier attach. Unrelated targets and
+		# replies stay concurrent.
+		if msg["type"] == "channel_message":
+			key = f"channel:{msg.get('channel', '')}"
+		else:
+			key = f"path:{msg.get('path', '')}"
+		locks = self._command_locks.setdefault(rid, {})
+		lock = locks.setdefault(key, asyncio.Lock())
 		async with lock:
-			render = self.render_sessions.get(rid)
-			if render is None:
-				return
-			owner_sid = self._render_to_user.get(rid)
-			if owner_sid is None:
-				return
-			session = self.user_sessions.get(owner_sid)
-			if session is None:
-				return
-			# Cancel any leftover cleanup for connected sessions. Never cancel
-			# for disconnected renders: nothing would reschedule it and the
-			# session would survive past its timeout.
-			if render.connected:
-				self._cancel_render_cleanup(rid)
-			# Completions skip middleware and apply immediately. A reply is
-			# the other half of a server request, not a command to authorize;
-			# putting apply behind `await` can deadlock if that await waits
-			# on another reply.
-			if msg["type"] == "reply":
-				render.replies.apply(msg)
+			if self.render_sessions.get(rid) is not render:
 				return
 			try:
 				if msg["type"] == "channel_message":
@@ -1284,13 +1299,13 @@ class App:
 	def close_render(self, rid: str):
 		# Cancel any pending cleanup task
 		self._cancel_render_cleanup(rid)
-		self._render_message_locks.pop(rid, None)
 		self._render_to_page_instance.pop(rid, None)
 		self._render_connect_attempts.pop(rid, None)
 		socket_sid = self._render_to_socket.pop(rid, None)
 		if socket_sid is not None:
 			self._socket_to_render.pop(socket_sid, None)
 
+		self._command_locks.pop(rid, None)
 		render = self.render_sessions.pop(rid, None)
 		if not render:
 			return

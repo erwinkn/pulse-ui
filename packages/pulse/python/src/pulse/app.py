@@ -243,7 +243,7 @@ class App:
 	_render_to_page_instance: dict[str, str | None]
 	_render_connect_attempts: dict[str, object]
 	_connecting_sockets: set[str]
-	_pending_socket_messages: dict[str, list[Serialized]]
+	_pending_socket_messages: dict[str, list[ClientMessage]]
 	_render_cleanups: dict[str, TimerHandleLike]
 	_render_message_locks: dict[str, asyncio.Lock]
 	_tasks: TaskRegistry
@@ -1003,34 +1003,55 @@ class App:
 		self._render_cleanups[rid] = handle
 
 	async def _handle_socket_message(self, sid: str, data: Serialized) -> None:
+		msg = cast(ClientMessage, deserialize(data))
 		if sid in self._connecting_sockets:
-			self._queue_pending_socket_message(sid, data)
+			# Replies resolve server-parked futures by correlation id; they
+			# never wait behind queued commands. Apply immediately once the
+			# socket is mapped to its render.
+			if msg["type"] == "reply":
+				rid = self._socket_to_render.get(sid)
+				render = self.render_sessions.get(rid) if rid else None
+				if render is not None:
+					render.replies.apply(msg)
+					return
+			self._queue_pending_socket_message(sid, msg)
 			return
-		await self._process_socket_message(sid, data)
+		await self._process_socket_message(sid, msg)
 
-	def _queue_pending_socket_message(self, sid: str, data: Serialized) -> None:
+	def _queue_pending_socket_message(self, sid: str, msg: ClientMessage) -> None:
 		queue = self._pending_socket_messages.setdefault(sid, [])
-		if len(queue) >= MAX_PENDING_SOCKET_MESSAGES:
+		# Never drop replies: a dropped reply orphans its pending future for
+		# the full request timeout.
+		if msg["type"] != "reply" and len(queue) >= MAX_PENDING_SOCKET_MESSAGES:
 			logger.warning(
 				"Dropping socket message for %s while connect is pending; queue is full",
 				sid,
 			)
 			return
-		queue.append(data)
+		queue.append(msg)
 
 	async def _drain_pending_socket_messages(self, sid: str) -> None:
 		try:
 			while pending := self._pending_socket_messages.pop(sid, []):
-				for data in pending:
-					await self._process_socket_message(sid, data)
+				# Apply queued replies first: they resolve futures without
+				# middleware and must not wait behind commands that may await.
+				rid = self._socket_to_render.get(sid)
+				render = self.render_sessions.get(rid) if rid else None
+				commands: list[ClientMessage] = []
+				for msg in pending:
+					if msg["type"] == "reply" and render is not None:
+						render.replies.apply(msg)
+					else:
+						commands.append(msg)
+				for msg in commands:
+					await self._process_socket_message(sid, msg)
 		finally:
 			self._connecting_sockets.discard(sid)
 
-	async def _process_socket_message(self, sid: str, data: Serialized) -> None:
+	async def _process_socket_message(self, sid: str, msg: ClientMessage) -> None:
 		rid = self._socket_to_render.get(sid)
 		if not rid:
 			return
-		msg = cast(ClientMessage, deserialize(data))
 		lock = self._render_message_locks.setdefault(rid, asyncio.Lock())
 		async with lock:
 			render = self.render_sessions.get(rid)

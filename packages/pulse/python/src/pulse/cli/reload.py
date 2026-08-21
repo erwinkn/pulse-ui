@@ -143,6 +143,10 @@ class DevSupervisor:
 				if self._web_code is not None:
 					return self._web_code
 				if not started:
+					print(
+						"Backend failed to start. Waiting for changes to retry...",
+						flush=True,
+					)
 					await self._race("changed", "web")
 					continue
 				if self.backend_spec.on_ready is not None:

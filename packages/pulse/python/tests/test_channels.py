@@ -180,3 +180,44 @@ async def test_missing_channel_request_sends_error_reply():
 	assert render.sent == [
 		{"type": "reply", "id": "client-req-1", "error": "Channel closed"}
 	]
+
+
+@pytest.mark.asyncio
+async def test_unhandled_channel_request_sends_error_reply():
+	app = ps.App()
+	render = DummyRender()
+	session = SimpleNamespace(sid="session-6")
+
+	real_render = ps.RenderSession(render.id, app.routes)
+	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
+
+	app.render_sessions[render.id] = real_render
+	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
+	app.user_sessions[session.sid] = session  # pyright: ignore[reportArgumentType]
+
+	with ps.PulseContext(
+		app=app,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		render=real_render,
+	):
+		real_render.channels.create("no-handler-channel")
+		real_render.channels.handle_client_event(
+			render=real_render,
+			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+			message={
+				"type": "channel_message",
+				"channel": "no-handler-channel",
+				"event": "get",
+				"payload": None,
+				"requestId": "client-req-2",
+			},
+		)
+
+	await asyncio.sleep(0)
+	assert render.sent == [
+		{
+			"type": "reply",
+			"id": "client-req-2",
+			"error": "No handler for event 'get' on channel 'no-handler-channel'",
+		}
+	]

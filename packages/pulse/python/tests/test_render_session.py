@@ -1345,6 +1345,36 @@ async def test_run_js_success_before_timeout():
 
 
 @pytest.mark.asyncio
+async def test_run_js_reply_cancels_timeout_timer():
+	"""The timeout timer must not stay registered after the reply arrives."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	baseline = len(session._timers._handles)  # pyright: ignore[reportPrivateUsage]
+	with ps.PulseContext.update(render=session, route=session.route_mounts["/a"].route):
+		future = session.run_js(get_answer(), result=True, timeout=60.0)
+
+	assert future is not None
+	assert len(session._timers._handles) == baseline + 1  # pyright: ignore[reportPrivateUsage]
+
+	js_msgs = [m for m in messages if m.get("type") == "js_exec"]
+	exec_id = cast(Any, js_msgs[0])["id"]
+	session.replies.apply({"type": "reply", "id": exec_id, "payload": 42})
+	assert await future == 42
+	await asyncio.sleep(0)  # let the done callback run
+	assert len(session._timers._handles) == baseline  # pyright: ignore[reportPrivateUsage]
+
+	session.close()
+
+
+@pytest.mark.asyncio
 async def test_session_close_cancels_pending_api():
 	"""Test that session.close() cancels pending API futures."""
 	routes = RouteTree([Route("a", simple_component)])

@@ -179,6 +179,12 @@ class ManagedProcess:
 		*,
 		pass_fds: tuple[int, ...] = (),
 	) -> ManagedProcess:
+		"""Start a managed process with optional inherited descriptors.
+
+		On Windows, pass_fds contains inheritable OS handles rather than CRT
+		descriptors; callers own their inheritability. On POSIX, pass_fds
+		contains file descriptors passed through subprocess.
+		"""
 		windows = os_family() == "windows"
 		creationflags = 0
 		args = spec.args
@@ -188,8 +194,6 @@ class ManagedProcess:
 			launcher = os.path.join(os.path.dirname(__file__), "_windows_launcher.py")
 			args = [sys.executable, "-I", launcher, *spec.args]
 			if pass_fds:
-				for fd in pass_fds:
-					os.set_inheritable(fd, True)
 				kwargs["close_fds"] = False
 		else:
 			kwargs["start_new_session"] = True
@@ -313,6 +317,8 @@ class ManagedProcess:
 		if self._job is not None:
 			self._job.terminate()
 			return
+		if os_family() == "windows":
+			return
 		# Kills surviving group members (e.g. grandchildren of a crashed
 		# leader) too: the zombie leader pins the pgid until close() reaps it.
 		# After the reap the pgid may be recycled, so never signal it then.
@@ -378,13 +384,23 @@ def execute_commands(
 	if not commands:
 		return 0
 
+	def _is_stop_induced(code: int) -> bool:
+		if os_family() == "windows":
+			# 1: TerminateProcess via Popen.terminate/job kill fallback.
+			# 0xFFFFFFFF: job-object termination of survivors.
+			# 0xC000013A: STATUS_CONTROL_C_EXIT after CTRL_BREAK.
+			return code in (1, 0xFFFFFFFF, 0xC000013A)
+		return code < 0
+
 	def interrupt_on_sigterm(_signum: int, _frame: object) -> None:
 		raise KeyboardInterrupt
 
 	previous_sigterm = signal.signal(signal.SIGTERM, interrupt_on_sigterm)
 	processes: list[ManagedProcess] = []
-	exit_codes: dict[str, int] = {}
+	self_exit_codes: dict[str, int] = {}
+	first_exit_code: int | None = None
 	exited = threading.Event()
+	stopping = threading.Event()
 
 	def start(spec: CommandSpec) -> ManagedProcess:
 		ready = threading.Event()
@@ -400,7 +416,15 @@ def execute_commands(
 						pass
 
 		def on_exit(code: int) -> None:
-			exit_codes[spec.name] = code
+			nonlocal first_exit_code
+			# Codes reported after the shutdown began are usually stop-induced
+			# (signal deaths on POSIX, TerminateProcess/CTRL_BREAK exits on
+			# Windows) and must not mask or fabricate a failure — but a
+			# genuine failure exit that lands after stopping still counts.
+			if not stopping.is_set() or not _is_stop_induced(code):
+				self_exit_codes[spec.name] = code
+			if first_exit_code is None:
+				first_exit_code = code
 			exited.set()
 
 		return ManagedProcess.start(spec, on_output, on_exit)
@@ -412,10 +436,12 @@ def execute_commands(
 		# Event.wait() would swallow Ctrl+C.
 		while not exited.wait(0.2):
 			pass
-		# Stop the survivors before reading exit codes so every process
-		# contributes one; _stop_processes is idempotent for the finally below.
+		stopping.set()
+		# _stop_processes is idempotent for the finally below.
 		_stop_processes(processes)
-		return max(exit_codes.values())
+		if self_exit_codes:
+			return max(self_exit_codes.values())
+		return first_exit_code if first_exit_code is not None else 0
 	except KeyboardInterrupt:
 		sys.stdout.write("\nShutting down...\n")
 		sys.stdout.flush()

@@ -15,10 +15,37 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
+from typing import Any
 
-from pulse.cli.helpers import ensure_gitignore_has
+from pulse.cli.helpers import ensure_gitignore_has, os_family
 
 DEFAULT_LOCK_FILENAME = ".pulse/lock"
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+PROCESS_SYNCHRONIZE = 0x100000
+PROCESS_TERMINATE = 0x1
+ERROR_ACCESS_DENIED = 5
+ERROR_INVALID_PARAMETER = 87
+WAIT_TIMEOUT = 0x102
+
+
+def _kernel32() -> Any:
+	import ctypes
+	from ctypes import wintypes
+
+	kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+	kernel32.OpenProcess.argtypes = [
+		wintypes.DWORD,
+		wintypes.BOOL,
+		wintypes.DWORD,
+	]
+	kernel32.OpenProcess.restype = wintypes.HANDLE
+	kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+	kernel32.WaitForSingleObject.restype = wintypes.DWORD
+	kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+	kernel32.TerminateProcess.restype = wintypes.BOOL
+	kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+	kernel32.CloseHandle.restype = wintypes.BOOL
+	return kernel32
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +142,27 @@ def _coerce_int(value: object) -> int | None:
 
 def is_process_alive(pid: int) -> bool:
 	"""Check if a process with the given PID is running."""
+	if os_family() == "windows":
+		import ctypes
+
+		kernel32 = _kernel32()
+		handle = kernel32.OpenProcess(
+			PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+			False,
+			pid,
+		)
+		if not handle:
+			error = ctypes.get_last_error()
+			if error == ERROR_ACCESS_DENIED:
+				return True
+			if error == ERROR_INVALID_PARAMETER:
+				return False
+			return True
+		try:
+			return kernel32.WaitForSingleObject(handle, 0) == WAIT_TIMEOUT
+		finally:
+			kernel32.CloseHandle(handle)
+
 	try:
 		# On POSIX, signal 0 checks for existence without killing
 		os.kill(pid, 0)
@@ -178,6 +226,38 @@ def interrupt_active_dev_server(
 
 
 def _interrupt_process(pid: int) -> None:
+	if os_family() == "windows":
+		import ctypes
+
+		kernel32 = _kernel32()
+		handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+		if not handle:
+			error = ctypes.get_last_error()
+			if error == ERROR_INVALID_PARAMETER:
+				return
+			if error == ERROR_ACCESS_DENIED:
+				raise RuntimeError(
+					f"Permission denied interrupting Pulse process {pid}."
+				)
+			raise RuntimeError(
+				f"Failed to open Pulse process {pid}: {ctypes.WinError(error)}"
+			)
+		try:
+			if not kernel32.TerminateProcess(handle, 1):
+				error = ctypes.get_last_error()
+				if error == ERROR_ACCESS_DENIED:
+					raise RuntimeError(
+						f"Permission denied interrupting Pulse process {pid}."
+					)
+				if error == ERROR_INVALID_PARAMETER:
+					return
+				raise RuntimeError(
+					f"Failed to terminate Pulse process {pid}: {ctypes.WinError(error)}"
+				)
+		finally:
+			kernel32.CloseHandle(handle)
+		return
+
 	try:
 		os.kill(pid, signal.SIGINT)
 	except ProcessLookupError:

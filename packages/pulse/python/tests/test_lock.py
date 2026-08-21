@@ -8,11 +8,24 @@ from pulse.cli.lock import (
 	active_lock_info,
 	create_lock,
 	interrupt_active_dev_server,
+	is_process_alive,
 	lock_path_for_web_root,
 	read_lock_info,
 	remove_lock,
 	write_lock_info,
 )
+
+
+def test_process_liveness_probe_does_not_terminate_live_process():
+	proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+	try:
+		assert is_process_alive(proc.pid)
+		assert proc.poll() is None
+	finally:
+		proc.terminate()
+		proc.wait(timeout=2)
+
+	assert not is_process_alive(proc.pid)
 
 
 def test_create_lock_round_trips_typed_info(tmp_path: Path):

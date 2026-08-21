@@ -121,7 +121,7 @@ describe("pulse", () => {
 			hook(pulse().configureServer).call({} as never, viteServer(viteHttp));
 			await listen(viteHttp);
 			expect(output).toBe(
-				"\n\x00pulse:vite-configured\n\n\x00pulse:vite-listening\n",
+				"\x00pulse:vite-configured\n\x00pulse:vite-listening\n",
 			);
 		} finally {
 			process.stdout.write = write;

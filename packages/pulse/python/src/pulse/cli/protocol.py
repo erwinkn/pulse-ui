@@ -17,7 +17,7 @@ def emit(message: str) -> None:
 	# Signaling must never take the child down when the supervisor is gone
 	# (closed pipe); the stdin watchdog handles that shutdown.
 	with contextlib.suppress(OSError):
-		sys.stdout.write(f"\n{PREFIX}{message}\n")
+		sys.stdout.write(f"{PREFIX}{message}\n")
 		sys.stdout.flush()
 
 

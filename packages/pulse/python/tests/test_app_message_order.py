@@ -265,6 +265,72 @@ async def test_parked_command_does_not_block_other_path_or_reply():
 	render.close()
 
 
+class GatingAttachMiddleware(PulseMiddleware):
+	"""Parks only `attach` commands until `release` is set."""
+
+	started: asyncio.Event
+	release: asyncio.Event
+
+	def __init__(self) -> None:
+		super().__init__()
+		self.started = asyncio.Event()
+		self.release = asyncio.Event()
+
+	@override
+	async def message(
+		self,
+		*,
+		data: ClientMessage,
+		session: dict[str, Any],
+		next: Callable[[], Awaitable[Ok[None] | Deny]],
+	) -> Ok[None] | Deny:
+		if data.get("type") == "attach":
+			self.started.set()
+			await self.release.wait()
+		return await next()
+
+
+@pytest.mark.asyncio
+async def test_same_path_detach_cannot_overtake_parked_attach():
+	"""A later detach for the same path must wait for the parked attach:
+	otherwise the attach observes a missing mount and forces a reload."""
+	middleware = GatingAttachMiddleware()
+
+	@ps.component
+	def PageA():
+		return ps.div()["a"]
+
+	app = ps.App(routes=[ps.Route("/a", PageA)], middleware=middleware)
+	render = RenderSession("render-1", app.routes)
+	session = SimpleNamespace(sid="session-1", data={})
+	_bind_render(app, render, session)
+	sent: list[dict[str, object]] = []
+	render.connect(
+		lambda message: sent.append(cast(dict[str, object], cast(object, message)))
+	)
+
+	with ps.PulseContext.update(render=render):
+		render.prerender(["/a"])
+
+	attach_task = _spawn(
+		app,
+		"socket-1",
+		{"type": "attach", "path": "/a", "routeInfo": _route_info("/a")},
+	)
+	await middleware.started.wait()
+	detach_task = _spawn(app, "socket-1", {"type": "detach", "path": "/a"})
+	await asyncio.sleep(0.01)
+	# The detach must be parked behind the attach, not applied.
+	assert render.route_mounts["/a"].state == "pending"
+
+	middleware.release.set()
+	await asyncio.gather(attach_task, detach_task)
+
+	# Attach applied first, then detach: no spurious reload was sent.
+	assert not [m for m in sent if m.get("type") == "reload"]
+	render.close()
+
+
 def test_socketio_async_handlers():
 	app = ps.App()
 
@@ -410,4 +476,117 @@ async def test_socket_messages_wait_for_connect_to_finish(
 	assert events == ["attach", "callback"]
 	assert "socket-1" not in app._connecting_sockets  # pyright: ignore[reportPrivateUsage]
 
+	render.close()
+
+
+def _wire_render(app: ps.App, sid: str) -> RenderSession:
+	render = RenderSession("render-1", app.routes)
+	session = SimpleNamespace(sid="session-1", data={})
+	app.render_sessions[render.id] = render
+	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
+	app.user_sessions[session.sid] = cast(UserSession, cast(object, session))
+	app._socket_to_render[sid] = render.id  # pyright: ignore[reportPrivateUsage]
+	return render
+
+
+@pytest.mark.asyncio
+async def test_reply_applies_immediately_while_connect_is_pending():
+	app = ps.App()
+	render = _wire_render(app, "socket-1")
+	app._connecting_sockets.add("socket-1")  # pyright: ignore[reportPrivateUsage]
+
+	fut = render.replies.register("corr-1")
+	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+		"socket-1", serialize({"type": "reply", "id": "corr-1", "payload": 7})
+	)
+
+	assert fut.done()
+	assert fut.result() == 7
+	assert app._pending_socket_messages.get("socket-1", []) == []  # pyright: ignore[reportPrivateUsage]
+	render.close()
+
+
+@pytest.mark.asyncio
+async def test_connect_queue_overflow_never_drops_replies(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	app = ps.App()
+	app._connecting_sockets.add("socket-1")  # pyright: ignore[reportPrivateUsage]
+
+	for i in range(150):
+		await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+			"socket-1",
+			serialize(
+				{
+					"type": "callback",
+					"path": "/",
+					"callback": f"{i}.onClick",
+					"args": [],
+				}
+			),
+		)
+	# Queue is full of commands; a reply must still be queued.
+	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+		"socket-1", serialize({"type": "reply", "id": "corr-1", "payload": 1})
+	)
+	queue = app._pending_socket_messages["socket-1"]  # pyright: ignore[reportPrivateUsage]
+	assert len(queue) == 101
+	assert queue[-1]["type"] == "reply"
+
+	render = _wire_render(app, "socket-1")
+	fut = render.replies.register("corr-1")
+
+	async def handle_pulse_message(*_args: object) -> None:
+		pass
+
+	monkeypatch.setattr(app, "_handle_pulse_message", handle_pulse_message)
+	await app._drain_pending_socket_messages(  # pyright: ignore[reportPrivateUsage]
+		"socket-1"
+	)
+	assert fut.done()
+	assert fut.result() == 1
+	render.close()
+
+
+@pytest.mark.asyncio
+async def test_drain_applies_replies_before_parked_commands(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	app = ps.App()
+	app._connecting_sockets.add("socket-1")  # pyright: ignore[reportPrivateUsage]
+
+	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+		"socket-1",
+		serialize(
+			{"type": "callback", "path": "/", "callback": "1.onClick", "args": []}
+		),
+	)
+	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+		"socket-1", serialize({"type": "reply", "id": "corr-1", "payload": 3})
+	)
+
+	render = _wire_render(app, "socket-1")
+	fut = render.replies.register("corr-1")
+
+	started = asyncio.Event()
+	release = asyncio.Event()
+
+	async def handle_pulse_message(*_args: object) -> None:
+		started.set()
+		await release.wait()
+
+	monkeypatch.setattr(app, "_handle_pulse_message", handle_pulse_message)
+
+	drain = asyncio.create_task(
+		app._drain_pending_socket_messages(  # pyright: ignore[reportPrivateUsage]
+			"socket-1"
+		)
+	)
+	await started.wait()
+	# The command is parked, but the reply already resolved.
+	assert fut.done()
+	assert fut.result() == 3
+
+	release.set()
+	await drain
 	render.close()

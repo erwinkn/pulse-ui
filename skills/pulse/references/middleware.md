@@ -339,6 +339,8 @@ app = ps.App(
 
 Executes in order. Each calls `await next()` to continue chain.
 
+Concurrency: `message`/`channel` hooks may await freely. Commands for the same route path (or same channel) still apply in arrival order; commands for other paths and `reply` completions are never blocked by a parked hook.
+
 ## Built-in Middleware
 
 ### `ps.LatencyMiddleware`

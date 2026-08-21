@@ -815,6 +815,41 @@ def test_execute_commands_stops_remaining_processes_when_one_exits(
 	assert "server-finished" not in output
 
 
+def test_execute_commands_preserves_clean_exit_when_stopping_survivor(
+	tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+	slow = CommandSpec(
+		name="server",
+		args=[
+			sys.executable,
+			"-c",
+			"import time; print('server-started', flush=True); time.sleep(5); print('server-finished', flush=True)",
+		],
+		cwd=tmp_path,
+		env=os.environ.copy(),
+	)
+	fast = CommandSpec(
+		name="web",
+		args=[
+			sys.executable,
+			"-c",
+			"print('web-exited', flush=True)",
+		],
+		cwd=tmp_path,
+		env=os.environ.copy(),
+	)
+
+	started = time.monotonic()
+	exit_code = execute_commands([slow, fast], tag_mode="plain")
+	elapsed = time.monotonic() - started
+
+	assert exit_code == 0
+	assert elapsed < 2
+	output = capsys.readouterr().out
+	assert "web-exited" in output
+	assert "server-finished" not in output
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group behavior")
 def test_execute_commands_gracefully_stops_descendants(tmp_path: Path) -> None:
 	ready = tmp_path / "descendant-ready"

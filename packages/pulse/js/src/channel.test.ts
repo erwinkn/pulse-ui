@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "bun:test";
 import {
 	ChannelBridge,
 	PulseChannelDisconnectedError,
+	PulseChannelDetachedError,
 	PulseChannelTimeoutError,
 } from "./channel";
 import type { ClientChannelMessage } from "./messages";
@@ -16,7 +17,12 @@ function makeBridgeClient(connected = true) {
 		}),
 		attachHandle: vi.fn(),
 		detachHandle: vi.fn(),
-		requestChannel(requestId: string, message: ClientChannelMessage, timeout?: number) {
+		requestChannel(
+			requestId: string,
+			message: ClientChannelMessage,
+			_owner: ChannelBridge,
+			timeout?: number,
+		) {
 			return new Promise((resolve, reject) => {
 				pending.set(requestId, { resolve, reject });
 				if (timeout !== undefined) {
@@ -80,6 +86,18 @@ describe("ChannelBridge", () => {
 		);
 	});
 
+	it("times out unanswered requests after the default timeout", async () => {
+		vi.useFakeTimers();
+		try {
+			const { bridge } = makeBridgeClient();
+			const pending = bridge.request("echo");
+			vi.advanceTimersByTime(30_000);
+			await expect(pending).rejects.toBeInstanceOf(PulseChannelTimeoutError);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("keeps on() legal after detach and still emits", () => {
 		const { bridge, sent } = makeBridgeClient();
 		const handler = vi.fn();
@@ -111,5 +129,28 @@ describe("ChannelBridge", () => {
 		bridge.on("ping", handler);
 		bridge.dispatchEvent("ping", 1);
 		expect(handler).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps a duplicate registration after removing one disposer", () => {
+		const { bridge } = makeBridgeClient();
+		const handler = vi.fn();
+		const removeFirst = bridge.on("ping", handler);
+		bridge.on("ping", handler);
+		removeFirst();
+		bridge.dispatchEvent("ping", 1);
+		expect(handler).toHaveBeenCalledTimes(1);
+		removeFirst();
+		bridge.dispatchEvent("ping", 2);
+		expect(handler).toHaveBeenCalledTimes(2);
+	});
+
+	it("warns once when emitting from a detached bridge", () => {
+		const { bridge } = makeBridgeClient();
+		const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+		bridge.emit("beforeAttach");
+		bridge.detach();
+		bridge.emit("afterDetach");
+		expect(warning).toHaveBeenCalledTimes(1);
+		warning.mockRestore();
 	});
 });

@@ -3,6 +3,7 @@ import { io, type Socket } from "socket.io-client";
 import {
 	ChannelBridge,
 	createRandomId,
+	PulseChannelDetachedError,
 	PulseChannelDisconnectedError,
 	PulseChannelRemoteError,
 	PulseChannelTimeoutError,
@@ -36,6 +37,7 @@ function browserIsOnline(): boolean {
 
 const PAGE_INSTANCE_AUTH_KEY = "__pulse_page_instance_id";
 const RENDER_ID_COLLISION_CODE = "render_id_collision";
+const OFFLINE_CHANNEL_EVENT_QUEUE_LIMIT = 100;
 const pageWindow =
 	typeof window === "undefined"
 		? undefined
@@ -89,7 +91,14 @@ export class PulseSocketIOClient {
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
 	#handles: Map<string, Set<ChannelBridge>> = new Map();
-	#pending = new Map<string, { resolve: (value: any) => void; reject: (error: any) => void }>();
+	#pending = new Map<
+		string,
+		{
+			owner: ChannelBridge;
+			resolve: (value: any) => void;
+			reject: (error: any) => void;
+		}
+	>();
 	#url: string;
 	#frameworkNavigate: NavigateFunction;
 	#directives: Directives;
@@ -293,6 +302,20 @@ export class PulseSocketIOClient {
 		}
 		if (payload.type === "channel" && (payload.action === "request" || payload.action === "response")) {
 			return;
+		}
+		// The protocol has no session identity, so cap rather than drop all offline events.
+		if (payload.type === "channel" && payload.action === "event") {
+			const queuedEvents = this.#messageQueue.filter(
+				(message) => message.type === "channel" && message.action === "event",
+			);
+			if (queuedEvents.length >= OFFLINE_CHANNEL_EVENT_QUEUE_LIMIT) {
+				const oldestEvent = this.#messageQueue.findIndex(
+					(message) => message.type === "channel" && message.action === "event",
+				);
+				if (oldestEvent !== -1) {
+					this.#messageQueue.splice(oldestEvent, 1);
+				}
+			}
 		}
 		this.#messageQueue.push(payload);
 	}
@@ -578,16 +601,23 @@ export class PulseSocketIOClient {
 
 	detachHandle(bridge: ChannelBridge): void {
 		const handles = this.#handles.get(bridge.id);
-		if (!handles) return;
-		handles.delete(bridge);
-		if (handles.size === 0) {
-			this.#handles.delete(bridge.id);
+		if (handles) {
+			handles.delete(bridge);
+			if (handles.size === 0) {
+				this.#handles.delete(bridge.id);
+			}
+		}
+		for (const [requestId, pending] of this.#pending) {
+			if (pending.owner !== bridge) continue;
+			this.#pending.delete(requestId);
+			pending.reject(new PulseChannelDetachedError("Channel handle detached"));
 		}
 	}
 
 	requestChannel(
 		requestId: string,
 		message: ClientChannelRequestMessage,
+		owner: ChannelBridge,
 		timeout?: number,
 	): Promise<any> {
 		if (!this.isConnected()) {
@@ -602,6 +632,7 @@ export class PulseSocketIOClient {
 				fn(value);
 			};
 			this.#pending.set(requestId, {
+				owner,
 				resolve: (value) => finish(resolve, value),
 				reject: (error) => finish(reject, error),
 			});
@@ -609,7 +640,7 @@ export class PulseSocketIOClient {
 				timer = setTimeout(() => {
 					if (!this.#pending.has(requestId)) return;
 					this.#pending.delete(requestId);
-					reject(new PulseChannelTimeoutError(timeout, message.event));
+					finish(reject, new PulseChannelTimeoutError(timeout, message.event));
 				}, timeout);
 			}
 			this.sendMessage(message);

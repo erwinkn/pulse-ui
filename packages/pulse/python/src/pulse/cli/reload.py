@@ -106,6 +106,7 @@ class DevSupervisor:
 		self._backend_exit = asyncio.Event()
 		self._backend_ready = asyncio.Event()
 		self._web_exit = asyncio.Event()
+		self._backend_gen = 0
 		self._backend_code: int | None = None
 		self._web_code: int | None = None
 		self._vite_configured = asyncio.Event()
@@ -183,9 +184,24 @@ class DevSupervisor:
 		if self.web is not None:
 			self.web.kill_tree()
 
+	def _note_backend_exit(self, gen: int, code: int) -> None:
+		# A previous generation's exit callback can fire after its process was
+		# replaced (close() joins its wait thread with a timeout); it must not
+		# flag the current backend as exited.
+		if gen != self._backend_gen:
+			return
+		self._backend_code = code
+		self._backend_exit.set()
+
+	def _note_backend_ready(self, gen: int) -> None:
+		if gen == self._backend_gen:
+			self._backend_ready.set()
+
 	async def _replace_backend(self) -> bool:
 		await self._stop(self.backend)
 		self.backend = None
+		self._backend_gen += 1
+		gen = self._backend_gen
 		self._backend_exit.clear()
 		self._backend_ready.clear()
 		self._backend_code = None
@@ -205,11 +221,10 @@ class DevSupervisor:
 			if text:
 				write_tagged_line(self.backend_spec.name, text, self.tag_mode)
 			if message == WORKER_READY:
-				loop.call_soon_threadsafe(self._backend_ready.set)
+				loop.call_soon_threadsafe(self._note_backend_ready, gen)
 
 		def on_exit(code: int) -> None:
-			self._backend_code = code
-			loop.call_soon_threadsafe(self._backend_exit.set)
+			loop.call_soon_threadsafe(self._note_backend_exit, gen, code)
 
 		spec = CommandSpec(
 			name=self.backend_spec.name,

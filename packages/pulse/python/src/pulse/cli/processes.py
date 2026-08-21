@@ -161,14 +161,13 @@ class ManagedProcess:
 	def __init__(
 		self,
 		process: subprocess.Popen[str],
-		output_thread: threading.Thread,
-		wait_thread: threading.Thread,
 		job: _WindowsJob | None,
 	) -> None:
 		self.process = process
-		self._output_thread = output_thread
-		self._wait_thread = wait_thread
+		self._output_thread: threading.Thread | None = None
+		self._wait_thread: threading.Thread | None = None
 		self._job = job
+		self._exit_code: int | None = None
 
 	@classmethod
 	def start(
@@ -233,8 +232,27 @@ class ManagedProcess:
 			for line in stream:
 				on_output(line.rstrip("\n"))
 
+		managed = cls(process, job)
+
 		def wait_for_exit() -> None:
-			on_exit(process.wait())
+			if windows:
+				code = process.wait()
+			else:
+				# Observe the exit without reaping (WNOWAIT): the zombie leader
+				# keeps the pid and pgid pinned until close() reaps it, so
+				# signalling the process group is always race-free.
+				try:
+					info = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
+				except ChildProcessError:
+					info = None
+				if info is not None and info.si_code == os.CLD_EXITED:
+					code = info.si_status
+				elif info is not None:
+					code = -info.si_status
+				else:
+					code = process.wait()
+			managed._exit_code = code
+			on_exit(code)
 
 		output_thread = threading.Thread(
 			target=read_output,
@@ -249,12 +267,18 @@ class ManagedProcess:
 		)
 		output_thread.start()
 		wait_thread.start()
+		managed._output_thread = output_thread
+		managed._wait_thread = wait_thread
 		_call_on_spawn(spec)
-		return cls(process, output_thread, wait_thread, job)
+		return managed
 
 	@property
 	def returncode(self) -> int | None:
-		return self.process.poll()
+		if os_family() == "windows":
+			return self.process.poll()
+		# Never poll() on POSIX: reaping is deferred to close() so the zombie
+		# leader keeps its pgid ours for the lifetime of this object.
+		return self._exit_code
 
 	def is_alive(self) -> bool:
 		return self.returncode is None
@@ -270,10 +294,8 @@ class ManagedProcess:
 					return
 			self.process.terminate()
 			return
-		# Once the wait thread reaps the child its pid may be reused; never
-		# signal a pgid we no longer own.
-		if not self.is_alive():
-			return
+		# Safe even after the leader exits: it stays a zombie (pinning the
+		# pgid) until close() reaps it, so this cannot hit a reused pgid.
 		with contextlib.suppress(ProcessLookupError, PermissionError):
 			os.killpg(self.process.pid, signal.SIGTERM)
 
@@ -289,10 +311,8 @@ class ManagedProcess:
 			return
 		if os_family() == "windows":
 			return
-		# Orphaned grandchildren are reaped by the stdin-EOF guard, so skipping
-		# the kill for an already-reaped leader never leaks the tree.
-		if not self.is_alive():
-			return
+		# Kills surviving group members (e.g. grandchildren of a crashed
+		# leader) too: the zombie leader pins the pgid until close() reaps it.
 		with contextlib.suppress(ProcessLookupError, PermissionError):
 			os.killpg(self.process.pid, signal.SIGKILL)
 
@@ -302,15 +322,21 @@ class ManagedProcess:
 				self.process.stdin.close()
 		# Wait for death and drain stdout before closing the pipe, otherwise a
 		# traceback printed as the child exits can be swallowed.
-		self._wait_thread.join(timeout=1)
-		self._output_thread.join(timeout=1)
-		if self._output_thread.is_alive() and self.process.stdout is not None:
-			with contextlib.suppress(Exception):
-				self.process.stdout.close()
+		if self._wait_thread is not None:
+			self._wait_thread.join(timeout=1)
+		if self._output_thread is not None:
 			self._output_thread.join(timeout=1)
+			if self._output_thread.is_alive() and self.process.stdout is not None:
+				with contextlib.suppress(Exception):
+					self.process.stdout.close()
+				self._output_thread.join(timeout=1)
 		if self.process.stdout is not None:
 			with contextlib.suppress(Exception):
 				self.process.stdout.close()
+		if os_family() != "windows":
+			# Reap the leader last so its pgid stayed ours for every kill above.
+			with contextlib.suppress(ChildProcessError):
+				self.process.wait()
 		if self._job is not None:
 			self._job.close()
 			self._job = None

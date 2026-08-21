@@ -6,6 +6,10 @@ from typing import Any, Literal, cast
 
 MAX_SAFE_INTEGER = 2**53 - 1
 MAX_PROJECTION_STEPS = 64
+# Spec'd nesting ceiling for the wire format, enforced by encoder and decoder
+# in both runtimes so the accepted input domain does not depend on runtime
+# recursion limits.
+MAX_DEPTH = 200
 DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
 SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
 

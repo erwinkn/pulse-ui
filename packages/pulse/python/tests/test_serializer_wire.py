@@ -478,3 +478,66 @@ def test_decode_rejects_dangling_and_forward_references():
 def test_decode_rejects_invalid_date_and_datetime_literals():
 	with pytest.raises(ValueError, match="Invalid datetime literal"):
 		deserialize([5, ["$", "t", "2024-01-02T03:04:05Z"]])
+
+
+def test_big_float_marker_rejects_out_of_double_range_ints():
+	with pytest.raises(ValueError, match="big-float marker"):
+		deserialize([5, ["$", "f", 10**400]])
+
+	with pytest.raises(ValueError, match="big-float marker"):
+		deserialize([5, ["$", "f", -(10**400)]])
+
+
+def test_nesting_beyond_max_depth_is_rejected_on_encode_and_decode():
+	deep: Any = []
+	current = deep
+	for _ in range(300):
+		child: list[Any] = []
+		current.append(child)
+		current = child
+
+	with pytest.raises(ValueError, match="maximum depth"):
+		serialize(deep)
+
+	deep_wire: object = json.loads("[5," + "[" * 300 + "]" * 300 + "]")
+	with pytest.raises(ValueError, match="maximum depth"):
+		deserialize(deep_wire)
+
+
+def test_tuples_do_not_claim_identity():
+	shared = (1, 2)
+	wire = serialize({"a": shared, "b": shared})
+	assert wire == [5, {"a": [1, 2], "b": [1, 2]}]
+	decoded = cast(dict[str, list[Any]], wire_roundtrip({"a": shared, "b": shared}))
+	assert decoded["a"] is not decoded["b"]
+
+	# CPython interns (); the wire must not depend on that.
+	assert serialize({"a": (), "b": ()}) == [5, {"a": [], "b": []}]
+
+
+def test_tuple_identity_slots_stay_in_lockstep_with_decoder():
+	shared: list[int] = [1]
+	wire = serialize({"a": (0,), "b": shared, "c": shared})
+	assert wire == [5, {"a": [0], "b": [1], "c": ["$", 2]}]
+	decoded = cast(
+		dict[str, list[Any]], wire_roundtrip({"a": (0,), "b": shared, "c": shared})
+	)
+	assert decoded["b"] is decoded["c"]
+	assert decoded["a"] is not decoded["b"]
+
+
+def test_cycle_through_tuple_terminates_via_mutable_member():
+	inner: list[Any] = []
+	looped = (inner,)
+	inner.append(looped)
+
+	# The tuple is unrolled once; the cycle terminates at the registered list.
+	wire = serialize(looped)
+	assert wire == [5, [[[["$", 1]]]]]
+	decoded = cast(list[Any], deserialize(json.loads(json.dumps(wire))))
+	assert decoded[0][0][0] is decoded[0]
+
+
+def test_frozensets_encode_like_sets():
+	assert serialize(frozenset({2, 1})) == serialize({2, 1})
+	assert wire_roundtrip(frozenset({"a", "b"})) == {"a", "b"}

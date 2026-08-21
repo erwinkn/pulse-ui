@@ -1036,7 +1036,17 @@ class App:
 		rid = self._socket_to_render.get(sid)
 		if not rid:
 			return
-		msg = cast(ClientMessage, self.serializer.deserialize(data))
+		try:
+			decoded = self.serializer.deserialize(data)
+		except Exception:
+			# The decoder is strict; a malformed frame from a stale or hostile
+			# client must not raise out of the socket.io message handler.
+			logger.exception("Dropping malformed socket message from %s", sid)
+			return
+		if not isinstance(decoded, dict) or not isinstance(decoded.get("type"), str):
+			logger.error("Dropping socket message without a string 'type' from %s", sid)
+			return
+		msg = cast("ClientMessage", cast(object, decoded))
 		lock = self._render_message_locks.setdefault(rid, asyncio.Lock())
 		async with lock:
 			render = self.render_sessions.get(rid)

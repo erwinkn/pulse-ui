@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from typing import Any, cast, final
 
 from pulse._serializer.common import (
+	MAX_DEPTH,
 	MAX_SAFE_INTEGER,
 	PathSegment,
 	datetime_from_wire,
@@ -42,6 +43,11 @@ class Decoder:
 		return self.decode(payload[1])
 
 	def decode(self, value: Any) -> Any:
+		if len(self.path) > MAX_DEPTH:
+			raise ValueError(
+				f"Cannot deserialize {format_path(self.path)}: nesting exceeds "
+				+ f"the maximum depth of {MAX_DEPTH}."
+			)
 		value_type = type(value)
 		if value is None or value_type is bool:
 			return value
@@ -121,8 +127,14 @@ class Decoder:
 				)
 			# int payloads come from JSON.stringify emitting large integral
 			# doubles as integer literals; both runtimes round them to the
-			# nearest double identically.
-			number = float(cast(int | float, marker[2]))
+			# nearest double identically. json.loads parses arbitrary digit
+			# strings into unbounded ints, so the conversion can overflow.
+			try:
+				number = float(cast(int | float, marker[2]))
+			except OverflowError:
+				raise ValueError(
+					f"Malformed big-float marker at {format_path(self.path)}."
+				) from None
 			if not math.isfinite(number) or abs(number) <= MAX_SAFE_INTEGER:
 				raise ValueError(
 					f"Malformed big-float marker at {format_path(self.path)}."

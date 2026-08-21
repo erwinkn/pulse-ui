@@ -11,6 +11,7 @@ from dataclasses import fields, is_dataclass
 from typing import Any, cast, final
 
 from pulse._serializer.common import (
+	MAX_DEPTH,
 	MAX_PROJECTION_STEPS,
 	MAX_SAFE_INTEGER,
 	PathSegment,
@@ -51,6 +52,11 @@ class Encoder:
 		return [5, self.encode(data)]
 
 	def encode(self, value: object) -> WireValue:
+		if len(self.path) > MAX_DEPTH:
+			raise ValueError(
+				f"Cannot serialize {format_path(self.path)}: nesting exceeds "
+				+ f"the maximum depth of {MAX_DEPTH}."
+			)
 		terminal, aliases = self._resolve_custom(value)
 		return self._encode_terminal(terminal, aliases)
 
@@ -82,6 +88,7 @@ class Encoder:
 				tuple,
 				dict,
 				set,
+				frozenset,
 				WireMap,
 			}:
 				return current, tuple(aliases)
@@ -98,7 +105,7 @@ class Encoder:
 				projected = current.to_pulse()
 			elif is_dataclass(current) and not isinstance(current, type):
 				return current, tuple(aliases)
-			elif isinstance(current, (dict, list, tuple, set)):
+			elif isinstance(current, (dict, list, tuple, set, frozenset)):
 				return current, tuple(aliases)
 			else:
 				raise TypeError(
@@ -149,12 +156,22 @@ class Encoder:
 			return self._encode_float(cast(float, value))
 
 		if not aliases:
-			existing = self.seen.get(id(value))
-			if existing is not None:
-				return ["$", existing[1]]
-			identity = self.next_identity
-			self.next_identity += 1
-			self.seen[id(value)] = (value, identity)
+			if value_type is tuple:
+				# Tuples are immutable, so identity is not meaningful: claiming
+				# it would leak CPython interning (two unrelated () literals
+				# share an id) and manufacture aliasing between decoded mutable
+				# arrays. The decoder still registers the resulting array, so
+				# the identity slot must be consumed to keep ids in lockstep.
+				# Any cycle through a tuple passes through a mutable container,
+				# which still registers and breaks the recursion.
+				self.next_identity += 1
+			else:
+				existing = self.seen.get(id(value))
+				if existing is not None:
+					return ["$", existing[1]]
+				identity = self.next_identity
+				self.next_identity += 1
+				self.seen[id(value)] = (value, identity)
 		else:
 			identity, seen = self._claim_aliased_identity(value, aliases)
 			if seen:
@@ -171,7 +188,7 @@ class Encoder:
 			return self._encode_record(cast(dict[object, object], value))
 		if isinstance(value, (list, tuple)):
 			return self._encode_array(value)
-		if isinstance(value, set):
+		if isinstance(value, (set, frozenset)):
 			return self._encode_set(value)
 		if is_dataclass(value) and not isinstance(value, type):
 			return self._encode_dataclass(value)
@@ -268,11 +285,14 @@ class Encoder:
 	# Wire order is sorted, not iteration order: Python set iteration varies
 	# per process (string hash randomization), and the wire must be
 	# deterministic for identical values.
-	def _encode_set(self, value: set[object]) -> list[WireValue]:
+	def _encode_set(self, value: set[object] | frozenset[object]) -> list[WireValue]:
 		portable: list[tuple[tuple[Any, ...], object, tuple[object, ...]]] = []
 		seen_js: set[tuple[Any, ...]] = set()
 		seen_python: set[tuple[Any, ...]] = set()
-		for index, source in enumerate(set.__iter__(value)):
+		iterator = (
+			set.__iter__(value) if isinstance(value, set) else frozenset.__iter__(value)
+		)
+		for index, source in enumerate(iterator):
 			self.path.append(("set", index))
 			terminal, aliases = self._resolve_custom(source)
 			terminal, sort_key, js_key, python_key = describe_set_value(

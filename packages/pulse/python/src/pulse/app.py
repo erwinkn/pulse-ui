@@ -870,12 +870,7 @@ class App:
 			try:
 				with PulseContext.update(session=session, render=render):
 
-					async def _next():
-						return Ok(None)
-
-					def _normalize_connect_response(res: Any) -> ConnectResponse:
-						if isinstance(res, (Ok, Deny)):
-							return res  # type: ignore[return-value]
+					async def _next() -> ConnectResponse:
 						return Ok(None)
 
 					try:
@@ -884,7 +879,6 @@ class App:
 							session=session.data,
 							next=_next,
 						)
-						res = _normalize_connect_response(res)
 					except Exception as exc:
 						connect_error = exc
 						res = Ok(None)
@@ -1125,12 +1119,6 @@ class App:
 				logger.warning("Unknown message type received: %s", msg)
 			return Ok()
 
-		def _normalize_message_response(res: Any) -> Ok[None] | Deny:
-			if isinstance(res, (Ok, Deny)):
-				return res  # type: ignore[return-value]
-			# Treat any other value as allow
-			return Ok(None)
-
 		with PulseContext.update(session=session, render=render):
 			try:
 				res = await self.middleware.message(
@@ -1138,13 +1126,13 @@ class App:
 					session=session.data,
 					next=_next,
 				)
-				res = _normalize_message_response(res)
-			except Exception:
+			except Exception as exc:
 				logger.exception("Error in message middleware")
+				render.report_error(msg.get("path", ""), "server", exc)
 				return
 
 			if isinstance(res, Deny):
-				path = msg.get("path", "api_response")
+				path = msg.get("path", "")
 				render.report_error(
 					path,
 					"server",
@@ -1166,22 +1154,21 @@ class App:
 			)
 			return Ok(None)
 
-		def _normalize_message_response(res: Any) -> Ok[None] | Deny:
-			if isinstance(res, (Ok, Deny)):
-				return res  # type: ignore[return-value]
-			# Treat any other value as allow
-			return Ok(None)
-
 		with PulseContext.update(session=session, render=render):
-			res = await self.middleware.channel(
-				channel_id=channel_id,
-				event=msg.get("event", ""),
-				payload=msg.get("payload"),
-				request_id=msg.get("requestId"),
-				session=session.data,
-				next=_next,
-			)
-			res = _normalize_message_response(res)
+			try:
+				res = await self.middleware.channel(
+					channel_id=channel_id,
+					event=msg.get("event", ""),
+					payload=msg.get("payload"),
+					request_id=msg.get("requestId"),
+					session=session.data,
+					next=_next,
+				)
+			except Exception as exc:
+				logger.exception("Error in channel middleware")
+				if req_id := msg.get("requestId"):
+					render.channels.send_error(req_id, str(exc))
+				return
 
 		if isinstance(res, Deny):
 			if req_id := msg.get("requestId"):

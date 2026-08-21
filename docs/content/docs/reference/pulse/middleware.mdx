@@ -148,7 +148,7 @@ async def message(
     *,
     data: ClientMessage,
     session: dict[str, Any],
-    next: Callable[[], Awaitable[Ok[None]]],
+    next: Callable[[], Awaitable[Ok[None] | Deny]],
 ) -> Ok[None] | Deny
 ```
 
@@ -159,9 +159,9 @@ Commands targeting the same route path (or the same channel) run in arrival orde
 **Parameters:**
 - `data` - Client message data.
 - `session` - Session data dictionary.
-- `next` - Callable to continue the middleware chain.
+- `next` - Callable to continue the middleware chain. Returns the downstream decision; a downstream `Deny` is final.
 
-**Returns:** `Ok[None]` to allow, `Deny` to block.
+**Returns:** `Ok[None]` to allow, `Deny` to block. A downstream `Deny` is final: the command never ran, so returning `Ok` cannot override it. Returning anything else raises `TypeError` (fail closed).
 
 ##### channel
 
@@ -174,7 +174,7 @@ async def channel(
     payload: Any,
     request_id: str | None,
     session: dict[str, Any],
-    next: Callable[[], Awaitable[Ok[None]]],
+    next: Callable[[], Awaitable[Ok[None] | Deny]],
 ) -> Ok[None] | Deny
 ```
 
@@ -186,9 +186,9 @@ Handle channel message authorization.
 - `payload` - Event payload.
 - `request_id` - Request ID if awaiting response.
 - `session` - Session data dictionary.
-- `next` - Callable to continue the middleware chain.
+- `next` - Callable to continue the middleware chain. Returns the downstream decision; a downstream `Deny` is final.
 
-**Returns:** `Ok[None]` to allow, `Deny` to block.
+**Returns:** `Ok[None]` to allow, `Deny` to block. A downstream `Deny` is final: the command never ran, so returning `Ok` cannot override it. Returning anything else raises `TypeError` (fail closed).
 
 ### MiddlewareStack
 

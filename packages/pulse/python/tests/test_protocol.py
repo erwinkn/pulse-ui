@@ -15,8 +15,8 @@ def test_emit_and_parse_round_trip(capsys: pytest.CaptureFixture[str]) -> None:
 	emit(WORKER_READY)
 
 	lines = capsys.readouterr().out.splitlines()
-	assert lines == ["", f"{PREFIX}{WORKER_READY}"]
-	assert parse(lines[1]) == ([WORKER_READY], "")
+	assert lines == [f"{PREFIX}{WORKER_READY}"]
+	assert parse(lines[0]) == ([WORKER_READY], "")
 
 
 def test_parse_marker_embedded_mid_line() -> None:

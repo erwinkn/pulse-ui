@@ -1126,12 +1126,13 @@ class App:
 					session=session.data,
 					next=_next,
 				)
-			except Exception:
+			except Exception as exc:
 				logger.exception("Error in message middleware")
+				render.report_error(msg.get("path", ""), "server", exc)
 				return
 
 			if isinstance(res, Deny):
-				path = msg.get("path", "api_response")
+				path = msg.get("path", "")
 				render.report_error(
 					path,
 					"server",
@@ -1154,14 +1155,20 @@ class App:
 			return Ok(None)
 
 		with PulseContext.update(session=session, render=render):
-			res = await self.middleware.channel(
-				channel_id=channel_id,
-				event=msg.get("event", ""),
-				payload=msg.get("payload"),
-				request_id=msg.get("requestId"),
-				session=session.data,
-				next=_next,
-			)
+			try:
+				res = await self.middleware.channel(
+					channel_id=channel_id,
+					event=msg.get("event", ""),
+					payload=msg.get("payload"),
+					request_id=msg.get("requestId"),
+					session=session.data,
+					next=_next,
+				)
+			except Exception as exc:
+				logger.exception("Error in channel middleware")
+				if req_id := msg.get("requestId"):
+					render.channels.send_error(req_id, str(exc))
+				return
 
 		if isinstance(res, Deny):
 			if req_id := msg.get("requestId"):

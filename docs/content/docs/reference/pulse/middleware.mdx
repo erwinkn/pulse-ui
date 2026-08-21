@@ -159,9 +159,9 @@ Commands targeting the same route path (or the same channel) run in arrival orde
 **Parameters:**
 - `data` - Client message data.
 - `session` - Session data dictionary.
-- `next` - Callable to continue the middleware chain. Returns the downstream decision; return it as-is or override it.
+- `next` - Callable to continue the middleware chain. Returns the downstream decision; a downstream `Deny` is final.
 
-**Returns:** `Ok[None]` to allow, `Deny` to block.
+**Returns:** `Ok[None]` to allow, `Deny` to block. A downstream `Deny` is final: the command never ran, so returning `Ok` cannot override it. Returning anything else raises `TypeError` (fail closed).
 
 ##### channel
 
@@ -186,9 +186,9 @@ Handle channel message authorization.
 - `payload` - Event payload.
 - `request_id` - Request ID if awaiting response.
 - `session` - Session data dictionary.
-- `next` - Callable to continue the middleware chain. Returns the downstream decision; return it as-is or override it.
+- `next` - Callable to continue the middleware chain. Returns the downstream decision; a downstream `Deny` is final.
 
-**Returns:** `Ok[None]` to allow, `Deny` to block.
+**Returns:** `Ok[None]` to allow, `Deny` to block. A downstream `Deny` is final: the command never ran, so returning `Ok` cannot override it. Returning anything else raises `TypeError` (fail closed).
 
 ### MiddlewareStack
 

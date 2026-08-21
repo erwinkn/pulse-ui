@@ -126,6 +126,30 @@ describe("PulseSocketIOClient attach ack", () => {
 		});
 	});
 
+	it("drops callbacks with unserializable arguments instead of throwing", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		client.attach("/", view);
+		socket.trigger("connect");
+		await connected;
+
+		const attach = sentMessages()[0]!;
+		if (attach.type !== "attach") throw new Error("Expected attach message");
+		socket.trigger(
+			"message",
+			serialize({
+				type: "attach_ack",
+				path: "/",
+				attachId: attach.attachId,
+			}),
+		);
+
+		expect(() =>
+			client.invokeCallback("/", "1.onClick", [() => {}]),
+		).not.toThrow();
+		expect(sentMessages().map((message) => message.type)).toEqual(["attach"]);
+	});
+
 	it("drops queued callbacks when the path detaches before ack", async () => {
 		const client = await makeClient();
 		const connected = client.connect();

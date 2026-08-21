@@ -213,7 +213,7 @@ async def fetch_external():
 **Available in:**
 - Component render functions
 - Event callbacks (`on_click`, `on_change`, etc.)
-- Effect functions (`@ps.effect`) — re-enters the creating render session; route-scoped effects resolve the live mount and get its `RouteContext` when present. `ps.global_state` effects get render but not route.
+- Effect functions (`@ps.effect`) — re-enters the creating render session. Route-scoped effects resolve the creating mount generation: live and replayed-and-reattached generations get their current `RouteContext`, detached grace-window generations remain stale for navigation, and gone or replaced generations run route-free. `ps.global_state` effects get render but not route; nested states constructed in its factory inherit this session-scoped behavior.
 - Query/mutation methods
 
 **NOT available in:**

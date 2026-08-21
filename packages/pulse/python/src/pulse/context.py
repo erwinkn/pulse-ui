@@ -30,7 +30,8 @@ class PulseContext:
 		session: Per-user session (UserSession or None).
 		render: Per-connection render session (RenderSession or None).
 		route: Active route context (RouteContext or None).
-		session_scoped_effects: Whether bound effects should omit route identity.
+		session_scoped_effects: Whether effects created during a session-scoped
+			state construction should omit route identity, including nested states.
 		source_route_path: Route mount path that originated the active callback/effect.
 		source_path: URL pathname that originated the active callback/effect.
 		source_mount_id: Route mount lifecycle id that originated the active callback/effect.
@@ -89,7 +90,8 @@ class PulseContext:
 			session: New session (optional, inherits if not provided).
 			render: New render session (optional, inherits if not provided).
 			route: New route context (optional, inherits if not provided).
-			session_scoped_effects: Whether bound effects omit route identity.
+			session_scoped_effects: Whether effects created during session-scoped
+				state construction omit route identity, including nested states.
 			source_route_path: New source route path (optional, inherits if not provided).
 			source_path: New source URL path (optional, inherits if not provided).
 			source_mount_id: New source mount id (optional, inherits if not provided).
@@ -123,9 +125,9 @@ class PulseContext:
 	def bind(cls, fn: F) -> F:
 		"""Re-enter the current PulseContext on every call.
 
-		Captures ``app`` / ``session`` / ``render`` and resolves the current
-		route mount on every call. No-op if there is no render session. A
-		returned cleanup callable is also bound.
+		Captures ``app`` / ``session`` / ``render`` and the creating route
+		generation, then resolves that generation on every call. No-op if
+		there is no render session. A returned cleanup callable is also bound.
 		"""
 		current = PULSE_CONTEXT.get()
 		if current is None or current.render is None:
@@ -133,11 +135,24 @@ class PulseContext:
 		app = current.app
 		session = current.session
 		render = current.render
+		captured_route = current.route
 		route_path = (
 			None
-			if current.session_scoped_effects or current.route is None
-			else current.route.route_path
+			if current.session_scoped_effects or captured_route is None
+			else captured_route.route_path
 		)
+		captured_source_path = current.source_path
+		captured_source_mount_id = current.source_mount_id
+		if route_path is not None and (
+			captured_source_path is None or captured_source_mount_id is None
+		):
+			with Untrack():
+				mount = render.route_mounts.get(route_path)
+				if mount is not None and mount.route is captured_route:
+					if captured_source_path is None:
+						captured_source_path = mount.route.pathname
+					if captured_source_mount_id is None:
+						captured_source_mount_id = mount.mount_id
 
 		def enter() -> PulseContext:
 			route = None
@@ -146,12 +161,18 @@ class PulseContext:
 			source_mount_id = None
 			if route_path is not None:
 				mount = render.route_mounts.get(route_path)
-				if mount is not None:
+				if mount is not None and mount.route is captured_route:
 					route = mount.route
 					source_route_path = route_path
-					with Untrack():
-						source_path = mount.route.pathname
-						source_mount_id = mount.mount_id
+					if mount.dispose_on_timeout:
+						# A grace-window mount is stale; a replayed mount clears
+						# this flag when it reattaches and remains valid.
+						source_path = captured_source_path
+						source_mount_id = captured_source_mount_id
+					else:
+						with Untrack():
+							source_path = mount.route.pathname
+							source_mount_id = mount.mount_id
 			return PulseContext(
 				app=app,
 				session=session,

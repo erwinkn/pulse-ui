@@ -28,7 +28,7 @@ from pulse.messages import (
 	ViewSnapshot,
 )
 from pulse.queries.store import QueryStore
-from pulse.reactive import REACTIVE_CONTEXT, Effect, flush_effects
+from pulse.reactive import REACTIVE_CONTEXT, Effect, Untrack, flush_effects
 from pulse.reactive_extensions import ReactiveDict
 from pulse.renderer import Callback, Callbacks, RenderTree
 from pulse.routing import (
@@ -343,9 +343,13 @@ class RouteMount:
 		if self.state != "pending":
 			return
 		self._cancel_pending_timeout()
-		if flush and self.queue:
+		if self.queue:
 			for msg in self.queue:
-				send_message(msg)
+				# With flush=False a snapshot supersedes queued VDOM deltas, but
+				# non-VDOM traffic (js_exec, api_call, channel messages, errors)
+				# cannot be reconstructed from a snapshot and must still go out.
+				if flush or msg["type"] != "vdom_update":
+					send_message(msg)
 		self.queue = None
 		self.snapshot_required = False
 		self.state = "active"
@@ -369,13 +373,19 @@ class RouteMount:
 		if self.state == "pending":
 			if self.queue is None:
 				raise RuntimeError(f"Pending mount missing queue for {self.path!r}")
-			if self.snapshot_required:
+			if self.snapshot_required and message["type"] == "vdom_update":
 				return
 			# Leave one sender-queue slot for the attach acknowledgement.
 			if len(self.queue) >= self.render.pending_message_limit - 1:
-				self.queue.clear()
+				# Collapse VDOM deltas into a snapshot; keep non-VDOM traffic,
+				# which a snapshot cannot reconstruct.
+				self.queue = [m for m in self.queue if m["type"] != "vdom_update"]
 				self.snapshot_required = True
-				return
+				if (
+					message["type"] == "vdom_update"
+					or len(self.queue) >= self.render.pending_message_limit - 1
+				):
+					return
 			self.queue.append(message)
 			return
 		if self.state == "active":
@@ -561,20 +571,6 @@ class RenderSession:
 			else:
 				self.query_store.resume_all()
 
-	def resync(self) -> None:
-		"""A replacement socket arrived before the old one's disconnect fired:
-		apply the missed disconnect, skipping the reconnect grace period.
-
-		Suspending (rather than leaving mounts pending) forces attach to send a
-		fresh init — updates in the gap went to the dead socket, so the pending
-		queue can't cover what the client missed. Only previously-active mounts
-		are suspended; never-active prerender mounts keep their dispose timers.
-		"""
-		active = [m for m in self.route_mounts.values() if m.state == "active"]
-		self.disconnect()
-		for mount in active:
-			mount.suspend()
-
 	def disconnect(self):
 		"""WebSocket disconnected. Queue briefly, then suspend mounts on timeout."""
 		self._send_message = None
@@ -595,8 +591,11 @@ class RenderSession:
 		if message.get("type") == "navigate_to":
 			origin = message.get("origin")
 			if origin is not None:
-				mount = self._get_mount_by_view_id(origin["viewId"])
-				if mount is None or mount.route.pathname != origin["pathname"]:
+				# Point-in-time fence; must not register reactive dependencies.
+				with Untrack():
+					mount = self._get_mount_by_view_id(origin["viewId"])
+					stale = mount is None or mount.route.pathname != origin["pathname"]
+				if stale:
 					return
 			if self._send_message:
 				self._send_message(message)
@@ -726,6 +725,10 @@ class RenderSession:
 		- ACTIVE: acknowledge matching state or include a snapshot
 		- No mount: request reload
 		"""
+		if self._send_message is None:
+			# Socket dropped while this attach was in flight; the client will
+			# re-attach on reconnect.
+			return None
 		path = ensure_absolute_path(path)
 		mount = self.route_mounts.get(path)
 
@@ -736,13 +739,13 @@ class RenderSession:
 		if mount.view_id != view_id:
 			self.send({"type": "reload"})
 			return None
-
-		mount.update_route(route_info)
 		if mount.instance_id is None:
 			mount.instance_id = instance_id
 		elif mount.instance_id != instance_id:
 			self.send({"type": "reload"})
 			return None
+
+		mount.update_route(route_info)
 		ack = ServerAttachAckMessage(
 			type="attach_ack",
 			path=path,

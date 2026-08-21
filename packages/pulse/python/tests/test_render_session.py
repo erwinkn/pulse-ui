@@ -1219,6 +1219,101 @@ def test_pending_update_overflow_collapses_to_snapshot():
 	session.close()
 
 
+def test_attach_while_disconnected_is_dropped():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+	session.connect(lambda _message: None)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"], make_route_info("/a"))
+	attach_mount(session, "/a")
+	mount = session.route_mounts["/a"]
+	revision_before = mount.revision
+	session.disconnect()
+
+	ack = attach_mount(session, "/a", attach_id="late-attach")
+	assert ack is None
+	assert mount.revision == revision_before
+	assert mount.state == "pending"
+
+	session.close()
+
+
+def test_snapshot_reattach_preserves_queued_non_vdom_messages():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"], make_route_info("/a"))
+	attach_mount(session, "/a")
+	mount = session.route_mounts["/a"]
+	client_revision = mount.revision
+	session.disconnect()
+
+	js_exec: ServerMessage = {
+		"type": "js_exec",
+		"path": "/a",
+		"viewId": mount.view_id,
+		"id": "queued-js",
+		"expr": "1",
+	}
+	session.send(js_exec)
+	update = session.rerender(mount, "/a")
+	assert update is not None
+	session.send(update)
+
+	messages.clear()
+	session.connect(messages.append)
+	# Stale client revision forces the snapshot path instead of replay.
+	ack = attach_mount(session, "/a", revision=client_revision - 1)
+	assert ack is not None
+	assert ack.get("snapshot") is not None
+	assert js_exec in messages
+	assert all(message["type"] != "vdom_update" for message in messages)
+
+	session.close()
+
+
+def test_pending_overflow_keeps_non_vdom_messages():
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes, pending_message_limit=2)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"], make_route_info("/a"))
+	attach_mount(session, "/a")
+	mount = session.route_mounts["/a"]
+	client_revision = mount.revision
+	session.disconnect()
+
+	js_exec: ServerMessage = {
+		"type": "js_exec",
+		"path": "/a",
+		"viewId": mount.view_id,
+		"id": "queued-js",
+		"expr": "1",
+	}
+	session.send(js_exec)
+	update = session.rerender(mount, "/a")
+	assert update is not None
+	session.send(update)
+
+	assert mount.snapshot_required is True
+	assert mount.queue == [js_exec]
+
+	messages.clear()
+	session.connect(messages.append)
+	ack = attach_mount(session, "/a", revision=client_revision)
+	assert ack is not None
+	assert ack.get("snapshot") is not None
+	assert js_exec in messages
+
+	session.close()
+
+
 def test_prerender_of_active_path_queues_updates_until_route_sync():
 	routes = make_routes()
 	session = RenderSession("test-id", routes)

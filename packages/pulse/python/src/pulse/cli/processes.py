@@ -384,6 +384,14 @@ def execute_commands(
 	if not commands:
 		return 0
 
+	def _is_stop_induced(code: int) -> bool:
+		if os_family() == "windows":
+			# 1: TerminateProcess via Popen.terminate/job kill fallback.
+			# 0xFFFFFFFF: job-object termination of survivors.
+			# 0xC000013A: STATUS_CONTROL_C_EXIT after CTRL_BREAK.
+			return code in (1, 0xFFFFFFFF, 0xC000013A)
+		return code < 0
+
 	def interrupt_on_sigterm(_signum: int, _frame: object) -> None:
 		raise KeyboardInterrupt
 
@@ -409,10 +417,11 @@ def execute_commands(
 
 		def on_exit(code: int) -> None:
 			nonlocal first_exit_code
-			# Codes reported after the shutdown began are stop-induced (e.g.
-			# 0xFFFFFFFF from a terminated Windows survivor) and must not mask
-			# or fabricate a failure.
-			if not stopping.is_set():
+			# Codes reported after the shutdown began are usually stop-induced
+			# (signal deaths on POSIX, TerminateProcess/CTRL_BREAK exits on
+			# Windows) and must not mask or fabricate a failure — but a
+			# genuine failure exit that lands after stopping still counts.
+			if not stopping.is_set() or not _is_stop_induced(code):
 				self_exit_codes[spec.name] = code
 			if first_exit_code is None:
 				first_exit_code = code

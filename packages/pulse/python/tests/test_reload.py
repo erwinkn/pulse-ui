@@ -423,6 +423,9 @@ async def test_worker_inherits_listen_sockets_across_reload(tmp_path: Path) -> N
 	)
 
 	async def once() -> None:
+		# Callers own inheritability: required on Windows, where pass_fds does
+		# not imply it.
+		reservation.sockets[0].set_inheritable(True)
 		process = ManagedProcess.start(
 			CommandSpec(
 				name="server",

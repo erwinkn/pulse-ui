@@ -367,9 +367,10 @@ def execute_commands(
 
 	previous_sigterm = signal.signal(signal.SIGTERM, interrupt_on_sigterm)
 	processes: list[ManagedProcess] = []
-	exit_codes: dict[str, int] = {}
+	self_exit_codes: dict[str, int] = {}
 	first_exit_code: int | None = None
 	exited = threading.Event()
+	stopping = threading.Event()
 
 	def start(spec: CommandSpec) -> ManagedProcess:
 		ready = threading.Event()
@@ -386,7 +387,11 @@ def execute_commands(
 
 		def on_exit(code: int) -> None:
 			nonlocal first_exit_code
-			exit_codes[spec.name] = code
+			# Codes reported after the shutdown began are stop-induced (e.g.
+			# 0xFFFFFFFF from a terminated Windows survivor) and must not mask
+			# or fabricate a failure.
+			if not stopping.is_set():
+				self_exit_codes[spec.name] = code
 			if first_exit_code is None:
 				first_exit_code = code
 			exited.set()
@@ -400,14 +405,12 @@ def execute_commands(
 		# Event.wait() would swallow Ctrl+C.
 		while not exited.wait(0.2):
 			pass
-		# Stop the survivors before reading exit codes so every process
-		# contributes one; _stop_processes is idempotent for the finally below.
+		stopping.set()
+		# _stop_processes is idempotent for the finally below.
 		_stop_processes(processes)
-		# On Windows, terminated survivors can report 0xFFFFFFFF and mask
-		# the actual first command failure if their codes are aggregated.
-		return (
-			first_exit_code if first_exit_code is not None else max(exit_codes.values())
-		)
+		if self_exit_codes:
+			return max(self_exit_codes.values())
+		return first_exit_code if first_exit_code is not None else 0
 	except KeyboardInterrupt:
 		sys.stdout.write("\nShutting down...\n")
 		sys.stdout.flush()

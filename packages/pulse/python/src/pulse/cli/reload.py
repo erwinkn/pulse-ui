@@ -184,6 +184,13 @@ class DevSupervisor:
 		if self.web is not None:
 			self.web.kill_tree()
 
+	def _note_backend_ready(self, gen: int) -> None:
+		# A late marker relayed by a replaced generation's output thread must
+		# not mark the current backend ready.
+		if gen != self._backend_gen:
+			return
+		self._backend_ready.set()
+
 	def _note_backend_exit(self, gen: int, code: int) -> None:
 		# A previous generation's exit callback can fire after its process was
 		# replaced (close() joins its wait thread with a timeout); it must not
@@ -217,10 +224,12 @@ class DevSupervisor:
 		loop = asyncio.get_running_loop()
 
 		def on_output(line: str) -> None:
-			message, text = parse(line)
-			if text:
+			messages, text = parse(line)
+			# Suppress only the padding newlines around markers, not genuine
+			# blank lines from the child.
+			if text or not messages:
 				write_tagged_line(self.backend_spec.name, text, self.tag_mode)
-			if message == WORKER_READY:
+			if WORKER_READY in messages:
 				loop.call_soon_threadsafe(self._note_backend_ready, gen)
 
 		def on_exit(code: int) -> None:
@@ -283,12 +292,12 @@ class DevSupervisor:
 		loop = asyncio.get_running_loop()
 
 		def on_output(line: str) -> None:
-			message, text = parse(line)
-			if text:
+			messages, text = parse(line)
+			if text or not messages:
 				write_tagged_line(web_spec.name, text, self.tag_mode)
-			if message == VITE_CONFIGURED:
+			if VITE_CONFIGURED in messages:
 				loop.call_soon_threadsafe(self._vite_configured.set)
-			elif message == VITE_LISTENING:
+			if VITE_LISTENING in messages:
 				loop.call_soon_threadsafe(self._vite_listening.set)
 
 		def on_exit(code: int) -> None:

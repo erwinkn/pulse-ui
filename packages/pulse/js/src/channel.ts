@@ -45,6 +45,8 @@ export type ChannelRequestOptions = {
 	timeout?: number;
 };
 
+const DEFAULT_CHANNEL_REQUEST_TIMEOUT = 30_000;
+
 export function createRandomId(): string {
 	if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
 		return crypto.randomUUID().replace(/-/g, "");
@@ -53,9 +55,10 @@ export function createRandomId(): string {
 }
 
 export class ChannelBridge {
-	#handlers = new Map<string, Set<ChannelEventHandler>>();
+	#handlers = new Map<string, Map<ChannelEventHandler, number>>();
 	#detached = false;
 	#attached = false;
+	#warnedAboutDetachedEmit = false;
 
 	constructor(
 		private client: PulseSocketIOClient,
@@ -92,6 +95,10 @@ export class ChannelBridge {
 		if (payload !== undefined) {
 			message.payload = payload;
 		}
+		if ((!this.#attached || this.#detached) && !this.#warnedAboutDetachedEmit) {
+			this.#warnedAboutDetachedEmit = true;
+			console.warn(`Pulse channel ${this.id} emitted while detached`);
+		}
 		this.client.sendMessage(message);
 	}
 
@@ -117,20 +124,34 @@ export class ChannelBridge {
 		if (payload !== undefined) {
 			message.payload = payload;
 		}
-		return this.client.requestChannel(requestId, message, options?.timeout);
+		return this.client.requestChannel(
+			requestId,
+			message,
+			this,
+			options?.timeout ?? DEFAULT_CHANNEL_REQUEST_TIMEOUT,
+		);
 	}
 
 	on(event: string, handler: ChannelEventHandler): () => void {
 		let bucket = this.#handlers.get(event);
 		if (!bucket) {
-			bucket = new Set();
+			bucket = new Map();
 			this.#handlers.set(event, bucket);
 		}
-		bucket.add(handler);
+		bucket.set(handler, (bucket.get(handler) ?? 0) + 1);
+		let removed = false;
 		return () => {
+			if (removed) return;
+			removed = true;
 			const set = this.#handlers.get(event);
 			if (!set) return;
-			set.delete(handler);
+			const count = set.get(handler);
+			if (count === undefined) return;
+			if (count === 1) {
+				set.delete(handler);
+			} else {
+				set.set(handler, count - 1);
+			}
 			if (set.size === 0) {
 				this.#handlers.delete(event);
 			}
@@ -146,7 +167,7 @@ export class ChannelBridge {
 		if (this.#detached || !this.#attached) return;
 		const handlers = this.#handlers.get(event);
 		if (!handlers) return;
-		for (const handler of handlers) {
+		for (const handler of handlers.keys()) {
 			try {
 				const result = handler(payload);
 				if (result && typeof (result as Promise<any>).then === "function") {
@@ -165,7 +186,7 @@ export class ChannelBridge {
 		if (!handlers || handlers.size === 0) {
 			return undefined;
 		}
-		const handler = handlers.values().next().value;
+		const handler = handlers.keys().next().value;
 		if (!handler) {
 			return undefined;
 		}
@@ -179,10 +200,6 @@ export function useChannel(channelId: string): ChannelBridge {
 	}
 	const client = usePulseClient();
 	const bridge = useMemo(() => client.channel(channelId), [client, channelId]);
-	// Register during render so a live-socket emit in the same turn is not dropped
-	// waiting for useEffect. Effect cleanup still detaches; the next render/effect
-	// re-attaches the same handle.
-	bridge.attach();
 	useEffect(() => {
 		bridge.attach();
 		return () => {

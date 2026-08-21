@@ -603,6 +603,46 @@ describe("PulseSocketIOClient channels", () => {
 		);
 	});
 
+	it("rejects only a detached handle's RPC and ignores its late response", async () => {
+		const { PulseChannelDetachedError } = await import("./channel");
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		const first = client.acquireChannel("rpc");
+		const second = client.acquireChannel("rpc");
+		const firstPending = first.request("echo");
+		const firstRequest = sentMessages().at(-1) as { requestId: string };
+		first.detach();
+		await expect(firstPending).rejects.toBeInstanceOf(PulseChannelDetachedError);
+
+		const secondPending = second.request("echo");
+		const secondRequest = sentMessages().at(-1) as { requestId: string };
+		expect(() =>
+			socket.trigger(
+				"message",
+				serialize({
+					type: "channel",
+					action: "response",
+					channel: "rpc",
+					responseTo: firstRequest.requestId,
+					payload: "late",
+				}),
+			),
+		).not.toThrow();
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel",
+				action: "response",
+				channel: "rpc",
+				responseTo: secondRequest.requestId,
+				payload: "live",
+			}),
+		);
+		await expect(secondPending).resolves.toBe("live");
+	});
+
 	it("queues emit while disconnected on the global client queue", async () => {
 		const client = await makeClient();
 		const bridge = client.acquireChannel("queued");
@@ -617,6 +657,23 @@ describe("PulseSocketIOClient channels", () => {
 			event: "ping",
 			payload: { n: 1 },
 		});
+	});
+
+	it("caps queued channel events by dropping the oldest event", async () => {
+		const client = await makeClient();
+		const bridge = client.acquireChannel("queued");
+		for (let n = 0; n < 101; n++) {
+			bridge.emit("ping", { n });
+		}
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		const events = sentMessages().filter(
+			(message) => message.type === "channel" && message.action === "event",
+		);
+		expect(events).toHaveLength(100);
+		expect(events[0]).toMatchObject({ payload: { n: 1 } });
+		expect(events.at(-1)).toMatchObject({ payload: { n: 100 } });
 	});
 
 	it("does not flush RPC after a disconnected request", async () => {

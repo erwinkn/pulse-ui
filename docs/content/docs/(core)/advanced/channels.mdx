@@ -39,6 +39,10 @@ import pulse as ps
 class NotificationState(ps.State):
     notifications: list[dict] = []
 
+    def __init__(self):
+        self.channel = ps.channel("notifications")
+        self.channel.on("new_notification", self.add)
+
     def add(self, notification: dict):
         self.notifications = [notification] + self.notifications
 
@@ -51,11 +55,7 @@ class NotificationState(ps.State):
 @ps.component
 def NotificationCenter():
     with ps.init():
-        channel = ps.channel("notifications")
         state = NotificationState()
-
-    # When the server sends a notification, add it to state
-    channel.on("new_notification", lambda payload: state.add(payload))
 
     return ps.div(className="fixed top-4 right-4 space-y-2")[
         ps.For(
@@ -93,7 +93,7 @@ The notification appears instantly for the user, without them clicking anything.
 
 ## Creating a channel
 
-Create a channel inside a component using `ps.channel()`. Each channel is automatically scoped to the current user session and route.
+Call `ps.channel()` inside a component to get a handle. The id is just a name in this render session.
 
 ```python
 import pulse as ps
@@ -106,30 +106,27 @@ def ChatRoom():
     # ... rest of component
 ```
 
-The string argument (`"chat"`) is an identifier that helps with debugging. If you don't provide one, Pulse generates a UUID automatically. The channel is cleaned up automatically when the component unmounts or the user navigates away.
+The string argument (`"chat"`) is the channel name. If you don't provide one, Pulse generates a UUID. `lifetime="route"` (the default) detaches this handle's listeners when the route actually unmounts — it requires a route context. The name itself is not created or destroyed.
 
 ## Handling events from the client
 
 Use `channel.on()` to register handlers for events sent from the browser. This is how you receive messages from client-side JavaScript code.
 
 ```python
-@ps.component
-def ChatRoom():
-    with ps.init():
-        chat = ps.channel("chat")
-        messages = ChatState()
+class ChatState(ps.State):
+    def __init__(self):
+        self.channel = ps.channel("chat")
+        self.channel.on("send_message", self._on_send)
+        self.channel.on("typing", self._on_typing)
 
-    # Handle incoming messages from the client
-    chat.on("send_message", lambda payload: messages.add(payload["text"]))
+    def _on_send(self, payload: dict):
+        self.add(payload["text"])
 
-    # Handlers can be async for operations that need to await
-    async def handle_typing(payload):
-        await messages.set_typing(payload["user"])
-
-    chat.on("typing", handle_typing)
+    async def _on_typing(self, payload: dict):
+        await self.set_typing(payload["user"])
 ```
 
-Each handler receives a `payload` dictionary containing whatever data the client sent. You can register multiple handlers for the same event if needed.
+Each handler receives a `payload` dictionary containing whatever data the client sent. `on(event, handler)` is idempotent for the same handler — register a stable method, not a new lambda each render. You can register multiple different handlers for the same event.
 
 ## Sending events to the client
 
@@ -151,18 +148,20 @@ async def get_client_info(chat: ps.Channel):
 
 The `timeout` parameter prevents your code from waiting forever if the client doesn't respond.
 
+Don't `emit` during prerender or the first server render and expect the client to hear it. `useChannel` attaches in an effect, so events sent before that effect runs can drop.
+
 ## Using channels on the client
 
 When you need custom client-side logic to interact with a channel, you'll write JavaScript code that runs in the browser. Pulse provides the `@ps.javascript` decorator for embedding JavaScript in your Python code.
 
-The `usePulseChannel` hook connects your JavaScript to a channel:
+`useChannel(channelId)` returns a handle. Client lifetime is where you put the hook (route vs layout):
 
 ```python
-from pulse.js.pulse import usePulseChannel
+from pulse.js.pulse import useChannel
 
 @ps.javascript(jsx=True)
 def ChatClient(*, channelId: str):
-    bridge = usePulseChannel(channelId)
+    bridge = useChannel(channelId)
 
     # Listen for events from the server
     def on_new_message(payload):
@@ -183,40 +182,67 @@ def ChatClient(*, channelId: str):
 
 A note on `@ps.javascript`: This decorator lets you write JavaScript logic that runs in the browser. The code inside looks like Python but transpiles to JavaScript. This is useful when you need browser APIs (like `localStorage`, `window`, or DOM manipulation) or want to optimize performance by keeping some logic client-side.
 
-The `usePulseChannel` hook returns a bridge object with three methods:
+The `useChannel` hook returns a bridge object with three methods:
 - `on(event, handler)` - Listen for events from the server
 - `emit(event, payload)` - Send events to the server (fire-and-forget)
 - `request(event, payload)` - Send a request and await the server's response
 
 ## Channel lifecycle
 
-Channels are tied to the route where they're created. When the user navigates to a different route, the channel closes automatically and resources are cleaned up. This prevents memory leaks and stale connections.
+A channel id is just a name. Nothing is created or destroyed on the wire. The only lifecycle is local: this handle's listeners attach and detach.
 
-If you need a channel that persists across route changes (like a global notification system), create it at a higher level in your component tree, such as in a layout component.
+`lifetime` controls when the **handle** auto-detaches, not whether the name exists:
 
-You can also close a channel manually when you're done with it:
+- `"route"` (default) — tear down this handle's `on()` set when that route unmounts, even if you stored the object.
+- `"tab"` — do not detach on route unmount. Lives until the render session ends or you call `detach()`.
+
+After a route handle detaches, `on()` and `request()` raise `ChannelDetached`; handlers still queued (or awaiting) are cancelled. `emit()` becomes a debug-logged no-op, since background tasks legitimately race an unmount.
+
+On the client, lifetime is React placement: put `useChannel(id)` in a route component to drop listeners on navigation, or in a layout to keep them for the tab. There is no `lifetime` argument on the hook.
+
+Several live handles can share one name. Events fan out to all attached handles. A request goes to just one: the first attached handle that has a handler for that event, in registration order.
 
 ```python
-chat.close()
+chat.detach()
 ```
+
+## Event ordering
+
+Events on a handle are processed one at a time, in arrival order — each event's handlers are awaited before the next event starts. So a slow `async` handler delays later events instead of reordering them, and an event handler must never block indefinitely:
+
+```python
+# ❌ stalls every later event on this handle
+chat.on("ping", lambda _: chat.request("slow"))
+
+# ✅ bounded
+chat.on("ping", lambda _: chat.request("slow", timeout=5.0))
+```
+
+The guarantee covers **events only**. Inbound requests run as independent tasks — they can overtake queued events, and that's deliberate: a request handler often awaits a request back to the client, which would otherwise deadlock the handle. The event backlog is capped at 500 per handle (oldest dropped, one warning) so a stuck handler can't grow it forever.
 
 ## Error handling
 
-Network connections aren't always reliable. When using `channel.request()`, the client might be slow or unresponsive. Always handle timeouts:
+`emit()` raises `TypeError` immediately if its payload is not serializable. While the socket is down, events buffer in the session queue: channel messages get their own 500-message budget (oldest dropped first, so a chatty channel can never evict control-plane messages like `reload` or `navigate_to`) inside an overall 1000-message bound.
+
+`request()` fails immediately if the socket is down. If the peer has no handler, you get a `ChannelRemoteError` with code `no_handler`. Middleware `Deny` is `denied`; a middleware exception is `handler_error`. The client timeout defaults to 30 seconds. Detaching the client handle rejects its in-flight requests with `PulseChannelDetachedError`.
+
+Requests use the first attached handle in registration order that has a handler for the event. Events fan out to all attached handles for that channel name.
 
 ```python
-from pulse import ChannelTimeout
+from pulse import ChannelDisconnected, ChannelRemoteError, ChannelTimeout
 
 async def safe_request(chat: ps.Channel):
     try:
-        response = await chat.request("get_data", timeout=5.0)
-        return response
+        return await chat.request("get_data", timeout=5.0)
     except ChannelTimeout:
-        # Client didn't respond in time
         return None
+    except ChannelDisconnected:
+        return None
+    except ChannelRemoteError as exc:
+        if exc.code == "no_handler":
+            return None
+        raise
 ```
-
-You can also catch `ChannelClosed` if you need to handle the case where someone tries to use a channel that's already been closed.
 
 ## When to use channels
 

@@ -7,7 +7,7 @@ from typing import Any, cast
 import pulse as ps
 import pytest
 from fastapi import HTTPException
-from pulse.messages import ClientChannelRequestMessage
+from pulse.messages import ClientChannelEventMessage
 from pulse.routing import Route, RouteInfo, RouteTree
 from pulse.serializer import serialize
 from pulse.user_session import UserSession
@@ -75,11 +75,11 @@ def build_context():
 	return app, dummy_render, session, real_render, route_ctx
 
 
-def client_channel_request(message: object) -> ClientChannelRequestMessage:
-	return cast(ClientChannelRequestMessage, message)
+def client_channel_event(message: object) -> ClientChannelEventMessage:
+	return cast(ClientChannelEventMessage, message)
 
 
-def test_form_recreates_channel_after_client_release():
+def test_form_reset_emits_on_mailbox():
 	app, render, session, real_render, route_ctx = build_context()
 
 	with ps.PulseContext(
@@ -93,26 +93,15 @@ def test_form_recreates_channel_after_client_release():
 			syncMode="change",
 			initialValues={"query": ""},
 		)
-		first_channel_id = form._channel.id  # pyright: ignore[reportPrivateUsage]
-
-	assert real_render.channels.release_channel(first_channel_id)
-	assert form._channel.closed  # pyright: ignore[reportPrivateUsage]
-
-	with ps.PulseContext(
-		app=app,
-		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
-		render=real_render,
-		route=route_ctx,
-	):
 		form.reset()
 
-	assert not form._channel.closed  # pyright: ignore[reportPrivateUsage]
-	assert form._channel.id != first_channel_id  # pyright: ignore[reportPrivateUsage]
+	assert render.sent[-1]["type"] == "channel"
+	assert render.sent[-1]["action"] == "event"
 	assert render.sent[-1]["event"] == "reset"
 
 
 @pytest.mark.asyncio
-async def test_form_sync_handler_survives_channel_recreation():
+async def test_form_sync_handler_receives_mailbox_event():
 	app, _render, session, real_render, route_ctx = build_context()
 
 	with ps.PulseContext(
@@ -122,23 +111,12 @@ async def test_form_sync_handler_survives_channel_recreation():
 		route=route_ctx,
 	):
 		form = MantineForm(syncMode="change", initialValues={"query": ""})
-		first_channel_id = form._channel.id  # pyright: ignore[reportPrivateUsage]
-
-	assert real_render.channels.release_channel(first_channel_id)
-
-	with ps.PulseContext(
-		app=app,
-		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
-		render=real_render,
-		route=route_ctx,
-	):
 		form.render()
-		real_render.channels.handle_client_event(
-			render=real_render,
-			session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
-			message=client_channel_request(
+		real_render.channels.handle_event(
+			client_channel_event(
 				{
-					"type": "channel_message",
+					"type": "channel",
+					"action": "event",
 					"channel": form._channel.id,  # pyright: ignore[reportPrivateUsage]
 					"event": "syncValues",
 					"payload": {"values": {"query": "xrd"}},

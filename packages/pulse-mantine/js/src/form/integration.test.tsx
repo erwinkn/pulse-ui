@@ -1,16 +1,25 @@
 import { describe, expect, it, mock } from "bun:test";
-import { MantineProvider } from "@mantine/core";
-import { fireEvent, render } from "@testing-library/react";
+import { Combobox as MantineCombobox, MantineProvider } from "@mantine/core";
+import { act, fireEvent, render } from "@testing-library/react";
 import { useField } from "./connect";
 import { Checkbox, CheckboxGroup, MultiSelect, TagsInput, TextInput } from "./fields";
 
+const channelHandlers = new Map<string, (payload?: any) => any>();
 const channel = {
-	on: () => () => {},
+	on: mock((event: string, handler: (payload?: any) => any) => {
+		channelHandlers.set(event, handler);
+		return () => {
+			if (channelHandlers.get(event) === handler) {
+				channelHandlers.delete(event);
+			}
+		};
+	}),
 	emit: mock(),
 };
 const client = {
-	acquireChannel: () => channel,
-	releaseChannel: () => {},
+	channel: () => channel,
+	attachHandle: () => {},
+	detachHandle: () => {},
 };
 let currentDirectives = {
 	query: { pulse_deployment: "prod-old" },
@@ -23,10 +32,13 @@ const submitForm = mock(
 mock.module("pulse-ui-client", () => ({
 	submitForm,
 	usePulseClient: () => client,
+	useChannel: () => channel,
 	usePulseDirectivesSource: () => directivesSource,
 }));
 
 const { Form } = await import("./form");
+const { Combobox } = await import("../combobox");
+const { Tree } = await import("../tree");
 
 type Sample = {
 	sample_id: string;
@@ -257,5 +269,80 @@ describe("MantineForm submit values", () => {
 			method: "post",
 			id: "record-1",
 		});
+	});
+});
+
+describe("Mantine channel handlers", () => {
+	it("registers Combobox handlers once across re-renders", () => {
+		channel.on.mockClear();
+		channelHandlers.clear();
+		const view = render(
+			<MantineProvider>
+				<Combobox channelId="combobox" />
+			</MantineProvider>,
+		);
+		const registrations = channel.on.mock.calls.length;
+		view.rerender(
+			<MantineProvider>
+				<Combobox channelId="combobox" />
+			</MantineProvider>,
+		);
+		expect(registrations).toBeGreaterThan(0);
+		expect(channel.on).toHaveBeenCalledTimes(registrations);
+		view.unmount();
+	});
+
+	it("registers Tree handlers once across re-renders", () => {
+		channel.on.mockClear();
+		channelHandlers.clear();
+		const view = render(
+			<MantineProvider>
+				<Tree channelId="tree" data={[]} />
+			</MantineProvider>,
+		);
+		const registrations = channel.on.mock.calls.length;
+		view.rerender(
+			<MantineProvider>
+				<Tree channelId="tree" data={[]} />
+			</MantineProvider>,
+		);
+		expect(registrations).toBeGreaterThan(0);
+		expect(channel.on).toHaveBeenCalledTimes(registrations);
+		view.unmount();
+	});
+
+	it("uses Mantine's stable selected-option getter", () => {
+		channel.on.mockClear();
+		channelHandlers.clear();
+		const view = render(
+			<MantineProvider>
+				<Combobox channelId="combobox">
+					<MantineCombobox.Options id="list">
+						<MantineCombobox.Option value="one">One</MantineCombobox.Option>
+					</MantineCombobox.Options>
+				</Combobox>
+			</MantineProvider>,
+		);
+		act(() => {
+			channelHandlers.get("setListId")?.({ listId: "list" });
+			channelHandlers.get("selectOption")?.({ index: 0 });
+		});
+		expect(channelHandlers.get("getSelectedOptionIndex")?.()).toBe(0);
+		view.unmount();
+	});
+
+	it("returns a channel-assigned list id", () => {
+		channel.on.mockClear();
+		channelHandlers.clear();
+		const view = render(
+			<MantineProvider>
+				<Combobox channelId="combobox" />
+			</MantineProvider>,
+		);
+		act(() => {
+			channelHandlers.get("setListId")?.({ listId: "channel-list" });
+		});
+		expect(channelHandlers.get("getListId")?.()).toBe("channel-list");
+		view.unmount();
 	});
 });

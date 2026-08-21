@@ -49,6 +49,7 @@ from pulse.helpers import (
 )
 from pulse.hooks.core import hooks
 from pulse.messages import (
+	ClientChannelEventMessage,
 	ClientChannelMessage,
 	ClientChannelRequestMessage,
 	ClientChannelResponseMessage,
@@ -924,7 +925,7 @@ class App:
 					self._cancel_render_cleanup(rid)
 
 					if connect_error is not None:
-						render.report_error("/", "connect", connect_error)
+						render.report_error(None, "connect", connect_error)
 			except Exception:
 				owns_connect_attempt = (
 					self._render_connect_attempts.get(rid) is connect_attempt
@@ -1050,7 +1051,7 @@ class App:
 			if render.connected:
 				self._cancel_render_cleanup(rid)
 			try:
-				if msg["type"] == "channel_message":
+				if msg["type"] == "channel":
 					await self._handle_channel_message(render, session, msg)
 				else:
 					await self._handle_pulse_message(render, session, msg)
@@ -1079,7 +1080,6 @@ class App:
 				render.execute_callback(msg["path"], msg["callback"], msg["args"])
 			elif msg["type"] == "detach":
 				render.detach(msg["path"])
-				render.channels.remove_route(msg["path"])
 			elif msg["type"] == "api_result":
 				render.handle_api_result(dict(msg))
 			elif msg["type"] == "js_result":
@@ -1118,39 +1118,93 @@ class App:
 	async def _handle_channel_message(
 		self, render: RenderSession, session: UserSession, msg: ClientChannelMessage
 	) -> None:
-		if msg.get("responseTo"):
-			msg = cast(ClientChannelResponseMessage, msg)
-			render.channels.handle_client_response(msg)
-		else:
-			channel_id = str(msg.get("channel", ""))
-			msg = cast(ClientChannelRequestMessage, msg)
+		action = msg.get("action")
+		if action not in ("event", "request", "response"):
+			logger.warning("Unknown channel action received: %s", msg)
+			return
 
-			async def _next() -> Ok[None]:
-				render.channels.handle_client_event(
-					render=render, session=session, message=msg
-				)
-				return Ok(None)
+		channel_id = msg.get("channel")
+		if not isinstance(channel_id, str):
+			logger.warning("Dropping channel message without channel: %s", msg)
+			return
 
-			def _normalize_message_response(res: Any) -> Ok[None] | Deny:
-				if isinstance(res, (Ok, Deny)):
-					return res  # type: ignore[return-value]
-				# Treat any other value as allow
-				return Ok(None)
+		if action == "response":
+			if not isinstance(msg.get("responseTo"), str):
+				logger.warning("Dropping channel response without responseTo: %s", msg)
+				return
+			render.channels.handle_response(cast(ClientChannelResponseMessage, msg))
+			return
 
+		event = msg.get("event")
+		if not isinstance(event, str):
+			logger.warning("Dropping channel message without event: %s", msg)
+			return
+		request_id = None
+		if action == "request":
+			request_id = msg.get("requestId")
+			if not isinstance(request_id, str):
+				# Cannot NACK what we cannot address.
+				logger.warning("Dropping channel request without requestId: %s", msg)
+				return
+
+		# Dispatch happens after the chain resolves, never inside `_next`: a
+		# middleware that awaits next() and then denies (or raises) must not
+		# produce a second response nor let the handler commit side effects.
+		reached_end = False
+
+		async def _next() -> Ok[None]:
+			nonlocal reached_end
+			reached_end = True
+			return Ok(None)
+
+		def _normalize_message_response(res: Any) -> Ok[None] | Deny:
+			if isinstance(res, (Ok, Deny)):
+				return res  # type: ignore[return-value]
+			return Ok(None)
+
+		try:
 			with PulseContext.update(session=session, render=render):
 				res = await self.middleware.channel(
 					channel_id=channel_id,
-					event=msg.get("event", ""),
+					event=event,
 					payload=msg.get("payload"),
-					request_id=msg.get("requestId"),
+					request_id=request_id,
 					session=session.data,
 					next=_next,
 				)
 				res = _normalize_message_response(res)
+		except Exception as e:
+			if request_id is not None:
+				render.channels.send_error(
+					channel_id, request_id, "handler_error", "Channel handler failed"
+				)
+			render.report_error(None, "channel", e)
+			return
 
-			if isinstance(res, Deny):
-				if req_id := msg.get("requestId"):
-					render.channels.send_error(channel_id, req_id, "Denied")
+		if isinstance(res, Deny) or not reached_end:
+			if request_id is not None:
+				render.channels.send_error(channel_id, request_id, "denied", "Denied")
+			return
+
+		if action == "event":
+			render.channels.handle_event(cast(ClientChannelEventMessage, msg))
+			return
+
+		def _on_done(task: asyncio.Task[Any]) -> None:
+			if task.cancelled():
+				return
+			try:
+				exc = task.exception()
+			except asyncio.CancelledError:
+				return
+			if exc is not None:
+				render.report_error(None, "channel", exc)
+
+		render.create_task(
+			render.channels.handle_request(cast(ClientChannelRequestMessage, msg)),
+			name=f"channel-request:{channel_id}:{event}",
+			on_done=_on_done,
+		)
 
 	def get_route(self, path: str):
 		return self.routes.find(path)

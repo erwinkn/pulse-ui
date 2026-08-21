@@ -1,6 +1,6 @@
 import { Combobox as MantineCombobox, useCombobox } from "@mantine/core";
 import { useChannel } from "pulse-ui-client";
-import { type ComponentPropsWithoutRef, useEffect, useRef } from "react";
+import { type ComponentPropsWithoutRef, useEffect, useLayoutEffect, useRef } from "react";
 
 type DropdownEventSource = "keyboard" | "mouse" | "unknown";
 
@@ -40,7 +40,9 @@ export function Combobox({
 }: PulseComboboxProps) {
 	const channel = useChannel(channelId);
 	const channelRef = useRef(channel);
-	channelRef.current = channel;
+	useLayoutEffect(() => {
+		channelRef.current = channel;
+	}, [channel]);
 
 	const combobox = useCombobox({
 		defaultOpened,
@@ -61,7 +63,10 @@ export function Combobox({
 		scrollBehavior,
 	});
 	const comboboxRef = useRef(combobox);
-	comboboxRef.current = combobox;
+	const listIdRef = useRef<string | undefined>(undefined);
+	useLayoutEffect(() => {
+		comboboxRef.current = combobox;
+	});
 
 	useEffect(() => {
 		const cleanups = [
@@ -96,11 +101,13 @@ export function Combobox({
 			channel.on("focusSearchInput", () => comboboxRef.current.focusSearchInput()),
 			channel.on("focusTarget", () => comboboxRef.current.focusTarget()),
 			channel.on("setListId", (payload: { listId: string }) => {
+				listIdRef.current = payload.listId;
 				comboboxRef.current.setListId(payload.listId);
 			}),
 			channel.on("getDropdownOpened", () => comboboxRef.current.dropdownOpened),
-			channel.on("getSelectedOptionIndex", () => comboboxRef.current.selectedOptionIndex),
-			channel.on("getListId", () => comboboxRef.current.listId),
+			channel.on("getSelectedOptionIndex", () => comboboxRef.current.getSelectedOptionIndex()),
+			// Mantine has no getListId(); setListId mutates a ref without rerender.
+			channel.on("getListId", () => listIdRef.current ?? comboboxRef.current.listId),
 		];
 
 		return () => {

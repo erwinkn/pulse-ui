@@ -1,6 +1,6 @@
 import { Tree as MantineTree, useTree } from "@mantine/core";
 import { useChannel } from "pulse-ui-client";
-import { type ComponentPropsWithoutRef, useEffect, useRef } from "react";
+import { type ComponentPropsWithoutRef, useEffect, useLayoutEffect, useRef } from "react";
 
 type ExpandedState = Record<string, boolean>;
 
@@ -61,7 +61,9 @@ function ConnectedTree({
 }: ConnectedTreeProps) {
 	const channel = useChannel(channelId);
 	const channelRef = useRef(channel);
-	channelRef.current = channel;
+	useLayoutEffect(() => {
+		channelRef.current = channel;
+	}, [channel]);
 
 	// Create controller with initial state and wire auto-sync callbacks
 	const tree = useTree({
@@ -79,7 +81,9 @@ function ConnectedTree({
 		},
 	} as any);
 	const treeRef = useRef(tree);
-	treeRef.current = tree;
+	useLayoutEffect(() => {
+		treeRef.current = tree;
+	});
 
 	// Server -> client imperative API
 	useEffect(() => {

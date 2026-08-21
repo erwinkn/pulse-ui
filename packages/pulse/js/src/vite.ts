@@ -34,6 +34,9 @@ export function pulse(): Plugin {
 			const clientPort = hmrClientPort();
 			if (clientPort === undefined) return;
 			const existingHmr = userConfig.server?.hmr;
+			// Respect an explicit HMR opt-out; merging an object over `false`
+			// would silently re-enable it.
+			if (existingHmr === false) return;
 			return {
 				server: {
 					hmr: {

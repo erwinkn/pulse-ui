@@ -1,25 +1,34 @@
 # pyright: reportUnusedFunction=false
 from __future__ import annotations
 
+from typing import Any
+
 import pulse as ps
 import pytest
 from pulse.context import PulseContext
 from pulse.hooks.core import HookContext
+from pulse.messages import ServerMessage
 from pulse.reactive import flush_effects
 from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteInfo, RouteTree
 from pulse.test_helpers import wait_for
 
 
-def make_route_info(pathname: str) -> RouteInfo:
+def make_route_info(
+	pathname: str, query_params: dict[str, str] | None = None
+) -> RouteInfo:
 	return {
 		"pathname": pathname,
 		"hash": "",
 		"query": "",
-		"queryParams": {},
+		"queryParams": query_params or {},
 		"pathParams": {},
 		"catchall": [],
 	}
+
+
+def navigations(msgs: list[ServerMessage]) -> list[Any]:
+	return [m.get("path") for m in msgs if m.get("type") == "navigate_to"]
 
 
 def make_session(pathname: str = "/"):
@@ -212,3 +221,129 @@ class TestEffectPulseContext:
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			Tracked()
 		assert await wait_for(lambda: seen == [session], timeout=0.2)
+
+	@pytest.mark.asyncio
+	async def test_async_cleanup_is_awaited_in_bound_context(self):
+		cleaned: list[object] = []
+
+		class Tracked(ps.State):
+			n: int = 0
+
+			@ps.effect
+			async def track(self):
+				_ = self.n
+
+				async def cleanup():
+					cleaned.append(PulseContext.get().render)
+
+				return cleanup
+
+		app, session, route_ctx = make_session()
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			state = Tracked()
+			assert await wait_for(lambda: state.track.runs == 1, timeout=0.2)
+			state.n += 1
+			assert await wait_for(lambda: cleaned == [session], timeout=0.2)
+
+
+class TestEffectMountIdentity:
+	"""Mount identity is resolved when the effect runs, never frozen."""
+
+	def test_navigate_survives_strict_mode_replay(self):
+		trigger = ps.Signal(0)
+
+		@ps.component
+		def Page():
+			@ps.effect
+			def go():
+				if trigger() > 0:
+					ps.navigate("/b")
+
+			return ps.div()["page"]
+
+		routes = [Route("a", Page), Route("b", ps.component(lambda: ps.div()))]
+		app = ps.App(routes=routes)
+		session = RenderSession(
+			"s", RouteTree(routes), dev_strict_mode_detach_timeout=5.0
+		)
+		msgs: list[ServerMessage] = []
+		session.connect(msgs.append)
+		with ps.PulseContext(app=app, render=session):
+			session.prerender(["/a"], make_route_info("/a"))
+			session.attach("/a", make_route_info("/a"))
+			# React StrictMode replays attach -> detach -> attach; detach renews
+			# the mount id without re-rendering.
+			session.detach("/a")
+			session.attach("/a", make_route_info("/a"))
+			trigger.write(1)
+			session.flush()
+			flush_effects()
+		assert navigations(msgs) == ["/b"]
+		session.close()
+
+	def test_state_outliving_creating_mount_can_navigate(self):
+		holder: list[Item] = []
+
+		class Item(ps.State):
+			n: int = 0
+
+			@ps.effect
+			def watch(self):
+				if self.n > 0:
+					ps.navigate("/c")
+
+		@ps.component
+		def PageA():
+			def create():
+				holder.append(Item())
+
+			return ps.div(onClick=create)["a"]
+
+		routes = [
+			Route("a", PageA),
+			Route("b", ps.component(lambda: ps.div())),
+			Route("c", ps.component(lambda: ps.div())),
+		]
+		app = ps.App(routes=routes)
+		session = RenderSession("s", RouteTree(routes))
+		msgs: list[ServerMessage] = []
+		session.connect(msgs.append)
+		with ps.PulseContext(app=app, render=session):
+			session.prerender(["/a"], make_route_info("/a"))
+			session.attach("/a", make_route_info("/a"))
+			key = next(iter(session.route_mounts["/a"].tree.callbacks))
+			# State created while /a is the current mount, but kept outside it.
+			session.execute_callback("/a", key, [])
+			session.flush()
+			flush_effects()
+			session.prerender(["/b"], make_route_info("/b"))
+			session.attach("/b", make_route_info("/b"))
+			session.detach("/a")
+			holder[0].n = 1
+			session.flush()
+			flush_effects()
+		assert navigations(msgs) == ["/c"]
+		session.close()
+
+	def test_global_state_init_can_read_route(self):
+		seen: list[RouteInfo] = []
+
+		class Cfg(ps.State):
+			def __init__(self):
+				super().__init__()
+				seen.append(ps.route())
+
+		accessor = ps.global_state(Cfg)
+		app, session, route_ctx = make_session("/a")
+		mount = session.route_mounts["/a"]
+		with ps.PulseContext(
+			app=app,
+			render=session,
+			route=route_ctx,
+			source_route_path=route_ctx.route_path,
+			source_path=route_ctx.pathname,
+			source_mount_id=mount.mount_id,
+		):
+			_ = accessor()
+		assert [info["pathname"] for info in seen] == ["/a"]
+		session.close()

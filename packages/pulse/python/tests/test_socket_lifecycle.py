@@ -10,6 +10,7 @@ import asyncio
 from collections.abc import Callable, Coroutine
 from typing import Any, cast, override
 
+import httpx
 import pulse as ps
 import pytest
 from pulse.messages import ServerMessage
@@ -738,6 +739,199 @@ async def test_shell_that_gains_mount_is_not_reaped_early(
 	handle = app._render_cleanups["shell-1"]  # pyright: ignore[reportPrivateUsage]
 	delay = handle.when() - loop.time()
 	assert delay == pytest.approx(600.0, abs=1.0)
+
+	await app.close()
+
+
+@pytest.mark.asyncio
+async def test_shell_ttl_fires_and_closes_render(monkeypatch: pytest.MonkeyPatch):
+	"""When the shell TTL fires, the render is actually removed."""
+	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
+	app = ps.App(routes=[], session_timeout=600.0, shell_render_timeout=0.05)
+	app.setup("http://example.com")
+	environ = make_environ(app, "user-1")
+	connect = app.sio.handlers["/"]["connect"]
+	disconnect = app.sio.handlers["/"]["disconnect"]
+
+	await connect("socket-a", environ, {"render_id": "shell-1"})
+	disconnect("socket-a")
+	assert "shell-1" in app.render_sessions
+
+	await wait_for(lambda: "shell-1" not in app.render_sessions)
+
+	await app.close()
+
+
+class _DenySecondConnect(ps.PulseMiddleware):
+	calls: int = 0
+
+	@override
+	async def connect(self, *, request: Any, session: Any, next: Any) -> Any:
+		self.calls += 1
+		if self.calls >= 2:
+			return ps.Deny()
+		return await next()
+
+
+@pytest.mark.asyncio
+async def test_failed_shell_reconnect_keeps_short_ttl(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	"""A failed reconnect (e.g. connect middleware Deny) to a disconnected
+	shell must reschedule the short shell TTL, not the full session_timeout."""
+	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
+	app = ps.App(
+		routes=[],
+		middleware=_DenySecondConnect(),
+		session_timeout=600.0,
+		shell_render_timeout=5.0,
+	)
+	app.setup("http://example.com")
+	environ = make_environ(app, "user-1")
+	connect = app.sio.handlers["/"]["connect"]
+	disconnect = app.sio.handlers["/"]["disconnect"]
+
+	await connect("socket-a", environ, {"render_id": "shell-1"})
+	disconnect("socket-a")
+
+	with pytest.raises(ConnectionRefusedError):
+		await connect("socket-b", environ, {"render_id": "shell-1"})
+
+	loop = asyncio.get_running_loop()
+	handle = app._render_cleanups["shell-1"]  # pyright: ignore[reportPrivateUsage]
+	delay = handle.when() - loop.time()
+	assert delay == pytest.approx(5.0, abs=0.5)
+
+	await app.close()
+
+
+async def _post_prerender(
+	app: ps.App, environ: dict[str, str], render_id: str, pathname: str
+) -> httpx.Response:
+	transport = httpx.ASGITransport(app=app.fastapi)
+	async with httpx.AsyncClient(
+		transport=transport, base_url="http://testserver"
+	) as client:
+		return await client.post(
+			"/_pulse/prerender",
+			json={"paths": [pathname], "routeInfo": make_route_info(pathname)},
+			headers={
+				"Cookie": environ["HTTP_COOKIE"],
+				"X-Pulse-Render-Id": render_id,
+			},
+		)
+
+
+@pytest.mark.asyncio
+async def test_prerender_reuse_reschedules_long_timeout_after_mount(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	"""A prerender that reuses a disconnected shell's id and mounts a route
+	turns it into a real render: cleanup is rescheduled to session_timeout."""
+	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
+	app = ps.App(
+		routes=[ps.Route("a", _hello)],
+		session_timeout=600.0,
+		shell_render_timeout=5.0,
+	)
+	app.setup("http://example.com")
+	environ = make_environ(app, "user-1")
+	connect = app.sio.handlers["/"]["connect"]
+	disconnect = app.sio.handlers["/"]["disconnect"]
+
+	await connect("socket-a", environ, {"render_id": "shell-1"})
+	disconnect("socket-a")
+
+	resp = await _post_prerender(app, environ, "shell-1", "/a")
+	assert resp.status_code == 200
+
+	render = app.render_sessions["shell-1"]
+	assert not render.is_shell
+	loop = asyncio.get_running_loop()
+	handle = app._render_cleanups["shell-1"]  # pyright: ignore[reportPrivateUsage]
+	delay = handle.when() - loop.time()
+	assert delay == pytest.approx(600.0, abs=1.0)
+
+	await app.close()
+
+
+class _RedirectPrerender(ps.PulseMiddleware):
+	@override
+	async def prerender(
+		self, *, payload: Any, request: Any, session: Any, next: Any
+	) -> Any:
+		return ps.Redirect(path="/elsewhere")
+
+
+@pytest.mark.asyncio
+async def test_prerender_reuse_that_stays_mountless_keeps_short_ttl(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	"""A prerender that reuses a disconnected shell's id but mounts nothing
+	(e.g. redirects) leaves it a shell: cleanup stays on the short TTL."""
+	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
+	app = ps.App(
+		routes=[ps.Route("a", _hello)],
+		middleware=_RedirectPrerender(),
+		session_timeout=600.0,
+		shell_render_timeout=5.0,
+	)
+	app.setup("http://example.com")
+	environ = make_environ(app, "user-1")
+	connect = app.sio.handlers["/"]["connect"]
+	disconnect = app.sio.handlers["/"]["disconnect"]
+
+	await connect("socket-a", environ, {"render_id": "shell-1"})
+	disconnect("socket-a")
+
+	resp = await _post_prerender(app, environ, "shell-1", "/a")
+	assert resp.status_code == 200
+	assert resp.json() == {"redirect": "/elsewhere"}
+
+	render = app.render_sessions["shell-1"]
+	assert render.is_shell
+	loop = asyncio.get_running_loop()
+	handle = app._render_cleanups["shell-1"]  # pyright: ignore[reportPrivateUsage]
+	delay = handle.when() - loop.time()
+	assert delay == pytest.approx(5.0, abs=0.5)
+
+	await app.close()
+
+
+@pytest.mark.asyncio
+async def test_prerender_on_render_reaped_mid_request_mints_fresh_render(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	"""If the render referenced by X-Pulse-Render-Id is closed between HTTP
+	middleware resolution and the prerender handler, a fresh render is minted
+	instead of prerendering on the dead one."""
+	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
+	app = ps.App(
+		routes=[ps.Route("a", _hello)],
+		session_timeout=600.0,
+		shell_render_timeout=5.0,
+	)
+	app.setup("http://example.com")
+	environ = make_environ(app, "user-1")
+	connect = app.sio.handlers["/"]["connect"]
+	disconnect = app.sio.handlers["/"]["disconnect"]
+
+	await connect("socket-a", environ, {"render_id": "shell-1"})
+	disconnect("socket-a")
+	stale = app.render_sessions["shell-1"]
+
+	# Simulate the TTL firing while the request is in flight: the render is
+	# closed before the prerender handler runs.
+	app.close_render("shell-1")
+	assert "shell-1" not in app.render_sessions
+
+	resp = await _post_prerender(app, environ, "shell-1", "/a")
+	assert resp.status_code == 200
+	payload = deserialize(resp.json())
+	new_render_id = payload["directives"]["headers"]["X-Pulse-Render-Id"]
+	assert new_render_id != "shell-1"
+	assert new_render_id in app.render_sessions
+	assert app.render_sessions[new_render_id] is not stale
 
 	await app.close()
 

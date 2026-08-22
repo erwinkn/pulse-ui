@@ -351,11 +351,12 @@ class ManagedProcess:
 			self._reaped = True
 			try:
 				self.process.wait(timeout=PROCESS_KILL_TIMEOUT)
-			except ChildProcessError:
-				pass
 			except subprocess.TimeoutExpired:
-				# A SIGKILLed child stuck in uninterruptible sleep: leave the
-				# zombie rather than hanging shutdown forever.
+				# A child stuck in uninterruptible sleep: the pgid is provably
+				# still pinned here, so take one last shot at survivors, then
+				# leave the zombie rather than hanging shutdown forever.
+				with contextlib.suppress(ProcessLookupError, PermissionError):
+					os.killpg(self.process.pid, signal.SIGKILL)
 				sys.stderr.write(
 					f"Warning: process {self.process.pid} did not exit; leaving it unreaped\n"
 				)

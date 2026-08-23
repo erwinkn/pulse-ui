@@ -436,6 +436,24 @@ def test_run_supervisor_binds_vite_to_public_host_in_subdomains(
 	assert ENV_PULSE_HMR_CLIENT_PORT not in commands[1].env
 
 
+def test_run_brackets_ipv6_react_server_address(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	cast(Any, app_ctx.app).mode = "subdomains"
+	commands, _installed = _patch_run_basics(monkeypatch, app_ctx)
+
+	result = runner.invoke(
+		cmd_mod.cli,
+		["run", "demo.py", "--plain", "--no-find-port", "--address", "::1"],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert commands[0].env[ENV_PULSE_REACT_SERVER_ADDRESS] == "http://[::1]:5173"
+
+
 def test_run_propagates_supervisor_exit_code(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -642,6 +660,8 @@ def test_run_fails_on_dependency_conflict(
 	[
 		("localhost", "http://localhost:8000"),
 		("127.0.0.1", "http://127.0.0.1:8000"),
+		("::1", "http://[::1]:8000"),
+		("[::1]", "http://[::1]:8000"),
 		("0.0.0.0", "http://localhost:8000"),  # wildcard -> reachable localhost
 		("::", "http://localhost:8000"),
 		("192.168.1.50", "http://192.168.1.50:8000"),  # LAN IP kept, still http

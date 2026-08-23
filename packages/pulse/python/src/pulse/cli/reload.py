@@ -141,13 +141,13 @@ class DevSupervisor:
 				if self._web_code is not None:
 					return self._web_code
 				self.changed.clear()
-				started = await self._replace_backend()
+				backend_start = await self._replace_backend()
 				if self.shutdown.is_set():
 					break
 				if self._web_code is not None:
 					return self._web_code
-				if started != "ready":
-					if started == "failed":
+				if backend_start != "ready":
+					if backend_start == "failed":
 						print(
 							"Backend failed to start. Waiting for changes to retry...",
 							flush=True,
@@ -218,6 +218,7 @@ class DevSupervisor:
 		self._backend_ready.clear()
 		self._backend_code = None
 		if self.shutdown.is_set():
+			# The caller re-checks shutdown before interpreting this outcome.
 			return "changed"
 		env = dict(self.backend_spec.env)
 		env[ENV_PULSE_LISTEN_FDS] = ",".join(

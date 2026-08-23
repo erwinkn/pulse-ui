@@ -146,6 +146,35 @@ describe("pulse", () => {
 		}
 	});
 
+	it("swallows asynchronous stdout errors without leaking listeners", async () => {
+		process.env.PULSE_SUPERVISED = "1";
+		const stdout = process.stdout;
+		const write = stdout.write;
+		const listenerCount = stdout.listenerCount("error");
+		stdout.write = ((_chunk: string | Uint8Array, callback?: (error?: Error) => void) => {
+			queueMicrotask(() => {
+				callback?.(new Error("closed"));
+				stdout.emit("error", new Error("closed"));
+			});
+			return true;
+		}) as typeof stdout.write;
+		const servers = [createHttpServer(), createHttpServer()];
+		try {
+			for (const server of servers) {
+				hook(pulse().configureServer).call({} as never, viteServer(server));
+			}
+			await new Promise<void>((resolve) => queueMicrotask(resolve));
+			const listenersAfterFirstNotify = stdout.listenerCount("error");
+			expect(listenersAfterFirstNotify).toBeLessThanOrEqual(listenerCount + 1);
+			expect(stdout.listenerCount("error")).toBe(listenersAfterFirstNotify);
+		} finally {
+			stdout.write = write;
+			for (const server of servers) {
+				server.close();
+			}
+		}
+	});
+
 	it("rejects middleware mode", () => {
 		process.env.PULSE_SUPERVISED = "1";
 		try {

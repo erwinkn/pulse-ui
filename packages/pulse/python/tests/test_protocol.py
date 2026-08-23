@@ -36,6 +36,11 @@ def test_parse_unknown_marker_left_intact() -> None:
 	assert parse(line) == ([], line)
 
 
+def test_parse_rejects_marker_prefix_shadowing() -> None:
+	line = f"{PREFIX}worker-readying"
+	assert parse(line) == ([], line)
+
+
 def test_parse_unrelated_line_unchanged() -> None:
 	line = "ordinary output"
 	assert parse(line) == ([], line)

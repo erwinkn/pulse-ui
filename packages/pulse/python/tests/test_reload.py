@@ -237,7 +237,9 @@ async def test_reload_kills_backend_immediately_and_keeps_vite(
 
 @pytest.mark.asyncio
 async def test_failed_backend_keeps_vite_and_waits_for_edit(
-	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	capsys: pytest.CaptureFixture[str],
 ) -> None:
 	supervisor = supervisor_shell(tmp_path)
 	events: list[str] = []
@@ -256,11 +258,17 @@ async def test_failed_backend_keeps_vite_and_waits_for_edit(
 	await wait_until(lambda: "server2:start" in events)
 	supervisor.shutdown.set()
 	assert await run_task == 130
+	assert (
+		"Backend failed to start. Waiting for changes to retry..."
+		in capsys.readouterr().out
+	)
 
 
 @pytest.mark.asyncio
 async def test_rapid_edit_kills_starting_backend(
-	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	capsys: pytest.CaptureFixture[str],
 ) -> None:
 	supervisor = supervisor_shell(tmp_path)
 	events: list[str] = []
@@ -278,6 +286,10 @@ async def test_rapid_edit_kills_starting_backend(
 	assert await run_task == 130
 	assert "server1:kill" in events
 	assert events.index("server1:kill") < events.index("server2:start")
+	assert (
+		"Backend failed to start. Waiting for changes to retry..."
+		not in capsys.readouterr().out
+	)
 
 
 @pytest.mark.asyncio

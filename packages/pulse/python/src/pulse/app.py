@@ -879,6 +879,8 @@ class App:
 							session=session.data,
 							next=_next,
 						)
+					except TypeError:
+						raise
 					except Exception as exc:
 						connect_error = exc
 						res = Ok(None)

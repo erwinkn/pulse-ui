@@ -314,6 +314,8 @@ def local_server_url(host: str, port: int | str) -> str:
 	"""
 	if host in ("0.0.0.0", "::", ""):
 		host = "localhost"
+	elif ":" in host and not host.startswith("["):
+		host = f"[{host}]"
 	return f"http://{host}:{port}"
 
 

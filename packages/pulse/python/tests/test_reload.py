@@ -400,10 +400,13 @@ async def test_vite_drain_timeout_does_not_wait_for_open_write_end(
 		"leftover web descendant holds the readiness pipe open"
 		in capsys.readouterr().out
 	)
+	reader = supervisor._vite_reader_thread  # pyright: ignore[reportPrivateUsage]
+	assert reader is not None
+	assert reader.is_alive()
 	assert processes[0].ready_w is not None
 	os.close(processes[0].ready_w)
 	processes[0].ready_w = None
-	await asyncio.sleep(0.02)
+	await wait_until(lambda: not reader.is_alive())
 
 
 @pytest.mark.asyncio

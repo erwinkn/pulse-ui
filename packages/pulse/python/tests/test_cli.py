@@ -2,6 +2,7 @@ import asyncio
 import importlib
 import json
 import os
+import re
 import socket
 import sys
 import time
@@ -596,6 +597,8 @@ def test_run_no_reload_keeps_direct_uvicorn_and_initial_codegen(
 	assert result.exit_code == 0, result.output
 	assert installed == [["bun", "i"]]
 	assert app.codegen_calls == ["http://localhost:8000"]
+	assert commands[0].ready_pattern is not None
+	assert re.search(commands[0].ready_pattern, "  ➜  Local: http://127.0.0.1:5173/")
 	assert commands[1].args[1:3] == ["-m", "uvicorn"]
 	assert "--reload" not in commands[1].args
 
@@ -811,13 +814,20 @@ def test_build_web_command_uses_node_serve_in_prod(tmp_path: Path) -> None:
 	web_root = tmp_path / "web"
 	web_root.mkdir()
 
-	spec = cmd_mod.build_web_command(web_root=web_root, extra_args=[], mode="prod")
+	spec = cmd_mod.build_web_command(
+		web_root=web_root,
+		extra_args=[],
+		host="192.168.1.50",
+		mode="prod",
+	)
 
 	assert spec.args == [
 		"node",
 		"node_modules/@react-router/serve/dist/cli.js",
 		"./build/server/index.js",
 	]
+	assert spec.env["HOST"] == "192.168.1.50"
+	assert "--host" not in spec.args
 
 
 def test_build_web_command_sets_node_env_in_prod(tmp_path: Path) -> None:
@@ -827,6 +837,21 @@ def test_build_web_command_sets_node_env_in_prod(tmp_path: Path) -> None:
 	spec = cmd_mod.build_web_command(web_root=web_root, extra_args=[], mode="prod")
 
 	assert spec.env["NODE_ENV"] == "production"
+
+
+def test_build_web_command_passes_host_to_dev_server(tmp_path: Path) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+
+	spec = cmd_mod.build_web_command(
+		web_root=web_root,
+		extra_args=[],
+		host="192.168.1.50",
+		port=5173,
+	)
+
+	assert spec.args[-2:] == ["--host", "192.168.1.50"]
+	assert "HOST" not in spec.env
 
 
 def test_web_workspaces_using_pulse_ui_client_declare_ws() -> None:

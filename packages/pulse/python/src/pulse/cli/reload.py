@@ -36,6 +36,7 @@ IGNORED_DIRECTORIES = frozenset(
 )
 PYTHON_EXTENSIONS = frozenset({".py", ".pyx", ".pyd"})
 VITE_PLUGIN_TIMEOUT = 15.0
+VITE_LISTENING_TIMEOUT = 30.0
 # A descendant that escaped the process group can still hold a readiness pipe's
 # write end; shutdown abandons the reader rather than waiting on it forever.
 READY_PIPE_DRAIN_TIMEOUT = 5.0
@@ -487,7 +488,22 @@ class DevSupervisor:
 			return
 		if not got:
 			return
-		if not await self._wait_vite_signal(self._vite_listening, timeout=None):
+		try:
+			got = await self._wait_vite_signal(
+				self._vite_listening, timeout=VITE_LISTENING_TIMEOUT
+			)
+		except TimeoutError:
+			if not self.shutdown.is_set() and self._web_code is None:
+				print(
+					"Vite loaded pulse() but never reported listening within "
+					+ f"{VITE_LISTENING_TIMEOUT:g}s.",
+					flush=True,
+				)
+				await self._stop(self.web)
+				self.web = None
+				self._web_code = 1
+			return
+		if not got:
 			return
 		if web_spec.on_ready is not None:
 			web_spec.on_ready()

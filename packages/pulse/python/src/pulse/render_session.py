@@ -963,6 +963,7 @@ class RenderSession:
 		def _cancel_timeout(_: asyncio.Future[object]) -> None:
 			handle.cancel()
 			self._timers.discard(handle)
+			self.replies.discard(exec_id)
 
 		future.add_done_callback(_cancel_timeout)
 		self.send(msg)

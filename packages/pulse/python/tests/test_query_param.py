@@ -1192,3 +1192,98 @@ class TestQueryParamAcrossMounts:
 		assert parse_qs(parsed.query)["q"] == ["from-restored"]
 
 		session.close()
+
+
+def test_r10_loading_a_value_equal_to_the_default_keeps_the_url():
+	class QState(ps.State):
+		q: ps.QueryParam[str] = "hello"
+
+	app, session, route_ctx = make_context(
+		make_route_info("/", query_params={"q": "hello", "other": "1"})
+	)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		state = QState()
+		flush_query_param_sync(session)
+		assert state.q == "hello"
+	assert navigations(messages) == []
+	assert session.url.query_params == {"q": "hello", "other": "1"}
+
+
+def test_r11_loading_a_sibling_default_does_not_reset_the_other_view():
+	class First(ps.State):
+		q: ps.QueryParam[str] = "a"
+
+	class Second(ps.State):
+		q: ps.QueryParam[str] = "b"
+
+	app, session, route_ctx = make_context(
+		make_route_info("/", query_params={"q": "a"})
+	)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		first = First()
+		second = Second()
+		flush_query_param_sync(session)
+		assert first.q == "a"
+		assert second.q == "a"
+
+		# A client navigation to the other view's default is just as authoritative.
+		route_ctx.update(make_route_info("/", query_params={"q": "b"}))
+		flush_query_param_sync(session)
+		assert first.q == "b"
+		assert second.q == "b"
+	assert navigations(messages) == []
+	assert session.url.query_params == {"q": "b"}
+
+
+def test_r12_write_after_loading_the_default_still_reaches_the_url():
+	class QState(ps.State):
+		q: ps.QueryParam[str] = "hello"
+
+	app, session, route_ctx = make_context(
+		make_route_info("/", query_params={"q": "hello"})
+	)
+	messages: list[ServerMessage] = []
+	session.connect(messages.append)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		state = QState()
+		flush_query_param_sync(session)
+		state.q = "world"
+		flush_query_param_sync(session)
+		assert state.q == "world"
+		navs = navigations(messages)
+		assert len(navs) == 1
+		assert parse_qs(urlparse(str(navs[0]["path"])).query)["q"] == ["world"]
+
+		# ...and going back to the default removes it again.
+		state.q = "hello"
+		flush_query_param_sync(session)
+		navs = navigations(messages)
+		assert len(navs) == 2
+		assert "q" not in parse_qs(urlparse(str(navs[1]["path"])).query)
+
+
+def test_r13_list_default_is_not_shared_across_sessions():
+	class TagState(ps.State):
+		tags: ps.QueryParam[list[str]] = []
+
+	app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		first = TagState()
+		flush_query_param_sync(session)
+		first.tags.append("alpha")
+		flush_query_param_sync(session)
+		assert list(first.tags) == ["alpha"]
+
+	app2, session2, route_ctx2 = make_context(make_route_info("/", query_params={}))
+	messages: list[ServerMessage] = []
+	session2.connect(messages.append)
+	with ps.PulseContext(app=app2, render=session2, route=route_ctx2):
+		second = TagState()
+		flush_query_param_sync(session2)
+		# The mutation above must not have leaked into the declaration default.
+		assert list(second.tags) == []
+	assert navigations(messages) == []

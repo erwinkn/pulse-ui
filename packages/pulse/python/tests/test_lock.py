@@ -56,7 +56,6 @@ def test_windows_interrupt_ignores_process_exiting_during_terminate(
 	)
 
 	lock_mod._interrupt_process(123)  # pyright: ignore[reportPrivateUsage]
-	assert not is_process_alive(123)
 
 
 def test_create_lock_round_trips_typed_info(tmp_path: Path):

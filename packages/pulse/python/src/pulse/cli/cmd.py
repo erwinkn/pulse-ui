@@ -240,7 +240,7 @@ def run(
 			web_cmd.env[ENV_PULSE_HMR_CLIENT_PORT] = str(port)
 		if not supervised_reload:
 			commands.append(web_cmd)
-		env.react_server_address = f"http://{web_host}:{web_port}"
+		env.react_server_address = local_server_url(web_host, web_port)
 
 	if not web_only:
 		if supervised_reload:

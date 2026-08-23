@@ -1134,3 +1134,22 @@ def test_r13_list_default_is_not_shared_across_sessions():
 		# The mutation above must not have leaked into the declaration default.
 		assert list(second.tags) == []
 	assert navigations(messages) == []
+
+
+def test_r14_repr_outside_a_render_context_does_not_raise():
+	class QState(ps.State):
+		q: ps.QueryParam[str] = "hello"
+		other: int = 3
+
+	app, session, route_ctx = make_context(
+		make_route_info("/", query_params={"q": "world"})
+	)
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		state = QState()
+		assert "q='world'" in repr(state)
+
+	# Outside the render context the URL-synced field is unreadable, but a repr
+	# must still work (logging, pytest assertion messages, ...).
+	text = repr(state)
+	assert "q=<unavailable>" in text
+	assert "other=3" in text

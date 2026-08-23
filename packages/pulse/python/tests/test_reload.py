@@ -271,6 +271,8 @@ async def test_rapid_edit_kills_starting_backend(
 	capsys: pytest.CaptureFixture[str],
 ) -> None:
 	supervisor = supervisor_shell(tmp_path)
+	ready_calls: list[None] = []
+	supervisor.backend_spec.on_ready = lambda: ready_calls.append(None)
 	events: list[str] = []
 	install_process_script(
 		monkeypatch,
@@ -286,6 +288,7 @@ async def test_rapid_edit_kills_starting_backend(
 	assert await run_task == 130
 	assert "server1:kill" in events
 	assert events.index("server1:kill") < events.index("server2:start")
+	assert len(ready_calls) == 1
 	assert (
 		"Backend failed to start. Waiting for changes to retry..."
 		not in capsys.readouterr().out

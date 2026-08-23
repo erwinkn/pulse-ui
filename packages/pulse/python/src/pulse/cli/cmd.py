@@ -212,11 +212,18 @@ def run(
 	# Build web command first (when needed) so we can set PULSE_REACT_SERVER_ADDRESS
 	# before building the uvicorn command, which needs that env var
 	web_port: int | None = None
+	web_port_reservation: PortReservation | None = None
 	web_cmd: CommandSpec | None = None
 	server_cmd: CommandSpec | None = None
 	if not server_only:
 		web_host = "127.0.0.1" if is_single_server else address
-		web_port = find_available_port(5173) if find_port else 5173
+		try:
+			web_port_reservation = reserve_port(web_host, 5173, find_port=find_port)
+			ctx.call_on_close(web_port_reservation.close)
+			web_port = web_port_reservation.port
+		except RuntimeError as exc:
+			logger.error(str(exc))
+			raise typer.Exit(1) from None
 		web_cmd = build_web_command(
 			web_root=web_root,
 			extra_args=(
@@ -251,6 +258,7 @@ def run(
 				app_ctx=app_ctx,
 				address=address,
 				port=port,
+				web_root=web_root,
 				reload_enabled=reload,
 				extra_args=server_args,
 				dev_secret=dev_secret,
@@ -299,6 +307,8 @@ def run(
 				del app_instance
 				del app_ctx
 				assert public_port is not None
+				if web_port_reservation is not None:
+					web_port_reservation.close()
 				exit_code = asyncio.run(
 					DevSupervisor(
 						backend=server_cmd,
@@ -308,10 +318,13 @@ def run(
 						registered_sources=registered_sources,
 						tag_mode=logger.get_tag_mode(),
 						listeners=public_port.sockets,
+						web_root=web_root,
 					).run()
 				)
 			else:
 				try:
+					if web_port_reservation is not None:
+						web_port_reservation.close()
 					exit_code = execute_commands(
 						commands,
 						tag_mode=logger.get_tag_mode(),
@@ -476,6 +489,7 @@ def build_uvicorn_command(
 	app_ctx: AppLoadResult,
 	address: str,
 	port: int,
+	web_root: Path,
 	reload_enabled: bool,
 	extra_args: Sequence[str],
 	dev_secret: str | None,
@@ -510,6 +524,14 @@ def build_uvicorn_command(
 		args.extend(["--reload-include", "*.css"])
 		app_dir = app_ctx.app_dir or Path.cwd()
 		args.extend(["--reload-dir", str(app_dir)])
+		if web_root.exists():
+			args.extend(["--reload-dir", str(web_root)])
+			pulse_dir = str(app_ctx.app.codegen.cfg.pulse_dir)
+			pulse_app_dir = web_root / "app" / pulse_dir
+			rel_path = Path(os.path.relpath(pulse_app_dir, cwd))
+			if not rel_path.is_absolute():
+				args.extend(["--reload-exclude", str(rel_path)])
+				args.extend(["--reload-exclude", str(rel_path / "**")])
 
 	if app_ctx.app.env == "prod":
 		args.extend(production_flags())

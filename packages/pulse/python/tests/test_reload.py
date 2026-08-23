@@ -241,7 +241,6 @@ async def test_reload_kills_backend_immediately_and_keeps_vite(
 async def test_failed_backend_keeps_vite_and_waits_for_edit(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
-	capsys: pytest.CaptureFixture[str],
 ) -> None:
 	supervisor = supervisor_shell(tmp_path)
 	events: list[str] = []
@@ -251,6 +250,12 @@ async def test_failed_backend_keeps_vite_and_waits_for_edit(
 		[("web", "ready"), ("server", "fail"), ("server", "ready")],
 	)
 
+	printed: list[str] = []
+
+	def record_print(message: object, *_args: object, **_kwargs: object) -> None:
+		printed.append(str(message))
+
+	monkeypatch.setattr(reload_mod, "print", record_print, raising=False)
 	run_task = asyncio.create_task(supervisor.run())
 	await wait_until(lambda: "server1:close" in events)
 	assert supervisor.web is not None
@@ -260,10 +265,7 @@ async def test_failed_backend_keeps_vite_and_waits_for_edit(
 	await wait_until(lambda: "server2:start" in events)
 	supervisor.shutdown.set()
 	assert await run_task == 130
-	assert (
-		"Backend failed to start. Waiting for changes to retry..."
-		in capsys.readouterr().out
-	)
+	assert "Backend failed to start. Waiting for changes to retry..." in printed
 
 
 @pytest.mark.asyncio
@@ -286,6 +288,7 @@ async def test_rapid_edit_kills_starting_backend(
 	await wait_until(lambda: "server1:start" in events)
 	supervisor.changed.set()
 	await wait_until(lambda: "server2:start" in events)
+	await wait_until(lambda: ready_calls)
 	supervisor.shutdown.set()
 	assert await run_task == 130
 	assert "server1:kill" in events
@@ -313,7 +316,7 @@ async def test_interrupted_backend_start_cancels_readiness_waiter(
 
 	monkeypatch.setattr(supervisor, "_race", race)
 
-	assert not await supervisor._replace_backend()  # pyright: ignore[reportPrivateUsage]
+	assert await supervisor._replace_backend() == "changed"  # pyright: ignore[reportPrivateUsage]
 	assert len(waiters) == 1
 	assert waiters[0].done()
 	assert waiters[0].cancelled()
@@ -343,7 +346,7 @@ async def test_backend_output_preserves_text_and_blank_lines_around_marker(
 
 	monkeypatch.setattr(ManagedProcess, "start", classmethod(start))
 
-	assert await supervisor._replace_backend()  # pyright: ignore[reportPrivateUsage]
+	assert await supervisor._replace_backend() == "ready"  # pyright: ignore[reportPrivateUsage]
 	assert capsys.readouterr().out == "[server] ordinary output \n[server] \n"
 
 
@@ -427,9 +430,9 @@ async def test_missing_vite_plugin_exits(
 async def test_vite_listening_timeout_fails_startup(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-	monkeypatch.setattr(reload_mod, "VITE_LISTENING_TIMEOUT", 0.01)
+	monkeypatch.setattr(reload_mod, "VITE_LISTENING_TIMEOUT", 0.2)
 	supervisor = supervisor_shell(tmp_path)
-	supervisor.vite_plugin_timeout = 0.01
+	supervisor.vite_plugin_timeout = 0.2
 	events: list[str] = []
 	install_process_script(monkeypatch, events, [("web", "configured")])
 
@@ -447,7 +450,7 @@ async def test_missing_vite_plugin_names_config_and_setup(
 	config = web_root / "vite.config.mts"
 	config.write_text("export default {};\n")
 	supervisor = supervisor_shell(tmp_path, web_root=web_root)
-	supervisor.vite_plugin_timeout = 0.01
+	supervisor.vite_plugin_timeout = 0.2
 	events: list[str] = []
 	install_process_script(monkeypatch, events, [("web", "hang")])
 

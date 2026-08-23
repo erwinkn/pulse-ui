@@ -571,12 +571,12 @@ def test_build_uvicorn_reload_watches_web_root_and_excludes_pulse_dir(
 	exclude = command.args.index("--reload-exclude")
 	assert command.args[exclude : exclude + 2] == [
 		"--reload-exclude",
-		"web/app/_pulse",
+		str(Path("web") / "app" / "_pulse"),
 	]
 	exclude = command.args.index("--reload-exclude", exclude + 1)
 	assert command.args[exclude : exclude + 2] == [
 		"--reload-exclude",
-		"web/app/_pulse/**",
+		str(Path("web") / "app" / "_pulse" / "**"),
 	]
 
 

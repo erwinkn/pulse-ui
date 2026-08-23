@@ -86,6 +86,7 @@ class DevSupervisor:
 		registered_sources: set[Path],
 		tag_mode: TagMode,
 		listeners: tuple[socket.socket, ...],
+		web_root: Path | None = None,
 		vite_plugin_timeout: float = VITE_PLUGIN_TIMEOUT,
 	) -> None:
 		self.backend_spec = backend
@@ -98,6 +99,7 @@ class DevSupervisor:
 		)
 		self.tag_mode: TagMode = tag_mode
 		self.listeners = listeners
+		self.web_root = web_root.resolve() if web_root is not None else None
 		self.vite_plugin_timeout = vite_plugin_timeout
 		self.changed = asyncio.Event()
 		self.shutdown = asyncio.Event()
@@ -329,10 +331,32 @@ class DevSupervisor:
 			)
 		except TimeoutError:
 			if not self.shutdown.is_set() and self._web_code is None:
+				vite_config: Path | None = None
+				if self.web_root is not None:
+					for filename in (
+						"vite.config.ts",
+						"vite.config.mts",
+						"vite.config.js",
+						"vite.config.mjs",
+						"vite.config.cts",
+						"vite.config.cjs",
+					):
+						candidate = self.web_root / filename
+						if candidate.is_file():
+							vite_config = candidate.resolve()
+							break
+				config_location = (
+					f" in {vite_config}"
+					if vite_config is not None
+					else " in vite.config.ts"
+				)
 				print(
 					"Vite did not load pulse() within "
 					+ f"{self.vite_plugin_timeout:g}s. Add it to the plugins "
-					+ "array in vite.config.ts.",
+					+ "array"
+					+ config_location
+					+ '. Add `import { pulse } from "pulse-ui-client/vite";` '
+					+ "and include it as `plugins: [..., pulse()]`.",
 					flush=True,
 				)
 				await self._stop(self.web)

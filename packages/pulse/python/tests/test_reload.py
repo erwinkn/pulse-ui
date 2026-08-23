@@ -165,6 +165,8 @@ def install_process_script(
 				os.write(child_w, b"c1")
 				os.close(child_w)
 				process.ready_w = None
+			elif outcome == "configured":
+				os.write(child_w, b"c")
 			elif outcome == "ready_open":
 				os.write(child_w, b"c1")
 			elif outcome == "fail":
@@ -382,6 +384,21 @@ async def test_missing_vite_plugin_exits(
 
 	assert await supervisor.run() == 1
 	assert "pulse()" in capsys.readouterr().out
+	assert "web1:kill" in events
+
+
+@pytest.mark.asyncio
+async def test_vite_listening_timeout_fails_startup(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+	monkeypatch.setattr(reload_mod, "VITE_LISTENING_TIMEOUT", 0.01)
+	supervisor = supervisor_shell(tmp_path)
+	supervisor.vite_plugin_timeout = 0.01
+	events: list[str] = []
+	install_process_script(monkeypatch, events, [("web", "configured")])
+
+	assert await supervisor.run() == 1
+	assert "Vite loaded pulse() but never reported listening" in capsys.readouterr().out
 	assert "web1:kill" in events
 
 

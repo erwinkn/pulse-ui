@@ -59,7 +59,7 @@ The `HookState` base class provides three lifecycle methods you can override:
 | Method | When it runs | Use case |
 |--------|--------------|----------|
 | `on_render_start(render_cycle)` | Before each render | Reset per-render state, start measurements |
-| `on_render_end(render_cycle)` | After each render | Finalize calculations, trigger side effects |
+| `on_render_end(render_cycle, error)` | After each render, even a failed one (`error` is the exception, or `None` on success) | Finalize calculations, trigger side effects |
 | `on_dispose()` | When component unmounts | Clean up resources, cancel subscriptions |
 
 ```python
@@ -73,7 +73,7 @@ class RenderCounterState(ps.hooks.State):
         self._render_start = time.time()
         self.total_renders = render_cycle
 
-    def on_render_end(self, render_cycle: int) -> None:
+    def on_render_end(self, render_cycle: int, error: BaseException | None) -> None:
         self.last_render_duration = time.time() - self._render_start
 
     def on_dispose(self) -> None:

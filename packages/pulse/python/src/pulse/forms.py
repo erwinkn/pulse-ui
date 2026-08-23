@@ -683,8 +683,17 @@ class FormStorage(HookState):
 		self.render_mark = render_cycle
 
 	@override
-	def on_render_end(self, render_cycle: int) -> None:
+	def on_render_end(self, render_cycle: int, error: BaseException | None) -> None:
 		if not self.prev_forms:
+			return
+		if error is not None:
+			# The render stopped at the raise, so forms it never re-registered are
+			# still live and still displayed by the client. Adopt them as current
+			# instead of disposing them, which would deregister them server-side
+			# and break submits until the next successful render.
+			for key, form in self.prev_forms.items():
+				self.forms[key] = form
+			self.prev_forms.clear()
 			return
 		for form in self.prev_forms.values():
 			form.dispose()

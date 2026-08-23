@@ -1,9 +1,12 @@
 # pyright: reportImportCycles=false
+import inspect
+from collections.abc import Callable
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
+from pulse.reactive import Untrack
 from pulse.routing import RouteContext
 
 if TYPE_CHECKING:
@@ -12,6 +15,7 @@ if TYPE_CHECKING:
 	from pulse.user_session import UserSession
 
 _UNSET = object()
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 @dataclass
@@ -26,6 +30,8 @@ class PulseContext:
 		session: Per-user session (UserSession or None).
 		render: Per-connection render session (RenderSession or None).
 		route: Active route context (RouteContext or None).
+		session_scoped_effects: Whether effects created during a session-scoped
+			state construction should omit route identity, including nested states.
 		source_route_path: Route mount path that originated the active callback/effect.
 		source_path: URL pathname that originated the active callback/effect.
 		source_mount_id: Route mount lifecycle id that originated the active callback/effect.
@@ -44,6 +50,7 @@ class PulseContext:
 	session: "UserSession | None" = None
 	render: "RenderSession | None" = None
 	route: "RouteContext | None" = None
+	session_scoped_effects: bool = False
 	source_route_path: str | None = None
 	source_path: str | None = None
 	source_mount_id: str | None = None
@@ -70,6 +77,7 @@ class PulseContext:
 		session: Any = _UNSET,
 		render: Any = _UNSET,
 		route: Any = _UNSET,
+		session_scoped_effects: Any = _UNSET,
 		source_route_path: Any = _UNSET,
 		source_path: Any = _UNSET,
 		source_mount_id: Any = _UNSET,
@@ -82,6 +90,8 @@ class PulseContext:
 			session: New session (optional, inherits if not provided).
 			render: New render session (optional, inherits if not provided).
 			route: New route context (optional, inherits if not provided).
+			session_scoped_effects: Whether effects created during session-scoped
+				state construction omit route identity, including nested states.
 			source_route_path: New source route path (optional, inherits if not provided).
 			source_path: New source URL path (optional, inherits if not provided).
 			source_mount_id: New source mount id (optional, inherits if not provided).
@@ -95,6 +105,11 @@ class PulseContext:
 			session=ctx.session if session is _UNSET else session,
 			render=ctx.render if render is _UNSET else render,
 			route=ctx.route if route is _UNSET else route,
+			session_scoped_effects=(
+				ctx.session_scoped_effects
+				if session_scoped_effects is _UNSET
+				else session_scoped_effects
+			),
 			source_route_path=(
 				ctx.source_route_path
 				if source_route_path is _UNSET
@@ -105,6 +120,100 @@ class PulseContext:
 				ctx.source_mount_id if source_mount_id is _UNSET else source_mount_id
 			),
 		)
+
+	@classmethod
+	def bind(cls, fn: F) -> F:
+		"""Re-enter the current PulseContext on every call.
+
+		Captures ``app`` / ``session`` / ``render`` and the creating route
+		generation, then resolves that generation on every call. No-op if
+		there is no render session. A returned cleanup callable is also bound.
+		"""
+		current = PULSE_CONTEXT.get()
+		if current is None or current.render is None:
+			return fn
+		app = current.app
+		session = current.session
+		render = current.render
+		captured_route = current.route
+		route_path = (
+			None
+			if current.session_scoped_effects or captured_route is None
+			else captured_route.route_path
+		)
+		captured_source_path = current.source_path
+		captured_source_mount_id = current.source_mount_id
+		if route_path is not None and (
+			captured_source_path is None or captured_source_mount_id is None
+		):
+			with Untrack():
+				mount = render.route_mounts.get(route_path)
+				if mount is not None and mount.route is captured_route:
+					if captured_source_path is None:
+						captured_source_path = mount.route.pathname
+					if captured_source_mount_id is None:
+						captured_source_mount_id = mount.mount_id
+
+		def enter() -> PulseContext:
+			route = None
+			source_route_path = None
+			source_path = None
+			source_mount_id = None
+			if route_path is not None:
+				mount = render.route_mounts.get(route_path)
+				if mount is not None and mount.route is captured_route:
+					route = mount.route
+					source_route_path = route_path
+					if mount.dispose_on_timeout:
+						# A grace-window mount is stale; a replayed mount clears
+						# this flag when it reattaches and remains valid.
+						source_path = captured_source_path
+						source_mount_id = captured_source_mount_id
+					else:
+						with Untrack():
+							source_path = mount.route.pathname
+							source_mount_id = mount.mount_id
+			return PulseContext(
+				app=app,
+				session=session,
+				render=render,
+				route=route,
+				source_route_path=source_route_path,
+				source_path=source_path,
+				source_mount_id=source_mount_id,
+			)
+
+		def bind_cleanup(result: Any) -> Any:
+			if not callable(result):
+				return result
+
+			if inspect.iscoroutinefunction(result):
+
+				async def bound_async_cleanup() -> None:
+					with enter():
+						await result()
+
+				return bound_async_cleanup
+
+			def bound_cleanup() -> None:
+				with enter():
+					result()
+
+			return bound_cleanup
+
+		if inspect.iscoroutinefunction(fn):
+
+			async def wrapped_async(*args: Any, **kwargs: Any) -> Any:
+				with enter():
+					return bind_cleanup(await fn(*args, **kwargs))
+
+			return cast(F, wrapped_async)
+
+		def wrapped(*args: Any, **kwargs: Any) -> Any:
+			with enter():
+				return bind_cleanup(fn(*args, **kwargs))
+
+		return cast(F, wrapped)
 
 	def __enter__(self):
 		self._token = PULSE_CONTEXT.set(self)

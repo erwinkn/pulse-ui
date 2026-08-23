@@ -5,7 +5,13 @@ import httpx
 import pulse as ps
 import pytest
 from pulse import forms
+from pulse.forms import internal_forms_hook
+from pulse.hooks.core import HookContext
+from pulse.reactive import Signal
+from pulse.render_session import RenderSession
+from pulse.routing import Route, RouteContext, RouteInfo, RouteTree
 from pulse.serializer import serialize
+from pulse.user_session import UserSession
 from starlette.datastructures import FormData as StarletteFormData
 from starlette.datastructures import UploadFile
 
@@ -176,3 +182,107 @@ async def test_invalid_structured_form_payload_returns_400(
 		assert not submitted
 	finally:
 		await app.close()
+
+
+def make_form_context():
+	@ps.component
+	def Page():
+		return ps.div()
+
+	route = Route("/", Page)
+	render = RenderSession(
+		"test", RouteTree([route]), server_address="http://testserver"
+	)
+	app = ps.App(routes=[route])
+	route_info: RouteInfo = {
+		"pathname": "/",
+		"hash": "",
+		"query": "",
+		"queryParams": {},
+		"pathParams": {},
+		"catchall": [],
+	}
+	route_ctx = RouteContext(route_info, route, render)
+	session = UserSession("test-session", {}, app)
+	return app, render, session, route_ctx
+
+
+async def noop_submit(_data: forms.FormData) -> None:
+	return None
+
+
+def test_form_survives_failed_render():
+	"""A render that raises before ps.Form must keep the form registered."""
+	app, render, session, route_ctx = make_form_context()
+	ctx = HookContext()
+	fail = Signal(False)
+	instances: list[forms.ManualForm] = []
+
+	@ps.component
+	def Comp():
+		if fail():
+			raise RuntimeError("transient")
+		node = ps.Form(key="f", onSubmit=noop_submit)
+		instances.append(internal_forms_hook().forms["f"])
+		return node
+
+	with ps.PulseContext(app=app, session=session, render=render, route=route_ctx):
+		with ctx:
+			Comp.fn()  # type: ignore[attr-defined]
+		first = instances[0]
+		registration_id = first.registration.id
+
+		fail.write(True)
+		with pytest.raises(RuntimeError, match="transient"), ctx:
+			Comp.fn()  # type: ignore[attr-defined]
+
+		# Client still displays the form, so its handler must stay registered.
+		assert registration_id in render.forms._handlers  # pyright: ignore[reportPrivateUsage]
+
+		fail.write(False)
+		with ctx:
+			Comp.fn()  # type: ignore[attr-defined]
+
+		assert instances[1] is first
+		assert first.registration.id == registration_id
+
+	session.dispose()
+
+
+def test_form_disposed_by_first_successful_render_after_failure():
+	"""A form genuinely dropped by the next successful render is still disposed."""
+	app, render, session, route_ctx = make_form_context()
+	ctx = HookContext()
+	fail = Signal(False)
+	show = Signal(True)
+	instances: list[forms.ManualForm] = []
+
+	@ps.component
+	def Comp():
+		if fail():
+			raise RuntimeError("transient")
+		if not show():
+			return ps.div()
+		node = ps.Form(key="f", onSubmit=noop_submit)
+		instances.append(internal_forms_hook().forms["f"])
+		return node
+
+	with ps.PulseContext(app=app, session=session, render=render, route=route_ctx):
+		with ctx:
+			Comp.fn()  # type: ignore[attr-defined]
+		registration_id = instances[0].registration.id
+
+		fail.write(True)
+		with pytest.raises(RuntimeError, match="transient"), ctx:
+			Comp.fn()  # type: ignore[attr-defined]
+
+		fail.write(False)
+		show.write(False)
+		with ctx:
+			Comp.fn()  # type: ignore[attr-defined]
+
+		assert registration_id not in render.forms._handlers  # pyright: ignore[reportPrivateUsage]
+		with pytest.raises(ValueError, match="disposed"):
+			_ = instances[0].registration
+
+	session.dispose()

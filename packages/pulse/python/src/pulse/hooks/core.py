@@ -96,11 +96,14 @@ class HookState(ResourceOwner):
 		"""
 		self.render_cycle = render_cycle
 
-	def on_render_end(self, render_cycle: int) -> None:
+	def on_render_end(self, render_cycle: int, error: BaseException | None) -> None:
 		"""Called after the component render has completed.
 
 		Args:
 			render_cycle: The current render cycle number.
+			error: Exception that aborted the render, or None if it succeeded.
+				A failed render only reached part of its hook calls, so
+				per-render bookkeeping must not be treated as complete.
 		"""
 		...
 
@@ -186,9 +189,9 @@ class HookNamespace(Generic[T]):
 		for state in self.states.values():
 			state.on_render_start(render_cycle)
 
-	def on_render_end(self, render_cycle: int):
+	def on_render_end(self, render_cycle: int, error: BaseException | None):
 		for state in self.states.values():
-			state.on_render_end(render_cycle)
+			state.on_render_end(render_cycle, error)
 
 	def ensure(self, ctx: "HookContext", key: str | None) -> T:
 		normalized = self._normalize_key(key)
@@ -267,7 +270,7 @@ class HookContext:
 			HOOK_CONTEXT.reset(self._token)
 			self._token = None
 			for namespace in self.namespaces.values():
-				namespace.on_render_end(self.render_cycle)
+				namespace.on_render_end(self.render_cycle, exc_val)
 		return False
 
 	def namespace_for(self, hook: Hook[T]) -> HookNamespace[T]:

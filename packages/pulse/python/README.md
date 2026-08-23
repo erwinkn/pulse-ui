@@ -37,6 +37,7 @@ src/pulse/
 ├── vdom.py             # VDOM node types (Element, Component, Node)
 ├── renderer.py         # VDOM rendering and diffing
 ├── render_session.py   # Per-browser session, manages mounted routes
+├── url.py              # Session URL + QueryParam Signal slots
 ├── reactive.py         # Signal/Computed/Effect primitives
 ├── reactive_extensions.py  # ReactiveList, ReactiveDict, ReactiveSet
 ├── state.py            # State management

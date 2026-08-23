@@ -39,6 +39,7 @@ VITE_PLUGIN_TIMEOUT = 15.0
 VITE_LISTENING_TIMEOUT = 30.0
 
 Wait = Literal["shutdown", "changed", "backend", "web", "ready"]
+BackendStart = Literal["ready", "failed", "changed"]
 
 
 @dataclass(slots=True)
@@ -145,8 +146,8 @@ class DevSupervisor:
 					break
 				if self._web_code is not None:
 					return self._web_code
-				if not started:
-					if not self.changed.is_set():
+				if started != "ready":
+					if started == "failed":
 						print(
 							"Backend failed to start. Waiting for changes to retry...",
 							flush=True,
@@ -208,7 +209,7 @@ class DevSupervisor:
 		self._backend_code = code
 		self._backend_exit.set()
 
-	async def _replace_backend(self) -> bool:
+	async def _replace_backend(self) -> BackendStart:
 		await self._stop(self.backend)
 		self.backend = None
 		self._backend_gen += 1
@@ -217,7 +218,7 @@ class DevSupervisor:
 		self._backend_ready.clear()
 		self._backend_code = None
 		if self.shutdown.is_set():
-			return False
+			return "changed"
 		env = dict(self.backend_spec.env)
 		env[ENV_PULSE_LISTEN_FDS] = ",".join(
 			f"{listener.family}:{listener.fileno()}" for listener in self.listeners
@@ -261,10 +262,10 @@ class DevSupervisor:
 				extra=waiter,
 			)
 			if result == "ready":
-				return True
+				return "ready"
 			await self._stop(self.backend)
 			self.backend = None
-			return False
+			return "changed" if result == "changed" else "failed"
 		finally:
 			if not waiter.done():
 				waiter.cancel()

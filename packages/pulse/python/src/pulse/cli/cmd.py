@@ -226,9 +226,7 @@ def run(
 			raise typer.Exit(1) from None
 		web_cmd = build_web_command(
 			web_root=web_root,
-			extra_args=(
-				[*web_args, "--host", web_host] if supervised_reload else web_args
-			),
+			extra_args=([*web_args, "--host", web_host]),
 			port=web_port,
 			strict_port=True,
 			mode=app_instance.env,

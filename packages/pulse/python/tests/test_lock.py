@@ -30,18 +30,24 @@ def test_process_liveness_probe_does_not_terminate_live_process():
 	assert not is_process_alive(proc.pid)
 
 
-def test_windows_interrupt_ignores_process_exiting_during_terminate(
+@pytest.mark.parametrize(
+	"wait_result",
+	[lock_mod.WAIT_OBJECT_0, lock_mod.WAIT_FAILED],
+)
+def test_windows_interrupt_handles_terminate_race(
 	monkeypatch: pytest.MonkeyPatch,
+	wait_result: int,
 ) -> None:
 	class Kernel32:
-		def OpenProcess(self, *_args: object) -> int:
+		def OpenProcess(self, access: int, *_args: object) -> int:
+			assert access == lock_mod.PROCESS_TERMINATE | lock_mod.PROCESS_SYNCHRONIZE
 			return 1
 
 		def TerminateProcess(self, _handle: int, _code: int) -> bool:
 			return False
 
 		def WaitForSingleObject(self, _handle: int, _timeout: int) -> int:
-			return lock_mod.WAIT_OBJECT_0
+			return wait_result
 
 		def CloseHandle(self, _handle: int) -> bool:
 			return True
@@ -55,7 +61,11 @@ def test_windows_interrupt_ignores_process_exiting_during_terminate(
 		raising=False,
 	)
 
-	lock_mod._interrupt_process(123)  # pyright: ignore[reportPrivateUsage]
+	if wait_result == lock_mod.WAIT_OBJECT_0:
+		lock_mod._interrupt_process(123)  # pyright: ignore[reportPrivateUsage]
+	else:
+		with pytest.raises(RuntimeError, match="Permission denied"):
+			lock_mod._interrupt_process(123)  # pyright: ignore[reportPrivateUsage]
 
 
 def test_create_lock_round_trips_typed_info(tmp_path: Path):

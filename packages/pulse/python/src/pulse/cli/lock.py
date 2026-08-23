@@ -27,6 +27,7 @@ ERROR_ACCESS_DENIED = 5
 ERROR_INVALID_PARAMETER = 87
 WAIT_OBJECT_0 = 0
 WAIT_TIMEOUT = 0x102
+WAIT_FAILED = 0xFFFFFFFF
 
 
 def _kernel32() -> Any:
@@ -231,7 +232,9 @@ def _interrupt_process(pid: int) -> None:
 		import ctypes
 
 		kernel32 = _kernel32()
-		handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+		handle = kernel32.OpenProcess(
+			PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, False, pid
+		)
 		if not handle:
 			error = ctypes.get_last_error()
 			if error == ERROR_INVALID_PARAMETER:
@@ -247,7 +250,7 @@ def _interrupt_process(pid: int) -> None:
 			if not kernel32.TerminateProcess(handle, 1):
 				error = ctypes.get_last_error()
 				if error == ERROR_ACCESS_DENIED:
-					if kernel32.WaitForSingleObject(handle, 0) != WAIT_TIMEOUT:
+					if kernel32.WaitForSingleObject(handle, 0) == WAIT_OBJECT_0:
 						return
 					raise RuntimeError(
 						f"Permission denied interrupting Pulse process {pid}."

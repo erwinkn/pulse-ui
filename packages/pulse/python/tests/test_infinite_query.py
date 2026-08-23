@@ -1731,7 +1731,7 @@ async def test_infinite_query_result_dispose_cancels_in_flight_fetch():
 		async def data(self, page_param: int) -> str:
 			fetch_log.append("started")
 			fetch_started.set()
-			await asyncio.sleep(0.02)  # Long running fetch
+			await asyncio.sleep(slow_delay(0.05))  # Long running fetch
 			fetch_log.append("completed")
 			return f"result-{page_param}"
 

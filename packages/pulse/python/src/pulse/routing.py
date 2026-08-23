@@ -563,7 +563,7 @@ class RouteContext:
 		self.render = render
 		# The session, not the mount, owns URL-derived state (query param
 		# bindings outlive any single mount).
-		render.set_url(info)
+		render.url.apply(info)
 
 	def update(self, info: RouteInfo) -> None:
 		"""Update the route info with new values.
@@ -572,7 +572,7 @@ class RouteContext:
 			info: New route info to apply.
 		"""
 		self.info.update(info)
-		self.render.set_url(info)
+		self.render.url.apply(info)
 
 	@property
 	def pathname(self) -> str:

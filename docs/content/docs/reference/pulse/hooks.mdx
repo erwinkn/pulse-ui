@@ -56,7 +56,8 @@ def user_profile(user_id):
 - Key must be non-empty string if provided
 - Can only be called once per render at the same location or with the same key
 - Factory is only called on first render; subsequent renders return cached instance
-- State is disposed when component unmounts or when key changes
+- State is disposed when the component unmounts, the key changes, or the call is skipped (e.g. a false conditional)
+- A render that raises disposes nothing: it only reached part of its `ps.state` calls
 
 ---
 
@@ -167,7 +168,7 @@ state = ps.setup(lambda: CounterState())
 
 ## effect (inline)
 
-When `@ps.effect` is used inside a component, effects are automatically registered and cached by code location.
+When `@ps.effect` is used inside a component, effects are automatically registered and cached by code location. Each run (and cleanup) re-enters the creating render session and that mount's `RouteContext`.
 
 ```python
 @ps.effect
@@ -625,7 +626,7 @@ class HookState(Resource):
     resources: ResourceScope  # owns this hook state's resources
 
     def on_render_start(self, render_cycle: int) -> None: ...
-    def on_render_end(self, render_cycle: int) -> None: ...
+    def on_render_end(self, render_cycle: int, error: BaseException | None) -> None: ...
     def on_dispose(self) -> None: ...
 ```
 

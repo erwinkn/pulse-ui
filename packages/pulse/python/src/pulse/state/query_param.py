@@ -4,7 +4,6 @@ Query parameter bindings for State properties.
 
 import sys
 import warnings
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from types import UnionType
@@ -19,25 +18,17 @@ from typing import (
 	get_origin,
 	override,
 )
-from urllib.parse import urlencode
 
 from pulse.context import PulseContext
 from pulse.helpers import values_equal
-from pulse.messages import ServerNavigateToMessage
-from pulse.reactive import Effect, Scope, Signal, Untrack
+from pulse.reactive import Signal
 from pulse.reactive_extensions import reactive, unwrap
-from pulse.resources import (
-	Resource,
-	ResourceOwner,
-	ResourceScope,
-	suspend_resource_scope,
-)
-from pulse.state.property import InitializableProperty, StateProperty
+from pulse.resources import ResourceScope
+from pulse.state.property import StateProperty
 
 T = TypeVar("T")
 
 if TYPE_CHECKING:
-	from pulse.render_session import RenderSession
 	from pulse.state.state import State
 
 
@@ -229,7 +220,7 @@ def _parse_query_param_scalar(raw: str, *, codec: QueryParamCodec, param: str) -
 	raise TypeError(f"Unsupported QueryParam codec '{codec.kind}'")
 
 
-def _parse_query_param_value(
+def parse_query_param_value(
 	raw: str | None,
 	*,
 	default: Any,
@@ -237,6 +228,10 @@ def _parse_query_param_value(
 	param: str,
 ) -> Any:
 	if raw is None:
+		if codec.kind == "list" and isinstance(default, list):
+			# The default is shared by every declaration of this param, so hand
+			# out a copy: an in-place mutation must not rewrite the default.
+			return reactive(list(cast(list[Any], default)))
 		return default
 	if raw == "" and codec.optional:
 		return None
@@ -286,7 +281,7 @@ def _serialize_query_param_scalar(
 	raise TypeError(f"Unsupported QueryParam codec '{codec.kind}'")
 
 
-def _serialize_query_param_value(
+def serialize_query_param_value(
 	value: Any,
 	*,
 	default: Any,
@@ -335,7 +330,7 @@ def extract_query_param(annotation: Any) -> tuple[Any, bool]:
 	return annotation, False
 
 
-class QueryParamProperty(StateProperty, InitializableProperty):
+class QueryParamProperty(StateProperty):
 	value_type: Any
 	param_name: str
 	codec: QueryParamCodec
@@ -358,253 +353,26 @@ class QueryParamProperty(StateProperty, InitializableProperty):
 		super().__set_name__(owner, name)
 		self.param_name = name
 
+	@override
+	def _get_signal(self, obj: Any) -> Signal[Any]:
+		# Raw slots are session-owned and outlive the states bound to them, so a
+		# disposed state still reads and writes the live slot. Same as a plain
+		# StateProperty, whose Signal also survives disposal: disposal releases
+		# effects, it does not poison attribute access. The typed view, on the
+		# other hand, belongs to the declaring state's scope and is dropped with
+		# it once no other state declares the same codec and default.
+		ctx = PulseContext.get()
+		if ctx.render is None:
+			raise RuntimeError(
+				"QueryParam properties require a render context. Create the state inside a component render."
+			)
+		scope: ResourceScope | None = obj._resource_scope
+		return ctx.render.url.param(
+			self.param_name,
+			self.codec,
+			self.default_value,
+			owner=None if scope is None or scope.__disposed__ else scope,
+		)
+
 	def hydrate(self, state: "State") -> None:
-		ctx = PulseContext.get()
-		if ctx.render is None:
-			raise RuntimeError(
-				"QueryParam properties require a render context. Create the state inside a component render."
-			)
-		raw = ctx.render.url["queryParams"].get(self.param_name)
-		value = _parse_query_param_value(
-			raw,
-			default=self.default_value,
-			codec=self.codec,
-			param=self.param_name,
-		)
-		self.__set__(state, value)
-
-	@override
-	def initialize(self, state: "State", name: str) -> "QueryParamRegistration":
-		ctx = PulseContext.get()
-		if ctx.render is None:
-			raise RuntimeError(
-				"QueryParam properties require a render context. Create the state inside a component render."
-			)
-		sync = ctx.render.query_param_sync
-		registration = sync.register(state, name, self)
-		setattr(state, f"_query_param_reg_{name}", registration)
-		return registration
-
-
-@dataclass(eq=False)
-class QueryParamBinding:
-	param: str
-	state: "State"
-	prop: QueryParamProperty
-	attr_name: str
-	route_path: str | None
-
-	def signal(self) -> Signal[Any]:
-		return self.prop.get_signal(self.state)
-
-	def default(self) -> Any:
-		return self.prop.default_value
-
-	def codec(self) -> QueryParamCodec:
-		return self.prop.codec
-
-
-class QueryParamRegistration(Resource):
-	_sync: "QueryParamSync"
-	_binding: QueryParamBinding
-
-	def __init__(self, sync: "QueryParamSync", binding: QueryParamBinding) -> None:
-		self._sync = sync
-		self._binding = binding
-
-	def prime(self) -> None:
-		self._sync.prime()
-
-	@override
-	def dispose(self) -> None:
-		self._sync.unregister(self._binding)
-
-
-class QueryParamSync(ResourceOwner):
-	"""Two-way sync between `QueryParam` state properties and the session URL.
-
-	Owned by the `RenderSession`, not by a mount: a binding lives as long as
-	the state that declared it, so a session-scoped state keeps syncing across
-	in-app navigation.
-
-	Bindings for one param name form a stack. The most recent registration owns
-	the URL; earlier ones still follow the URL but no longer write to it. This
-	tolerates the transient overlap during client-side navigation, where the
-	incoming route's states are created (via prerender) while the outgoing
-	route is still mounted. Two states of the *same* route claiming one param
-	is still an error.
-	"""
-
-	render: "RenderSession"
-	_bindings: dict[str, list[QueryParamBinding]]
-	_route_effect: Effect | None
-	_state_effect: Effect | None
-
-	def __init__(self, render: "RenderSession") -> None:
-		self.render = render
-		self._bindings = {}
-		self._route_effect = None
-		self._state_effect = None
-		self._resource_scope: ResourceScope | None = ResourceScope(
-			label="QueryParamSync"
-		)
-
-	def register(
-		self, state: "State", attr_name: str, prop: QueryParamProperty
-	) -> QueryParamRegistration:
-		param = prop.param_name
-		if not param:
-			raise RuntimeError("QueryParam param name was not resolved")
-		ctx = PulseContext.get()
-		route_path = ctx.route.route_path if ctx.route is not None else None
-		stack = self._bindings.get(param)
-		if stack is None:
-			stack = []
-		elif any(existing.route_path == route_path for existing in stack):
-			raise ValueError(f"QueryParam '{param}' is already bound in this route")
-		binding = QueryParamBinding(
-			param=param,
-			state=state,
-			prop=prop,
-			attr_name=attr_name,
-			route_path=route_path,
-		)
-		stack.append(binding)
-		self._bindings[param] = stack
-		self._ensure_effects()
-		return QueryParamRegistration(self, binding)
-
-	def unregister(self, binding: QueryParamBinding) -> None:
-		stack = self._bindings.get(binding.param)
-		if stack is None or binding not in stack:
-			return
-		was_owner = stack[-1] is binding
-		stack.remove(binding)
-		if not stack:
-			del self._bindings[binding.param]
-		if not self._bindings:
-			if self._route_effect:
-				self._route_effect.dispose()
-				self._route_effect = None
-			if self._state_effect:
-				self._state_effect.dispose()
-				self._state_effect = None
-			return
-		if was_owner and self._state_effect is not None:
-			# Ownership moved to the previous binding: re-run so the state
-			# effect tracks the restored binding's signal. The restored binding
-			# has been following the URL all along, so this normally finds
-			# nothing to write and emits no navigation.
-			if self._route_effect is not None:
-				self._route_effect.run()
-			self._state_effect.run()
-
-	def _ensure_effects(self) -> None:
-		if self._route_effect is None or self._state_effect is None:
-			with suspend_resource_scope(), Scope():
-				if self._route_effect is None:
-					self._route_effect = Effect(
-						self._sync_from_route,
-						name="QueryParamSync:route",
-						lazy=True,
-					)
-					self.resources.own(self._route_effect)
-				if self._state_effect is None:
-					self._state_effect = Effect(
-						self._sync_to_route,
-						name="QueryParamSync:state",
-						lazy=True,
-					)
-					self.resources.own(self._state_effect)
-
-	def prime(self) -> None:
-		if self._route_effect and self._route_effect.runs == 0:
-			self._route_effect.run()
-		if self._state_effect:
-			self._state_effect.run()
-
-	def _active_bindings(self) -> list[QueryParamBinding]:
-		"""The binding that owns the URL for each param name."""
-		return [stack[-1] for stack in self._bindings.values() if stack]
-
-	def _apply_route_to_binding(self, binding: QueryParamBinding) -> None:
-		query_params = self.render.url["queryParams"]
-		raw = query_params.get(binding.param)
-		parsed = _parse_query_param_value(
-			raw,
-			default=binding.default(),
-			codec=binding.codec(),
-			param=binding.param,
-		)
-		signal = binding.signal()
-		current = signal.value
-		if values_equal(current, parsed):
-			return
-		binding.prop.__set__(binding.state, parsed)
-
-	def _sync_from_route(self) -> None:
-		_ = self.render.url["queryParams"]
-		if self._route_effect and self._route_effect.runs == 0:
-			return
-		# Every binding follows the URL, including displaced ones whose state is
-		# still mounted; only writing back to the URL is exclusive.
-		for stack in self._bindings.values():
-			for binding in stack:
-				self._apply_route_to_binding(binding)
-
-	def _sync_to_route(self) -> None:
-		with Untrack():
-			url = self.render.url
-			current_params = dict(cast(Mapping[str, str], url["queryParams"]))
-			pathname = url["pathname"]
-			hash_frag = url["hash"]
-		if not pathname:
-			# No route info yet: nothing to navigate relative to.
-			return
-		query_params = dict(current_params)
-		for binding in self._active_bindings():
-			signal = binding.signal()
-			value = signal.read()
-			codec = binding.codec()
-			if codec.kind == "list" and value is not None:
-				value = unwrap(value)
-			serialized = _serialize_query_param_value(
-				value,
-				default=binding.default(),
-				codec=codec,
-				param=binding.param,
-			)
-			if serialized is None:
-				query_params.pop(binding.param, None)
-			else:
-				query_params[binding.param] = serialized
-
-		if query_params == current_params:
-			return
-		path = pathname
-		query = urlencode(query_params)
-		if query:
-			path += "?" + query
-		if hash_frag:
-			if hash_frag.startswith("#"):
-				path += hash_frag
-			else:
-				path += "#" + hash_frag
-		# Session-scoped, so the navigation is not bound to a route mount: the
-		# only staleness question is whether the URL it was built from is still
-		# the one on screen. `sourcePath` alone expresses exactly that.
-		self.render.send(
-			ServerNavigateToMessage(
-				type="navigate_to",
-				path=path,
-				replace=True,
-				hard=False,
-				sourcePath=pathname,
-			)
-		)
-
-	@override
-	def on_dispose(self) -> None:
-		self._route_effect = None
-		self._state_effect = None
-		self._bindings.clear()
+		self._get_signal(state)

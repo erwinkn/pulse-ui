@@ -100,6 +100,8 @@ class TrackerState(ps.State):
             self.results = await api.search(self.query)
 ```
 
+Created under a render session, the effect re-enters that session on every run (and cleanup). Mount-local `ps.state` resolves the creating route generation: live or replayed-and-reattached mounts use the current route, detached grace-window mounts are stale for navigation, and gone or replaced mounts run route-free. `ps.global_state` does not use a route, and nested states created in its factory remain session-scoped and route-free.
+
 ### Cleanup Pattern
 
 Return a cleanup function from effects:
@@ -116,6 +118,8 @@ class SubscriptionState(ps.State):
     def handle_event(self, data):
         print(f"Received: {data}")
 ```
+
+Async cleanups are awaited by async effects and scheduled by synchronous cleanup paths.
 
 ### Effect Options
 
@@ -278,7 +282,7 @@ def ItemList():
 
 ### Disposal
 
-Component-owned state is disposed when its owning hook is replaced or the component unmounts. Global state remains alive until its render session closes. A state owns the resources (effects, nested states) created in its constructor, plus any unowned resource assigned to one of its attributes later (e.g. `self._poller = Effect(...)` from an event handler); disposing the state disposes them all. Assigning over an owned resource disposes the replaced one. Override `on_dispose()` for cleanup beyond that (`dispose()` itself cannot be overridden):
+Component-owned state is disposed when its owning hook is replaced, a `ps.state` key changes, the `ps.state` call is skipped, or the component unmounts. Global state remains alive until its render session closes. A state owns the resources (effects, nested states) created in its constructor, plus any unowned resource assigned to one of its attributes later (e.g. `self._poller = Effect(...)` from an event handler); disposing the state disposes them all. Assigning over an owned resource disposes the replaced one. Override `on_dispose()` for cleanup beyond that (`dispose()` itself cannot be overridden):
 
 ```python
 class ConnectionState(ps.State):

@@ -213,7 +213,7 @@ def ConditionalDemo():
         show = ps.Signal(True)
 
     if show():
-        counter = ps.state(CounterState())  # Cached even when hidden
+        counter = ps.state(CounterState())  # Disposed when hidden
     else:
         counter = None
 
@@ -223,7 +223,7 @@ def ConditionalDemo():
     )
 ```
 
-States in conditionals are not disposed when condition becomes false - they remain cached.
+States skipped this render (false conditional, or a key that is no longer used) are disposed. Same rule as `@ps.effect`. A render that raises disposes nothing — only successful renders evict.
 
 ## ps.stable()
 
@@ -279,7 +279,7 @@ value = config_ref()  # Call to get current value
 
 ## Inline @ps.effect
 
-Effects inside component functions. Auto-registered during render.
+Effects inside component functions. Auto-registered during render. Each run (and cleanup) re-enters the creating render session and resolves the creating mount generation. Live and replayed-and-reattached generations provide the current `RouteContext`; detached grace-window generations are stale for navigation; gone or replaced generations run route-free.
 
 ```python
 @ps.component
@@ -294,6 +294,8 @@ def Logger():
 
     return ps.div(...)
 ```
+
+Async cleanups are awaited in async paths and scheduled when invoked from synchronous cleanup paths.
 
 **key parameter for loops:**
 ```python

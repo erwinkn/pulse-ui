@@ -12,6 +12,7 @@ from enum import IntEnum
 from types import SimpleNamespace
 from typing import Any, get_type_hints, override
 
+from pulse.context import PulseContext
 from pulse.reactive import Computed, Effect, Scope, Signal
 from pulse.reactive_extensions import ReactiveProperty
 from pulse.resources import (
@@ -32,7 +33,6 @@ from pulse.state.property import (
 from pulse.state.query_param import (
 	QueryParam,
 	QueryParamProperty,
-	QueryParamRegistration,
 	extract_query_param,
 )
 
@@ -278,10 +278,19 @@ class State(ResourceOwner, metaclass=StateMeta):
 		if resources is None:
 			raise RuntimeError("State construction requires an active ResourceScope")
 		instance._resource_scope = resources
-		for _, attr in instance._initializable_properties():
-			if isinstance(attr, QueryParamProperty):
-				attr.hydrate(instance)
+		for attr in instance._query_param_properties():
+			attr.hydrate(instance)
 		return instance
+
+	def _query_param_properties(self) -> Iterator[QueryParamProperty]:
+		for cls in self.__class__.__mro__:
+			if cls is State or cls is ABC:
+				continue
+			for name, attr in cls.__dict__.items():
+				if getattr(self.__class__, name, attr) is not attr:
+					continue
+				if isinstance(attr, QueryParamProperty):
+					yield attr
 
 	def _initializable_properties(
 		self,
@@ -309,16 +318,14 @@ class State(ResourceOwner, metaclass=StateMeta):
 		resource_scope = current_resource_scope()
 		if resource_scope is None:
 			raise RuntimeError("State initialization requires an active ResourceScope")
-		query_param_registration = None
 		with Scope():
 			for name, attr in self._initializable_properties():
 				resource = attr.initialize(self, name)
 				if isinstance(resource, Resource):
 					resource_scope.own(resource)
-				if isinstance(resource, QueryParamRegistration):
-					query_param_registration = resource
-		if query_param_registration is not None:
-			query_param_registration.prime()
+		ctx = PulseContext.get()
+		if ctx.render is not None and any(self._query_param_properties()):
+			ctx.render.url.prime()
 
 		setattr(self, STATE_STATUS_FIELD, StateStatus.INITIALIZED)
 
@@ -422,7 +429,13 @@ class State(ResourceOwner, metaclass=StateMeta):
 					continue
 				if isinstance(value, ReactiveProperty):
 					seen.add(name)
-					prop_value = getattr(self, name)
+					try:
+						prop_value = getattr(self, name)
+					except RuntimeError:
+						# URL-synced fields live on the session URL and are only
+						# readable under a render session. A repr must not raise.
+						props.append(f"{name}=<unavailable>")
+						continue
 					props.append(f"{name}={prop_value!r}")
 
 		# Include ComputedProperty values from MRO

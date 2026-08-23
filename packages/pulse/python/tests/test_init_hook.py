@@ -526,7 +526,8 @@ def test_init_key_change_disposes_query_param_state_before_replacement() -> None
 	assert effects[0].__disposed__
 	assert second.dispose_calls == 0
 	assert not effects[1].__disposed__
-	assert second.q == "hello"
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		assert second.q == "hello"
 	assert events == ["run:first", "cleanup:first", "run:second"]
 
 	ctx.unmount()

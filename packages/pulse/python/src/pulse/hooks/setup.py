@@ -4,7 +4,8 @@ from collections.abc import Callable
 from typing import Any, ParamSpec, TypeVar, cast, override
 
 from pulse.hooks.core import HookMetadata, HookState, hooks
-from pulse.reactive import Effect, Scope, Signal
+from pulse.hooks.lifecycle import InitializationScope
+from pulse.reactive import Signal
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -21,7 +22,7 @@ class SetupState(HookState):
 		initialized: Whether setup has been called at least once.
 		args: List of signals tracking positional argument values.
 		kwargs: Dict of signals tracking keyword argument values.
-		effects: List of effects created during setup execution.
+		scope: Resources created during setup execution.
 		key: Optional key for re-initialization control.
 	"""
 
@@ -30,7 +31,7 @@ class SetupState(HookState):
 		"initialized",
 		"args",
 		"kwargs",
-		"effects",
+		"scope",
 		"key",
 		"_called",
 		"_pending_key",
@@ -44,7 +45,7 @@ class SetupState(HookState):
 		self.initialized = False
 		self.args: list[Signal[Any]] = []
 		self.kwargs: dict[str, Signal[Any]] = {}
-		self.effects: list[Effect] = []
+		self.scope: InitializationScope | None = None
 		self.key: str | None = None
 		self._called = False
 		self._pending_key: str | None = None
@@ -62,10 +63,16 @@ class SetupState(HookState):
 		kwargs: dict[str, Any],
 		key: str | None,
 	) -> Any:
-		self.dispose_effects()
-		with Scope() as scope:
-			self.value = init_func(*args, **kwargs)
-			self.effects = list(scope.effects)
+		self.dispose_scope()
+		self.value = None
+		self.initialized = False
+		self.key = None
+		scope = InitializationScope(label="ps.setup")
+		with scope:
+			value = init_func(*args, **kwargs)
+		self.resources.own(scope)
+		self.value = value
+		self.scope = scope
 		self.args = [Signal(arg) for arg in args]
 		self.kwargs = {name: Signal(value) for name, value in kwargs.items()}
 		self.initialized = True
@@ -103,14 +110,14 @@ class SetupState(HookState):
 		for name, value in kwargs.items():
 			self.kwargs[name].write(value)
 
-	def dispose_effects(self) -> None:
-		for effect in self.effects:
-			effect.dispose()
-		self.effects = []
+	def dispose_scope(self) -> None:
+		if self.scope is not None and not self.scope.__disposed__:
+			self.scope.dispose()
+		self.scope = None
 
 	@override
-	def dispose(self) -> None:
-		self.dispose_effects()
+	def on_dispose(self) -> None:
+		self.dispose_scope()
 		self.args = []
 		self.kwargs = {}
 		self.value = None

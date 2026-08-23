@@ -23,6 +23,7 @@ from pulse.context import PulseContext
 from pulse.helpers import values_equal
 from pulse.reactive import Signal
 from pulse.reactive_extensions import reactive, unwrap
+from pulse.resources import ResourceScope
 from pulse.state.property import StateProperty
 
 T = TypeVar("T")
@@ -354,16 +355,24 @@ class QueryParamProperty(StateProperty):
 
 	@override
 	def _get_signal(self, obj: Any) -> Signal[Any]:
-		# Slots are session-owned and outlive the states bound to them, so a
+		# Raw slots are session-owned and outlive the states bound to them, so a
 		# disposed state still reads and writes the live slot. Same as a plain
 		# StateProperty, whose Signal also survives disposal: disposal releases
-		# effects, it does not poison attribute access.
+		# effects, it does not poison attribute access. The typed view, on the
+		# other hand, belongs to the declaring state's scope and is dropped with
+		# it once no other state declares the same codec and default.
 		ctx = PulseContext.get()
 		if ctx.render is None:
 			raise RuntimeError(
 				"QueryParam properties require a render context. Create the state inside a component render."
 			)
-		return ctx.render.url.param(self.param_name, self.codec, self.default_value)
+		scope: ResourceScope | None = obj._resource_scope
+		return ctx.render.url.param(
+			self.param_name,
+			self.codec,
+			self.default_value,
+			owner=None if scope is None or scope.__disposed__ else scope,
+		)
 
 	def hydrate(self, state: "State") -> None:
 		self._get_signal(state)

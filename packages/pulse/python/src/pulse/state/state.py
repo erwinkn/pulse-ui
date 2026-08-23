@@ -13,9 +13,15 @@ from types import SimpleNamespace
 from typing import Any, get_type_hints, override
 
 from pulse.context import PulseContext
-from pulse.helpers import Disposable
 from pulse.reactive import Computed, Effect, Scope, Signal
 from pulse.reactive_extensions import ReactiveProperty
+from pulse.resources import (
+	OWNERSHIP_INTERNAL_ATTRS,
+	Resource,
+	ResourceOwner,
+	ResourceScope,
+	current_resource_scope,
+)
 from pulse.state.property import (
 	MEMBER_CACHE_ATTR,
 	ComputedProperty,
@@ -24,7 +30,11 @@ from pulse.state.property import (
 	StateMemberDescriptor,
 	StateProperty,
 )
-from pulse.state.query_param import QueryParam, QueryParamProperty, extract_query_param
+from pulse.state.query_param import (
+	QueryParam,
+	QueryParamProperty,
+	extract_query_param,
+)
 
 
 class StateMeta(ABCMeta):
@@ -152,14 +162,13 @@ class StateMeta(ABCMeta):
 
 	@override
 	def __call__(cls, *args: Any, **kwargs: Any):
-		# Create the instance (runs __new__ and the class' __init__)
-		instance = super().__call__(*args, **kwargs)
-		# Ensure state effects are initialized even if user __init__ skipped super().__init__
-		try:
-			initializer = instance._initialize
-		except AttributeError:
-			return instance
-		initializer()
+		outer_scope = current_resource_scope()
+		resources = ResourceScope(label=cls.__name__)
+		with resources:
+			instance = super().__call__(*args, **kwargs)
+			instance._initialize()
+		if outer_scope is not None:
+			outer_scope.own(instance)
 		return instance
 
 
@@ -172,7 +181,7 @@ class StateStatus(IntEnum):
 STATE_STATUS_FIELD = "__pulse_status__"
 
 
-class State(Disposable, metaclass=StateMeta):
+class State(ResourceOwner, metaclass=StateMeta):
 	"""
 	Base class for reactive state objects.
 
@@ -213,7 +222,24 @@ class State(Disposable, metaclass=StateMeta):
 			or getattr(self, STATE_STATUS_FIELD, StateStatus.UNINITIALIZED)
 			== StateStatus.INITIALIZING
 		):
+			old = self.__dict__.get(name)
 			super().__setattr__(name, value)
+			# Attribute assignment is the ownership mechanism: a Resource
+			# stored on the state (in its __dict__, not routed to a
+			# descriptor) is adopted by the state's scope, and an owned
+			# resource replaced by the write is disposed. The ownership
+			# system's own bookkeeping attributes are exempt.
+			if name in OWNERSHIP_INTERNAL_ATTRS:
+				return
+			if value is old or self.__dict__.get(name) is not value:
+				return
+			scope = self._resource_scope
+			if scope is None or value is scope:
+				return
+			if isinstance(value, Resource) and not value.__disposed__:
+				scope.adopt(value)
+			if isinstance(old, Resource) and not old.__disposed__ and scope.owns(old):
+				old.dispose()
 			return
 
 		# Route reactive properties through their descriptor
@@ -246,10 +272,12 @@ class State(Disposable, metaclass=StateMeta):
 			+ " = <value>'"
 		)
 
-	_scope: Scope
-
 	def __new__(cls, *args: Any, **kwargs: Any):
 		instance = super().__new__(cls)
+		resources = current_resource_scope()
+		if resources is None:
+			raise RuntimeError("State construction requires an active ResourceScope")
+		instance._resource_scope = resources
 		for attr in instance._query_param_properties():
 			attr.hydrate(instance)
 		return instance
@@ -287,10 +315,14 @@ class State(Disposable, metaclass=StateMeta):
 			)
 		setattr(self, STATE_STATUS_FIELD, StateStatus.INITIALIZING)
 
-		self._scope = Scope()
-		with self._scope:
+		resource_scope = current_resource_scope()
+		if resource_scope is None:
+			raise RuntimeError("State initialization requires an active ResourceScope")
+		with Scope():
 			for name, attr in self._initializable_properties():
-				attr.initialize(self, name)
+				resource = attr.initialize(self, name)
+				if isinstance(resource, Resource):
+					resource_scope.own(resource)
 		ctx = PulseContext.get()
 		if ctx.render is not None and any(self._query_param_properties()):
 			ctx.render.url.prime()
@@ -369,43 +401,18 @@ class State(Disposable, metaclass=StateMeta):
 				if effect is not None:
 					yield effect
 
+	@override
 	def on_dispose(self) -> None:
 		"""
 		Override this method to run cleanup code when the state is disposed.
 
-		This is called automatically when `dispose()` is called, before effects are disposed.
-		Use this to clean up timers, connections, or other resources.
+		This is called automatically when `dispose()` is called, before the
+		state's owned resources (effects, nested states) are disposed. The
+		state's ResourceScope owns every Resource created during construction
+		and every unowned Resource later stored on an attribute; `dispose()`
+		itself cannot be overridden.
 		"""
 		pass
-
-	@override
-	def dispose(self) -> None:
-		"""
-		Clean up the state, disposing all effects and resources.
-
-		Calls on_dispose() first for user-defined cleanup, then disposes all
-		Disposable instances attached to this state (including effects).
-
-		This method is called automatically when the state goes out of scope
-		or when explicitly cleaning up. After disposal, the state should not
-		be used.
-
-		Raises:
-			RuntimeError: If any effects defined on the state's scope were not
-			        properly disposed.
-		"""
-		# Call user-defined cleanup hook first
-		self.on_dispose()
-		member_cache = self.__dict__.get(MEMBER_CACHE_ATTR, {})
-		for value in (*self.__dict__.values(), *member_cache.values()):
-			if isinstance(value, Disposable):
-				value.dispose()
-
-		undisposed_effects = [e for e in self._scope.effects if not e.__disposed__]
-		if len(undisposed_effects) > 0:
-			raise RuntimeError(
-				f"State.dispose() missed effects defined on its Scope: {[e.name for e in undisposed_effects]}"
-			)
 
 	@override
 	def __repr__(self) -> str:

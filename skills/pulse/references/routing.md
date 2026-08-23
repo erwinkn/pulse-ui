@@ -302,8 +302,9 @@ def SearchPage():
 
 **Constraints:**
 - Requires a render context — creating the state outside a component render raises `RuntimeError`. Reads and writes also go through `render.url.param(...)`, so they need an active `PulseContext` (component render and server callbacks have one).
-- `pulse.url.SessionUrl` (`render.url`) is a `Disposable` with `pathname` / `hash` / `query_params`. It owns one Signal per param name (`url.param(...)`). `RouteContext` writes the snapshot via `url.apply(...)`; typed fields read and write that Signal. Two states sharing `q` see the same value immediately. A second registration with a different type or default raises `ValueError`.
-- The slot lives on the session URL until the session closes, so a `ps.global_state` field keeps syncing across in-app navigation. The URL stays the source of truth: navigating to a URL without the param resets the field to its default.
+- `pulse.url.SessionUrl` (`render.url`) is a resource with `pathname` / `hash` / `query_params`. It holds one raw value per param name, plus a typed view per `(type, default)` combination declared for that name (`url.param(...)`). `RouteContext` writes the snapshot via `url.apply(...)`; typed fields read and write their view's Signal. Two states declaring `q` with the same type and default share one view and see each other's writes immediately; declarations with a different type or default get their own view of the same raw value.
+- The raw value lives on the session URL until the session closes, so a `ps.global_state` field keeps syncing across in-app navigation. The URL stays the source of truth: navigating to a URL without the param resets the field to its default.
+- A typed view belongs to the `ResourceScope`s of the states that declared it, and is dropped once all of them are disposed. Dropping a view leaves the raw value and the URL untouched, and an unpushed write reaches the URL on the way out.
 - Server-synced by design: every change is a round-trip. For rapid URL updates (map viewport, scroll position), sync client-side with `history.replaceState` in transpiled code instead — see `js-interop.md` → "Latency-sensitive interactions".
 
 ## Path Parameters

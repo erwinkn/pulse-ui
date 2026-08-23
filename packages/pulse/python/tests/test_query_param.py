@@ -9,6 +9,7 @@ from pulse.hooks.core import HookContext
 from pulse.messages import ServerMessage, ServerNavigateToMessage
 from pulse.reactive import flush_effects
 from pulse.render_session import RenderSession
+from pulse.resources import ResourceScope
 from pulse.routing import Route, RouteInfo, RouteTree
 
 
@@ -864,14 +865,17 @@ def test_f4_failed_constructor_keeps_immediate_shared_write():
 		with pytest.raises(RuntimeError, match="boom"):
 			Boom()
 		flush_query_param_sync(session)
+		# The write belongs to the session, so it reaches the URL even though the
+		# state that made it never finished constructing.
+		assert len(navigations(messages)) == 1
+		assert parse_qs(urlparse(str(navigations(messages)[0]["path"])).query)["q"] == [
+			"half-written"
+		]
 		messages.clear()
 		later = Later()
 		flush_query_param_sync(session)
 		assert later.q == "half-written"
-	assert len(navigations(messages)) == 1
-	assert parse_qs(urlparse(str(navigations(messages)[0]["path"])).query)["q"] == [
-		"half-written"
-	]
+	assert navigations(messages) == []
 
 
 def test_f5_cross_route_declarations_have_independent_defaults():
@@ -1306,3 +1310,91 @@ def test_r14_repr_outside_a_render_context_does_not_raise():
 	text = repr(state)
 	assert "q=<unavailable>" in text
 	assert "other=3" in text
+
+
+def test_r15_disposing_the_last_holder_drops_the_view_but_keeps_the_slot():
+	class QState(ps.State):
+		page: ps.QueryParam[int] = 1
+
+	app, session, route_ctx = make_context(
+		make_route_info("/", query_params={"page": "3"})
+	)
+	session.connect(lambda _msg: None)
+	scope = ResourceScope()
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		with scope:
+			state = QState()
+		assert state.page == 3
+	slot = session.url._slots["page"]  # pyright: ignore[reportPrivateUsage]
+	assert len(slot.views) == 1
+
+	scope.dispose()
+	assert slot.views == []
+	# The URL string is the source of truth: the slot and its raw value stay.
+	assert session.url._slots["page"] is slot  # pyright: ignore[reportPrivateUsage]
+	assert slot.raw.value == "3"
+
+
+def test_r16_view_survives_while_another_state_holds_it():
+	class QState(ps.State):
+		page: ps.QueryParam[int] = 1
+
+	app, session, route_ctx = make_context(
+		make_route_info("/", query_params={"page": "3"})
+	)
+	session.connect(lambda _msg: None)
+	first_scope = ResourceScope()
+	second_scope = ResourceScope()
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		with first_scope:
+			QState()
+		with second_scope:
+			second = QState()
+
+	slot = session.url._slots["page"]  # pyright: ignore[reportPrivateUsage]
+	assert len(slot.views) == 1
+
+	first_scope.dispose()
+	assert len(slot.views) == 1
+	session.update_route("/", make_route_info("/", query_params={"page": "7"}))
+	flush_effects()
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		assert second.page == 7
+
+	second_scope.dispose()
+	assert slot.views == []
+
+
+def test_r17_disposed_strict_view_does_not_break_later_url_updates():
+	class StrictState(ps.State):
+		page: ps.QueryParam[int] = 1
+
+	class LooseState(ps.State):
+		page: ps.QueryParam[str] = ""
+
+	app, session, route_ctx = make_context(
+		make_route_info("/", query_params={"page": "3"})
+	)
+	session.connect(lambda _msg: None)
+	strict_scope = ResourceScope()
+	loose_scope = ResourceScope()
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		with strict_scope:
+			StrictState()
+		with loose_scope:
+			loose = LooseState()
+
+	slot = session.url._slots["page"]  # pyright: ignore[reportPrivateUsage]
+	assert len(slot.views) == 2
+
+	strict_scope.dispose()
+	assert len(slot.views) == 1
+
+	# "not-a-number" does not decode for the strict view. Now that the view went
+	# away with its state, it cannot fail the URL update for the live one.
+	session.update_route("/", make_route_info("/", query_params={"page": "later"}))
+	flush_effects()
+	with ps.PulseContext(app=app, render=session, route=route_ctx):
+		assert loose.page == "later"
+
+	loose_scope.dispose()

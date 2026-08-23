@@ -2658,6 +2658,39 @@ async def test_keyed_query_interval_uses_min_interval_and_latest_observer():
 
 @pytest.mark.asyncio
 @with_render_session
+async def test_shared_interval_effect_outlives_first_state():
+	class S(ps.State):
+		@ps.query(
+			key=("shared-interval-owner",),
+			retries=0,
+			refetch_interval=60,
+			fetch_on_mount=False,
+		)
+		async def value(self) -> int:
+			await asyncio.sleep(0)
+			return 1
+
+	first = S()
+	second = S()
+	first_result = query_result(first.value)
+	second_result = query_result(second.value)
+	assert isinstance(first_result, KeyedQueryResult)
+	assert isinstance(second_result, KeyedQueryResult)
+	query = first_result._query()  # pyright: ignore[reportPrivateUsage]
+	effect = query._interval_effect  # pyright: ignore[reportPrivateUsage]
+	assert effect is not None
+	assert effect._resource_owner is query.resources  # pyright: ignore[reportPrivateUsage]
+
+	first.dispose()
+	assert not effect.__disposed__
+	assert second_result in query.observers
+
+	second.dispose()
+	assert effect.__disposed__
+
+
+@pytest.mark.asyncio
+@with_render_session
 async def test_keyed_query_uses_latest_fetch_fn_after_state_recreation():
 	"""
 	Regression test for bug where keyed query uses stale fetch function after
@@ -3913,3 +3946,22 @@ async def test_keyed_state_query_uses_local_store_without_render_context():
 	assert store.get(("value",)) is not None
 	state.dispose()
 	assert store.get(("value",)) is None
+
+
+def test_query_store_disposes_all_entries_when_one_fails():
+	store = QueryStore()
+	first = store.ensure(("first",))
+	second = store.ensure(("second",))
+
+	def boom() -> None:
+		raise RuntimeError("boom")
+
+	first.cancel = boom  # pyright: ignore[reportAttributeAccessIssue]
+
+	with pytest.raises(RuntimeError, match="boom"):
+		store.dispose_all()
+
+	assert first.__disposed__
+	assert second.__disposed__
+	assert store.get_any(("first",)) is None
+	assert store.get_any(("second",)) is None

@@ -8,7 +8,7 @@ description: "State and reactive containers"
 Base class for reactive state objects. Properties with type annotations automatically become reactive and trigger re-renders when changed.
 
 ```python
-class State(Disposable, metaclass=StateMeta)
+class State(Resource, metaclass=StateMeta)
 ```
 
 ### Defining State
@@ -57,7 +57,9 @@ Iterate over the state's `Effect` instances.
 
 #### `dispose() -> None`
 
-Clean up the state, disposing all effects and calling `on_dispose()`.
+Clean up the state: calls `on_dispose()`, then disposes every resource the state owns. A state owns the resources created in its constructor and any unowned resource later assigned to one of its attributes (e.g. `self._poller = Effect(...)` from an event handler). Assigning over an owned resource disposes the replaced one.
+
+`dispose()` cannot be overridden—a subclass that defines it raises `TypeError` at class definition. Override `on_dispose()` instead.
 
 #### `on_dispose() -> None`
 

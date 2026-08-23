@@ -57,7 +57,7 @@ def my_form():
 Low-level form handler for custom form implementations.
 
 ```python
-class ManualForm(Disposable):
+class ManualForm(Resource):
     def __init__(self, on_submit: EventHandler1[FormData] | None = None)
 ```
 
@@ -207,7 +207,7 @@ Malformed structured payloads return HTTP 400 and don't call the submit handler.
 Internal class managing form registrations. Not typically used directly.
 
 ```python
-class FormRegistry(Disposable):
+class FormRegistry(Resource):
     def register(
         render_id: str,
         route_id: str,

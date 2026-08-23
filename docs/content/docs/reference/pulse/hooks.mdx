@@ -114,6 +114,18 @@ def UserProfile(user_id: str):
     return ps.div(user.name)
 ```
 
+### Lifecycle
+
+`ps.init()` owns the `ps.State` instances and inline `@ps.effect` effects created while its block runs. Pulse disposes them when:
+
+- `key` changes, before running the block again
+- initialization raises, including anything created before the exception
+- the component unmounts
+
+Disposing a state also stops its state effects and calls `on_dispose()`.
+
+Ownership does not transfer just because an initializer accesses a state. States supplied from outside the block, returned by `ps.state()`, or returned by `ps.global_state()` keep their existing owners and lifetimes.
+
 ### Equivalent to `ps.setup()`
 
 Under the hood, `ps.init()` is syntactic sugar. This code:
@@ -149,6 +161,8 @@ If you encounter issues with `ps.init()` (e.g., source code not available in som
 # If ps.init() causes issues, use ps.setup() instead
 state = ps.setup(lambda: CounterState())
 ```
+
+`ps.setup()` has the same ownership rules as `ps.init()`: it owns states and effects created by its initializer and disposes them when `ps.setup_key()` changes, initialization raises, or the component unmounts. States owned elsewhere, including `ps.state()` and `ps.global_state()` instances, keep their existing owners.
 
 ---
 
@@ -608,11 +622,15 @@ def create(
 Base class for hook state. Override lifecycle methods:
 
 ```python
-class HookState(Disposable):
+class HookState(Resource):
+    resources: ResourceScope  # owns this hook state's resources
+
     def on_render_start(self, render_cycle: int) -> None: ...
     def on_render_end(self, render_cycle: int, error: BaseException | None) -> None: ...
-    def dispose(self) -> None: ...
+    def on_dispose(self) -> None: ...
 ```
+
+Resources created inside the hook factory are captured into `resources` automatically and disposed on unmount. Attach later-created resources with `self.resources.own(...)`. `dispose()` cannot be overridden: it runs `on_dispose()`, then disposes `resources`, even if `on_dispose()` raises.
 
 ### HookMetadata
 
@@ -635,7 +653,7 @@ class TimerHookState(ps.hooks.State):
     def elapsed(self) -> float:
         return time.time() - self.start_time
 
-    def dispose(self) -> None:
+    def on_dispose(self) -> None:
         pass
 
 _timer_hook = ps.hooks.create("my_app:timer", lambda: TimerHookState())

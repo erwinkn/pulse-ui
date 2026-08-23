@@ -73,6 +73,9 @@ def Good():
 **Notes:**
 - Uses AST rewriting via `@ps.component` decorator
 - If source unavailable (some deployments), use `ps.setup()` instead
+- Owns states and effects created inside the block
+- Disposes owned states and effects before re-running for a new key, after failed initialization, and on component unmount
+- States passed in or obtained through `ps.state()` / `ps.global_state()` keep their existing owners
 
 ## ps.setup()
 
@@ -104,16 +107,22 @@ def Dashboard():
 
 Arguments are tracked via reactive signals. Changes update the signals but don't re-run setup.
 
-**Cleanup via return value:**
+**Owned state and effect cleanup:**
 ```python
 def init_with_cleanup():
-    ws = WebSocket("ws://server")
-    ws.connect()
-    # Cleanup happens when component unmounts
-    return ws  # If ws has dispose(), it's called
+    state = ConnectionState()
+
+    @ps.effect
+    def connect():
+        connection = open_connection()
+        return connection.close
+
+    return state
 
 state = ps.setup(init_with_cleanup)
 ```
+
+`ps.setup()` owns states and effects created while its initializer runs. It disposes them before re-initializing for a new `ps.setup_key()`, after failed initialization, and when the component unmounts. The returned value alone does not determine ownership. States passed in or obtained through `ps.state()` / `ps.global_state()` keep their existing owners.
 
 **ps.setup_key() for re-initialization:**
 ```python
@@ -394,7 +403,7 @@ for item in items:
 
 | Hook | Purpose | Runs | Key Support |
 |------|---------|------|-------------|
-| `ps.init()` | Preserve variables | Once | No |
+| `ps.init()` | Preserve variables | Once per key | `key=` |
 | `ps.setup()` | One-time setup with cleanup | Once (re-run with setup_key) | Via setup_key() |
 | `ps.state()` | Inline state instances | Factory once | Yes |
 | `ps.stable()` | Stable callback/value refs | Every render (updates ref) | Yes (the first arg) |

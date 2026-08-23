@@ -227,6 +227,10 @@ def parse_query_param_value(
 	param: str,
 ) -> Any:
 	if raw is None:
+		if codec.kind == "list" and isinstance(default, list):
+			# The default is shared by every declaration of this param, so hand
+			# out a copy: an in-place mutation must not rewrite the default.
+			return reactive(list(cast(list[Any], default)))
 		return default
 	if raw == "" and codec.optional:
 		return None

@@ -57,7 +57,10 @@ class PendingReplies:
 		reply_id = message["id"]
 		error = message.get("error")
 		if error is not None:
-			self.reject(reply_id, as_exception(error))
+			self.reject(
+				reply_id,
+				error if isinstance(error, BaseException) else RuntimeError(str(error)),
+			)
 		else:
 			self.resolve(reply_id, message.get("payload"))
 
@@ -92,9 +95,3 @@ class PendingReplies:
 	def _pop(self, reply_id: str) -> asyncio.Future[Any] | None:
 		self._cancel_keys.pop(reply_id, None)
 		return self._futures.pop(reply_id, None)
-
-
-def as_exception(error: Any) -> BaseException:
-	if isinstance(error, BaseException):
-		return error
-	return RuntimeError(str(error))

@@ -230,7 +230,6 @@ class Channel:
 	async def _invoke_handler(
 		self, handler: ChannelHandler, payload: Any, *, required: bool
 	) -> Any:
-		from pulse.context import PULSE_CONTEXT
 		from pulse.helpers import maybe_await
 
 		render = self._session
@@ -252,8 +251,6 @@ class Channel:
 			route_ctx = mount.route
 			source_mount_id = mount.mount_id
 
-		if PULSE_CONTEXT.get() is None:
-			return await maybe_await(handler(payload))
 		with PulseContext.update(
 			render=render,
 			route=route_ctx,

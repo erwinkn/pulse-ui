@@ -186,17 +186,18 @@ async def test_tab_handle_survives_route_unmount():
 		handle.on("ping", lambda payload: received.append(payload))
 	render.channels.detach_route("/")
 	handle.on("still-ok", lambda _: None)
-	render.channels.handle_event(
-		as_event(
-			{
-				"type": "channel",
-				"action": "event",
-				"channel": "tab-box",
-				"event": "ping",
-				"payload": 1,
-			},
+	with ctx(app, session, render, route):
+		render.channels.handle_event(
+			as_event(
+				{
+					"type": "channel",
+					"action": "event",
+					"channel": "tab-box",
+					"event": "ping",
+					"payload": 1,
+				},
+			)
 		)
-	)
 	await asyncio.sleep(0)
 	assert received == [1]
 
@@ -280,17 +281,18 @@ async def test_request_nacks_without_handler():
 	app, dummy, session, render, _route = build_session()
 	with ctx(app, session, render):
 		ps.channel("empty", lifetime="tab")
-	await render.channels.handle_request(
-		as_request(
-			{
-				"type": "channel",
-				"action": "request",
-				"channel": "empty",
-				"event": "missing",
-				"requestId": "req-1",
-			},
+	with ctx(app, session, render):
+		await render.channels.handle_request(
+			as_request(
+				{
+					"type": "channel",
+					"action": "request",
+					"channel": "empty",
+					"event": "missing",
+					"requestId": "req-1",
+				},
+			)
 		)
-	)
 	assert dummy.sent[-1] == {
 		"type": "channel",
 		"action": "response",
@@ -308,17 +310,18 @@ async def test_event_without_listener_is_dropped():
 	app, dummy, session, render, _route = build_session()
 	with ctx(app, session, render):
 		ps.channel("quiet", lifetime="tab")
-	render.channels.handle_event(
-		as_event(
-			{
-				"type": "channel",
-				"action": "event",
-				"channel": "quiet",
-				"event": "ping",
-				"payload": 1,
-			},
+	with ctx(app, session, render):
+		render.channels.handle_event(
+			as_event(
+				{
+					"type": "channel",
+					"action": "event",
+					"channel": "quiet",
+					"event": "ping",
+					"payload": 1,
+				},
+			)
 		)
-	)
 	assert dummy.sent == []
 
 
@@ -331,16 +334,17 @@ async def test_event_fans_out_to_two_handles():
 		b = ps.channel("shared", lifetime="tab")
 		a.on("ping", lambda _: seen.append("a"))
 		b.on("ping", lambda _: seen.append("b"))
-	render.channels.handle_event(
-		as_event(
-			{
-				"type": "channel",
-				"action": "event",
-				"channel": "shared",
-				"event": "ping",
-			},
+	with ctx(app, session, render, route):
+		render.channels.handle_event(
+			as_event(
+				{
+					"type": "channel",
+					"action": "event",
+					"channel": "shared",
+					"event": "ping",
+				},
+			)
 		)
-	)
 	await asyncio.sleep(0)
 	assert seen == ["a", "b"]
 
@@ -358,17 +362,18 @@ async def test_transport_drop_rejects_rpc_and_keeps_listeners():
 	with pytest.raises(ChannelDisconnected):
 		await pending
 	assert dummy.sent[0]["action"] == "request"
-	render.channels.handle_event(
-		as_event(
-			{
-				"type": "channel",
-				"action": "event",
-				"channel": "keep",
-				"event": "ping",
-				"payload": "still-here",
-			},
+	with ctx(app, session, render):
+		render.channels.handle_event(
+			as_event(
+				{
+					"type": "channel",
+					"action": "event",
+					"channel": "keep",
+					"event": "ping",
+					"payload": "still-here",
+				},
+			)
 		)
-	)
 	await asyncio.sleep(0)
 	assert received == ["still-here"]
 
@@ -506,16 +511,17 @@ async def test_on_same_handler_is_idempotent():
 		channel = ps.channel("once")
 		channel.on("ping", handler)
 		channel.on("ping", handler)
-	render.channels.handle_event(
-		as_event(
-			{
-				"type": "channel",
-				"action": "event",
-				"channel": "once",
-				"event": "ping",
-			},
+	with ctx(app, session, render, route):
+		render.channels.handle_event(
+			as_event(
+				{
+					"type": "channel",
+					"action": "event",
+					"channel": "once",
+					"event": "ping",
+				},
+			)
 		)
-	)
 	await asyncio.sleep(0)
 	assert calls == [1]
 
@@ -544,16 +550,17 @@ async def test_event_handler_error_is_reported():
 	with ctx(app, session, render):
 		channel = ps.channel("boom", lifetime="tab")
 		channel.on("ping", boom)
-	render.channels.handle_event(
-		as_event(
-			{
-				"type": "channel",
-				"action": "event",
-				"channel": "boom",
-				"event": "ping",
-			},
+	with ctx(app, session, render):
+		render.channels.handle_event(
+			as_event(
+				{
+					"type": "channel",
+					"action": "event",
+					"channel": "boom",
+					"event": "ping",
+				},
+			)
 		)
-	)
 	errors: list[dict[str, Any]] = []
 	for _ in range(20):
 		await asyncio.sleep(0)
@@ -613,16 +620,17 @@ async def test_tab_handler_error_reports_on_live_mount():
 	with ctx(app, session, render):
 		channel = ps.channel("tab-boom", lifetime="tab")
 		channel.on("ping", boom)
-	render.channels.handle_event(
-		as_event(
-			{
-				"type": "channel",
-				"action": "event",
-				"channel": "tab-boom",
-				"event": "ping",
-			},
+	with ctx(app, session, render):
+		render.channels.handle_event(
+			as_event(
+				{
+					"type": "channel",
+					"action": "event",
+					"channel": "tab-boom",
+					"event": "ping",
+				},
+			)
 		)
-	)
 	errors: list[dict[str, Any]] = []
 	for _ in range(20):
 		await asyncio.sleep(0)
@@ -848,16 +856,17 @@ async def test_stale_on_remover_does_not_drop_new_handler():
 		remove_first()
 		channel.on("ping", lambda _: seen.append("second"))
 		remove_first()
-	render.channels.handle_event(
-		as_event(
-			{
-				"type": "channel",
-				"action": "event",
-				"channel": "once",
-				"event": "ping",
-			},
+	with ctx(app, session, render, route):
+		render.channels.handle_event(
+			as_event(
+				{
+					"type": "channel",
+					"action": "event",
+					"channel": "once",
+					"event": "ping",
+				},
+			)
 		)
-	)
 	await asyncio.sleep(0)
 	assert seen == ["second"]
 
@@ -890,17 +899,18 @@ async def test_unserializable_request_result_nacks():
 	with ctx(app, session, render, route):
 		channel = ps.channel("bad")
 		channel.on("get", lambda _: object)
-	await render.channels.handle_request(
-		as_request(
-			{
-				"type": "channel",
-				"action": "request",
-				"channel": "bad",
-				"event": "get",
-				"requestId": "req-bad",
-			},
+	with ctx(app, session, render, route):
+		await render.channels.handle_request(
+			as_request(
+				{
+					"type": "channel",
+					"action": "request",
+					"channel": "bad",
+					"event": "get",
+					"requestId": "req-bad",
+				},
+			)
 		)
-	)
 	nacks = [msg for msg in dummy.sent if msg.get("type") == "channel"]
 	assert nacks[-1]["error"]["code"] == "handler_error"
 
@@ -1012,6 +1022,89 @@ async def test_request_without_request_id_is_dropped():
 
 
 @pytest.mark.asyncio
+async def test_inbound_handlers_receive_session_render_and_route_context():
+	app, dummy, session, render, route = build_session(connected=True, with_route=True)
+	assert route is not None
+	observed: dict[str, Any] = {}
+
+	with ctx(app, session, render, route):
+		request_channel = ps.channel("context-request")
+		event_channel = ps.channel("context-event")
+		tab_channel = ps.channel("context-tab", lifetime="tab")
+
+		def request_handler(_: Any) -> str:
+			observed["request_session"] = ps.session()
+			observed["request_render"] = ps.websocket_id()
+			observed["request_route"] = ps.route()
+			return "request-ok"
+
+		def event_handler(_: Any) -> None:
+			observed["event_session"] = ps.session()
+			observed["event_render"] = ps.websocket_id()
+			observed["event_route"] = ps.route()
+
+		def tab_handler(_: Any) -> None:
+			observed["tab_session"] = ps.session()
+			observed["tab_render"] = ps.websocket_id()
+			observed["tab_route"] = ps.PulseContext.get().route
+
+		request_channel.on("read", request_handler)
+		event_channel.on("changed", event_handler)
+		tab_channel.on("changed", tab_handler)
+
+	user = cast(UserSession, cast(object, session))
+	await app._handle_channel_message(  # pyright: ignore[reportPrivateUsage]
+		render,
+		user,
+		as_request(
+			{
+				"type": "channel",
+				"action": "request",
+				"channel": "context-request",
+				"event": "read",
+				"requestId": "req-context",
+			},
+		),
+	)
+	await app._handle_channel_message(  # pyright: ignore[reportPrivateUsage]
+		render,
+		user,
+		as_event(
+			{
+				"type": "channel",
+				"action": "event",
+				"channel": "context-event",
+				"event": "changed",
+			},
+		),
+	)
+	await app._handle_channel_message(  # pyright: ignore[reportPrivateUsage]
+		render,
+		user,
+		as_event(
+			{
+				"type": "channel",
+				"action": "event",
+				"channel": "context-tab",
+				"event": "changed",
+			},
+		),
+	)
+
+	await wait_for(lambda: "tab_route" in observed)
+	assert dummy.sent[-1]["payload"] == "request-ok"
+	assert observed["request_session"] is session.data
+	assert observed["request_render"] == render.id
+	assert observed["request_route"] == route.info
+	assert observed["event_session"] is session.data
+	assert observed["event_render"] == render.id
+	assert observed["event_route"] == route.info
+	assert observed["tab_session"] is session.data
+	assert observed["tab_render"] == render.id
+	assert observed["tab_route"] is None
+
+
+@pytest.mark.asyncio
 async def test_cancelled_request_clears_pending():
 	app, _dummy, session, render, _route = build_session(connected=True)
 	with ctx(app, session, render):
@@ -1108,16 +1201,17 @@ async def test_events_run_in_arrival_order():
 		channel.on("first", slow)
 		channel.on("second", fast)
 	for event in ("first", "second"):
-		render.channels.handle_event(
-			as_event(
-				{
-					"type": "channel",
-					"action": "event",
-					"channel": "ordered",
-					"event": event,
-				},
+		with ctx(app, session, render):
+			render.channels.handle_event(
+				as_event(
+					{
+						"type": "channel",
+						"action": "event",
+						"channel": "ordered",
+						"event": event,
+					},
+				)
 			)
-		)
 	await wait_for(lambda: len(seen) == 2)
 	assert seen == ["first", "second"]
 
@@ -1135,16 +1229,17 @@ async def test_detach_skips_pending_handlers():
 		channel = ps.channel("detaching", lifetime="tab")
 		channel.on("ping", first)
 		channel.on("ping", lambda _: seen.append("second"))
-	render.channels.handle_event(
-		as_event(
-			{
-				"type": "channel",
-				"action": "event",
-				"channel": "detaching",
-				"event": "ping",
-			},
+	with ctx(app, session, render):
+		render.channels.handle_event(
+			as_event(
+				{
+					"type": "channel",
+					"action": "event",
+					"channel": "detaching",
+					"event": "ping",
+				},
+			)
 		)
-	)
 	await asyncio.sleep(0)
 	channel.detach()
 	for _ in range(10):
@@ -1194,17 +1289,18 @@ async def test_event_backlog_drops_oldest_with_one_warning(
 
 	with caplog.at_level(logging.WARNING):
 		for i in range(MAX_QUEUED_EVENTS + 5):
-			render.channels.handle_event(
-				as_event(
-					{
-						"type": "channel",
-						"action": "event",
-						"channel": "backlog",
-						"event": "ping",
-						"payload": i,
-					},
+			with ctx(app, session, render):
+				render.channels.handle_event(
+					as_event(
+						{
+							"type": "channel",
+							"action": "event",
+							"channel": "backlog",
+							"event": "ping",
+							"payload": i,
+						},
+					)
 				)
-			)
 		await asyncio.sleep(0)
 		# One event is in flight on the blocked handler, the rest wait in the queue.
 		assert len(channel._events) == MAX_QUEUED_EVENTS - 1  # pyright: ignore[reportPrivateUsage]
@@ -1230,17 +1326,18 @@ async def test_detach_cancels_event_pump():
 		channel = ps.channel("cancel-pump", lifetime="tab")
 		channel.on("ping", blocked)
 	for i in range(2):
-		render.channels.handle_event(
-			as_event(
-				{
-					"type": "channel",
-					"action": "event",
-					"channel": "cancel-pump",
-					"event": "ping",
-					"payload": i,
-				},
+		with ctx(app, session, render):
+			render.channels.handle_event(
+				as_event(
+					{
+						"type": "channel",
+						"action": "event",
+						"channel": "cancel-pump",
+						"event": "ping",
+						"payload": i,
+					},
+				)
 			)
-		)
 	await asyncio.sleep(0)
 	pump = channel._pump  # pyright: ignore[reportPrivateUsage]
 	assert pump is not None and not pump.done()

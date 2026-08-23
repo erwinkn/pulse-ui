@@ -1163,7 +1163,7 @@ class App:
 			return Ok(None)
 
 		try:
-			with PulseContext.update(session=session, render=render):
+			with PulseContext(app=self, session=session, render=render):
 				res = await self.middleware.channel(
 					channel_id=channel_id,
 					event=event,
@@ -1186,25 +1186,26 @@ class App:
 				render.channels.send_error(channel_id, request_id, "denied", "Denied")
 			return
 
-		if action == "event":
-			render.channels.handle_event(cast(ClientChannelEventMessage, msg))
-			return
-
-		def _on_done(task: asyncio.Task[Any]) -> None:
-			if task.cancelled():
+		with PulseContext(app=self, session=session, render=render):
+			if action == "event":
+				render.channels.handle_event(cast(ClientChannelEventMessage, msg))
 				return
-			try:
-				exc = task.exception()
-			except asyncio.CancelledError:
-				return
-			if exc is not None:
-				render.report_error(None, "channel", exc)
 
-		render.create_task(
-			render.channels.handle_request(cast(ClientChannelRequestMessage, msg)),
-			name=f"channel-request:{channel_id}:{event}",
-			on_done=_on_done,
-		)
+			def _on_done(task: asyncio.Task[Any]) -> None:
+				if task.cancelled():
+					return
+				try:
+					exc = task.exception()
+				except asyncio.CancelledError:
+					return
+				if exc is not None:
+					render.report_error(None, "channel", exc)
+
+			render.create_task(
+				render.channels.handle_request(cast(ClientChannelRequestMessage, msg)),
+				name=f"channel-request:{channel_id}:{event}",
+				on_done=_on_done,
+			)
 
 	def get_route(self, path: str):
 		return self.routes.find(path)

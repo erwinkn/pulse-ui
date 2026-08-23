@@ -585,6 +585,32 @@ def test_run_no_reload_keeps_direct_uvicorn_and_initial_codegen(
 	assert "--reload" not in commands[1].args
 
 
+def test_run_no_reload_binds_vite_to_public_host(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	cast(Any, app_ctx.app).mode = "subdomains"
+	commands, _installed = _patch_run_basics(monkeypatch, app_ctx)
+
+	result = runner.invoke(
+		cmd_mod.cli,
+		[
+			"run",
+			"demo.py",
+			"--plain",
+			"--no-reload",
+			"--no-find-port",
+			"--address",
+			"192.168.1.50",
+		],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert commands[0].args[commands[0].args.index("--host") + 1] == "192.168.1.50"
+
+
 def test_run_skips_install_and_codegen_for_server_only(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

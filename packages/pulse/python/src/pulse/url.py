@@ -42,6 +42,11 @@ class SessionUrl(Disposable):
 	Each declaration gets a typed view of that raw value, so declarations
 	with different codecs or defaults can coexist.
 
+	The raw value is the source of truth and the views are derived from it: a
+	view only pushes to the URL when its value differs from what the current
+	raw value decodes to. Loading a URL therefore never rewrites it, even when
+	a value equals one view's default.
+
 	A parameter name has exactly one raw URL value. Writing a value that
 	serializes as absent (for example, one view's default) resets every other
 	view of that name to its own default. A declaration registered while a
@@ -235,14 +240,32 @@ class SessionUrl(Disposable):
 			for view in slot.views:
 				value = view.signal.read()
 				if view.codec.kind == "list" and value is not None:
+					# Read through the reactive list so an in-place mutation
+					# re-runs this effect.
 					value = unwrap(value)
+				raw = slot.raw.value
+				try:
+					decoded = self._parse(
+						raw, codec=view.codec, default=view.default, name=name
+					)
+				except Exception:
+					# The raw value does not decode for this view. The URL is the
+					# source of truth, so it stays; `apply` reports the error.
+					continue
+				if values_equal(value, decoded):
+					# The view still holds what `raw` decodes to, so nobody wrote
+					# it and it has nothing to push. Serializing anyway would
+					# rewrite the URL on load whenever a value happens to equal
+					# this view's default, and reset sibling views declaring
+					# another default for the same name.
+					continue
 				serialized = serialize_query_param_value(
 					value,
 					default=view.default,
 					codec=view.codec,
 					param=name,
 				)
-				if serialized != slot.raw.value:
+				if serialized != raw:
 					errors = self._set_raw(name, slot, serialized)
 					if first_error is None and errors:
 						first_error = errors[0]

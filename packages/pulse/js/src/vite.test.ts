@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { EventEmitter } from "node:events";
 import { createServer as createHttpServer, type Server } from "node:http";
 import type { ViteDevServer } from "vite";
 import { pulse } from "./vite";
@@ -148,9 +149,8 @@ describe("pulse", () => {
 
 	it("swallows asynchronous stdout errors without leaking listeners", async () => {
 		process.env.PULSE_SUPERVISED = "1";
-		const stdout = process.stdout;
-		const write = stdout.write;
-		const listenerCount = stdout.listenerCount("error");
+		const originalStdout = process.stdout;
+		const stdout = new EventEmitter() as unknown as typeof process.stdout;
 		stdout.write = ((_chunk: string | Uint8Array, callback?: (error?: Error) => void) => {
 			queueMicrotask(() => {
 				callback?.(new Error("closed"));
@@ -158,17 +158,25 @@ describe("pulse", () => {
 			});
 			return true;
 		}) as typeof stdout.write;
+		Object.defineProperty(process, "stdout", {
+			configurable: true,
+			value: stdout,
+			writable: true,
+		});
+		const listenerCount = stdout.listenerCount("error");
 		const servers = [createHttpServer(), createHttpServer()];
 		try {
 			for (const server of servers) {
 				hook(pulse().configureServer).call({} as never, viteServer(server));
 			}
 			await new Promise<void>((resolve) => queueMicrotask(resolve));
-			const listenersAfterFirstNotify = stdout.listenerCount("error");
-			expect(listenersAfterFirstNotify).toBeLessThanOrEqual(listenerCount + 1);
-			expect(stdout.listenerCount("error")).toBe(listenersAfterFirstNotify);
+			expect(stdout.listenerCount("error")).toBe(listenerCount + 1);
 		} finally {
-			stdout.write = write;
+			Object.defineProperty(process, "stdout", {
+				configurable: true,
+				value: originalStdout,
+				writable: true,
+			});
 			for (const server of servers) {
 				server.close();
 			}

@@ -25,6 +25,7 @@ def emit(message: str) -> None:
 def parse(line: str) -> tuple[list[str], str]:
 	"""Extract every protocol marker from a line of child output.
 
+	Markers must end at a token boundary so a child word cannot shadow one.
 	Returns the markers found plus the line with them stripped.
 	"""
 	messages: list[str] = []
@@ -37,11 +38,7 @@ def parse(line: str) -> tuple[list[str], str]:
 		for message in MESSAGES:
 			if line.startswith(message, start):
 				end = start + len(message)
-				if (
-					message == WORKER_READY
-					and end < len(line)
-					and line[end] in MARKER_TOKEN_CHARACTERS
-				):
+				if end < len(line) and line[end] in MARKER_TOKEN_CHARACTERS:
 					continue
 				messages.append(message)
 				line = line[:index] + line[end:]

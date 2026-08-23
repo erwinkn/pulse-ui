@@ -27,8 +27,8 @@ def test_parse_marker_embedded_mid_line() -> None:
 
 
 def test_parse_multiple_markers_on_one_line() -> None:
-	line = f"a{PREFIX}{VITE_CONFIGURED}{PREFIX}{VITE_LISTENING}b"
-	assert parse(line) == ([VITE_CONFIGURED, VITE_LISTENING], "ab")
+	line = f"a{PREFIX}{VITE_CONFIGURED} text{PREFIX}{VITE_LISTENING}"
+	assert parse(line) == ([VITE_CONFIGURED, VITE_LISTENING], "a text")
 
 
 def test_parse_unknown_marker_left_intact() -> None:

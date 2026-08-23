@@ -4,6 +4,7 @@ from typing import cast
 
 import pulse as ps
 import pytest
+from pulse.app import MAX_PENDING_SOCKET_MESSAGES
 from pulse.messages import ClientPulseMessage
 from pulse.render_session import RenderSession
 from pulse.serializer import serialize
@@ -302,6 +303,65 @@ async def test_connect_queue_overflow_never_drops_replies(
 	assert fut.done()
 	assert fut.result() == 1
 	render.close()
+
+
+@pytest.mark.asyncio
+async def test_connect_queue_caps_commands_and_replies_independently():
+	app = ps.App()
+	app._connecting_sockets.add("socket-1")  # pyright: ignore[reportPrivateUsage]
+
+	for i in range(MAX_PENDING_SOCKET_MESSAGES):
+		await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+			"socket-1",
+			serialize(
+				{
+					"type": "callback",
+					"path": "/",
+					"callback": f"{i}.onClick",
+					"args": [],
+				}
+			),
+		)
+	for i in range(MAX_PENDING_SOCKET_MESSAGES):
+		await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+			"socket-1",
+			serialize({"type": "reply", "id": f"corr-{i}", "payload": i}),
+		)
+
+	queue = app._pending_socket_messages["socket-1"]  # pyright: ignore[reportPrivateUsage]
+	assert (
+		sum(message["type"] != "reply" for message in queue)
+		== MAX_PENDING_SOCKET_MESSAGES
+	)
+	assert (
+		sum(message["type"] == "reply" for message in queue)
+		== MAX_PENDING_SOCKET_MESSAGES
+	)
+
+	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+		"socket-1",
+		serialize(
+			{
+				"type": "callback",
+				"path": "/",
+				"callback": "overflow.onClick",
+				"args": [],
+			}
+		),
+	)
+	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+		"socket-1",
+		serialize({"type": "reply", "id": "corr-overflow", "payload": None}),
+	)
+
+	assert (
+		sum(message["type"] != "reply" for message in queue)
+		== MAX_PENDING_SOCKET_MESSAGES
+	)
+	assert (
+		sum(message["type"] == "reply" for message in queue)
+		== MAX_PENDING_SOCKET_MESSAGES
+	)
 
 
 @pytest.mark.asyncio

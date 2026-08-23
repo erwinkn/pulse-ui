@@ -422,7 +422,13 @@ class State(Disposable, metaclass=StateMeta):
 					continue
 				if isinstance(value, ReactiveProperty):
 					seen.add(name)
-					prop_value = getattr(self, name)
+					try:
+						prop_value = getattr(self, name)
+					except RuntimeError:
+						# URL-synced fields live on the session URL and are only
+						# readable under a render session. A repr must not raise.
+						props.append(f"{name}=<unavailable>")
+						continue
 					props.append(f"{name}={prop_value!r}")
 
 		# Include ComputedProperty values from MRO

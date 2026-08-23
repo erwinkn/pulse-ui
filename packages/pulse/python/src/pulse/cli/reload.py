@@ -35,6 +35,9 @@ IGNORED_DIRECTORIES = frozenset(
 )
 PYTHON_EXTENSIONS = frozenset({".py", ".pyx", ".pyd"})
 VITE_PLUGIN_TIMEOUT = 15.0
+# A descendant that escaped the process group can still hold a readiness pipe's
+# write end; shutdown abandons the reader rather than waiting on it forever.
+READY_PIPE_DRAIN_TIMEOUT = 5.0
 
 Wait = Literal["shutdown", "changed", "backend", "web", "ready"]
 
@@ -85,6 +88,7 @@ class DevSupervisor:
 		registered_sources: set[Path],
 		tag_mode: TagMode,
 		listeners: tuple[socket.socket, ...],
+		web_root: Path | None = None,
 		vite_plugin_timeout: float = VITE_PLUGIN_TIMEOUT,
 	) -> None:
 		self.backend_spec = backend
@@ -97,6 +101,7 @@ class DevSupervisor:
 		)
 		self.tag_mode: TagMode = tag_mode
 		self.listeners = listeners
+		self.web_root = web_root.resolve() if web_root is not None else None
 		self.vite_plugin_timeout = vite_plugin_timeout
 		self.changed = asyncio.Event()
 		self.shutdown = asyncio.Event()
@@ -261,7 +266,9 @@ class DevSupervisor:
 			# the supervisor.
 			if ready is not None and not ready.done():
 				with contextlib.suppress(Exception):
-					await asyncio.wait_for(asyncio.shield(ready), timeout=5)
+					await asyncio.wait_for(
+						asyncio.shield(ready), timeout=READY_PIPE_DRAIN_TIMEOUT
+					)
 			if ready is None or ready.done():
 				with contextlib.suppress(OSError):
 					os.close(ready_r)
@@ -301,10 +308,22 @@ class DevSupervisor:
 	async def _await_vite_drain(self) -> None:
 		drain = self._vite_drain
 		self._vite_drain = None
-		if drain is not None:
-			await drain
+		if drain is None:
+			self._close_vite_ready_fd()
 			return
-		self._close_vite_ready_fd()
+		# Bounded: the drain only sees EOF once every copy of the write end is
+		# closed, so a web descendant that escaped the process group would
+		# otherwise wedge shutdown. Abandon the reader instead — it closes the
+		# fd itself once the straggler exits.
+		with contextlib.suppress(Exception):
+			await asyncio.wait_for(
+				asyncio.shield(drain), timeout=READY_PIPE_DRAIN_TIMEOUT
+			)
+		if not drain.done():
+			print(
+				"Warning: a leftover web descendant holds the readiness pipe open; leaking its reader until it exits.",
+				flush=True,
+			)
 
 	async def _wait_vite_signal(
 		self, event: asyncio.Event, *, timeout: float | None
@@ -371,10 +390,32 @@ class DevSupervisor:
 			)
 		except TimeoutError:
 			if not self.shutdown.is_set() and self._web_code is None:
+				vite_config: Path | None = None
+				if self.web_root is not None:
+					for filename in (
+						"vite.config.ts",
+						"vite.config.mts",
+						"vite.config.js",
+						"vite.config.mjs",
+						"vite.config.cts",
+						"vite.config.cjs",
+					):
+						candidate = self.web_root / filename
+						if candidate.is_file():
+							vite_config = candidate.resolve()
+							break
+				config_location = (
+					f" in {vite_config}"
+					if vite_config is not None
+					else " in vite.config.ts"
+				)
 				print(
 					"Vite did not load pulse() within "
 					+ f"{self.vite_plugin_timeout:g}s. Add it to the plugins "
-					+ "array in vite.config.ts.",
+					+ "array"
+					+ config_location
+					+ '. Add `import { pulse } from "pulse-ui-client/vite";` '
+					+ "and include it as `plugins: [..., pulse()]`.",
 					flush=True,
 				)
 				await self._stop(self.web)

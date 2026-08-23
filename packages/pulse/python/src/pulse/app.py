@@ -1024,9 +1024,13 @@ class App:
 
 	def _queue_pending_socket_message(self, sid: str, msg: ClientMessage) -> None:
 		queue = self._pending_socket_messages.setdefault(sid, [])
-		# Never drop replies: a dropped reply orphans its pending future for
-		# the full request timeout.
-		if msg["type"] != "reply" and len(queue) >= MAX_PENDING_SOCKET_MESSAGES:
+		queued_replies = sum(queued["type"] == "reply" for queued in queue)
+		if (
+			msg["type"] == "reply" and queued_replies >= MAX_PENDING_SOCKET_MESSAGES
+		) or (
+			msg["type"] != "reply"
+			and len(queue) - queued_replies >= MAX_PENDING_SOCKET_MESSAGES
+		):
 			logger.warning(
 				"Dropping socket message for %s while connect is pending; queue is full",
 				sid,

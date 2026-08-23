@@ -30,10 +30,18 @@ from watchfiles import Change
 
 @final
 class FakeProcess:
-	def __init__(self, name: str, events: list[str], *, hangs: bool = False) -> None:
+	def __init__(
+		self,
+		name: str,
+		events: list[str],
+		*,
+		hangs: bool = False,
+		leaks_ready: bool = False,
+	) -> None:
 		self.name = name
 		self.events = events
 		self.hangs = hangs
+		self.leaks_ready = leaks_ready
 		self.alive = True
 		self.code: int | None = None
 		self.on_exit: Callable[[int], None] | None = None
@@ -57,7 +65,7 @@ class FakeProcess:
 		self.exit(-9)
 
 	def exit(self, code: int) -> None:
-		if self.ready_w is not None:
+		if self.ready_w is not None and not self.leaks_ready:
 			with contextlib.suppress(OSError):
 				os.close(self.ready_w)
 			self.ready_w = None
@@ -84,7 +92,9 @@ def command(name: str, tmp_path: Path, ready_pattern: str | None = None) -> Comm
 
 
 def supervisor_shell(
-	tmp_path: Path, listeners: tuple[socket.socket, ...] = ()
+	tmp_path: Path,
+	listeners: tuple[socket.socket, ...] = (),
+	web_root: Path | None = None,
 ) -> DevSupervisor:
 	return DevSupervisor(
 		backend=command("server", tmp_path),
@@ -94,6 +104,7 @@ def supervisor_shell(
 		registered_sources=set(),
 		tag_mode="plain",
 		listeners=listeners,
+		web_root=web_root,
 	)
 
 
@@ -126,7 +137,12 @@ def install_process_script(
 		assert spec.name == expected_name
 		instance = 1 + sum(process.name.startswith(spec.name) for process in processes)
 		name = f"{spec.name}{instance}"
-		process = FakeProcess(name, events, hangs=outcome == "hang")
+		process = FakeProcess(
+			name,
+			events,
+			hangs=outcome in ("hang", "leak"),
+			leaks_ready=outcome == "leak",
+		)
 		process.on_exit = on_exit
 		process.pass_fds = pass_fds
 		processes.append(process)
@@ -367,6 +383,47 @@ async def test_missing_vite_plugin_exits(
 	assert await supervisor.run() == 1
 	assert "pulse()" in capsys.readouterr().out
 	assert "web1:kill" in events
+
+
+@pytest.mark.asyncio
+async def test_vite_drain_timeout_does_not_wait_for_open_write_end(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+	monkeypatch.setattr(reload_mod, "READY_PIPE_DRAIN_TIMEOUT", 0.01)
+	supervisor = supervisor_shell(tmp_path)
+	supervisor.vite_plugin_timeout = 0.01
+	events: list[str] = []
+	processes = install_process_script(monkeypatch, events, [("web", "leak")])
+
+	assert await supervisor.run() == 1
+	assert (
+		"leftover web descendant holds the readiness pipe open"
+		in capsys.readouterr().out
+	)
+	assert processes[0].ready_w is not None
+	os.close(processes[0].ready_w)
+	processes[0].ready_w = None
+	await asyncio.sleep(0.02)
+
+
+@pytest.mark.asyncio
+async def test_missing_vite_plugin_names_config_and_setup(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	config = web_root / "vite.config.mts"
+	config.write_text("export default {};\n")
+	supervisor = supervisor_shell(tmp_path, web_root=web_root)
+	supervisor.vite_plugin_timeout = 0.01
+	events: list[str] = []
+	install_process_script(monkeypatch, events, [("web", "hang")])
+
+	assert await supervisor.run() == 1
+	output = capsys.readouterr().out
+	assert str(config.resolve()) in output
+	assert 'import { pulse } from "pulse-ui-client/vite";' in output
+	assert "plugins: [..., pulse()]" in output
 
 
 @pytest.mark.asyncio

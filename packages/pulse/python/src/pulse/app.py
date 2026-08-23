@@ -881,6 +881,10 @@ class App:
 							next=_next,
 						)
 					except MiddlewareDecisionError:
+						if created_render:
+							self.close_render(rid)
+						else:
+							self.close_session_if_inactive(session.sid)
 						raise
 					except Exception as exc:
 						connect_error = exc

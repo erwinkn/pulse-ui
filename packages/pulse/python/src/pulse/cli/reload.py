@@ -328,26 +328,25 @@ class DevSupervisor:
 		self, loop: asyncio.AbstractEventLoop, drain: asyncio.Future[None]
 	) -> None:
 		ready_r = self._vite_ready_r
-		if ready_r is None:
-			return
 		try:
-			while True:
-				try:
-					chunk = os.read(ready_r, 8)
-				except OSError:
-					return
-				if not chunk:
-					return
-				if b"c" in chunk:
+			if ready_r is not None:
+				while True:
 					try:
-						loop.call_soon_threadsafe(self._vite_configured.set)
-					except RuntimeError:
+						chunk = os.read(ready_r, 8)
+					except OSError:
 						return
-				if b"1" in chunk:
-					try:
-						loop.call_soon_threadsafe(self._vite_listening.set)
-					except RuntimeError:
+					if not chunk:
 						return
+					if b"c" in chunk:
+						try:
+							loop.call_soon_threadsafe(self._vite_configured.set)
+						except RuntimeError:
+							return
+					if b"1" in chunk:
+						try:
+							loop.call_soon_threadsafe(self._vite_listening.set)
+						except RuntimeError:
+							return
 		finally:
 			self._close_vite_ready_fd()
 

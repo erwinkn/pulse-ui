@@ -6,6 +6,7 @@ import os
 import signal
 import socket
 import sys
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast, final
@@ -115,7 +116,8 @@ class DevSupervisor:
 		self._vite_configured = asyncio.Event()
 		self._vite_listening = asyncio.Event()
 		self._vite_ready_r: int | None = None
-		self._vite_drain: asyncio.Task[None] | None = None
+		self._vite_drain: asyncio.Future[None] | None = None
+		self._vite_reader_thread: threading.Thread | None = None
 		for listener in listeners:
 			listener.set_inheritable(False)
 
@@ -233,7 +235,8 @@ class DevSupervisor:
 			cwd=self.backend_spec.cwd,
 			env=env,
 		)
-		ready: asyncio.Task[bytes] | None = None
+		ready: asyncio.Future[bytes] | None = None
+		ready_thread: threading.Thread | None = None
 		try:
 			try:
 				self.backend = ManagedProcess.start(
@@ -243,7 +246,39 @@ class DevSupervisor:
 				os.close(ready_w)
 				for listener in self.listeners:
 					listener.set_inheritable(False)
-			ready = asyncio.create_task(asyncio.to_thread(os.read, ready_r, 1))
+			ready_future: asyncio.Future[bytes] = loop.create_future()
+			ready = ready_future
+
+			def read_ready() -> None:
+				try:
+					data = os.read(ready_r, 1)
+				except OSError as exc:
+					error = exc
+
+					def set_error() -> None:
+						if not ready_future.done():
+							ready_future.set_exception(error)
+
+					try:
+						loop.call_soon_threadsafe(set_error)
+					except RuntimeError:
+						pass
+				else:
+
+					def set_result() -> None:
+						if not ready_future.done():
+							ready_future.set_result(data)
+
+					try:
+						loop.call_soon_threadsafe(set_result)
+					except RuntimeError:
+						pass
+				finally:
+					with contextlib.suppress(OSError):
+						os.close(ready_r)
+
+			ready_thread = threading.Thread(target=read_ready, daemon=True)
+			ready_thread.start()
 			result = await self._race("changed", "backend", "web", extra=ready)
 			if result == "ready":
 				try:
@@ -260,19 +295,22 @@ class DevSupervisor:
 		finally:
 			# Await the reader before closing its fd: the write end lives only
 			# in the child, so once the child is stopped the read returns EOF
-			# promptly. Closing first could hand the fd number to a concurrent
-			# open while the pool thread still reads from it. Bounded: a
-			# group-escaping descendant holding the write end must not wedge
-			# the supervisor.
+			# promptly. The dedicated daemon thread owns the read so an
+			# escaping descendant cannot wedge loop shutdown.
 			if ready is not None and not ready.done():
 				with contextlib.suppress(Exception):
 					await asyncio.wait_for(
 						asyncio.shield(ready), timeout=READY_PIPE_DRAIN_TIMEOUT
 					)
-			if ready is None or ready.done():
+			if ready is None and ready_thread is None:
 				with contextlib.suppress(OSError):
 					os.close(ready_r)
-			else:
+			elif (
+				ready is not None
+				and not ready.done()
+				and ready_thread is not None
+				and ready_thread.is_alive()
+			):
 				# A descendant escaped the process group and still holds the
 				# write end: the reader thread and fd stay pinned until it dies.
 				print(
@@ -286,24 +324,41 @@ class DevSupervisor:
 		if fd is not None:
 			os.close(fd)
 
-	async def _drain_vite_ready(self) -> None:
+	def _drain_vite_ready(
+		self, loop: asyncio.AbstractEventLoop, drain: asyncio.Future[None]
+	) -> None:
 		ready_r = self._vite_ready_r
 		if ready_r is None:
 			return
 		try:
 			while True:
 				try:
-					chunk = await asyncio.to_thread(os.read, ready_r, 8)
+					chunk = os.read(ready_r, 8)
 				except OSError:
 					return
 				if not chunk:
 					return
 				if b"c" in chunk:
-					self._vite_configured.set()
+					try:
+						loop.call_soon_threadsafe(self._vite_configured.set)
+					except RuntimeError:
+						return
 				if b"1" in chunk:
-					self._vite_listening.set()
+					try:
+						loop.call_soon_threadsafe(self._vite_listening.set)
+					except RuntimeError:
+						return
 		finally:
 			self._close_vite_ready_fd()
+
+			def complete() -> None:
+				if not drain.done():
+					drain.set_result(None)
+
+			try:
+				loop.call_soon_threadsafe(complete)
+			except RuntimeError:
+				pass
 
 	async def _await_vite_drain(self) -> None:
 		drain = self._vite_drain
@@ -383,7 +438,16 @@ class DevSupervisor:
 			raise
 		finally:
 			os.close(ready_w)
-		self._vite_drain = asyncio.create_task(self._drain_vite_ready())
+		loop = asyncio.get_running_loop()
+		drain: asyncio.Future[None] = loop.create_future()
+		self._vite_drain = drain
+		thread = threading.Thread(
+			target=self._drain_vite_ready,
+			args=(loop, drain),
+			daemon=True,
+		)
+		self._vite_reader_thread = thread
+		thread.start()
 		try:
 			got = await self._wait_vite_signal(
 				self._vite_configured, timeout=self.vite_plugin_timeout
@@ -432,9 +496,9 @@ class DevSupervisor:
 	async def _race(
 		self,
 		*names: str,
-		extra: asyncio.Task[Any] | None = None,
+		extra: asyncio.Future[Any] | None = None,
 	) -> Wait:
-		waiters: dict[str, asyncio.Task[Any]] = {
+		waiters: dict[str, asyncio.Future[Any]] = {
 			"shutdown": asyncio.create_task(self.shutdown.wait()),
 		}
 		if "changed" in names:

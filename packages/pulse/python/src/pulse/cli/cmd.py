@@ -226,11 +226,12 @@ def run(
 			raise typer.Exit(1) from None
 		web_cmd = build_web_command(
 			web_root=web_root,
-			extra_args=([*web_args, "--host", web_host]),
+			extra_args=web_args,
+			host=web_host,
 			port=web_port,
 			strict_port=True,
 			mode=app_instance.env,
-			ready_pattern=None if supervised_reload else r"localhost:\d+",
+			ready_pattern=(None if supervised_reload else rf":{web_port}(?:[/\s]|$)"),
 			on_ready=mark_web_ready,
 			plain=plain,
 		)
@@ -641,6 +642,7 @@ def build_web_command(
 	*,
 	web_root: Path,
 	extra_args: Sequence[str],
+	host: str | None = None,
 	port: int | None = None,
 	strict_port: bool = True,
 	mode: PulseEnv = "dev",
@@ -656,6 +658,8 @@ def build_web_command(
 			"./build/server/index.js",
 		]
 		command_env["NODE_ENV"] = "production"
+		if host is not None:
+			command_env["HOST"] = host
 	else:
 		# Development: use dev server
 		args = ["bun", "run", "dev"]
@@ -672,6 +676,8 @@ def build_web_command(
 				args.append("--strictPort")
 	if extra_args:
 		args.extend(extra_args)
+	if mode != "prod" and host is not None:
+		args.extend(["--host", host])
 
 	command_env.update(
 		{

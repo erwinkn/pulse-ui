@@ -566,6 +566,39 @@ class RaisingConnectMiddleware(ps.PulseMiddleware):
 		raise RuntimeError("boom in connect middleware")
 
 
+class InvalidConnectDecisionMiddleware(ps.PulseMiddleware):
+	@override
+	async def connect(self, *, request: Any, session: Any, next: Any) -> Any:
+		return None
+
+
+@pytest.mark.asyncio
+async def test_invalid_connect_decision_refuses_and_disposes_fresh_render(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
+	app = ps.App(routes=[], middleware=InvalidConnectDecisionMiddleware())
+	app.setup("http://example.com")
+	environ = make_environ(app, "user-1")
+	connect = connect_handler(app)
+
+	with pytest.raises(ps.MiddlewareDecisionError):
+		await connect(
+			"socket-a",
+			environ,
+			{"render_id": "render-1", "__pulse_page_instance_id": "page-a"},
+		)
+
+	assert app.render_sessions == {}
+	assert app._socket_to_render == {}  # pyright: ignore[reportPrivateUsage]
+	assert app._render_to_socket == {}  # pyright: ignore[reportPrivateUsage]
+	assert app._render_to_page_instance == {}  # pyright: ignore[reportPrivateUsage]
+	assert app._render_connect_attempts == {}  # pyright: ignore[reportPrivateUsage]
+	assert app._render_cleanups == {}  # pyright: ignore[reportPrivateUsage]
+
+	await app.close()
+
+
 @pytest.mark.asyncio
 async def test_connect_middleware_exception_is_surfaced_after_bind(
 	monkeypatch: pytest.MonkeyPatch,

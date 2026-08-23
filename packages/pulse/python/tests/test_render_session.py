@@ -1284,6 +1284,33 @@ async def test_run_js_timeout():
 
 
 @pytest.mark.asyncio
+async def test_run_js_cancellation_discards_pending_reply():
+	"""Cancelling run_js must remove its pending reply registration."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	with ps.PulseContext.update(render=session, route=session.route_mounts["/a"].route):
+		future = session.run_js(get_answer(), result=True, timeout=60.0)
+
+	assert future is not None
+	exec_id = cast(Any, [m for m in messages if m.get("type") == "js_exec"][0])["id"]
+	assert exec_id in session.replies
+
+	future.cancel()
+	await asyncio.sleep(0)
+
+	assert exec_id not in session.replies
+	session.close()
+
+
+@pytest.mark.asyncio
 async def test_run_js_registers_before_send():
 	"""A synchronous send callback can reply immediately; the future
 	must already be registered."""
@@ -1340,6 +1367,7 @@ async def test_run_js_success_before_timeout():
 	# The future should resolve with the result
 	result = await future
 	assert result == 42
+	assert len(session.replies) == 0
 
 	session.close()
 

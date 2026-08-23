@@ -9,6 +9,7 @@ VITE_CONFIGURED = "vite-configured"
 VITE_LISTENING = "vite-listening"
 
 MESSAGES = frozenset({WORKER_READY, VITE_CONFIGURED, VITE_LISTENING})
+MARKER_TOKEN_CHARACTERS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
 
 
 def emit(message: str) -> None:
@@ -35,8 +36,15 @@ def parse(line: str) -> tuple[list[str], str]:
 		start = index + len(PREFIX)
 		for message in MESSAGES:
 			if line.startswith(message, start):
+				end = start + len(message)
+				if (
+					message == WORKER_READY
+					and end < len(line)
+					and line[end] in MARKER_TOKEN_CHARACTERS
+				):
+					continue
 				messages.append(message)
-				line = line[:index] + line[start + len(message) :]
+				line = line[:index] + line[end:]
 				search_from = index
 				break
 		else:

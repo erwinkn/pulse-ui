@@ -144,7 +144,7 @@ class DevSupervisor:
 					break
 				if self._web_code is not None:
 					return self._web_code
-				if not started:
+				if not started and not self.changed.is_set():
 					print(
 						"Backend failed to start. Waiting for changes to retry...",
 						flush=True,

@@ -1,8 +1,10 @@
+import ctypes
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from pulse.cli import lock as lock_mod
 from pulse.cli.lock import (
 	LockInfo,
 	active_lock_info,
@@ -26,6 +28,35 @@ def test_process_liveness_probe_does_not_terminate_live_process():
 		proc.wait(timeout=2)
 
 	assert not is_process_alive(proc.pid)
+
+
+def test_windows_interrupt_ignores_process_exiting_during_terminate(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	class Kernel32:
+		def OpenProcess(self, *_args: object) -> int:
+			return 1
+
+		def TerminateProcess(self, _handle: int, _code: int) -> bool:
+			return False
+
+		def WaitForSingleObject(self, _handle: int, _timeout: int) -> int:
+			return lock_mod.WAIT_OBJECT_0
+
+		def CloseHandle(self, _handle: int) -> bool:
+			return True
+
+	monkeypatch.setattr(lock_mod, "os_family", lambda: "windows")
+	monkeypatch.setattr(lock_mod, "_kernel32", lambda: Kernel32())
+	monkeypatch.setattr(
+		ctypes,
+		"get_last_error",
+		lambda: lock_mod.ERROR_ACCESS_DENIED,
+		raising=False,
+	)
+
+	lock_mod._interrupt_process(123)  # pyright: ignore[reportPrivateUsage]
+	assert not is_process_alive(123)
 
 
 def test_create_lock_round_trips_typed_info(tmp_path: Path):

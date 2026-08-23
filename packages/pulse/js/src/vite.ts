@@ -5,6 +5,7 @@ const SUPERVISED_ENV = "PULSE_SUPERVISED";
 const PROTOCOL_PREFIX = "\x00pulse:";
 const VITE_CONFIGURED = "vite-configured";
 const VITE_LISTENING = "vite-listening";
+let stdoutWithErrorListener: typeof process.stdout | undefined;
 
 function hmrClientPort(): number | undefined {
 	const raw = process.env[HMR_CLIENT_PORT_ENV];
@@ -53,8 +54,13 @@ export function pulse(): Plugin {
 }
 
 function notify(message: string) {
+	const stdout = process.stdout;
+	if (stdoutWithErrorListener !== stdout) {
+		stdout.on("error", () => {});
+		stdoutWithErrorListener = stdout;
+	}
 	try {
-		process.stdout.write(`${PROTOCOL_PREFIX}${message}\n`);
+		stdout.write(`${PROTOCOL_PREFIX}${message}\n`, () => {});
 	} catch {
 		// Readiness reporting must never prevent Vite from starting.
 	}

@@ -410,6 +410,20 @@ async def test_vite_drain_timeout_does_not_wait_for_open_write_end(
 
 
 @pytest.mark.asyncio
+async def test_vite_drain_without_pipe_resolves_future(tmp_path: Path) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	drain = asyncio.get_running_loop().create_future()
+
+	supervisor._drain_vite_ready(  # pyright: ignore[reportPrivateUsage]
+		asyncio.get_running_loop(), drain
+	)
+	await asyncio.sleep(0)
+
+	assert drain.done()
+	assert drain.result() is None
+
+
+@pytest.mark.asyncio
 async def test_missing_vite_plugin_names_config_and_setup(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

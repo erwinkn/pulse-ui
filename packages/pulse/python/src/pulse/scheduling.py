@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any, ParamSpec, Protocol, TypeVar, override
 
@@ -7,6 +8,13 @@ from anyio import from_thread
 
 T = TypeVar("T")
 P = ParamSpec("P")
+
+CLOCK_RESOLUTION = time.get_clock_info("monotonic").resolution
+
+
+def clamp_delay(delay: float) -> float:
+	"""Clamp positive delays because asyncio treats timers within one clock resolution as due."""
+	return max(delay, CLOCK_RESOLUTION) if delay > 0 else delay
 
 
 class TimerHandleLike(Protocol):
@@ -230,7 +238,7 @@ class TimerRegistry:
 			try:
 				while not handle.cancelled:
 					# Start counting the next interval AFTER the previous execution completes
-					await asyncio.sleep(interval)
+					await asyncio.sleep(clamp_delay(interval))
 					if handle.cancelled:
 						break
 					try:
@@ -290,7 +298,7 @@ class TimerRegistry:
 		tracked_box: list[TimerHandleLike] = []
 		_run = self._prepare_run(loop, tracked_box, fn, args, kwargs, untrack=untrack)
 
-		handle = loop.call_later(delay, _run)
+		handle = loop.call_later(clamp_delay(delay), _run)
 		tracked = _TrackedTimerHandle(handle, self)
 		tracked_box.append(tracked)
 		self._handles.add(tracked)

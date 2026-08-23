@@ -18,7 +18,7 @@ from pulse.queries.store import QueryStore
 from pulse.reactive import Computed, Untrack
 from pulse.render_session import RenderSession
 from pulse.routing import RouteTree
-from pulse.test_helpers import wait_for
+from pulse.test_helpers import slow_delay, wait_for
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -289,7 +289,7 @@ async def test_query_entry_cancel_refetch():
 		nonlocal calls
 		calls += 1
 		try:
-			await asyncio.sleep(0.01)
+			await asyncio.sleep(slow_delay())
 		except asyncio.CancelledError:
 			# print("Cancelled!")
 			raise
@@ -619,7 +619,7 @@ async def test_query_retry_delay():
 	attempts: list[float] = []
 
 	async def fetcher():
-		attempts.append(asyncio.get_event_loop().time())
+		attempts.append(time.perf_counter())
 		if len(attempts) < 3:
 			raise ValueError("retry")
 		return "success"
@@ -2480,7 +2480,7 @@ async def test_state_query_refetch_interval():
 	class S(ps.State):
 		calls: int = 0
 
-		@ps.query(retries=0, refetch_interval=0.01)
+		@ps.query(retries=0, refetch_interval=slow_delay())
 		async def data(self) -> int:
 			self.calls += 1
 			await asyncio.sleep(0)

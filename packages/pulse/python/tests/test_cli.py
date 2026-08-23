@@ -2,6 +2,7 @@ import asyncio
 import importlib
 import json
 import os
+import socket
 import sys
 import time
 from pathlib import Path
@@ -326,8 +327,11 @@ def test_run_interrupt_stops_existing_server_before_finding_port(
 	result = runner.invoke(cmd_mod.cli, ["run", "demo.py", "--plain", "--interrupt"])
 
 	assert result.exit_code == 0, result.output
-	assert calls[:2] == [("interrupt", web_root), ("reserve", 8000)]
-	assert all(call != ("reserve", 5173) for call in calls)
+	assert calls[:3] == [
+		("interrupt", web_root),
+		("reserve", 8000),
+		("reserve", 5173),
+	]
 	assert "Stopped existing Pulse dev server at http://localhost:8000" in result.output
 	assert [command.name for command in commands] == ["server", "web"]
 
@@ -463,8 +467,98 @@ def test_run_finds_next_available_ports_by_default(
 	result = runner.invoke(cmd_mod.cli, ["run", "demo.py", "--plain"])
 
 	assert result.exit_code == 0, result.output
-	assert reservations == [("localhost", 8000, True)]
+	assert reservations == [
+		("localhost", 8000, True),
+		("127.0.0.1", 5173, True),
+	]
 	assert commands[1].args[commands[1].args.index("--port") + 1] == "5173"
+
+
+def test_run_holds_web_port_until_process_launch(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	reservations: list[PortReservation] = []
+	events: list[str] = []
+
+	def reserve(host: str, port: int, *, find_port: bool) -> PortReservation:
+		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		sock.bind(("127.0.0.1", 0))
+		sock.listen()
+		reservation = PortReservation(sock.getsockname()[1], (sock,))
+		reservations.append(reservation)
+		events.append(f"reserve:{host}:{port}")
+		return reservation
+
+	def prepare(web_root_arg: Path, *, pulse_version: str) -> DependencyPlan:
+		assert reservations[-1].sockets[0].fileno() >= 0
+		return DependencyPlan(command=["bun", "i"], to_add=())
+
+	def run_plan(logger: object, web_root_arg: Path, plan: DependencyPlan) -> None:
+		assert reservations[-1].sockets[0].fileno() >= 0
+
+	def execute(command_specs: list[CommandSpec], *, tag_mode: str) -> int:
+		assert reservations[-1].sockets[0].fileno() == -1
+		events.append("launch")
+		return 0
+
+	def load_app(_target: str, _logger: object | None = None) -> AppLoadResult:
+		return app_ctx
+
+	monkeypatch.setattr(cmd_mod, "load_app_from_target", load_app)
+	monkeypatch.setattr(cmd_mod, "reserve_port", reserve)
+	monkeypatch.setattr(cmd_mod, "prepare_web_dependencies", prepare)
+	monkeypatch.setattr(cmd_mod, "_run_dependency_plan", run_plan)
+	monkeypatch.setattr(cmd_mod, "execute_commands", execute)
+
+	result = runner.invoke(
+		cmd_mod.cli,
+		["run", "demo.py", "--plain", "--no-reload", "--no-find-port"],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert events == ["reserve:127.0.0.1:5173", "launch"]
+
+
+def test_build_uvicorn_reload_watches_web_root_and_excludes_pulse_dir(
+	tmp_path: Path,
+) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	cast(Any, app_ctx.app).env = "prod"
+
+	command = cmd_mod.build_uvicorn_command(
+		app_ctx=app_ctx,
+		address="localhost",
+		port=8000,
+		web_root=web_root,
+		reload_enabled=True,
+		extra_args=(),
+		dev_secret=None,
+		server_only=False,
+		plain=True,
+	)
+
+	reload_dir = command.args.index("--reload-dir")
+	assert command.args[reload_dir : reload_dir + 4] == [
+		"--reload-dir",
+		str(tmp_path),
+		"--reload-dir",
+		str(web_root),
+	]
+	exclude = command.args.index("--reload-exclude")
+	assert command.args[exclude : exclude + 2] == [
+		"--reload-exclude",
+		"web/app/_pulse",
+	]
+	exclude = command.args.index("--reload-exclude", exclude + 1)
+	assert command.args[exclude : exclude + 2] == [
+		"--reload-exclude",
+		"web/app/_pulse/**",
+	]
 
 
 def test_run_no_reload_keeps_direct_uvicorn_and_initial_codegen(

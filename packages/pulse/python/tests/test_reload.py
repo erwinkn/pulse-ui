@@ -84,7 +84,9 @@ def command(name: str, tmp_path: Path, ready_pattern: str | None = None) -> Comm
 
 
 def supervisor_shell(
-	tmp_path: Path, listeners: tuple[socket.socket, ...] = ()
+	tmp_path: Path,
+	listeners: tuple[socket.socket, ...] = (),
+	web_root: Path | None = None,
 ) -> DevSupervisor:
 	return DevSupervisor(
 		backend=command("server", tmp_path),
@@ -94,6 +96,7 @@ def supervisor_shell(
 		registered_sources=set(),
 		tag_mode="plain",
 		listeners=listeners,
+		web_root=web_root,
 	)
 
 
@@ -401,6 +404,26 @@ async def test_missing_vite_plugin_exits(
 	assert await supervisor.run() == 1
 	assert "pulse()" in capsys.readouterr().out
 	assert "web1:kill" in events
+
+
+@pytest.mark.asyncio
+async def test_missing_vite_plugin_names_config_and_setup(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	config = web_root / "vite.config.mts"
+	config.write_text("export default {};\n")
+	supervisor = supervisor_shell(tmp_path, web_root=web_root)
+	supervisor.vite_plugin_timeout = 0.01
+	events: list[str] = []
+	install_process_script(monkeypatch, events, [("web", "hang")])
+
+	assert await supervisor.run() == 1
+	output = capsys.readouterr().out
+	assert str(config.resolve()) in output
+	assert 'import { pulse } from "pulse-ui-client/vite";' in output
+	assert "plugins: [..., pulse()]" in output
 
 
 @pytest.mark.asyncio

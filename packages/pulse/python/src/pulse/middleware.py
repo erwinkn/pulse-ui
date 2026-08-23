@@ -80,6 +80,10 @@ class Deny:
 	"""Denial response. Blocks the request."""
 
 
+class MiddlewareDecisionError(TypeError):
+	"""Raised when a decision hook returns an invalid value."""
+
+
 def _coerce_decision(res: Any) -> "Ok[None] | Deny":
 	"""Decision hooks must return Ok or Deny; anything else fails closed.
 
@@ -88,7 +92,7 @@ def _coerce_decision(res: Any) -> "Ok[None] | Deny":
 	"""
 	if isinstance(res, (Ok, Deny)):
 		return res  # type: ignore[return-value]
-	raise TypeError(
+	raise MiddlewareDecisionError(
 		f"Middleware decision hook must return Ok or Deny, got {type(res).__name__}"
 	)
 

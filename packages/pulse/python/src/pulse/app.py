@@ -61,6 +61,7 @@ from pulse.messages import (
 from pulse.middleware import (
 	ConnectResponse,
 	Deny,
+	MiddlewareDecisionError,
 	MiddlewareStack,
 	NotFound,
 	Ok,
@@ -879,7 +880,7 @@ class App:
 							session=session.data,
 							next=_next,
 						)
-					except TypeError:
+					except MiddlewareDecisionError:
 						raise
 					except Exception as exc:
 						connect_error = exc

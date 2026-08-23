@@ -241,6 +241,7 @@ async def test_reload_kills_backend_immediately_and_keeps_vite(
 async def test_failed_backend_keeps_vite_and_waits_for_edit(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
+	capsys: pytest.CaptureFixture[str],
 ) -> None:
 	supervisor = supervisor_shell(tmp_path)
 	events: list[str] = []
@@ -250,12 +251,6 @@ async def test_failed_backend_keeps_vite_and_waits_for_edit(
 		[("web", "ready"), ("server", "fail"), ("server", "ready")],
 	)
 
-	printed: list[str] = []
-
-	def record_print(message: object, *_args: object, **_kwargs: object) -> None:
-		printed.append(str(message))
-
-	monkeypatch.setattr(reload_mod, "print", record_print, raising=False)
 	run_task = asyncio.create_task(supervisor.run())
 	await wait_until(lambda: "server1:close" in events)
 	assert supervisor.web is not None
@@ -265,7 +260,10 @@ async def test_failed_backend_keeps_vite_and_waits_for_edit(
 	await wait_until(lambda: "server2:start" in events)
 	supervisor.shutdown.set()
 	assert await run_task == 130
-	assert "Backend failed to start. Waiting for changes to retry..." in printed
+	assert (
+		"Backend failed to start. Waiting for changes to retry..."
+		in capsys.readouterr().out
+	)
 
 
 @pytest.mark.asyncio

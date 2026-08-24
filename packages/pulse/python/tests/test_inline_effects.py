@@ -705,6 +705,89 @@ class TestEdgeCases:
 
 		assert runs == [0]  # Effect did NOT run again
 
+	def test_effect_after_raise_point_survives_failed_render(self):
+		"""A render that raises must not dispose effects declared after the raise."""
+		runs: list[int] = []
+		effects: list[Effect] = []
+		fail = Signal(False)
+		counter = Signal(0)
+
+		@ps.component
+		def Comp():
+			if fail():
+				raise RuntimeError("transient")
+
+			@ps.effect(immediate=True)
+			def my_effect():
+				runs.append(counter())
+
+			effects.append(my_effect)
+			return None
+
+		ctx = HookContext()
+		with ctx:
+			Comp.fn()
+
+		assert runs == [0]
+		first = effects[0]
+
+		fail.write(True)
+		with pytest.raises(RuntimeError, match="transient"), ctx:
+			Comp.fn()
+
+		assert not first.__disposed__
+
+		# Still live: dependency changes keep triggering it during the failure window.
+		with Batch():
+			counter.write(1)
+
+		assert runs == [0, 1]
+
+		fail.write(False)
+		with ctx:
+			Comp.fn()
+
+		assert effects[1] is first
+		assert not first.__disposed__
+
+	def test_effect_disposed_by_first_successful_render_after_failure(self):
+		"""A failed render's partial seen-set must not skew the next successful render."""
+		cleanups: list[str] = []
+		fail = Signal(False)
+		show = Signal(True)
+
+		@ps.component
+		def Comp():
+			if fail():
+				raise RuntimeError("transient")
+			if show():
+
+				@ps.effect(immediate=True)
+				def my_effect():
+					def cleanup():
+						cleanups.append("disposed")
+
+					return cleanup
+
+			return None
+
+		ctx = HookContext()
+		with ctx:
+			Comp.fn()
+
+		fail.write(True)
+		with pytest.raises(RuntimeError, match="transient"), ctx:
+			Comp.fn()
+
+		assert cleanups == []
+
+		fail.write(False)
+		show.write(False)
+		with ctx:
+			Comp.fn()
+
+		assert cleanups == ["disposed"]
+
 	def test_effect_with_closure_captures_current_values(self):
 		captured: list[int] = []
 

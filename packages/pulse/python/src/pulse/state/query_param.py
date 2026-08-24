@@ -354,6 +354,10 @@ class QueryParamProperty(StateProperty):
 
 	@override
 	def _get_signal(self, obj: Any) -> Signal[Any]:
+		# Slots are session-owned and outlive the states bound to them, so a
+		# disposed state still reads and writes the live slot. Same as a plain
+		# StateProperty, whose Signal also survives disposal: disposal releases
+		# effects, it does not poison attribute access.
 		ctx = PulseContext.get()
 		if ctx.render is None:
 			raise RuntimeError(

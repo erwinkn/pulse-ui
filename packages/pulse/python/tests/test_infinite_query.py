@@ -14,7 +14,7 @@ from pulse.queries.infinite_query import (
 from pulse.reactive import Computed
 from pulse.render_session import RenderSession
 from pulse.routing import RouteTree
-from pulse.test_helpers import wait_for
+from pulse.test_helpers import slow_delay, wait_for
 
 
 class ProjectsPage(TypedDict):
@@ -1256,7 +1256,7 @@ async def test_infinite_query_cancel_fetch_cancels_inflight_request():
 		async def slow_query(self, page_param: int) -> int:
 			self.fetch_started.append(page_param)
 			# Slow fetch - gives time for cancellation
-			await asyncio.sleep(0.015)
+			await asyncio.sleep(slow_delay(0.05))
 			self.fetch_completed.append(page_param)
 			return page_param
 
@@ -1305,7 +1305,7 @@ async def test_infinite_query_cancel_fetch_next_page_cancels_inflight():
 		@ps.infinite_query(initial_page_param=0, retries=0, key=("cancel-fetch-next",))
 		async def slow_query(self, page_param: int) -> int:
 			self.fetch_started.append(page_param)
-			await asyncio.sleep(0.015)
+			await asyncio.sleep(slow_delay(0.05))
 			self.fetch_completed.append(page_param)
 			return page_param
 
@@ -1670,7 +1670,7 @@ async def test_infinite_query_refetch_with_cancel_uses_correct_fetch_fn():
 		)
 		async def data(self, page_param: int) -> str:
 			fetch_started.append((self.suffix, page_param))
-			await asyncio.sleep(0.015)  # Long enough to allow cancellation
+			await asyncio.sleep(slow_delay(0.05))  # Long enough to allow cancellation
 			fetch_completed.append((self.suffix, page_param))
 			return f"{self.suffix}-{page_param}"
 
@@ -1731,7 +1731,7 @@ async def test_infinite_query_result_dispose_cancels_in_flight_fetch():
 		async def data(self, page_param: int) -> str:
 			fetch_log.append("started")
 			fetch_started.set()
-			await asyncio.sleep(0.02)  # Long running fetch
+			await asyncio.sleep(slow_delay(0.05))  # Long running fetch
 			fetch_log.append("completed")
 			return f"result-{page_param}"
 
@@ -2094,7 +2094,7 @@ async def test_infinite_query_key_change_does_not_affect_other_observer():
 			uid = self.user_id
 			fetch_log.append((self.name, uid, "started"))
 			fetch_started.set()
-			await asyncio.sleep(0.015)
+			await asyncio.sleep(slow_delay(0.05))
 			fetch_log.append((self.name, uid, "completed"))
 			return {"items": [uid * 10 + page_param], "next": None}
 

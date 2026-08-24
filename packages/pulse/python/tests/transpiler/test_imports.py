@@ -340,11 +340,16 @@ class TestPathHelpers:
 		assert is_relative_path("./utils")
 		assert is_relative_path("./components/Button")
 		assert is_relative_path("./styles.css")
+		assert is_relative_path(".\\utils")
+		assert is_relative_path(".\\components\\Button")
+		assert is_relative_path(".\\styles.css")
 
 	def test_is_relative_path_with_dot_dot_slash(self):
 		"""Paths starting with ../ are relative."""
 		assert is_relative_path("../utils")
 		assert is_relative_path("../../shared/config")
+		assert is_relative_path("..\\utils")
+		assert is_relative_path("..\\..\\shared\\config")
 
 	def test_is_relative_path_rejects_package_paths(self):
 		"""Package paths are not relative."""
@@ -362,6 +367,9 @@ class TestPathHelpers:
 		assert is_absolute_path("/absolute/path")
 		assert is_absolute_path("/Users/test/project/src/utils.ts")
 		assert is_absolute_path("/tmp/styles.css")
+		assert is_absolute_path("C:\\absolute\\path")
+		assert is_absolute_path("C:/Users/test/project/src/utils.ts")
+		assert is_absolute_path("\\\\server\\share\\styles.css")
 
 	def test_is_absolute_path_rejects_relative(self):
 		"""Relative paths are not absolute."""
@@ -377,11 +385,15 @@ class TestPathHelpers:
 		"""Local paths include relative paths."""
 		assert is_local_path("./utils")
 		assert is_local_path("../shared")
+		assert is_local_path(".\\utils")
+		assert is_local_path("..\\shared")
 
 	def test_is_local_path_includes_absolute(self):
 		"""Local paths include absolute paths."""
 		assert is_local_path("/absolute/path")
 		assert is_local_path("/Users/test/file.ts")
+		assert is_local_path("C:\\absolute\\path")
+		assert is_local_path("\\\\server\\share\\file.ts")
 
 	def test_is_local_path_excludes_packages(self):
 		"""Package paths are not local."""

@@ -1,5 +1,8 @@
+import asyncio
 import json
 import os
+import re
+import socket
 import sys
 import time
 from pathlib import Path
@@ -30,13 +33,49 @@ from pulse.cli.packages import (
 	resolve_versions,
 	spec_satisfies,
 )
+from pulse.cli.ports import PortReservation
 from pulse.cli.processes import execute_commands
 from pulse.cli.secrets import resolve_dev_secret
-from pulse.env import env
+from pulse.env import ENV_PULSE_HMR_CLIENT_PORT, ENV_PULSE_REACT_SERVER_ADDRESS, env
 from pulse.transpiler.imports import Import, clear_import_registry
 from typer.testing import CliRunner
 
 runner = CliRunner()
+
+
+def install_recording_supervisor(
+	monkeypatch: pytest.MonkeyPatch,
+	commands: list[CommandSpec],
+	*,
+	exit_code: int = 0,
+	captured: dict[str, Any] | None = None,
+) -> None:
+	class Supervisor:
+		def __init__(self, **kwargs: Any) -> None:
+			if captured is not None:
+				captured.update(kwargs)
+			commands.append(kwargs["backend"])
+			if kwargs["web"] is not None:
+				commands.append(kwargs["web"])
+
+		async def run(self) -> int:
+			return exit_code
+
+	def run(coroutine: Any) -> int:
+		coroutine.close()
+		return exit_code
+
+	monkeypatch.setattr(cmd_mod, "DevSupervisor", Supervisor)
+	monkeypatch.setattr(asyncio, "run", run)
+
+
+VITE_CONFIG = """import { reactRouter } from "@react-router/dev/vite";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+	plugins: [reactRouter()],
+});
+"""
 
 
 class _GenerateAppStub:
@@ -59,7 +98,7 @@ class _RunAppStub:
 				web_root=web_root, pulse_dir=pulse_dir, pulse_path=pulse_path
 			)
 		)
-		self.mode: str = "multi-server"
+		self.mode: str = "single-server"
 		self.env: str = "dev"
 		self.codegen_calls: list[str] = []
 
@@ -232,6 +271,7 @@ def test_run_interrupt_stops_existing_server_before_finding_port(
 ):
 	web_root = tmp_path / "web"
 	web_root.mkdir()
+	(web_root / "vite.config.ts").write_text(VITE_CONFIG)
 	app_ctx = _make_run_app_ctx(tmp_path, web_root)
 	calls: list[tuple[str, object]] = []
 	commands: list[CommandSpec] = []
@@ -253,13 +293,9 @@ def test_run_interrupt_stops_existing_server_before_finding_port(
 		calls.append(("interrupt", web_root_arg))
 		return stopped
 
-	def find_port(port: int) -> int:
-		calls.append(("find", port))
-		return port
-
-	def execute(command_specs: list[CommandSpec], *, tag_mode: str) -> int:
-		commands.extend(command_specs)
-		return 0
+	def reserve(host: str, port: int, *, find_port: bool) -> PortReservation:
+		calls.append(("reserve", port))
+		return PortReservation(port, ())
 
 	def prepare(web_root_arg: Path, *, pulse_version: str) -> DependencyPlan:
 		return DependencyPlan(command=["bun", "i"], to_add=())
@@ -269,22 +305,29 @@ def test_run_interrupt_stops_existing_server_before_finding_port(
 
 	monkeypatch.setattr(cmd_mod, "load_app_from_target", load_app)
 	monkeypatch.setattr(cmd_mod, "interrupt_active_dev_server", interrupt)
-	monkeypatch.setattr(cmd_mod, "find_available_port", find_port)
+	monkeypatch.setattr(cmd_mod, "reserve_port", reserve)
 	monkeypatch.setattr(cmd_mod, "prepare_web_dependencies", prepare)
 	monkeypatch.setattr(cmd_mod, "_run_dependency_plan", run_plan)
-	monkeypatch.setattr(cmd_mod, "execute_commands", execute)
+	install_recording_supervisor(monkeypatch, commands)
 
 	result = runner.invoke(cmd_mod.cli, ["run", "demo.py", "--plain", "--interrupt"])
 
 	assert result.exit_code == 0, result.output
-	assert calls[:2] == [("interrupt", web_root), ("find", 8000)]
-	assert ("find", 5173) in calls
+	assert calls[:3] == [
+		("interrupt", web_root),
+		("reserve", 8000),
+		("reserve", 5173),
+	]
 	assert "Stopped existing Pulse dev server at http://localhost:8000" in result.output
-	assert [command.name for command in commands] == ["web", "server"]
+	assert [command.name for command in commands] == ["server", "web"]
 
 
 def _patch_run_basics(
-	monkeypatch: pytest.MonkeyPatch, app_ctx: AppLoadResult
+	monkeypatch: pytest.MonkeyPatch,
+	app_ctx: AppLoadResult,
+	*,
+	supervisor_exit_code: int = 0,
+	captured: dict[str, Any] | None = None,
 ) -> tuple[list[CommandSpec], list[list[str]]]:
 	"""Stub `run`'s side effects, capturing launched commands and install calls."""
 	commands: list[CommandSpec] = []
@@ -295,6 +338,10 @@ def _patch_run_basics(
 
 	def find_port(port: int) -> int:
 		return port
+
+	def reserve(host: str, port: int, *, find_port: bool) -> PortReservation:
+		# Port 0 asks the OS for an ephemeral port; mimic that in the stub.
+		return PortReservation(port or 49152, ())
 
 	def prepare(web_root_arg: Path, *, pulse_version: str) -> DependencyPlan:
 		return DependencyPlan(command=["bun", "i"], to_add=())
@@ -308,33 +355,263 @@ def _patch_run_basics(
 
 	monkeypatch.setattr(cmd_mod, "load_app_from_target", load_app)
 	monkeypatch.setattr(cmd_mod, "find_available_port", find_port)
+	monkeypatch.setattr(cmd_mod, "reserve_port", reserve)
 	monkeypatch.setattr(cmd_mod, "prepare_web_dependencies", prepare)
 	monkeypatch.setattr(cmd_mod, "_run_dependency_plan", run_plan)
 	monkeypatch.setattr(cmd_mod, "execute_commands", execute)
+	install_recording_supervisor(
+		monkeypatch, commands, exit_code=supervisor_exit_code, captured=captured
+	)
 	return commands, installed
 
 
-def test_run_installs_and_generates_before_web(
+def test_run_supervisor_keeps_vite_on_loopback_in_single_server(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-	"""`run` installs web deps and generates routes before launching the web server."""
 	web_root = tmp_path / "web"
 	web_root.mkdir()
+	vite_config = web_root / "vite.config.ts"
+	vite_config.write_text(VITE_CONFIG)
 	app_ctx = _make_run_app_ctx(tmp_path, web_root)
 	app = cast(Any, app_ctx.app)
-
-	commands, installed = _patch_run_basics(monkeypatch, app_ctx)
+	captured: dict[str, Any] = {}
+	commands, installed = _patch_run_basics(monkeypatch, app_ctx, captured=captured)
 
 	result = runner.invoke(
 		cmd_mod.cli, ["run", "demo.py", "--plain", "--no-find-port", "--port", "8000"]
 	)
 
 	assert result.exit_code == 0, result.output
-	# Install runs, then codegen with the bind address, before commands launch.
+	assert captured["ignored_roots"] == (web_root.resolve(),)
+	assert vite_config.read_text() == VITE_CONFIG
 	assert installed == [["bun", "i"]]
 	assert app.codegen_calls == ["http://localhost:8000"]
-	assert (web_root / "app" / "_pulse" / "routes.ts").exists()
-	assert [c.name for c in commands] == ["web", "server"]
+	assert [c.name for c in commands] == ["server", "web"]
+	assert commands[0].args[1:3] == ["-m", "pulse.cli.dev_worker"]
+	assert commands[0].args[commands[0].args.index("--host") + 1] == "localhost"
+	assert commands[0].args[commands[0].args.index("--port") + 1] == "8000"
+	assert "--bind-host" not in commands[0].args
+	assert commands[0].env[ENV_PULSE_REACT_SERVER_ADDRESS] == "http://127.0.0.1:5173"
+	assert commands[1].args[:3] == ["bun", "run", "dev"]
+	port_index = commands[1].args.index("--port")
+	assert commands[1].args[port_index : port_index + 3] == [
+		"--port",
+		"5173",
+		"--strictPort",
+	]
+	assert commands[1].args[commands[1].args.index("--host") + 1] == "127.0.0.1"
+	assert commands[1].env[ENV_PULSE_HMR_CLIENT_PORT] == "8000"
+
+
+def test_run_supervisor_binds_vite_to_public_host_in_subdomains(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	cast(Any, app_ctx.app).mode = "subdomains"
+	commands, _installed = _patch_run_basics(monkeypatch, app_ctx)
+
+	result = runner.invoke(
+		cmd_mod.cli, ["run", "demo.py", "--plain", "--no-find-port", "--port", "8000"]
+	)
+
+	assert result.exit_code == 0, result.output
+	assert commands[0].env[ENV_PULSE_REACT_SERVER_ADDRESS] == "http://localhost:5173"
+	assert commands[1].args[commands[1].args.index("--host") + 1] == "localhost"
+	assert ENV_PULSE_HMR_CLIENT_PORT not in commands[1].env
+
+
+def test_run_brackets_ipv6_react_server_address(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	cast(Any, app_ctx.app).mode = "subdomains"
+	commands, _installed = _patch_run_basics(monkeypatch, app_ctx)
+
+	result = runner.invoke(
+		cmd_mod.cli,
+		["run", "demo.py", "--plain", "--no-find-port", "--address", "::1"],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert commands[0].env[ENV_PULSE_REACT_SERVER_ADDRESS] == "http://[::1]:5173"
+
+
+def test_run_propagates_supervisor_exit_code(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	_patch_run_basics(monkeypatch, app_ctx, supervisor_exit_code=7)
+
+	result = runner.invoke(cmd_mod.cli, ["run", "demo.py", "--plain"])
+
+	assert result.exit_code == 7
+
+
+def test_run_finds_next_available_ports_by_default(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	reservations: list[tuple[str, int, bool]] = []
+
+	def reserve(host: str, port: int, *, find_port: bool) -> PortReservation:
+		reservations.append((host, port, find_port))
+		return PortReservation(port, ())
+
+	commands, _installed = _patch_run_basics(monkeypatch, app_ctx)
+	monkeypatch.setattr(cmd_mod, "reserve_port", reserve)
+
+	result = runner.invoke(cmd_mod.cli, ["run", "demo.py", "--plain"])
+
+	assert result.exit_code == 0, result.output
+	assert reservations == [
+		("localhost", 8000, True),
+		("127.0.0.1", 5173, True),
+	]
+	assert commands[1].args[commands[1].args.index("--port") + 1] == "5173"
+
+
+def test_run_holds_web_port_until_process_launch(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	reservations: list[PortReservation] = []
+	events: list[str] = []
+
+	def reserve(host: str, port: int, *, find_port: bool) -> PortReservation:
+		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		sock.bind(("127.0.0.1", 0))
+		sock.listen()
+		reservation = PortReservation(sock.getsockname()[1], (sock,))
+		reservations.append(reservation)
+		events.append(f"reserve:{host}:{port}")
+		return reservation
+
+	def prepare(web_root_arg: Path, *, pulse_version: str) -> DependencyPlan:
+		assert reservations[-1].sockets[0].fileno() >= 0
+		return DependencyPlan(command=["bun", "i"], to_add=())
+
+	def run_plan(logger: object, web_root_arg: Path, plan: DependencyPlan) -> None:
+		assert reservations[-1].sockets[0].fileno() >= 0
+
+	def execute(command_specs: list[CommandSpec], *, tag_mode: str) -> int:
+		assert reservations[-1].sockets[0].fileno() == -1
+		events.append("launch")
+		return 0
+
+	def load_app(_target: str, _logger: object | None = None) -> AppLoadResult:
+		return app_ctx
+
+	monkeypatch.setattr(cmd_mod, "load_app_from_target", load_app)
+	monkeypatch.setattr(cmd_mod, "reserve_port", reserve)
+	monkeypatch.setattr(cmd_mod, "prepare_web_dependencies", prepare)
+	monkeypatch.setattr(cmd_mod, "_run_dependency_plan", run_plan)
+	monkeypatch.setattr(cmd_mod, "execute_commands", execute)
+
+	result = runner.invoke(
+		cmd_mod.cli,
+		["run", "demo.py", "--plain", "--no-reload", "--no-find-port"],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert events == ["reserve:127.0.0.1:5173", "launch"]
+
+
+def test_build_uvicorn_reload_watches_web_root_and_excludes_pulse_dir(
+	tmp_path: Path,
+) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	cast(Any, app_ctx.app).env = "prod"
+
+	command = cmd_mod.build_uvicorn_command(
+		app_ctx=app_ctx,
+		address="localhost",
+		port=8000,
+		web_root=web_root,
+		reload_enabled=True,
+		extra_args=(),
+		dev_secret=None,
+		server_only=False,
+		plain=True,
+	)
+
+	reload_dir = command.args.index("--reload-dir")
+	assert command.args[reload_dir : reload_dir + 4] == [
+		"--reload-dir",
+		str(tmp_path),
+		"--reload-dir",
+		str(web_root),
+	]
+	exclude = command.args.index("--reload-exclude")
+	assert command.args[exclude : exclude + 2] == [
+		"--reload-exclude",
+		"web/app/_pulse",
+	]
+	exclude = command.args.index("--reload-exclude", exclude + 1)
+	assert command.args[exclude : exclude + 2] == [
+		"--reload-exclude",
+		"web/app/_pulse/**",
+	]
+
+
+def test_run_no_reload_keeps_direct_uvicorn_and_initial_codegen(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	app = cast(Any, app_ctx.app)
+	commands, installed = _patch_run_basics(monkeypatch, app_ctx)
+
+	result = runner.invoke(
+		cmd_mod.cli,
+		["run", "demo.py", "--plain", "--no-reload", "--no-find-port"],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert installed == [["bun", "i"]]
+	assert app.codegen_calls == ["http://localhost:8000"]
+	assert commands[0].ready_pattern is not None
+	assert re.search(commands[0].ready_pattern, "  ➜  Local: http://127.0.0.1:5173/")
+	assert commands[1].args[1:3] == ["-m", "uvicorn"]
+	assert "--reload" not in commands[1].args
+
+
+def test_run_no_reload_binds_vite_to_public_host(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+	app_ctx = _make_run_app_ctx(tmp_path, web_root)
+	cast(Any, app_ctx.app).mode = "subdomains"
+	commands, _installed = _patch_run_basics(monkeypatch, app_ctx)
+
+	result = runner.invoke(
+		cmd_mod.cli,
+		[
+			"run",
+			"demo.py",
+			"--plain",
+			"--no-reload",
+			"--no-find-port",
+			"--address",
+			"192.168.1.50",
+		],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert commands[0].args[commands[0].args.index("--host") + 1] == "192.168.1.50"
 
 
 def test_run_skips_install_and_codegen_for_server_only(
@@ -355,6 +632,8 @@ def test_run_skips_install_and_codegen_for_server_only(
 			"demo.py",
 			"--plain",
 			"--server-only",
+			"--react-server-address",
+			"http://localhost:5173",
 			"--no-find-port",
 			"--port",
 			"8000",
@@ -395,6 +674,8 @@ def test_run_fails_on_dependency_conflict(
 	[
 		("localhost", "http://localhost:8000"),
 		("127.0.0.1", "http://127.0.0.1:8000"),
+		("::1", "http://[::1]:8000"),
+		("[::1]", "http://[::1]:8000"),
 		("0.0.0.0", "http://localhost:8000"),  # wildcard -> reachable localhost
 		("::", "http://localhost:8000"),
 		("192.168.1.50", "http://192.168.1.50:8000"),  # LAN IP kept, still http
@@ -425,6 +706,8 @@ def test_run_existing_lock_suggests_interrupt(
 			"run",
 			"demo.py",
 			"--server-only",
+			"--react-server-address",
+			"http://localhost:5173",
 			"--no-reload",
 			"--plain",
 			"--port",
@@ -516,13 +799,20 @@ def test_build_web_command_uses_node_serve_in_prod(tmp_path: Path) -> None:
 	web_root = tmp_path / "web"
 	web_root.mkdir()
 
-	spec = cmd_mod.build_web_command(web_root=web_root, extra_args=[], mode="prod")
+	spec = cmd_mod.build_web_command(
+		web_root=web_root,
+		extra_args=[],
+		host="192.168.1.50",
+		mode="prod",
+	)
 
 	assert spec.args == [
 		"node",
 		"node_modules/@react-router/serve/dist/cli.js",
 		"./build/server/index.js",
 	]
+	assert spec.env["HOST"] == "192.168.1.50"
+	assert "--host" not in spec.args
 
 
 def test_build_web_command_sets_node_env_in_prod(tmp_path: Path) -> None:
@@ -532,6 +822,21 @@ def test_build_web_command_sets_node_env_in_prod(tmp_path: Path) -> None:
 	spec = cmd_mod.build_web_command(web_root=web_root, extra_args=[], mode="prod")
 
 	assert spec.env["NODE_ENV"] == "production"
+
+
+def test_build_web_command_passes_host_to_dev_server(tmp_path: Path) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+
+	spec = cmd_mod.build_web_command(
+		web_root=web_root,
+		extra_args=[],
+		host="192.168.1.50",
+		port=5173,
+	)
+
+	assert spec.args[-2:] == ["--host", "192.168.1.50"]
+	assert "HOST" not in spec.env
 
 
 def test_web_workspaces_using_pulse_ui_client_declare_ws() -> None:
@@ -602,6 +907,29 @@ def test_execute_commands_streams_output(
 	assert spawns == ["server"]
 
 
+def test_execute_commands_strips_terminal_controls_but_preserves_sgr(
+	tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+	spec = CommandSpec(
+		name="web",
+		args=[
+			sys.executable,
+			"-c",
+			(
+				"print('\\033]0;title update\\007\\033[1;1H\\033[0J\\033[2K\\033[2A\\0337\\0338'"
+				"'\\033[38;5;208mRoute config saved.\\033[0m')"
+			),
+		],
+		cwd=tmp_path,
+		env=os.environ.copy(),
+	)
+
+	assert execute_commands([spec], tag_mode="plain") == 0
+	assert capsys.readouterr().out == (
+		"[web] \033[38;5;208mRoute config saved.\033[0m\n"
+	)
+
+
 def test_execute_commands_stops_remaining_processes_when_one_exits(
 	tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ):
@@ -635,6 +963,55 @@ def test_execute_commands_stops_remaining_processes_when_one_exits(
 	output = capsys.readouterr().out
 	assert "web-exited" in output
 	assert "server-finished" not in output
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group behavior")
+def test_execute_commands_gracefully_stops_descendants(tmp_path: Path) -> None:
+	ready = tmp_path / "descendant-ready"
+	stopped = tmp_path / "descendant-stopped"
+	child_code = (
+		"import signal, time\n"
+		"from pathlib import Path\n"
+		"def stop(*_args):\n"
+		f" Path({str(stopped)!r}).write_text('stopped')\n"
+		" raise SystemExit\n"
+		"signal.signal(signal.SIGTERM, stop)\n"
+		f"Path({str(ready)!r}).write_text('ready')\n"
+		"while True: time.sleep(1)\n"
+	)
+	slow = CommandSpec(
+		name="server",
+		args=[
+			sys.executable,
+			"-c",
+			(
+				"import subprocess, sys, time\n"
+				f"subprocess.Popen([sys.executable, '-c', {child_code!r}])\n"
+				"while True: time.sleep(1)\n"
+			),
+		],
+		cwd=tmp_path,
+		env=os.environ.copy(),
+	)
+	fast = CommandSpec(
+		name="web",
+		args=[
+			sys.executable,
+			"-c",
+			(
+				"import time\n"
+				"from pathlib import Path\n"
+				f"ready = Path({str(ready)!r})\n"
+				"while not ready.exists(): time.sleep(0.01)\n"
+				"raise SystemExit(7)\n"
+			),
+		],
+		cwd=tmp_path,
+		env=os.environ.copy(),
+	)
+
+	assert execute_commands([slow, fast], tag_mode="plain") == 7
+	assert stopped.read_text() == "stopped"
 
 
 @pytest.mark.parametrize(

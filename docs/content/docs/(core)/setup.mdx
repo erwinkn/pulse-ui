@@ -67,6 +67,21 @@ bun install
 cd ..
 ```
 
+Register Pulse's Vite plugin in `web/vite.config.ts`. Pulse waits for it
+to report that Vite is actually listening before serving traffic — hitting
+`:8000` too early is what used to throw those confusing first-load errors.
+The plugin also points HMR at the public port in single-server mode.
+
+```ts
+import { reactRouter } from "@react-router/dev/vite";
+import { pulse } from "pulse-ui-client/vite";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  plugins: [reactRouter(), pulse()],
+});
+```
+
 This scaffolds a server-side rendered React app that Pulse will use to display your components. You can take a look at how `examples/main.py` and `examples/web/` are set up for a working reference.
 
 ## Step 3: Run your app
@@ -77,11 +92,9 @@ Now you're ready to start your Pulse app:
 uv run pulse run app.py
 ```
 
-The `pulse run` command does two things:
-1. **Generates React routes** — It reads your Python components and creates corresponding files in `web/app/pulse/`
-2. **Starts the dev server** — It launches the React Router development server
+The `pulse run` command starts the Python and React Router servers. Pulse holds the public port (starting at 8000, first one free) and restarts only the Python worker when you save. Vite stays up. In single-server mode it listens on loopback behind the proxy. WebSockets and in-memory Pulse state reset on a Python save; JavaScript, TypeScript, and CSS still use Vite HMR.
 
-Open the URL shown in your terminal (usually `http://localhost:5173`) and you should see "Hello Pulse" displayed in your browser!
+Open the URL shown in your terminal (usually `http://localhost:8000`) and you should see "Hello Pulse" displayed in your browser!
 
 ## Customizing the frontend location
 

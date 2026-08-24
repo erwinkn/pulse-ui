@@ -21,7 +21,7 @@ PulseEnv = Literal["dev", "ci", "prod"]
 """Environment type for the Pulse application.
 
 Values:
-    "dev": Development environment with hot reload and debugging.
+    "dev": Development environment with restart watching and debugging.
     "ci": Continuous integration environment for testing.
     "prod": Production environment with optimizations enabled.
 """
@@ -35,6 +35,12 @@ ENV_PULSE_PORT = "PULSE_PORT"
 ENV_PULSE_REACT_SERVER_ADDRESS = "PULSE_REACT_SERVER_ADDRESS"
 ENV_PULSE_SECRET = "PULSE_SECRET"
 ENV_PULSE_DISABLE_CODEGEN = "PULSE_DISABLE_CODEGEN"
+ENV_PULSE_BACKEND_LIFECYCLE_URL = "PULSE_BACKEND_LIFECYCLE_URL"
+ENV_PULSE_BACKEND_LIFECYCLE_SECRET = "PULSE_BACKEND_LIFECYCLE_SECRET"
+ENV_PULSE_BACKEND_INSTANCE = "PULSE_BACKEND_INSTANCE"
+ENV_PULSE_VITE_LIFECYCLE_URL = "PULSE_VITE_LIFECYCLE_URL"
+ENV_PULSE_VITE_LIFECYCLE_SECRET = "PULSE_VITE_LIFECYCLE_SECRET"
+ENV_PULSE_VITE_INSTANCE = "PULSE_VITE_INSTANCE"
 
 
 class EnvVars:

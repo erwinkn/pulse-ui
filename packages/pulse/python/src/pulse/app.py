@@ -484,7 +484,7 @@ class App:
 	def asgi_factory(self) -> ASGIApp:
 		"""ASGI factory for production deployment.
 
-		Called on each uvicorn reload. Initializes code generation and sets up
+		Called when an ASGI worker starts. Initializes code generation and sets up
 		the application with the appropriate server address.
 
 		Returns:

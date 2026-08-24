@@ -578,14 +578,29 @@ class QueryParamSync(Disposable):
 				path += "#" + hash_frag
 		# Session-scoped, so the navigation is not bound to a route mount: the
 		# only staleness question is whether the URL it was built from is still
-		# the one on screen. `sourcePath` alone expresses exactly that.
+		# the one on screen. Bind the origin to a mount currently displaying
+		# that pathname so late navigations are dropped once the URL changes;
+		# without such a mount the URL is already stale, so drop the navigation.
+		# The scan is a point-in-time fence, not a reactive dependency.
+		with Untrack():
+			mount = next(
+				(
+					m
+					for m in self.render.route_mounts.values()
+					if m.route.pathname == pathname
+				),
+				None,
+			)
+			origin = mount.origin() if mount is not None else None
+		if origin is None:
+			return
 		self.render.send(
 			ServerNavigateToMessage(
 				type="navigate_to",
 				path=path,
 				replace=True,
 				hard=False,
-				sourcePath=pathname,
+				origin=origin,
 			)
 		)
 

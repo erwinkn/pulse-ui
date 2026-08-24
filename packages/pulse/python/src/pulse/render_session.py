@@ -1,27 +1,36 @@
 import asyncio
+import bisect
+import heapq
 import logging
+import time
 import traceback
 import uuid
 from asyncio import iscoroutine
+from collections import deque
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, TypeVar, cast, overload
 
 from pulse.channel import Channel
 from pulse.context import PulseContext
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import (
+	RouteOrigin,
 	ServerApiCallMessage,
+	ServerAttachAckMessage,
+	ServerErrorMessage,
 	ServerErrorPhase,
 	ServerInitMessage,
 	ServerJsExecMessage,
 	ServerMessage,
 	ServerNavigateToMessage,
 	ServerUpdateMessage,
+	ViewSnapshot,
 )
 from pulse.queries.store import QueryStore
 from pulse.reactive import REACTIVE_CONTEXT, Effect, Untrack, flush_effects
 from pulse.reactive_extensions import ReactiveDict
-from pulse.renderer import RenderTree
+from pulse.renderer import Callback, Callbacks, RenderTree
 from pulse.routing import (
 	Layout,
 	Route,
@@ -87,6 +96,146 @@ def run_js(expr: Any, *, result: bool = False) -> asyncio.Future[Any] | None:
 
 MountState = Literal["pending", "active", "suspended", "closed"]
 T_Render = TypeVar("T_Render")
+CALLBACK_HISTORY_VERSIONS = 20_000
+CALLBACK_HISTORY_REVISIONS = 100_000
+CALLBACK_UNAVAILABLE = object()
+
+
+@dataclass(slots=True)
+class CallbackVersion:
+	revision: int
+	callback: Callback | None
+
+
+@dataclass(slots=True)
+class CallbackRevision:
+	revision: int
+	superseded_at: float | None = None
+
+
+class CallbackHistory:
+	retention_seconds: float
+	current: Callbacks
+	revisions: deque[CallbackRevision]
+	versions: dict[str, list[CallbackVersion]]
+	next_changes: list[tuple[int, str]]
+	version_count: int
+
+	def __init__(self, retention_seconds: float) -> None:
+		self.retention_seconds = retention_seconds
+		self.current = {}
+		self.revisions = deque()
+		self.versions = {}
+		self.next_changes = []
+		self.version_count = 0
+
+	@property
+	def oldest_revision(self) -> int | None:
+		return self.revisions[0].revision if self.revisions else None
+
+	@property
+	def latest_revision(self) -> int | None:
+		return self.revisions[-1].revision if self.revisions else None
+
+	def clear(self) -> None:
+		self.current.clear()
+		self.revisions.clear()
+		self.versions.clear()
+		self.next_changes.clear()
+		self.version_count = 0
+
+	def record(self, revision: int, callbacks: Callbacks, *, now: float) -> None:
+		latest = self.latest_revision
+		if latest is not None and revision != latest + 1:
+			raise RuntimeError(
+				f"Callback revisions must be sequential: got {revision} after {latest}"
+			)
+		if self.revisions:
+			self.revisions[-1].superseded_at = now
+
+		for key in self.current.keys() | callbacks.keys():
+			previous = self.current.get(key)
+			current = callbacks.get(key)
+			if self._same_callback(previous, current):
+				continue
+			versions = self.versions.setdefault(key, [])
+			versions.append(CallbackVersion(revision, current))
+			if len(versions) == 2:
+				heapq.heappush(self.next_changes, (revision, key))
+			self.version_count += 1
+
+		self.current = dict(callbacks)
+		self.revisions.append(CallbackRevision(revision))
+		self.prune(now=now)
+
+	def lookup(
+		self, revision: int, key: str, *, now: float
+	) -> Callback | object | None:
+		self.prune(now=now)
+		oldest = self.oldest_revision
+		latest = self.latest_revision
+		if oldest is None or revision < oldest or latest is None or revision > latest:
+			return CALLBACK_UNAVAILABLE
+		versions = self.versions.get(key)
+		if not versions:
+			return None
+		index = bisect.bisect_right(
+			versions, revision, key=lambda version: version.revision
+		)
+		if index == 0:
+			return None
+		return versions[index - 1].callback
+
+	def prune(self, *, now: float) -> None:
+		while len(self.revisions) > 1:
+			oldest = self.revisions[0]
+			assert oldest.superseded_at is not None
+			within_ttl = now - oldest.superseded_at < self.retention_seconds
+			within_version_limit = self.version_count <= CALLBACK_HISTORY_VERSIONS
+			within_revision_limit = len(self.revisions) <= CALLBACK_HISTORY_REVISIONS
+			if within_ttl and within_version_limit and within_revision_limit:
+				break
+			self.revisions.popleft()
+			floor = self.revisions[0].revision
+			self._prune_versions(floor)
+
+	def _prune_versions(self, floor: int) -> None:
+		while self.next_changes and self.next_changes[0][0] <= floor:
+			revision, key = heapq.heappop(self.next_changes)
+			versions = self.versions.get(key)
+			if not versions or len(versions) < 2 or versions[1].revision != revision:
+				continue
+			self._prune_key(key, floor)
+			versions = self.versions.get(key)
+			if versions and len(versions) >= 2:
+				heapq.heappush(self.next_changes, (versions[1].revision, key))
+
+	def _prune_key(self, key: str, floor: int) -> None:
+		versions = self.versions.get(key)
+		if not versions:
+			return
+		index = (
+			bisect.bisect_right(versions, floor, key=lambda version: version.revision)
+			- 1
+		)
+		if index < 0:
+			return
+		keep_from = index if versions[index].callback is not None else index + 1
+		if keep_from:
+			del versions[:keep_from]
+			self.version_count -= keep_from
+		if not versions:
+			self.versions.pop(key, None)
+
+	@staticmethod
+	def _same_callback(left: Callback | None, right: Callback | None) -> bool:
+		if left is None or right is None:
+			return left is right
+		return (
+			left.fn is right.fn
+			and left.n_args == right.n_args
+			and left.accepts_varargs == right.accepts_varargs
+		)
 
 
 class SessionUrl(TypedDict):
@@ -116,7 +265,11 @@ class RouteMount:
 	dispose_on_timeout: bool
 	queue: list[ServerMessage] | None
 	queue_timeout: TimerHandleLike | None
-	mount_id: str
+	snapshot_required: bool
+	view_id: str
+	revision: int
+	instance_id: str | None
+	callback_history: CallbackHistory
 	render_batch_id: int
 	render_batch_renders: int
 
@@ -139,15 +292,19 @@ class RouteMount:
 		self.dispose_on_timeout = False
 		self.queue = []
 		self.queue_timeout = None
-		self.mount_id = uuid.uuid4().hex
+		self.snapshot_required = False
+		self.view_id = uuid.uuid4().hex
+		self.revision = -1
+		self.instance_id = None
+		self.callback_history = CallbackHistory(render.disconnect_queue_timeout)
 		self.render_batch_id = -1
 		self.render_batch_renders = 0
 
 	def update_route(self, route_info: RouteInfo) -> None:
 		self.route.update(route_info)
 
-	def renew_mount_id(self) -> None:
-		self.mount_id = uuid.uuid4().hex
+	def origin(self) -> RouteOrigin:
+		return {"viewId": self.view_id, "pathname": self.route.pathname}
 
 	def _cancel_pending_timeout(self) -> None:
 		if self.queue_timeout is not None:
@@ -174,19 +331,37 @@ class RouteMount:
 				self.effect.resume()
 			self.state = "pending"
 			self.queue = []
+			self.snapshot_required = False
 		self.dispose_on_timeout = dispose
 		self.queue_timeout = self.render.schedule_later(
 			timeout, self._on_pending_timeout
 		)
 
-	def activate(self, send_message: Callable[[ServerMessage], Any]) -> None:
+	def activate(
+		self, send_message: Callable[[ServerMessage], Any], *, flush: bool = True
+	) -> None:
 		if self.state != "pending":
 			return
 		self._cancel_pending_timeout()
 		if self.queue:
 			for msg in self.queue:
+				# With flush=False a snapshot supersedes queued VDOM deltas, but
+				# other queued traffic (js_exec, server_error) cannot be
+				# reconstructed from a snapshot and must still go out.
+				if not flush and msg["type"] == "vdom_update":
+					continue
+				# A result-bearing js_exec whose awaiting future already timed
+				# out is dead: executing its side effect now would surprise a
+				# caller that already saw the call fail.
+				if (
+					msg["type"] == "js_exec"
+					and msg.get("wantsResult")
+					and not self.render.has_pending_js_result(msg["id"])
+				):
+					continue
 				send_message(msg)
 		self.queue = None
+		self.snapshot_required = False
 		self.state = "active"
 		self.ever_active = True
 		self.dispose_on_timeout = False
@@ -197,6 +372,7 @@ class RouteMount:
 			return
 		self.state = "suspended"
 		self.queue = None
+		self.snapshot_required = False
 		self._cancel_pending_timeout()
 		if self.effect:
 			self.effect.pause()
@@ -207,7 +383,38 @@ class RouteMount:
 		if self.state == "pending":
 			if self.queue is None:
 				raise RuntimeError(f"Pending mount missing queue for {self.path!r}")
-			self.queue.append(message)
+			if message["type"] == "vdom_update":
+				if self.snapshot_required:
+					return
+				# Leave one sender-queue slot for the attach acknowledgement.
+				if len(self.queue) >= self.render.pending_message_limit - 1:
+					# Collapse VDOM deltas: the snapshot sent on reattach
+					# supersedes them.
+					self.queue = [m for m in self.queue if m["type"] != "vdom_update"]
+					self.snapshot_required = True
+					return
+				self.queue.append(message)
+				return
+			queue = self.queue
+			if len(queue) >= self.render.pending_message_limit - 1:
+				remaining: list[ServerMessage] = [
+					m for m in queue if m["type"] != "vdom_update"
+				]
+				if len(remaining) < len(queue):
+					self.queue = queue = remaining
+					self.snapshot_required = True
+				if len(queue) >= self.render.pending_message_limit - 1:
+					# Saturated with messages a snapshot cannot reconstruct:
+					# the client can no longer be brought back in sync.
+					logger.error(
+						"Pending queue for %r saturated with non-VDOM messages; forcing a client reload",
+						self.path,
+					)
+					queue.clear()
+					self.snapshot_required = True
+					self.render.send({"type": "reload"})
+					return
+			queue.append(message)
 			return
 		if self.state == "active":
 			send_message(message)
@@ -215,6 +422,23 @@ class RouteMount:
 		if self.state == "closed":
 			raise RuntimeError(f"Message sent to closed mount {self.path!r}")
 		# suspended: drop; the client gets a fresh init on resume
+
+	def can_replay_from(self, revision: int) -> bool:
+		if self.snapshot_required:
+			return False
+		current = revision
+		for message in self.queue or []:
+			if message["type"] != "vdom_update":
+				continue
+			if message["viewId"] != self.view_id or message["baseRevision"] != current:
+				return False
+			current = message["revision"]
+		return current == self.revision
+
+	def record_callbacks(self) -> None:
+		self.callback_history.record(
+			self.revision, self.tree.callbacks, now=time.monotonic()
+		)
 
 	def ensure_effect(self, *, lazy: bool = False, flush: bool = True) -> None:
 		if self.effect is not None:
@@ -253,6 +477,8 @@ class RouteMount:
 		self._cancel_pending_timeout()
 		self.state = "closed"
 		self.queue = None
+		self.snapshot_required = False
+		self.callback_history.clear()
 		self.tree.unmount()
 		if self.effect:
 			self.effect.dispose()
@@ -271,16 +497,18 @@ class RenderSession:
 	prerender_queue_timeout: float
 	dev_strict_mode_detach_timeout: float
 	disconnect_queue_timeout: float
+	pending_message_limit: int
 	render_loop_limit: int
 	_server_address: str | None
 	_client_address: str | None
 	_send_message: Callable[[ServerMessage], Any] | None
 	_pending_api: dict[str, asyncio.Future[dict[str, Any]]]
-	_pending_js_results: dict[str, asyncio.Future[Any]]
+	_pending_js_results: dict[str, tuple[str, asyncio.Future[Any]]]
 	_ref_channel: Channel | None
 	_ref_channels_by_route: dict[str, Channel]
 	_global_states: dict[str, State]
 	_global_queue: list[ServerMessage]
+	_global_queue_overflowed: bool
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
 
@@ -294,6 +522,7 @@ class RenderSession:
 		prerender_queue_timeout: float = 60.0,
 		dev_strict_mode_detach_timeout: float = 0.0,
 		disconnect_queue_timeout: float = 300.0,
+		pending_message_limit: int = 10_000,
 		render_loop_limit: int = 50,
 	) -> None:
 		from pulse.channel import ChannelsManager
@@ -315,6 +544,7 @@ class RenderSession:
 		self._send_message = None
 		self._global_states = {}
 		self._global_queue = []
+		self._global_queue_overflowed = False
 		self.connected = False
 		self.channels = ChannelsManager(self)
 		self.forms = FormRegistry(self)
@@ -328,6 +558,7 @@ class RenderSession:
 		self.prerender_queue_timeout = prerender_queue_timeout
 		self.dev_strict_mode_detach_timeout = dev_strict_mode_detach_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
+		self.pending_message_limit = pending_message_limit
 		self.render_loop_limit = render_loop_limit
 
 	@property
@@ -349,11 +580,18 @@ class RenderSession:
 
 	# ---- Connection lifecycle ----
 
-	def connect(self, send_message: Callable[[ServerMessage], Any]):
+	def connect(
+		self, send_message: Callable[[ServerMessage], Any], *, replacing: bool = False
+	):
 		"""WebSocket connected. Set sender, don't auto-flush (attach does that)."""
 		self._send_message = send_message
 		self.connected = True
-		if self._global_queue:
+		if self._global_queue_overflowed:
+			# Session-level messages were lost while disconnected; the client
+			# cannot be brought back in sync incrementally.
+			self._global_queue_overflowed = False
+			send_message({"type": "reload"})
+		elif self._global_queue:
 			queued = self._global_queue
 			self._global_queue = []
 			for msg in queued:
@@ -363,21 +601,10 @@ class RenderSession:
 		# render); the session is inherited from the caller's context, which must
 		# wrap connect() so reconnect fetches match initial fetches.
 		with PulseContext.update(render=self):
-			self.query_store.resume_all()
-
-	def resync(self) -> None:
-		"""A replacement socket arrived before the old one's disconnect fired:
-		apply the missed disconnect, skipping the reconnect grace period.
-
-		Suspending (rather than leaving mounts pending) forces attach to send a
-		fresh init — updates in the gap went to the dead socket, so the pending
-		queue can't cover what the client missed. Only previously-active mounts
-		are suspended; never-active prerender mounts keep their dispose timers.
-		"""
-		active = [m for m in self.route_mounts.values() if m.state == "active"]
-		self.disconnect()
-		for mount in active:
-			mount.suspend()
+			if replacing:
+				self.query_store.reconnect_all()
+			else:
+				self.query_store.resume_all()
 
 	def disconnect(self):
 		"""WebSocket disconnected. Queue briefly, then suspend mounts on timeout."""
@@ -392,39 +619,41 @@ class RenderSession:
 
 	# ---- Message routing ----
 
+	def _queue_global(self, message: ServerMessage) -> None:
+		"""Queue a session-level message while disconnected, bounded like the
+		per-mount and socket-sender queues. Unlike VDOM deltas, these messages
+		cannot be reconstructed from a snapshot: overflow forces a client
+		reload on reconnect instead of silently dropping the excess."""
+		if self._global_queue_overflowed:
+			return
+		if len(self._global_queue) >= self.pending_message_limit:
+			logger.error(
+				"Global message queue for render %r exceeded %d messages while disconnected; forcing a client reload on reconnect",
+				self.id,
+				self.pending_message_limit,
+			)
+			self._global_queue = []
+			self._global_queue_overflowed = True
+			return
+		self._global_queue.append(message)
+
 	def send(self, message: ServerMessage):
 		"""Route message based on mount state."""
-		# Forced navigation is global. Route-bound navigation is dropped once
-		# its source route has unmounted.
+		# Forced navigation is global. Origin-bound navigation is dropped once
+		# its source view or pathname is no longer current.
 		if message.get("type") == "navigate_to":
-			source_route_path = message.get("sourceRoutePath")
-			source_path = message.get("sourcePath")
-			source_mount_id = message.get("sourceMountId")
-			if isinstance(source_route_path, str) and isinstance(source_path, str):
-				mount = self.route_mounts.get(ensure_absolute_path(source_route_path))
-				source_path = ensure_absolute_path(source_path)
-				if (
-					mount is None
-					or mount.route.pathname != source_path
-					or (
-						isinstance(source_mount_id, str)
-						and mount.mount_id != source_mount_id
-					)
-				):
-					return
-			elif isinstance(source_path, str):
-				source_path = ensure_absolute_path(source_path)
+			origin = message.get("origin")
+			if origin is not None:
+				# Point-in-time fence; must not register reactive dependencies.
 				with Untrack():
-					source_path_is_active = any(
-						mount.route.pathname == source_path
-						for mount in self.route_mounts.values()
-					)
-				if not source_path_is_active:
+					mount = self._get_mount_by_view_id(origin["viewId"])
+					stale = mount is None or mount.route.pathname != origin["pathname"]
+				if stale:
 					return
 			if self._send_message:
 				self._send_message(message)
 			else:
-				self._global_queue.append(message)
+				self._queue_global(message)
 			return
 		# Global messages (not path-specific) go directly if connected
 		path = message.get("path")
@@ -432,7 +661,7 @@ class RenderSession:
 			if self._send_message:
 				self._send_message(message)
 			else:
-				self._global_queue.append(message)
+				self._queue_global(message)
 			return
 
 		# Normalize path for lookup
@@ -442,6 +671,9 @@ class RenderSession:
 			# Unknown path - send directly if connected (for js_exec, etc.)
 			if self._send_message:
 				self._send_message(message)
+			return
+		view_id = message.get("viewId")
+		if isinstance(view_id, str) and view_id != mount.view_id:
 			return
 
 		if self._send_message:
@@ -461,18 +693,20 @@ class RenderSession:
 		# is also called outside an `except` block (e.g. a deferred connect error),
 		# where traceback.format_exc() would yield "NoneType: None".
 		stack = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-		self.send(
-			{
-				"type": "server_error",
-				"path": path,
-				"error": {
-					"message": str(exc),
-					"stack": stack,
-					"phase": phase,
-					"details": details or {},
-				},
-			}
+		message = ServerErrorMessage(
+			type="server_error",
+			path=path,
+			error={
+				"message": str(exc),
+				"stack": stack,
+				"phase": phase,
+				"details": details or {},
+			},
 		)
+		mount = self.route_mounts.get(ensure_absolute_path(path))
+		if mount is not None:
+			message["viewId"] = mount.view_id
+		self.send(message)
 		logger.error(
 			"Error reported for path %r during %s: %s\n%s",
 			path,
@@ -528,53 +762,96 @@ class RenderSession:
 
 	# ---- Client lifecycle ----
 
-	def attach(self, path: str, route_info: RouteInfo) -> bool:
+	def attach(
+		self,
+		path: str,
+		route_info: RouteInfo,
+		view_id: str,
+		revision: int,
+		attach_id: str,
+		instance_id: str,
+	) -> ServerAttachAckMessage | None:
 		"""
 		Client ready to receive updates for path.
-		- PENDING: flush queue, transition to ACTIVE
-		- SUSPENDED: re-render, send a fresh init, transition to ACTIVE
-		- ACTIVE: update route_info
+		- PENDING: replay a contiguous queue or send a snapshot
+		- SUSPENDED: re-render and include a snapshot
+		- ACTIVE: acknowledge matching state or include a snapshot
 		- No mount: request reload
-		Returns True when callbacks can be accepted for this path.
 		"""
+		if self._send_message is None:
+			# Socket dropped while this attach was in flight; the client will
+			# re-attach on reconnect.
+			return None
 		path = ensure_absolute_path(path)
 		mount = self.route_mounts.get(path)
 
 		if mount is None:
 			# Initial render must come from prerender
 			self.send({"type": "reload"})
-			return False
+			return None
+		if mount.view_id != view_id:
+			self.send({"type": "reload"})
+			return None
+		if mount.instance_id is None:
+			mount.instance_id = instance_id
+		elif mount.instance_id != instance_id:
+			self.send({"type": "reload"})
+			return None
 
 		mount.update_route(route_info)
-		if mount.state == "suspended":
-			return self._resume_mount(mount, path)
-		if mount.state == "pending" and self._send_message:
+		ack = ServerAttachAckMessage(
+			type="attach_ack",
+			path=path,
+			attachId=attach_id,
+			viewId=mount.view_id,
+			revision=mount.revision,
+		)
+		if self._send_message is None:
+			# update_route() can run effects that disconnect the session.
+			return None
+		if mount.state == "pending" and mount.can_replay_from(revision):
 			mount.activate(self._send_message)
-		return mount.state == "active"
+			ack["revision"] = mount.revision
+			return ack
+		if mount.state == "active" and revision == mount.revision:
+			return ack
 
-	def _resume_mount(self, mount: RouteMount, path: str) -> bool:
-		"""Reactivate a suspended mount by re-rendering and sending a fresh init.
+		snapshot = self._snapshot_mount(mount, path)
+		if snapshot is None:
+			return None
+		ack["viewId"] = snapshot["viewId"]
+		ack["revision"] = snapshot["revision"]
+		ack["snapshot"] = snapshot
+		return ack
 
-		The retained tree and hook state carry the user's work across the
-		disconnect; the client replaces its view with the new init.
-		"""
+	def _snapshot_mount(self, mount: RouteMount, path: str) -> ViewSnapshot | None:
 		assert mount.effect is not None
-		mount.effect.resume()
+		if mount.state == "suspended":
+			mount.start_pending(self.disconnect_queue_timeout)
 		with mount.effect.capture_deps(update_deps=True):
 			message = self.render(mount, path)
 		if message["type"] == "navigate_to":
 			self.send(message)
 			self.dispose_mount(path, mount)
-			return False
-		mount.state = "active"
-		self.send(message)
-		return True
+			return None
+		if self._send_message is None:
+			# Rendering can run effects that disconnect the session.
+			return None
+		if mount.state == "pending":
+			mount.activate(self._send_message, flush=False)
+		return {
+			"viewId": message["viewId"],
+			"revision": message["revision"],
+			"vdom": message["vdom"],
+		}
 
-	def update_route(self, path: str, route_info: RouteInfo):
+	def update_route(
+		self, path: str, route_info: RouteInfo, view_id: str, revision: int
+	) -> None:
 		"""Update routing state (query params, etc.) for attached path."""
 		path = ensure_absolute_path(path)
 		mount = self.route_mounts.get(path)
-		if mount is None:
+		if mount is None or mount.view_id != view_id:
 			# No-op when mount does not exist yet.
 			# Route updates may arrive before prerender; prerender creates the mount with
 			# the authoritative RouteInfo, so replaying/stashing is unnecessary.
@@ -582,7 +859,14 @@ class RenderSession:
 		try:
 			mount.update_route(route_info)
 			if mount.state == "pending" and self._send_message:
-				mount.activate(self._send_message)
+				if mount.can_replay_from(revision):
+					mount.activate(self._send_message)
+				else:
+					self._send_message(
+						{"type": "resync_view", "path": path, "viewId": view_id}
+					)
+			elif mount.state == "active" and revision != mount.revision:
+				self.send({"type": "resync_view", "path": path, "viewId": view_id})
 		except Exception as e:
 			self.report_error(path, "navigate", e)
 
@@ -590,31 +874,34 @@ class RenderSession:
 		current = self.route_mounts.get(path)
 		if current is not mount:
 			return
+		self.route_mounts.pop(path, None)
+		self._ref_channels_by_route.pop(path, None)
 		try:
-			self.route_mounts.pop(path, None)
-			self._ref_channels_by_route.pop(path, None)
 			mount.dispose()
 		except Exception as e:
 			self.report_error(path, "unmount", e)
+		finally:
+			self.channels.remove_route(path)
 
-	def detach(self, path: str):
+	def detach(self, path: str, view_id: str, instance_id: str) -> bool:
 		"""Client route unmounted. Dispose immediately outside dev StrictMode replay."""
 		path = ensure_absolute_path(path)
-		self._ref_channels_by_route.pop(path, None)
 		mount = self.route_mounts.get(path)
-		if not mount:
-			return
-		mount.renew_mount_id()
+		if (
+			mount is None
+			or mount.view_id != view_id
+			or mount.instance_id != instance_id
+		):
+			return False
 		if self.dev_strict_mode_detach_timeout > 0:
 			# React StrictMode in development intentionally replays mount effects as
 			# attach -> detach -> attach without another prerender. Keep the mount for
 			# a very short dev-only window so that synthetic cleanup can be cancelled
-			# by the replayed attach. The mount id was renewed above before this delay,
-			# so async work from the detached generation is still route-stale and cannot
-			# navigate during the grace period.
+			# by the replayed attach. This remains the same logical view.
 			mount.start_pending(self.dev_strict_mode_detach_timeout, dispose=True)
-			return
+			return True
 		self.dispose_mount(path, mount)
+		return True
 
 	# ---- Effect creation ----
 
@@ -640,17 +927,11 @@ class RenderSession:
 	) -> T_Render | ServerNavigateToMessage:
 		ctx = PulseContext.get()
 		render_session = ctx.session if session is None else session
-		with Untrack():
-			source_path = mount.route.pathname
-			source_route_path = mount.route.route_path
-			source_mount_id = mount.mount_id
 		with PulseContext.update(
 			session=render_session,
 			render=self,
 			route=mount.route,
-			source_route_path=source_route_path,
-			source_path=source_path,
-			source_mount_id=source_mount_id,
+			origin=mount.origin(),
 		):
 			try:
 				self._check_render_loop(mount, path)
@@ -661,6 +942,7 @@ class RenderSession:
 					path=r.path,
 					replace=r.replace,
 					hard=False,
+					origin=mount.origin(),
 				)
 			except NotFoundInterrupt:
 				ctx = PulseContext.get()
@@ -669,6 +951,7 @@ class RenderSession:
 					path=ctx.app.not_found,
 					replace=True,
 					hard=False,
+					origin=mount.origin(),
 				)
 
 	def render(
@@ -677,7 +960,15 @@ class RenderSession:
 		def _render() -> ServerInitMessage:
 			vdom = mount.tree.render()
 			mount.initialized = True
-			return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
+			mount.revision += 1
+			mount.record_callbacks()
+			return ServerInitMessage(
+				type="vdom_init",
+				path=path,
+				viewId=mount.view_id,
+				revision=mount.revision,
+				vdom=vdom,
+			)
 
 		message = self._render_with_interrupts(
 			mount, path, session=session, render_fn=_render
@@ -691,9 +982,17 @@ class RenderSession:
 			if not mount.initialized:
 				raise RuntimeError(f"rerender called before init for {path!r}")
 			ops = mount.tree.rerender()
-			if ops:
-				return ServerUpdateMessage(type="vdom_update", path=path, ops=ops)
-			return None
+			base_revision = mount.revision
+			mount.revision += 1
+			mount.record_callbacks()
+			return ServerUpdateMessage(
+				type="vdom_update",
+				path=path,
+				viewId=mount.view_id,
+				baseRevision=base_revision,
+				revision=mount.revision,
+				ops=ops,
+			)
 
 		return self._render_with_interrupts(
 			mount, path, session=session, render_fn=_rerender
@@ -723,7 +1022,7 @@ class RenderSession:
 			if not fut.done():
 				fut.cancel()
 		self._pending_api.clear()
-		for fut in self._pending_js_results.values():
+		for _, fut in self._pending_js_results.values():
 			if not fut.done():
 				fut.cancel()
 		self._pending_js_results.clear()
@@ -732,6 +1031,7 @@ class RenderSession:
 		# Close any timer that may have been scheduled during cleanup (ex: query GC)
 		self._timers.cancel_all()
 		self._global_queue = []
+		self._global_queue_overflowed = False
 		self._send_message = None
 		self.connected = False
 
@@ -741,6 +1041,12 @@ class RenderSession:
 		if not mount:
 			raise ValueError(f"No active route for '{path}'")
 		return mount
+
+	def _get_mount_by_view_id(self, view_id: str) -> RouteMount | None:
+		return next(
+			(mount for mount in self.route_mounts.values() if mount.view_id == view_id),
+			None,
+		)
 
 	def set_url(self, info: RouteInfo) -> None:
 		"""Record the URL the client is currently displaying.
@@ -808,31 +1114,44 @@ class RenderSession:
 		"""Remove a timer handle from the session registry."""
 		self._timers.discard(handle)
 
-	def execute_callback(self, path: str, key: str, args: list[Any] | tuple[Any, ...]):
+	def execute_callback(
+		self,
+		path: str,
+		view_id: str,
+		revision: int,
+		key: str,
+		args: list[Any] | tuple[Any, ...],
+	) -> None:
 		path = ensure_absolute_path(path)
 		mount = self.route_mounts.get(path)
-		if mount is None or mount.state == "closed":
+		if mount is None or mount.state == "closed" or mount.view_id != view_id:
 			logger.warning("Dropping callback %r for missing route %r", key, path)
 			return
-		cb = mount.tree.callbacks.get(key)
-		if cb is None:
-			logger.warning("Dropping stale callback %r for route %r", key, path)
+		callback = mount.callback_history.lookup(revision, key, now=time.monotonic())
+		if callback is CALLBACK_UNAVAILABLE:
+			logger.warning(
+				"Dropping callback %r for unavailable revision %s on route %r",
+				key,
+				revision,
+				path,
+			)
+			self.send({"type": "resync_view", "path": path, "viewId": view_id})
 			return
+		if callback is None:
+			logger.warning("Dropping stale callback %r for route %r", key, path)
+			self.send({"type": "resync_view", "path": path, "viewId": view_id})
+			return
+		assert isinstance(callback, Callback)
+		cb = callback
 
 		def report(e: BaseException, is_async: bool = False):
 			self.report_error(path, "callback", e, {"callback": key, "async": is_async})
 
 		try:
-			with Untrack():
-				source_path = mount.route.pathname
-				source_route_path = mount.route.route_path
-				source_mount_id = mount.mount_id
 			with PulseContext.update(
 				render=self,
 				route=mount.route,
-				source_route_path=source_route_path,
-				source_path=source_path,
-				source_mount_id=source_mount_id,
+				origin=mount.origin(),
 			):
 				res = cb.fn(*(args if cb.accepts_varargs else args[: cb.n_args]))
 				if iscoroutine(res):
@@ -968,36 +1287,41 @@ class RenderSession:
 			)
 
 		ctx = PulseContext.get()
+		if ctx.origin is None:
+			raise RuntimeError("run_js() requires an active route view")
 		exec_id = next_id()
 
 		# Get route pattern path (e.g., "/users/:id") not pathname (e.g., "/users/123")
 		# This must match the path used to key views on the client side
 		path = ctx.route.pulse_route.unique_path() if ctx.route else "/"
 
-		self.send(
-			ServerJsExecMessage(
-				type="js_exec",
-				path=path,
-				id=exec_id,
-				expr=expr.render(),
-			)
+		message = ServerJsExecMessage(
+			type="js_exec",
+			path=path,
+			viewId=ctx.origin["viewId"],
+			id=exec_id,
+			expr=expr.render(),
 		)
+		if not result:
+			self.send(message)
+			return None
 
-		if result:
-			loop = asyncio.get_running_loop()
-			future: asyncio.Future[object] = loop.create_future()
-			self._pending_js_results[exec_id] = future
+		message["wantsResult"] = True
+		loop = asyncio.get_running_loop()
+		future: asyncio.Future[object] = loop.create_future()
+		self._pending_js_results[exec_id] = (ctx.origin["viewId"], future)
 
-			def _on_timeout() -> None:
-				self._pending_js_results.pop(exec_id, None)
-				if not future.done():
-					future.set_exception(asyncio.TimeoutError())
+		def _on_timeout() -> None:
+			self._pending_js_results.pop(exec_id, None)
+			if not future.done():
+				future.set_exception(asyncio.TimeoutError())
 
-			self._timers.later(timeout, _on_timeout)
+		self._timers.later(timeout, _on_timeout)
+		self.send(message)
+		return future
 
-			return future
-
-		return None
+	def has_pending_js_result(self, exec_id: str) -> bool:
+		return exec_id in self._pending_js_results
 
 	def handle_js_result(self, data: dict[str, Any]) -> None:
 		"""Handle js_result message from client."""
@@ -1005,9 +1329,13 @@ class RenderSession:
 		if exec_id is None:
 			return
 		exec_id = str(exec_id)
-		fut = self._pending_js_results.pop(exec_id, None)
-		if fut is None or fut.done():
+		pending = self._pending_js_results.get(exec_id)
+		if pending is None:
 			return
+		view_id, fut = pending
+		if data.get("viewId") != view_id or fut.done():
+			return
+		self._pending_js_results.pop(exec_id, None)
 		error = data.get("error")
 		if error is not None:
 			fut.set_exception(JsExecError(error))

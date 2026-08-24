@@ -41,6 +41,32 @@ def make_context(route_info: RouteInfo):
 	return app, session, route_ctx
 
 
+def attach_mount(session: RenderSession, path: str, info: RouteInfo) -> None:
+	mount = session.route_mounts[path]
+	session.attach(
+		path,
+		info,
+		mount.view_id,
+		mount.revision,
+		f"attach-{path}",
+		f"instance-{path}",
+	)
+
+
+def detach_mount(session: RenderSession, path: str) -> None:
+	mount = session.route_mounts[path]
+	if mount.instance_id is None:
+		# Detach comes from a client unmount, which implies a prior attach.
+		attach_mount(session, path, mount.route.info)
+	assert mount.instance_id is not None
+	session.detach(path, mount.view_id, mount.instance_id)
+
+
+def update_mount_route(session: RenderSession, path: str, info: RouteInfo) -> None:
+	mount = session.route_mounts[path]
+	session.update_route(path, info, mount.view_id, mount.revision)
+
+
 def flush_query_param_sync(session: RenderSession) -> None:
 	flush_effects()
 	effect = session.query_param_sync._state_effect  # pyright: ignore[reportPrivateUsage]
@@ -117,10 +143,12 @@ class TestQueryParam:
 		assert len(messages) == 1
 		msg = messages[0]
 		assert msg["type"] == "navigate_to"
-		# Session-scoped sync: attributed to the URL it was built from, not to a mount.
-		assert "sourceRoutePath" not in msg
-		assert "sourceMountId" not in msg
-		assert msg.get("sourcePath") == "/"
+		# Session-scoped sync: attributed to the mount displaying the URL it
+		# was built from.
+		assert msg.get("origin") == {
+			"viewId": session.route_mounts["/"].view_id,
+			"pathname": "/",
+		}
 		parsed = urlparse(str(msg["path"]))
 		query = parse_qs(parsed.query)
 		assert query["q"] == ["next"]
@@ -346,8 +374,8 @@ class TestQueryParamAcrossMounts:
 		info = make_route_info(path, query_params=query_params)
 		session.prerender([path], info)
 		if detach is not None:
-			session.detach(detach)
-		session.attach(path, info)
+			detach_mount(session, detach)
+		attach_mount(session, path, info)
 
 	def test_binding_survives_mount_change(self):
 		class Filters(ps.State):
@@ -373,8 +401,10 @@ class TestQueryParamAcrossMounts:
 
 		# URL -> state still works after the mount that created the state is gone
 		# (back/forward, or a manual edit of the query string).
-		session.update_route(
-			"/b", make_route_info("/b", query_params={"q": "world", "other": "1"})
+		update_mount_route(
+			session,
+			"/b",
+			make_route_info("/b", query_params={"q": "world", "other": "1"}),
 		)
 		flush_effects()
 		assert state.q == "world"
@@ -385,13 +415,94 @@ class TestQueryParamAcrossMounts:
 		flush_query_param_sync(session)
 		navs = navigations(messages)
 		assert len(navs) == 1
-		assert navs[0].get("sourcePath") == "/b"
+		assert navs[0].get("origin") == {
+			"viewId": session.route_mounts["/b"].view_id,
+			"pathname": "/b",
+		}
 		parsed = urlparse(str(navs[0]["path"]))
 		assert parsed.path == "/b"
 		query = parse_qs(parsed.query)
 		assert query["q"] == ["next"]
 		# Unrelated params on the new route are preserved
 		assert query["other"] == ["1"]
+
+		session.close()
+
+	def test_no_mount_for_current_url_drops_navigation(self):
+		"""A state write with no mount displaying the URL must not navigate."""
+
+		class Filters(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		session_filters = ps.global_state(Filters)
+
+		app, session = make_two_route_session()
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
+
+		start = make_route_info("/a", query_params={"q": "hello"})
+		session.prerender(["/a"], start)
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/a"].route
+		):
+			state = session_filters()
+			flush_effects()
+
+		# /a unmounts before any new mount takes over the URL.
+		detach_mount(session, "/a")
+		assert "/a" not in session.route_mounts
+
+		messages.clear()
+		state.q = "late-write"
+		flush_query_param_sync(session)
+		assert navigations(messages) == []
+
+		session.close()
+
+	def test_pathname_only_route_change_emits_no_navigation(self):
+		"""The mount fence must not become a reactive dependency of the sync
+		effect: a pathname-only route change re-applying stale params would be
+		a dependency leak."""
+
+		class Filters(ps.State):
+			q: ps.QueryParam[str] = ""
+
+		session_filters = ps.global_state(Filters)
+
+		def render():
+			return ps.div()
+
+		route = Route("users/:id", ps.component(render))
+		routes = RouteTree([route])
+		app = ps.App(routes=[route])
+		session = RenderSession("test", routes)
+		messages: list[ServerMessage] = []
+		session.connect(messages.append)
+
+		info = make_route_info("/users/1", query_params={"q": "hello"})
+		session.prerender(["/users/:id"], info)
+		attach_mount(session, "/users/:id", info)
+		with ps.PulseContext(
+			app=app, render=session, route=session.route_mounts["/users/:id"].route
+		):
+			state = session_filters()
+			flush_effects()
+
+		messages.clear()
+		state.q = "next"
+		flush_query_param_sync(session)
+		assert len(navigations(messages)) == 1
+
+		# Client applies the navigation, then moves to another id with the
+		# same query params: no further navigation may be emitted.
+		messages.clear()
+		update_mount_route(
+			session,
+			"/users/:id",
+			make_route_info("/users/2", query_params={"q": "next"}),
+		)
+		flush_query_param_sync(session)
+		assert navigations(messages) == []
 
 		session.close()
 
@@ -462,8 +573,12 @@ class TestQueryParamAcrossMounts:
 		assert navigations(messages) == []
 
 		# Both still follow the URL.
-		session.update_route("/b", make_route_info("/b", query_params={"q": "shared"}))
-		session.update_route("/a", make_route_info("/a", query_params={"q": "shared"}))
+		update_mount_route(
+			session, "/b", make_route_info("/b", query_params={"q": "shared"})
+		)
+		update_mount_route(
+			session, "/a", make_route_info("/a", query_params={"q": "shared"})
+		)
 		flush_effects()
 		assert a.q == "shared"
 		assert b.q == "shared"
@@ -513,14 +628,14 @@ class TestQueryParamAcrossMounts:
 		):
 			b = FiltersB()
 			flush_effects()
-		session.detach("/a")
-		session.attach("/b", info_b)
+		detach_mount(session, "/a")
+		attach_mount(session, "/b", info_b)
 
 		# /c: no local binding; /b unmounts and its state is disposed.
 		info_c = make_route_info("/c", query_params={"q": "hello"})
 		session.prerender(["/c"], info_c)
-		session.detach("/b")
-		session.attach("/c", info_c)
+		detach_mount(session, "/b")
+		attach_mount(session, "/c", info_c)
 		b.dispose()
 		flush_effects()
 
@@ -535,7 +650,10 @@ class TestQueryParamAcrossMounts:
 		flush_query_param_sync(session)
 		navs = navigations(messages)
 		assert len(navs) == 1
-		assert navs[0].get("sourcePath") == "/c"
+		assert navs[0].get("origin") == {
+			"viewId": session.route_mounts["/c"].view_id,
+			"pathname": "/c",
+		}
 		parsed = urlparse(str(navs[0]["path"]))
 		assert parsed.path == "/c"
 		assert parse_qs(parsed.query)["q"] == ["from-restored"]

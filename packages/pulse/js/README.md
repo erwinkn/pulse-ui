@@ -41,7 +41,7 @@ src/
 ├── form.tsx            # PulseForm component
 ├── helpers.ts          # Route info extraction utilities
 ├── vdom.ts             # VDOM types (VDOMNode, VDOMElement)
-├── usePulseChannel.ts  # React hook for channels
+├── useChannel.ts  # React hook for channels
 │
 └── serialize/          # Data serialization
     ├── serializer.ts   # Main serialize/deserialize
@@ -102,10 +102,10 @@ Socket.IO transport with automatic reconnection, message queuing, connection sta
 Real-time messaging:
 
 ```tsx
-import { usePulseChannel } from "pulse-client";
+import { useChannel } from "pulse-client";
 
 function Chat() {
-  const channel = usePulseChannel("chat");
+  const channel = useChannel("chat");
   channel.on("new_message", (msg) => { /* handle */ });
   channel.emit("message", { text: "Hello" });
 }
@@ -115,7 +115,7 @@ function Chat() {
 
 **Components**: `PulseProvider`, `PulseView`, `PulseForm`, `RenderLazy`
 
-**Hooks**: `usePulseClient()`, `usePulseChannel(name)`
+**Hooks**: `usePulseClient()`, `useChannel(name)`
 
 **Functions**: `serialize`, `deserialize`, `extractServerRouteInfo`, `submitForm`
 

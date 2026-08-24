@@ -33,7 +33,7 @@ class DummyChannel:
 			return self.responses.pop(0)
 		return None
 
-	def close(self) -> None:
+	def detach(self) -> None:
 		return None
 
 

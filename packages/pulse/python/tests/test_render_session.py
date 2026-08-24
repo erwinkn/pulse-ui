@@ -8,6 +8,7 @@ that updates from one session do not leak into the other.
 
 import asyncio
 import gc
+import logging
 from collections.abc import Callable, Iterator
 from typing import Any, cast, override
 
@@ -18,7 +19,7 @@ from pulse.hooks.core import HookContext
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import ServerMessage
 from pulse.reactive import Effect
-from pulse.render_session import RenderSession
+from pulse.render_session import MAX_QUEUED_CHANNEL_MESSAGES, RenderSession
 from pulse.routing import Route, RouteInfo, RouteTree
 from pulse.test_helpers import wait_for
 from pulse.transpiler.nodes import Element, PulseNode
@@ -2178,3 +2179,92 @@ async def test_async_callback_error_reports_real_traceback():
 	assert "NoneType: None" not in err["stack"]
 
 	session.close()
+
+
+def test_report_error_fans_out_when_path_is_unmounted():
+	routes = RouteTree(
+		[Route("dash", simple_component), Route("other", simple_component)]
+	)
+	session = RenderSession("test-id", routes)
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/dash", "/other"])
+		session.attach("/dash", make_route_info("/dash"))
+		session.attach("/other", make_route_info("/other"))
+
+	session.report_error(None, "channel", RuntimeError("no path"))
+	session.report_error("/", "connect", RuntimeError("stale root"))
+	session.report_error("/dash", "callback", RuntimeError("route scoped"))
+
+	channel_paths = [
+		m["path"]
+		for m in messages
+		if m["type"] == "server_error" and cast(Any, m)["error"]["message"] == "no path"
+	]
+	connect_paths = [
+		m["path"]
+		for m in messages
+		if m["type"] == "server_error"
+		and cast(Any, m)["error"]["message"] == "stale root"
+	]
+	scoped = [
+		m
+		for m in messages
+		if m["type"] == "server_error"
+		and cast(Any, m)["error"]["message"] == "route scoped"
+	]
+	assert sorted(channel_paths) == ["/dash", "/other"]
+	assert sorted(connect_paths) == ["/dash", "/other"]
+	assert len(scoped) == 1
+	assert scoped[0]["path"] == "/dash"
+
+	session.close()
+
+
+def test_disconnect_queue_drops_oldest_channel_events_with_one_warning(
+	caplog: pytest.LogCaptureFixture,
+):
+	app = ps.App()
+	session = ps.RenderSession("render-cap", app.routes)
+	with caplog.at_level(logging.WARNING):
+		for i in range(MAX_QUEUED_CHANNEL_MESSAGES + 5):
+			session.channels.send_event("cap", f"e{i}", None)
+	queue = session._global_queue  # pyright: ignore[reportPrivateUsage]
+	assert len(queue) == MAX_QUEUED_CHANNEL_MESSAGES
+	assert cast(Any, queue[0])["event"] == "e5"
+	warnings = [r for r in caplog.records if "disconnect queue" in r.getMessage()]
+	assert len(warnings) == 1
+
+
+def test_channel_overflow_keeps_control_plane_messages():
+	app = ps.App()
+	session = ps.RenderSession("render-control", app.routes)
+	session.send({"type": "reload"})
+	for i in range(MAX_QUEUED_CHANNEL_MESSAGES + 50):
+		session.channels.send_event("cap", f"e{i}", None)
+	queue = session._global_queue  # pyright: ignore[reportPrivateUsage]
+	assert [m["type"] for m in queue].count("reload") == 1
+	assert len(queue) == MAX_QUEUED_CHANNEL_MESSAGES + 1
+	assert cast(Any, queue[1])["event"] == "e50"
+
+
+def test_connect_drain_survives_undeliverable_message():
+	app = ps.App()
+	session = ps.RenderSession("render-drain", app.routes)
+	session.channels.send_event("drain", "bad", None)
+	session.channels.send_event("drain", "good", None)
+	delivered: list[ServerMessage] = []
+
+	def send(message: ServerMessage) -> None:
+		if cast(Any, message).get("event") == "bad":
+			raise RuntimeError("transport blew up")
+		delivered.append(message)
+
+	session.connect(send)
+	assert [cast(Any, m)["event"] for m in delivered] == ["good"]
+	assert session.connected
+	session.channels.send_event("drain", "after", None)
+	assert [cast(Any, m)["event"] for m in delivered] == ["good", "after"]
+	assert session._global_queue == []  # pyright: ignore[reportPrivateUsage]

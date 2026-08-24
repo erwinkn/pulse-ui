@@ -188,7 +188,7 @@ class NotificationsStore(ps.State):
 	queued_ids: list[str]
 
 	def __init__(self) -> None:
-		self._channel = ps.channel(NOTIFICATIONS_CHANNEL_ID)
+		self._channel = ps.channel(NOTIFICATIONS_CHANNEL_ID, lifetime="tab")
 		self.registry = {}
 		self.visible_ids = []
 		self.queued_ids = []

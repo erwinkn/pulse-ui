@@ -47,6 +47,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__file__)
 
+# Caps on messages buffered while the socket is down (drop-oldest past these).
+# Channel events get their own budget so a chatty channel cannot evict
+# control-plane messages (reload, navigate_to, server_error).
+MAX_DISCONNECT_QUEUE = 1000
+MAX_QUEUED_CHANNEL_MESSAGES = 500
+
 
 class JsExecError(Exception):
 	"""Raised when client-side JS execution fails."""
@@ -277,10 +283,9 @@ class RenderSession:
 	_send_message: Callable[[ServerMessage], Any] | None
 	_pending_api: dict[str, asyncio.Future[dict[str, Any]]]
 	_pending_js_results: dict[str, asyncio.Future[Any]]
-	_ref_channel: Channel | None
-	_ref_channels_by_route: dict[str, Channel]
 	_global_states: dict[str, State]
 	_global_queue: list[ServerMessage]
+	_queue_trim_warned: set[str]
 	_tasks: TaskRegistry
 	_timers: TimerRegistry
 
@@ -315,13 +320,12 @@ class RenderSession:
 		self._send_message = None
 		self._global_states = {}
 		self._global_queue = []
+		self._queue_trim_warned = set()
 		self.connected = False
 		self.channels = ChannelsManager(self)
 		self.forms = FormRegistry(self)
 		self._pending_api = {}
 		self._pending_js_results = {}
-		self._ref_channel = None
-		self._ref_channels_by_route = {}
 		self._tasks = TaskRegistry(name=f"render:{id}")
 		self._timers = TimerRegistry(tasks=self._tasks, name=f"render:{id}")
 		self.query_store = QueryStore()
@@ -353,11 +357,20 @@ class RenderSession:
 		"""WebSocket connected. Set sender, don't auto-flush (attach does that)."""
 		self._send_message = send_message
 		self.connected = True
-		if self._global_queue:
-			queued = self._global_queue
-			self._global_queue = []
-			for msg in queued:
+		queued = self._global_queue
+		self._global_queue = []
+		self._queue_trim_warned.clear()
+		for msg in queued:
+			# One undeliverable message must not abort the drain: the rest of the
+			# queue would be lost and the session left connected without a socket.
+			try:
 				self.send(msg)
+			except Exception as exc:
+				logger.error(
+					"Dropping queued %s message on reconnect",
+					msg.get("type"),
+					exc_info=exc,
+				)
 		# Restart query intervals and refetch stale data (no-op on first connect).
 		# Establishes render context here (so resume fetch-tasks register on this
 		# render); the session is inherited from the caller's context, which must
@@ -383,6 +396,7 @@ class RenderSession:
 		"""WebSocket disconnected. Queue briefly, then suspend mounts on timeout."""
 		self._send_message = None
 		self.connected = False
+		self.channels.fail_pending()
 		# Pause query interval refetching while nobody is watching
 		self.query_store.suspend_all()
 
@@ -394,6 +408,15 @@ class RenderSession:
 
 	def send(self, message: ServerMessage):
 		"""Route message based on mount state."""
+		# Channel RPC is fail-fast. Never park request/response on the
+		# disconnect queue — the pending future is already rejected.
+		if message.get("type") == "channel" and message.get("action") in (
+			"request",
+			"response",
+		):
+			if self._send_message:
+				self._send_message(message)
+			return
 		# Forced navigation is global. Route-bound navigation is dropped once
 		# its source route has unmounted.
 		if message.get("type") == "navigate_to":
@@ -424,7 +447,7 @@ class RenderSession:
 			if self._send_message:
 				self._send_message(message)
 			else:
-				self._global_queue.append(message)
+				self._queue_global(message)
 			return
 		# Global messages (not path-specific) go directly if connected
 		path = message.get("path")
@@ -432,7 +455,7 @@ class RenderSession:
 			if self._send_message:
 				self._send_message(message)
 			else:
-				self._global_queue.append(message)
+				self._queue_global(message)
 			return
 
 		# Normalize path for lookup
@@ -450,9 +473,54 @@ class RenderSession:
 		if mount.state == "pending":
 			mount.deliver(message, lambda _: None)
 
+	def _queue_global(self, message: ServerMessage) -> None:
+		"""Buffer a message for the disconnect grace period, dropping oldest on overflow.
+
+		Channel messages overflow against their own budget: they are the chatty ones,
+		and losing a reload / navigate_to / server_error to them would be far worse.
+		"""
+		self._global_queue.append(message)
+		if len(self._global_queue) <= MAX_QUEUED_CHANNEL_MESSAGES:
+			return
+		channel_positions = [
+			i for i, msg in enumerate(self._global_queue) if msg["type"] == "channel"
+		]
+		drop = len(channel_positions) - MAX_QUEUED_CHANNEL_MESSAGES
+		if drop > 0:
+			dropped = set(channel_positions[:drop])
+			self._global_queue = [
+				msg for i, msg in enumerate(self._global_queue) if i not in dropped
+			]
+			self._warn_queue_trim("channel", MAX_QUEUED_CHANNEL_MESSAGES)
+		overflow = len(self._global_queue) - MAX_DISCONNECT_QUEUE
+		if overflow > 0:
+			del self._global_queue[:overflow]
+			self._warn_queue_trim("total", MAX_DISCONNECT_QUEUE)
+
+	def _warn_queue_trim(self, kind: str, cap: int) -> None:
+		if kind in self._queue_trim_warned:
+			return
+		self._queue_trim_warned.add(kind)
+		logger.warning(
+			"Render session %s disconnect queue hit its %s cap (%d); dropping oldest",
+			self.id,
+			kind,
+			cap,
+		)
+
+	def _error_report_paths(self, path: str | None) -> list[str]:
+		# Wire `path` must match a live client view. Tab / connect / middleware
+		# errors have no route (or a stale "/") — fan out to current mounts.
+		if path is not None:
+			path = ensure_absolute_path(path)
+			if path in self.route_mounts:
+				return [path]
+		mounts = list(self.route_mounts)
+		return mounts if mounts else ["/"]
+
 	def report_error(
 		self,
-		path: str,
+		path: str | None,
 		phase: ServerErrorPhase,
 		exc: BaseException,
 		details: dict[str, Any] | None = None,
@@ -461,18 +529,19 @@ class RenderSession:
 		# is also called outside an `except` block (e.g. a deferred connect error),
 		# where traceback.format_exc() would yield "NoneType: None".
 		stack = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-		self.send(
-			{
-				"type": "server_error",
-				"path": path,
-				"error": {
-					"message": str(exc),
-					"stack": stack,
-					"phase": phase,
-					"details": details or {},
-				},
-			}
-		)
+		for target in self._error_report_paths(path):
+			self.send(
+				{
+					"type": "server_error",
+					"path": target,
+					"error": {
+						"message": str(exc),
+						"stack": stack,
+						"phase": phase,
+						"details": details or {},
+					},
+				}
+			)
 		logger.error(
 			"Error reported for path %r during %s: %s\n%s",
 			path,
@@ -520,8 +589,7 @@ class RenderSession:
 
 			results[path] = message
 			if message["type"] == "navigate_to":
-				mount.dispose()
-				del self.route_mounts[path]
+				self.dispose_mount(path, mount)
 				continue
 
 		return results
@@ -592,7 +660,7 @@ class RenderSession:
 			return
 		try:
 			self.route_mounts.pop(path, None)
-			self._ref_channels_by_route.pop(path, None)
+			self.channels.detach_route(path)
 			mount.dispose()
 		except Exception as e:
 			self.report_error(path, "unmount", e)
@@ -600,7 +668,6 @@ class RenderSession:
 	def detach(self, path: str):
 		"""Client route unmounted. Dispose immediately outside dev StrictMode replay."""
 		path = ensure_absolute_path(path)
-		self._ref_channels_by_route.pop(path, None)
 		mount = self.route_mounts.get(path)
 		if not mount:
 			return
@@ -714,11 +781,7 @@ class RenderSession:
 		for value in self._global_states.values():
 			value.dispose()
 		self._global_states.clear()
-		for channel_id in list(self.channels._channels.keys()):  # pyright: ignore[reportPrivateUsage]
-			channel = self.channels._channels.get(channel_id)  # pyright: ignore[reportPrivateUsage]
-			if channel:
-				channel.closed = True
-				self.channels.dispose_channel(channel, reason="render.close")
+		self.channels.reset()
 		for fut in self._pending_api.values():
 			if not fut.done():
 				fut.cancel()
@@ -727,8 +790,6 @@ class RenderSession:
 			if not fut.done():
 				fut.cancel()
 		self._pending_js_results.clear()
-		self._ref_channel = None
-		self._ref_channels_by_route.clear()
 		# Close any timer that may have been scheduled during cleanup (ex: query GC)
 		self._timers.cancel_all()
 		self._global_queue = []
@@ -767,20 +828,10 @@ class RenderSession:
 	def get_ref_channel(self) -> Channel:
 		ctx = PulseContext.get()
 		if ctx.route is None:
-			if self._ref_channel is not None and not self._ref_channel.closed:
-				return self._ref_channel
-			self._ref_channel = self.channels.create(bind_route=False)
-			return self._ref_channel
-
-		route_path = ctx.route.route_path
-		channel = self._ref_channels_by_route.get(route_path)
-		if channel is not None and channel.closed:
-			self._ref_channels_by_route.pop(route_path, None)
-			channel = None
-		if channel is None:
-			channel = self.channels.create(bind_route=True)
-			self._ref_channels_by_route[route_path] = channel
-		return channel
+			return self.channels.acquire("__pulse_ref__", lifetime="tab")
+		return self.channels.acquire(
+			f"__pulse_ref__:{ctx.route.route_path}", lifetime="route"
+		)
 
 	def flush(self):
 		with PulseContext.update(render=self):

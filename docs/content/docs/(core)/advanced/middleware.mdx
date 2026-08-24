@@ -168,11 +168,13 @@ async def message(self, *, data, session, next):
 
 ### `channel`
 
-Called for pub/sub channel messages. Useful for authorizing access to real-time channels:
+Called for inbound channel **events and requests** only — never responses, and never connect/disconnect. Channel ids are guessable, so gate messages here.
+
+`Deny` on an event drops it. `Deny` on a request sends a `denied` error response.
 
 ```python
-async def channel(self, *, channel_id, event, payload, session, next):
-    # Only admins can access admin channels
+async def channel(self, *, channel_id, event, payload, request_id, session, next):
+    # Only admins can use admin channels
     if channel_id.startswith("admin:") and not session.get("is_admin"):
         return ps.Deny()
     return await next()

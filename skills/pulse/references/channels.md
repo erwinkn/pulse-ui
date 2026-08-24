@@ -1,15 +1,15 @@
 # Channels
 
-Bidirectional real-time communication between server (Python) and client (browser).
+A channel id is a session-scoped name. Messages route by id. The only lifecycle is local listener attach/detach. The name is not created or destroyed on the wire.
 
-## Creating a Channel
+## Creating a handle
 
 ```python
 class ChatState(ps.State):
     messages: list[str] = []
 
     def __init__(self):
-        self.channel = ps.channel()
+        self.channel = ps.channel("chat")
         self._cleanup = self.channel.on("client:message", self._on_message)
 
     def _on_message(self, payload: dict):
@@ -19,7 +19,11 @@ class ChatState(ps.State):
         self._cleanup()
 ```
 
-`ps.channel()` creates a unique channel ID. Pass `channel.id` to client components.
+`ps.channel()` with `None` generates a UUID. Empty string raises `ValueError`. Pass `channel.id` to client components.
+
+`lifetime="route"` (default) auto-detaches this handle on real route unmount and requires a route context. `lifetime="tab"` survives navigation until session end or `detach()`.
+
+During a live route mount, `ps.channel("foo")` returns the same handle. `on(event, handler)` is idempotent for that triple. Use a stable method, not a new lambda each render. After auto-detach, the next call is a new handle on the same name.
 
 ## Server → Client
 
@@ -29,6 +33,10 @@ class ChatState(ps.State):
 self.channel.emit("server:notify", {"type": "update", "data": {...}})
 ```
 
+If the WebSocket is down, emit uses the session global queue: channel messages have their own 500-message drop-oldest budget (never evicting control-plane messages) inside an overall 1000-message bound. No per-channel buffer. Unserializable payload → `TypeError` at the emitter (validated before queueing; the live socket serializes in the emitter's frame anyway).
+
+Do not emit during prerender / first server render and expect the client to hear it. `useChannel` attaches in an effect, so events emitted before that effect runs can drop — no listener yet.
+
 ### Request (with response)
 
 ```python
@@ -36,224 +44,71 @@ try:
     response = await self.channel.request(
         "server:ask",
         {"question": "confirm?"},
-        timeout=5.0,  # Optional, default no timeout
+        timeout=5.0,
     )
-    print(f"Client responded: {response}")
 except ps.ChannelTimeout:
     print("Client didn't respond in time")
-except ps.ChannelClosed:
-    print("Channel was closed")
+except ps.ChannelDisconnected:
+    print("Socket is down")
+except ps.ChannelRemoteError as exc:
+    print(exc.code, exc.message)
 ```
+
+No handler → immediate `no_handler` NACK. Middleware `Deny` → `denied`. Middleware exception → `handler_error`. Requests are not queued while the socket is down.
 
 ## Client → Server
 
-### Listen for events
-
 ```python
-def _on_ping(self, payload: dict):
-    print(f"Client pinged: {payload}")
-    # Optionally respond
-    self.channel.emit("server:pong", {"ack": True})
-
-# Register handler
-cleanup = self.channel.on("client:ping", _on_ping)
-
-# Unregister when done
+cleanup = self.channel.on("client:ping", self._on_ping)
 cleanup()
 ```
 
-### Handle requests (return response)
+After `detach()`: `on()` and `request()` raise `ChannelDetached`, `emit()` is a debug-logged no-op (emits race detach from background tasks). Queued and in-flight handlers are cancelled.
+
+Events on one handle are FIFO: each event's handlers are awaited before the next event runs, so an event handler must never block indefinitely (`await request(...)` with no `timeout` stalls the handle). Backlog capped at 500 events per handle, drop-oldest, warn once. FIFO covers events only: inbound requests run as independent tasks (a request handler may `await` a client request) and can overtake queued events.
+
+Several live handles can share a name, including a `"tab"` and a `"route"` handle. Events fan out to all. A request goes to the first attached handle with a handler for the event (registration order).
+
+## Client-side
 
 ```python
-async def _on_request(self, payload: dict) -> dict:
-    result = await process(payload)
-    return {"status": "ok", "result": result}
-
-self.channel.on("client:request", _on_request)
-```
-
-## Client-Side (JavaScript)
-
-Use `@ps.javascript` to write client code that uses channels:
-
-```python
-from pulse.js.pulse import usePulseChannel
+from pulse.js.pulse import useChannel
 
 @ps.javascript(jsx=True)
-def ChatClient(*, channelId: str):
-    bridge = usePulseChannel(channelId)
+def ChatClient(*, channel_id: str):
+    bridge = useChannel(channel_id)
 
-    # Send event to server
     def sendMessage(text: str):
         bridge.emit("client:message", {"text": text})
 
-    # Request with response
-    async def askServer():
-        response = await bridge.request("client:request", {"data": "..."})
-        print(response)
-
-    # Listen for server events
     def setupListeners():
-        def onNotify(payload):
-            print("Server notified:", payload)
-
-        off = bridge.on("server:notify", onNotify)
-        return off  # Cleanup
+        return bridge.on("server:notify", lambda payload: print(payload))
 
     useEffect(setupListeners, [bridge])
-
     return ps.div(...)
 ```
 
-### Client Bridge API
+No `lifetime` argument. Place the hook in a layout to keep listeners across routes. The hook attaches in an effect.
 
-```typescript
-bridge.emit(event: string, payload?: any): void
-bridge.request(event: string, payload?: any): Promise<any>
-bridge.on(event: string, handler: (payload) => any): () => void
+Two hooks → two handles, one name. Events fan out to all attached handles. Requests use the first attached handle in registration order that has a handler. Client `on()` is legal while detached (StrictMode). Optional `request(event, payload, { timeout })` is milliseconds; the default is 30 seconds. Detaching a handle rejects its in-flight requests with `PulseChannelDetachedError`; detached `emit()` warns once and still sends.
+
+## Wire
+
+```
+{type:"channel", action:"event", channel, event, payload?}
+{type:"channel", action:"request", channel, event, payload?, requestId}
+{type:"channel", action:"response", channel, responseTo, payload?, error?}
 ```
 
-## Full Example
+`error.code` is `no_handler` | `denied` | `handler_error`. No connect/disconnect/close/subscriptionId on the wire. Reconnect sends zero channel protocol traffic. Events may flush from the global queue; request/response never do.
 
-```python
-import pulse as ps
-from pulse.js.pulse import usePulseChannel
+## Middleware
 
-useState = ps.Import("useState", "react")
-useEffect = ps.Import("useEffect", "react")
-
-
-class ChatRoom(ps.State):
-    messages: list[dict] = []
-
-    def __init__(self):
-        self.channel = ps.channel()
-        self._handlers = [
-            self.channel.on("client:send", self._on_send),
-        ]
-
-    def _on_send(self, payload: dict):
-        msg = {"user": "User", "text": payload["text"]}
-        self.messages.append(msg)
-        # Broadcast to client
-        self.channel.emit("server:message", msg)
-
-    def on_dispose(self):
-        for cleanup in self._handlers:
-            cleanup()
-
-
-@ps.javascript(jsx=True)
-def ChatWidget(*, channelId: str):
-    bridge = usePulseChannel(channelId)
-    messages, setMessages = useState([])
-    draft, setDraft = useState("")
-
-    def subscribe():
-        def onMessage(msg):
-            setMessages(lambda prev: [*prev, msg])
-
-        return bridge.on("server:message", onMessage)
-
-    useEffect(subscribe, [bridge])
-
-    def send():
-        if draft.strip():
-            bridge.emit("client:send", {"text": draft})
-            setDraft("")
-
-    return ps.div(className="chat")[
-        ps.div(className="messages")[
-            ps.For(
-                messages,
-                lambda m, i: ps.div(f"{m['user']}: {m['text']}", key=str(i)),
-            )
-        ],
-        ps.input(
-            value=draft,
-            onChange=lambda e: setDraft(e.target.value),
-            placeholder="Type message...",
-        ),
-        ps.button("Send", onClick=send),
-    ]
-
-
-@ps.component
-def ChatApp():
-    with ps.init():
-        room = ChatRoom()
-
-    return ps.div(
-        ps.h1("Chat"),
-        # Server-rendered message list
-        ps.ul(
-            ps.For(
-                room.messages,
-                lambda m, _: ps.li(f"{m['user']}: {m['text']}"),
-            )
-        ),
-        # Client widget with channel
-        ChatWidget(channelId=room.channel.id),
-    )
-```
-
-## Error Handling
-
-```python
-# Timeout on request
-try:
-    response = await channel.request("event", data, timeout=5.0)
-except ps.ChannelTimeout:
-    # Handle timeout
-    pass
-
-# Channel closed (user navigated away)
-try:
-    channel.emit("event", data)
-except ps.ChannelClosed:
-    # Handle closed channel
-    pass
-```
-
-## Channel Lifecycle
-
-1. **Created** — `ps.channel()` in State `__init__`
-2. **Active** — While component is mounted
-3. **Closed** — When component unmounts or user disconnects
-
-Always clean up handlers in `on_dispose()`:
-
-```python
-class MyState(ps.State):
-    def __init__(self):
-        self.channel = ps.channel()
-        self._cleanup = []
-        self._cleanup.append(self.channel.on("event1", self._h1))
-        self._cleanup.append(self.channel.on("event2", self._h2))
-
-    def on_dispose(self):
-        for cleanup in self._cleanup:
-            cleanup()
-```
-
-## Channel Properties
-
-```python
-channel.id      # str — unique channel identifier
-channel.closed  # bool — True if channel is closed
-```
-
-## Use Cases
-
-- **Chat/messaging** — Real-time message sync
-- **Live updates** — Push data changes to client
-- **Collaborative editing** — Multi-user sync
-- **Notifications** — Server-initiated alerts
-- **Gaming** — Low-latency state sync
-- **Progress tracking** — Long-running task updates
+`channel()` sees inbound events and requests only. `Deny` on event = drop. `Deny` on request = `denied` error response. Channel ids are guessable; gate messages.
 
 ## See Also
 
 - `js-interop.md` - React integration for channel UI
 - `reactive.md` - Effect for cleanup patterns
-- `middleware.md` - Channel authorization with channel hook
+- `middleware.md` - Channel authorization
+- `errors.md` - Channel exceptions

@@ -36,7 +36,13 @@ from pulse.queries.common import (
 )
 from pulse.queries.effect import AsyncQueryEffect
 from pulse.reactive import Computed, Effect, Signal, Untrack
-from pulse.scheduling import TimerHandleLike, create_task, is_pytest, later
+from pulse.scheduling import (
+	TimerHandleLike,
+	clamp_delay,
+	create_task,
+	is_pytest,
+	later,
+)
 from pulse.state.property import InitializableProperty, StateMemberDescriptor
 from pulse.state.state import State
 
@@ -65,7 +71,7 @@ def retry_backoff_delay(
 	float conversion (``2**1024`` exceeds the max float); the result is capped
 	long before that anyway.
 	"""
-	return min(base * 2.0 ** min(attempt, 1000), cap)
+	return clamp_delay(min(base * 2.0 ** min(attempt, 1000), cap))
 
 
 def query_store_for_state(state: State) -> "QueryStore":
@@ -590,7 +596,7 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 		"""Whether the data is invalidated or older than stale_time seconds."""
 		if self.state.invalidated:
 			return True
-		return (time.time() - self.state.last_updated.read()) > stale_time
+		return (time.time() - self.state.last_updated.read()) >= stale_time
 
 	@override
 	def _resume_after_suspend(self) -> None:
@@ -861,7 +867,7 @@ class UnkeyedQueryResult(Generic[T], Disposable, SuspendableQuery):
 		"""Check if the query data is invalidated or stale based on stale_time."""
 		if self.state.invalidated:
 			return True
-		return (time.time() - self.state.last_updated.read()) > self._stale_time
+		return (time.time() - self.state.last_updated.read()) >= self._stale_time
 
 	async def _run(self):
 		"""Run the fetch, tracking only dependencies read by the user fetch."""

@@ -227,7 +227,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
 		"""Whether the data is invalidated or older than stale_time seconds."""
 		if self.invalidated:
 			return True
-		return (time.time() - self.last_updated.read()) > stale_time
+		return (time.time() - self.last_updated.read()) >= stale_time
 
 	@override
 	def _resume_after_suspend(self) -> None:

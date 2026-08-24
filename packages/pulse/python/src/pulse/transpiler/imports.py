@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import ntpath
 from dataclasses import dataclass
 from pathlib import Path
 from typing import (
@@ -48,12 +49,17 @@ def caller_file(depth: int = 2) -> Path:
 
 def is_relative_path(path: str) -> bool:
 	"""Check if path is a relative import (starts with ./ or ../)."""
-	return path.startswith("./") or path.startswith("../")
+	return (
+		path.startswith("./")
+		or path.startswith("../")
+		or path.startswith(".\\")
+		or path.startswith("..\\")
+	)
 
 
 def is_absolute_path(path: str) -> bool:
 	"""Check if path is an absolute filesystem path."""
-	return path.startswith("/")
+	return path.startswith("/") or ntpath.isabs(path)
 
 
 def is_local_path(path: str) -> bool:

@@ -402,6 +402,10 @@ def global_state(
 	two users, always get separate instances. Use ``ps.session()``
 	(``UserSession``) to coordinate state across a single user's tabs.
 
+	States constructed while a global-state factory runs are owned by that
+	session-scoped state. Their effects therefore keep the render session but
+	omit route identity, including for nested state construction.
+
 	Can be used as a decorator on a State class or with a factory function.
 
 	Args:
@@ -466,7 +470,12 @@ def global_state(
 				"ps.global_state must be called inside a Pulse render/callback context"
 			)
 		key = base_key if id is None else f"{base_key}|{id}"
-		return cast(S, ctx.render.get_global_state(key, lambda: mk(*args, **kwargs)))
+
+		def factory() -> S:
+			with PulseContext.update(session_scoped_effects=True):
+				return mk(*args, **kwargs)
+
+		return cast(S, ctx.render.get_global_state(key, factory))
 
 	return accessor
 

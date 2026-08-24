@@ -2,21 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
 import signal
 import socket
 import sys
-import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast, final
 
 from watchfiles import Change, awatch
 
+from pulse.cli.helpers import os_family
 from pulse.cli.logging import TagMode
 from pulse.cli.models import CommandSpec
 from pulse.cli.processes import ManagedProcess, write_tagged_line
-from pulse.env import ENV_PULSE_LISTEN_FDS, ENV_PULSE_READY_FD, ENV_PULSE_VITE_READY_FD
+from pulse.cli.protocol import VITE_CONFIGURED, VITE_LISTENING, WORKER_READY, parse
+from pulse.env import ENV_PULSE_LISTEN_FDS, ENV_PULSE_SUPERVISED
 
 IGNORED_DIRECTORIES = frozenset(
 	{
@@ -37,11 +37,9 @@ IGNORED_DIRECTORIES = frozenset(
 PYTHON_EXTENSIONS = frozenset({".py", ".pyx", ".pyd"})
 VITE_PLUGIN_TIMEOUT = 15.0
 VITE_LISTENING_TIMEOUT = 30.0
-# A descendant that escaped the process group can still hold a readiness pipe's
-# write end; shutdown abandons the reader rather than waiting on it forever.
-READY_PIPE_DRAIN_TIMEOUT = 5.0
 
 Wait = Literal["shutdown", "changed", "backend", "web", "ready"]
+BackendStart = Literal["ready", "failed", "changed"]
 
 
 @dataclass(slots=True)
@@ -110,15 +108,13 @@ class DevSupervisor:
 		self.backend: ManagedProcess | None = None
 		self.web: ManagedProcess | None = None
 		self._backend_exit = asyncio.Event()
+		self._backend_ready = asyncio.Event()
 		self._web_exit = asyncio.Event()
 		self._backend_gen = 0
 		self._backend_code: int | None = None
 		self._web_code: int | None = None
 		self._vite_configured = asyncio.Event()
 		self._vite_listening = asyncio.Event()
-		self._vite_ready_r: int | None = None
-		self._vite_drain: asyncio.Future[None] | None = None
-		self._vite_reader_thread: threading.Thread | None = None
 		for listener in listeners:
 			listener.set_inheritable(False)
 
@@ -145,12 +141,17 @@ class DevSupervisor:
 				if self._web_code is not None:
 					return self._web_code
 				self.changed.clear()
-				started = await self._replace_backend()
+				backend_start = await self._replace_backend()
 				if self.shutdown.is_set():
 					break
 				if self._web_code is not None:
 					return self._web_code
-				if not started:
+				if backend_start != "ready":
+					if backend_start == "failed":
+						print(
+							"Backend failed to start. Waiting for changes to retry...",
+							flush=True,
+						)
 					await self._race("changed", "web")
 					continue
 				if self.backend_spec.on_ready is not None:
@@ -182,7 +183,6 @@ class DevSupervisor:
 			self.backend = None
 			await self._stop(self.web)
 			self.web = None
-			await self._await_vite_drain()
 			for signum, handler in previous_handlers.items():
 				signal.signal(signum, cast(Any, handler))
 
@@ -193,6 +193,13 @@ class DevSupervisor:
 		if self.web is not None:
 			self.web.kill_tree()
 
+	def _note_backend_ready(self, gen: int) -> None:
+		# A late marker relayed by a replaced generation's output thread must
+		# not mark the current backend ready.
+		if gen != self._backend_gen:
+			return
+		self._backend_ready.set()
+
 	def _note_backend_exit(self, gen: int, code: int) -> None:
 		# A previous generation's exit callback can fire after its process was
 		# replaced (close() joins its wait thread with a timeout); it must not
@@ -202,30 +209,34 @@ class DevSupervisor:
 		self._backend_code = code
 		self._backend_exit.set()
 
-	async def _replace_backend(self) -> bool:
+	async def _replace_backend(self) -> BackendStart:
 		await self._stop(self.backend)
 		self.backend = None
 		self._backend_gen += 1
 		gen = self._backend_gen
 		self._backend_exit.clear()
+		self._backend_ready.clear()
 		self._backend_code = None
 		if self.shutdown.is_set():
-			return False
-		ready_r, ready_w = os.pipe()
-		os.set_inheritable(ready_w, True)
-		os.set_inheritable(ready_r, False)
+			# The caller re-checks shutdown before interpreting this outcome.
+			return "changed"
 		env = dict(self.backend_spec.env)
 		env[ENV_PULSE_LISTEN_FDS] = ",".join(
 			f"{listener.family}:{listener.fileno()}" for listener in self.listeners
 		)
-		env[ENV_PULSE_READY_FD] = str(ready_w)
 		for listener in self.listeners:
 			listener.set_inheritable(True)
-		pass_fds = tuple(listener.fileno() for listener in self.listeners) + (ready_w,)
+		pass_fds = tuple(listener.fileno() for listener in self.listeners)
 		loop = asyncio.get_running_loop()
 
 		def on_output(line: str) -> None:
-			write_tagged_line(self.backend_spec.name, line, self.tag_mode)
+			messages, text = parse(line)
+			# Suppress only the padding newlines around markers, not genuine
+			# blank lines from the child.
+			if text or not messages:
+				write_tagged_line(self.backend_spec.name, text, self.tag_mode)
+			if WORKER_READY in messages:
+				loop.call_soon_threadsafe(self._note_backend_ready, gen)
 
 		def on_exit(code: int) -> None:
 			loop.call_soon_threadsafe(self._note_backend_exit, gen, code)
@@ -236,149 +247,31 @@ class DevSupervisor:
 			cwd=self.backend_spec.cwd,
 			env=env,
 		)
-		ready: asyncio.Future[bytes] | None = None
-		ready_thread: threading.Thread | None = None
 		try:
-			try:
-				self.backend = ManagedProcess.start(
-					spec, on_output, on_exit, pass_fds=pass_fds
-				)
-			finally:
-				os.close(ready_w)
-				for listener in self.listeners:
-					listener.set_inheritable(False)
-			ready_future: asyncio.Future[bytes] = loop.create_future()
-			ready = ready_future
-
-			def read_ready() -> None:
-				try:
-					data = os.read(ready_r, 1)
-				except OSError as exc:
-					error = exc
-
-					def set_error() -> None:
-						if not ready_future.done():
-							ready_future.set_exception(error)
-
-					try:
-						loop.call_soon_threadsafe(set_error)
-					except RuntimeError:
-						pass
-				else:
-
-					def set_result() -> None:
-						if not ready_future.done():
-							ready_future.set_result(data)
-
-					try:
-						loop.call_soon_threadsafe(set_result)
-					except RuntimeError:
-						pass
-				finally:
-					with contextlib.suppress(OSError):
-						os.close(ready_r)
-
-			ready_thread = threading.Thread(target=read_ready, daemon=True)
-			ready_thread.start()
-			result = await self._race("changed", "backend", "web", extra=ready)
+			self.backend = ManagedProcess.start(
+				spec, on_output, on_exit, pass_fds=pass_fds
+			)
+		finally:
+			for listener in self.listeners:
+				listener.set_inheritable(False)
+		waiter = asyncio.create_task(self._backend_ready.wait())
+		try:
+			result = await self._race(
+				"changed",
+				"backend",
+				"web",
+				extra=waiter,
+			)
 			if result == "ready":
-				try:
-					ok = ready.result() == b"1"
-				except OSError:
-					ok = False
-				if not ok:
-					await self._stop(self.backend)
-					self.backend = None
-				return ok
+				return "ready"
 			await self._stop(self.backend)
 			self.backend = None
-			return False
+			return "changed" if result == "changed" else "failed"
 		finally:
-			# Await the reader before closing its fd: the write end lives only
-			# in the child, so once the child is stopped the read returns EOF
-			# promptly. The dedicated daemon thread owns the read so an
-			# escaping descendant cannot wedge loop shutdown.
-			if ready is not None and not ready.done():
-				with contextlib.suppress(Exception):
-					await asyncio.wait_for(
-						asyncio.shield(ready), timeout=READY_PIPE_DRAIN_TIMEOUT
-					)
-			if ready is None and ready_thread is None:
-				with contextlib.suppress(OSError):
-					os.close(ready_r)
-			elif (
-				ready is not None
-				and not ready.done()
-				and ready_thread is not None
-				and ready_thread.is_alive()
-			):
-				# A descendant escaped the process group and still holds the
-				# write end: the reader thread and fd stay pinned until it dies.
-				print(
-					"Warning: a leftover backend descendant holds the readiness pipe open; leaking its reader until it exits.",
-					flush=True,
-				)
-
-	def _close_vite_ready_fd(self) -> None:
-		fd = self._vite_ready_r
-		self._vite_ready_r = None
-		if fd is not None:
-			os.close(fd)
-
-	def _drain_vite_ready(
-		self, loop: asyncio.AbstractEventLoop, drain: asyncio.Future[None]
-	) -> None:
-		ready_r = self._vite_ready_r
-		try:
-			if ready_r is not None:
-				while True:
-					try:
-						chunk = os.read(ready_r, 8)
-					except OSError:
-						return
-					if not chunk:
-						return
-					if b"c" in chunk:
-						try:
-							loop.call_soon_threadsafe(self._vite_configured.set)
-						except RuntimeError:
-							return
-					if b"1" in chunk:
-						try:
-							loop.call_soon_threadsafe(self._vite_listening.set)
-						except RuntimeError:
-							return
-		finally:
-			self._close_vite_ready_fd()
-
-			def complete() -> None:
-				if not drain.done():
-					drain.set_result(None)
-
-			try:
-				loop.call_soon_threadsafe(complete)
-			except RuntimeError:
-				pass
-
-	async def _await_vite_drain(self) -> None:
-		drain = self._vite_drain
-		self._vite_drain = None
-		if drain is None:
-			self._close_vite_ready_fd()
-			return
-		# Bounded: the drain only sees EOF once every copy of the write end is
-		# closed, so a web descendant that escaped the process group would
-		# otherwise wedge shutdown. Abandon the reader instead — it closes the
-		# fd itself once the straggler exits.
-		with contextlib.suppress(Exception):
-			await asyncio.wait_for(
-				asyncio.shield(drain), timeout=READY_PIPE_DRAIN_TIMEOUT
-			)
-		if not drain.done():
-			print(
-				"Warning: a leftover web descendant holds the readiness pipe open; leaking its reader until it exits.",
-				flush=True,
-			)
+			if not waiter.done():
+				waiter.cancel()
+				with contextlib.suppress(asyncio.CancelledError):
+					await waiter
 
 	async def _wait_vite_signal(
 		self, event: asyncio.Event, *, timeout: float | None
@@ -402,52 +295,40 @@ class DevSupervisor:
 		web_spec = self.web_spec
 		self._web_exit.clear()
 		self._web_code = None
-		ready_r, ready_w = os.pipe()
-		os.set_inheritable(ready_w, True)
-		os.set_inheritable(ready_r, False)
-		self._vite_ready_r = ready_r
 		loop = asyncio.get_running_loop()
 
 		def on_output(line: str) -> None:
-			write_tagged_line(web_spec.name, line, self.tag_mode)
+			messages, text = parse(line)
+			if text or not messages:
+				write_tagged_line(web_spec.name, text, self.tag_mode)
+			if VITE_CONFIGURED in messages:
+				loop.call_soon_threadsafe(self._vite_configured.set)
+			if VITE_LISTENING in messages:
+				loop.call_soon_threadsafe(self._vite_listening.set)
 
 		def on_exit(code: int) -> None:
 			self._web_code = code
 			loop.call_soon_threadsafe(self._web_exit.set)
 
 		env = dict(web_spec.env)
-		env[ENV_PULSE_VITE_READY_FD] = str(ready_w)
-		spec = CommandSpec(
-			name=web_spec.name,
-			args=[
+		env[ENV_PULSE_SUPERVISED] = "1"
+		web_args = web_spec.args
+		if os_family() != "windows":
+			# POSIX uses guard for orphan cleanup; Windows job objects reap descendants.
+			web_args = [
 				sys.executable,
 				"-m",
 				"pulse.cli.guard",
 				"--",
 				*web_spec.args,
-			],
+			]
+		spec = CommandSpec(
+			name=web_spec.name,
+			args=web_args,
 			cwd=web_spec.cwd,
 			env=env,
 		)
-		try:
-			self.web = ManagedProcess.start(
-				spec, on_output, on_exit, pass_fds=(ready_w,)
-			)
-		except BaseException:
-			self._close_vite_ready_fd()
-			raise
-		finally:
-			os.close(ready_w)
-		loop = asyncio.get_running_loop()
-		drain: asyncio.Future[None] = loop.create_future()
-		self._vite_drain = drain
-		thread = threading.Thread(
-			target=self._drain_vite_ready,
-			args=(loop, drain),
-			daemon=True,
-		)
-		self._vite_reader_thread = thread
-		thread.start()
+		self.web = ManagedProcess.start(spec, on_output, on_exit)
 		try:
 			got = await self._wait_vite_signal(
 				self._vite_configured, timeout=self.vite_plugin_timeout
@@ -511,9 +392,9 @@ class DevSupervisor:
 	async def _race(
 		self,
 		*names: str,
-		extra: asyncio.Future[Any] | None = None,
+		extra: asyncio.Task[Any] | None = None,
 	) -> Wait:
-		waiters: dict[str, asyncio.Future[Any]] = {
+		waiters: dict[str, asyncio.Task[Any]] = {
 			"shutdown": asyncio.create_task(self.shutdown.wait()),
 		}
 		if "changed" in names:

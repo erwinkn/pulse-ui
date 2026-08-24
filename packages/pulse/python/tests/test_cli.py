@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import json
 import os
 import re
@@ -41,6 +42,20 @@ from pulse.transpiler.imports import Import, clear_import_registry
 from typer.testing import CliRunner
 
 runner = CliRunner()
+
+
+@pytest.mark.parametrize(
+	"module_name",
+	(
+		"pulse.cli.lock",
+		"pulse.cli.processes",
+		"pulse.cli.protocol",
+		"pulse.cli.guard",
+		"pulse.cli.reload",
+	),
+)
+def test_cli_modules_import(module_name: str) -> None:
+	importlib.import_module(module_name)
 
 
 def install_recording_supervisor(
@@ -556,12 +571,12 @@ def test_build_uvicorn_reload_watches_web_root_and_excludes_pulse_dir(
 	exclude = command.args.index("--reload-exclude")
 	assert command.args[exclude : exclude + 2] == [
 		"--reload-exclude",
-		"web/app/_pulse",
+		str(Path("web") / "app" / "_pulse"),
 	]
 	exclude = command.args.index("--reload-exclude", exclude + 1)
 	assert command.args[exclude : exclude + 2] == [
 		"--reload-exclude",
-		"web/app/_pulse/**",
+		str(Path("web") / "app" / "_pulse" / "**"),
 	]
 
 
@@ -959,6 +974,41 @@ def test_execute_commands_stops_remaining_processes_when_one_exits(
 	elapsed = time.monotonic() - started
 
 	assert exit_code == 7
+	assert elapsed < 2
+	output = capsys.readouterr().out
+	assert "web-exited" in output
+	assert "server-finished" not in output
+
+
+def test_execute_commands_preserves_clean_exit_when_stopping_survivor(
+	tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+	slow = CommandSpec(
+		name="server",
+		args=[
+			sys.executable,
+			"-c",
+			"import time; print('server-started', flush=True); time.sleep(5); print('server-finished', flush=True)",
+		],
+		cwd=tmp_path,
+		env=os.environ.copy(),
+	)
+	fast = CommandSpec(
+		name="web",
+		args=[
+			sys.executable,
+			"-c",
+			"print('web-exited', flush=True)",
+		],
+		cwd=tmp_path,
+		env=os.environ.copy(),
+	)
+
+	started = time.monotonic()
+	exit_code = execute_commands([slow, fast], tag_mode="plain")
+	elapsed = time.monotonic() - started
+
+	assert exit_code == 0
 	assert elapsed < 2
 	output = capsys.readouterr().out
 	assert "web-exited" in output

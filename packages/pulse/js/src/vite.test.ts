@@ -1,12 +1,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { closeSync, openSync, readFileSync, unlinkSync } from "node:fs";
+import { EventEmitter } from "node:events";
 import { createServer as createHttpServer, type Server } from "node:http";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { ViteDevServer } from "vite";
 import { pulse } from "./vite";
 
-const ENV_NAMES = ["PULSE_HMR_CLIENT_PORT", "PULSE_VITE_READY_FD"] as const;
+const ENV_NAMES = ["PULSE_HMR_CLIENT_PORT", "PULSE_SUPERVISED"] as const;
 const originalEnv = Object.fromEntries(
 	ENV_NAMES.map((name) => [name, process.env[name]]),
 ) as Record<(typeof ENV_NAMES)[number], string | undefined>;
@@ -51,8 +49,7 @@ describe("pulse", () => {
 		for (const name of ENV_NAMES) delete process.env[name];
 		const plugin = pulse();
 		const server = createHttpServer();
-		// Bun's node:http server registers its own "listening" listener.
-		const baseline = server.listenerCount("listening");
+		const listenerCount = server.listenerCount("listening");
 		try {
 			expect(
 				hook(plugin.config).call({} as never, {} as never, {} as never),
@@ -60,15 +57,10 @@ describe("pulse", () => {
 			expect(
 				hook(plugin.configureServer).call({} as never, viteServer(server)),
 			).toBeUndefined();
-			expect(server.listenerCount("listening")).toBe(baseline);
+			expect(server.listenerCount("listening")).toBe(listenerCount);
 		} finally {
 			server.close();
 		}
-	});
-
-	it("rejects a non-integer ready fd", () => {
-		process.env.PULSE_VITE_READY_FD = "nope";
-		expect(() => pulse()).toThrow("non-negative integer");
 	});
 
 	it("sets HMR clientPort from the supervisor", () => {
@@ -117,55 +109,87 @@ describe("pulse", () => {
 		).toBeUndefined();
 	});
 
-	it("writes configured then listening to the ready fd", async () => {
-		const path = join(tmpdir(), `pulse-vite-ready-${process.pid}-${Date.now()}`);
-		const fd = openSync(path, "w");
-		process.env.PULSE_VITE_READY_FD = String(fd);
+	it("writes configured then listening to stdout", async () => {
+		process.env.PULSE_SUPERVISED = "1";
+		let output = "";
+		const write = process.stdout.write;
+		process.stdout.write = ((chunk: string | Uint8Array) => {
+			output += chunk.toString();
+			return true;
+		}) as typeof process.stdout.write;
 		const viteHttp = createHttpServer();
 		try {
 			hook(pulse().configureServer).call({} as never, viteServer(viteHttp));
 			await listen(viteHttp);
-			closeSync(fd);
-			expect(readFileSync(path, "utf8")).toBe("c1");
+			expect(output).toBe(
+				"\x00pulse:vite-configured\n\x00pulse:vite-listening\n",
+			);
 		} finally {
+			process.stdout.write = write;
 			if (viteHttp.listening) await close(viteHttp);
-			try {
-				unlinkSync(path);
-			} catch {}
 		}
 	});
 
-	it("does not throw when the supervisor has closed the ready fd", () => {
-		const path = join(tmpdir(), `pulse-vite-closed-${process.pid}-${Date.now()}`);
-		const fd = openSync(path, "w");
-		process.env.PULSE_VITE_READY_FD = String(fd);
-		closeSync(fd);
+	it("does not throw when stdout is unavailable", () => {
+		process.env.PULSE_SUPERVISED = "1";
+		const write = process.stdout.write;
+		process.stdout.write = (() => {
+			throw new Error("closed");
+		}) as typeof process.stdout.write;
 		const viteHttp = createHttpServer();
 		try {
 			expect(() =>
 				hook(pulse().configureServer).call({} as never, viteServer(viteHttp)),
 			).not.toThrow();
 		} finally {
+			process.stdout.write = write;
 			viteHttp.close();
-			try {
-				unlinkSync(path);
-			} catch {}
+		}
+	});
+
+	it("swallows asynchronous stdout errors without leaking listeners", async () => {
+		process.env.PULSE_SUPERVISED = "1";
+		const originalStdout = process.stdout;
+		const stdout = new EventEmitter() as unknown as typeof process.stdout;
+		stdout.write = ((_chunk: string | Uint8Array, callback?: (error?: Error) => void) => {
+			queueMicrotask(() => {
+				callback?.(new Error("closed"));
+				stdout.emit("error", new Error("closed"));
+			});
+			return true;
+		}) as typeof stdout.write;
+		Object.defineProperty(process, "stdout", {
+			configurable: true,
+			value: stdout,
+			writable: true,
+		});
+		const listenerCount = stdout.listenerCount("error");
+		const servers = [createHttpServer(), createHttpServer()];
+		try {
+			for (const server of servers) {
+				hook(pulse().configureServer).call({} as never, viteServer(server));
+			}
+			await new Promise<void>((resolve) => queueMicrotask(resolve));
+			expect(stdout.listenerCount("error")).toBe(listenerCount + 1);
+		} finally {
+			Object.defineProperty(process, "stdout", {
+				configurable: true,
+				value: originalStdout,
+				writable: true,
+			});
+			for (const server of servers) {
+				server.close();
+			}
 		}
 	});
 
 	it("rejects middleware mode", () => {
-		const path = join(tmpdir(), `pulse-vite-mw-${process.pid}-${Date.now()}`);
-		const fd = openSync(path, "w");
-		process.env.PULSE_VITE_READY_FD = String(fd);
+		process.env.PULSE_SUPERVISED = "1";
 		try {
 			expect(() =>
 				hook(pulse().configureServer).call({} as never, viteServer(null)),
 			).toThrow("HTTP server");
 		} finally {
-			closeSync(fd);
-			try {
-				unlinkSync(path);
-			} catch {}
 		}
 	});
 });

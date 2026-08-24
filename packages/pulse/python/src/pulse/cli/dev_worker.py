@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
 import os
 import socket
 import sys
@@ -15,8 +14,9 @@ import uvicorn
 from uvicorn.config import LOGGING_CONFIG
 
 from pulse.cli.helpers import load_app_from_target
+from pulse.cli.protocol import WORKER_READY, emit
 from pulse.cli.uvicorn_log_config import get_log_config
-from pulse.env import ENV_PULSE_LISTEN_FDS, ENV_PULSE_READY_FD, env
+from pulse.env import ENV_PULSE_LISTEN_FDS, env
 
 DEVELOPMENT_GRACEFUL_TIMEOUT = 0
 
@@ -36,9 +36,9 @@ def inherit_listeners() -> list[socket.socket]:
 	listeners: list[socket.socket] = []
 	for part in raw.split(","):
 		family_text, fd_text = part.split(":", 1)
-		fd = int(fd_text)
-		listener = socket.fromfd(fd, int(family_text), socket.SOCK_STREAM)
-		os.close(fd)
+		listener = socket.socket(
+			int(family_text), socket.SOCK_STREAM, fileno=int(fd_text)
+		)
 		listeners.append(listener)
 	return listeners
 
@@ -60,13 +60,7 @@ def worker_uvicorn_config(
 
 
 def _notify_ready() -> None:
-	raw = os.environ.get(ENV_PULSE_READY_FD)
-	if raw is None or raw.strip() == "":
-		return
-	fd = int(raw)
-	with contextlib.suppress(OSError):
-		os.write(fd, b"1")
-		os.close(fd)
+	emit(WORKER_READY)
 
 
 def _watch_supervisor(server: uvicorn.Server) -> None:
@@ -107,6 +101,9 @@ def main() -> None:
 			name="pulse-supervisor-watchdog",
 			daemon=True,
 		).start()
+		if os.name == "nt":
+			# Inherited listen sockets cannot be served by the Proactor loop.
+			asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 		asyncio.run(server.serve(sockets=listeners))
 		raise SystemExit(0)
 	except click.exceptions.Exit as exc:

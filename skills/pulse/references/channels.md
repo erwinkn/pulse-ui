@@ -20,6 +20,17 @@ class ChatState(ps.State):
 ```
 
 `ps.channel()` creates a unique channel ID. Pass `channel.id` to client components.
+The default `lifetime="route"` closes the channel with its route. Use
+`lifetime="tab"` for state that must survive route changes:
+
+```python
+class NotificationState(ps.State):
+    def __init__(self):
+        self.channel = ps.channel("notifications", lifetime="tab")
+```
+
+Tab channels close with the render session and are not shared across browser tabs.
+Their handlers run without a current route context.
 
 ## Server → Client
 
@@ -28,6 +39,12 @@ class ChatState(ps.State):
 ```python
 self.channel.emit("server:notify", {"type": "update", "data": {...}})
 ```
+
+Disconnected emits are buffered in a 64-event FIFO. Pulse flushes them when the
+client subscribes again and drops the oldest event at the cap. Client
+`emit()` uses the same queue before the hook has subscribed and while the
+socket is down. After the server closes the channel, client `emit()` is a
+no-op.
 
 ### Request (with response)
 
@@ -41,6 +58,8 @@ try:
     print(f"Client responded: {response}")
 except ps.ChannelTimeout:
     print("Client didn't respond in time")
+except ps.ChannelDisconnected:
+    print("No client is subscribed")
 except ps.ChannelClosed:
     print("Channel was closed")
 ```
@@ -105,11 +124,14 @@ def ChatClient(*, channelId: str):
     return ps.div(...)
 ```
 
+For a tab-lifetime server channel, use `usePulseChannel(channelId, "tab")`.
+
 ### Client Bridge API
 
 ```typescript
-bridge.emit(event: string, payload?: any): void
-bridge.request(event: string, payload?: any): Promise<any>
+bridge.closed: boolean
+bridge.emit(event: string, payload?: any): void  // queues while unsubscribed; no-op if closed
+bridge.request(event: string, payload?: any): Promise<any>  // throws if closed or unsubscribed
 bridge.on(event: string, handler: (payload) => any): () => void
 ```
 
@@ -207,7 +229,13 @@ except ps.ChannelTimeout:
     # Handle timeout
     pass
 
-# Channel closed (user navigated away)
+# No browser bridge is currently subscribed
+try:
+    await channel.request("event", data)
+except ps.ChannelDisconnected:
+    pass
+
+# Channel closed (route/render disposed or explicitly closed)
 try:
     channel.emit("event", data)
 except ps.ChannelClosed:
@@ -218,8 +246,21 @@ except ps.ChannelClosed:
 ## Channel Lifecycle
 
 1. **Created** — `ps.channel()` in State `__init__`
-2. **Active** — While component is mounted
-3. **Closed** — When component unmounts or user disconnects
+2. **Subscribed** — While a client bridge is listening
+3. **Disconnected** — The server channel stays alive and buffers emits
+4. **Closed** — Pulse destroys the owner, or you call `channel.close()`
+
+Wire: every channel message is `{ type: "channel", action, channel, ... }`. `subscriptionId` keys generations.
+
+- Subscribe → `action: "connect"`
+- Unsubscribe → `action: "disconnect"` (does not destroy the server channel)
+- Server destroy → `action: "close"` (not a `__close__` event)
+
+Route channels close when Pulse destroys their route. Tab channels close when
+Pulse closes their render session.
+A subscribed client can send events while the channel is open.
+If no client is subscribed, Pulse keeps the last 64 events from emit().
+If there are more than 64 events, Pulse removes the oldest event.
 
 Always clean up handlers in `on_dispose()`:
 
@@ -240,7 +281,9 @@ class MyState(ps.State):
 
 ```python
 channel.id      # str — unique channel identifier
+channel.lifetime  # "route" | "tab" — automatic cleanup boundary
 channel.closed  # bool — True if channel is closed
+channel.connected  # bool — True while a client bridge is subscribed
 ```
 
 ## Use Cases

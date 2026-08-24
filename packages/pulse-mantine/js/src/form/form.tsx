@@ -2,9 +2,8 @@ import type { UseFormInput, UseFormReturnType } from "@mantine/form";
 import { useForm } from "@mantine/form";
 import {
 	submitForm,
-	usePulseClient,
+	usePulseChannel,
 	usePulseDirectivesSource,
-	type ChannelBridge,
 } from "pulse-ui-client";
 import {
 	type ComponentPropsWithoutRef,
@@ -64,9 +63,8 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 	cascadeUpdates,
 	...formProps
 }: MantineFormProps<TValues>) {
-	const client = usePulseClient();
+	const channel = usePulseChannel(channelId);
 	const directives = usePulseDirectivesSource();
-	const channelRef = useRef<ChannelBridge | null>(null);
 	const formRef = useRef<UseFormReturnType<TValues> | null>(null);
 	// Timers for server-validation per path
 	const serverTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -91,22 +89,25 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 		>;
 	}, [validate]);
 
-	const emitChannel = useCallback((event: string, payload?: any) => {
-		channelRef.current?.emit(event, payload);
-	}, []);
-
 	const sendSync = useCallback(
 		(reason: "change" | "blur", path?: string) => {
 			const values = formRef.current?.getValues();
 			if (!values) return;
-			emitChannel("syncValues", {
+			channel.emit("syncValues", {
 				reason,
 				path,
 				values: stripFilesForSync(values),
 			});
 		},
-		[emitChannel],
+		[channel],
 	);
+
+	const clearPendingTimers = useCallback(() => {
+		serverTimersRef.current.forEach(clearTimeout);
+		serverTimersRef.current.clear();
+		syncTimersRef.current.forEach(clearTimeout);
+		syncTimersRef.current.clear();
+	}, []);
 
 	const getValueAtPath = useCallback((source: any, path?: string) => {
 		if (!source || !path) return undefined;
@@ -198,7 +199,7 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 						const latestValues = formRef.current?.getValues();
 						if (!latestValues) return;
 						const value = getValueAtPath(latestValues, path);
-						emitChannel("serverValidate", {
+						channel.emit("serverValidate", {
 							value: stripFilesForSync(value),
 							values: stripFilesForSync(latestValues),
 							path,
@@ -215,7 +216,7 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 			sendSync,
 			serverRulesByPath,
 			shouldValidateOnChange,
-			emitChannel,
+			channel,
 		],
 	);
 
@@ -261,13 +262,13 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 			const latestValues = formRef.current?.getValues();
 			if (!latestValues) return;
 			const value = getValueAtPath(latestValues, path);
-			emitChannel("serverValidate", {
+			channel.emit("serverValidate", {
 				value: stripFilesForSync(value),
 				values: stripFilesForSync(latestValues),
 				path,
 			});
 		},
-		[getValueAtPath, syncMode, sendSync, serverRulesByPath, shouldValidateOnBlur, emitChannel],
+		[getValueAtPath, syncMode, sendSync, serverRulesByPath, shouldValidateOnBlur, channel],
 	);
 
 	const form = useForm<any>({
@@ -288,21 +289,13 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 
 	// Cleanup outstanding timers on unmount
 	useEffect(() => {
-		return () => {
-			serverTimersRef.current.forEach((t: ReturnType<typeof setTimeout>) => {
-				clearTimeout(t);
-			});
-			serverTimersRef.current.clear();
-			syncTimersRef.current.forEach((t) => {
-				clearTimeout(t);
-			});
-			syncTimersRef.current.clear();
-		};
-	}, []);
+		return clearPendingTimers;
+	}, [clearPendingTimers]);
 
 	useEffect(() => {
-		const channel = client.acquireChannel(channelId);
-		channelRef.current = channel;
+		if (channel.closed) {
+			return;
+		}
 		const cleanups = [
 			channel.on("setValues", (payload: { values: TValues }) => {
 				const currentForm = formRef.current;
@@ -389,13 +382,10 @@ export function Form<TValues extends Record<string, any> = Record<string, any>>(
 		];
 
 		return () => {
+			clearPendingTimers();
 			for (const dispose of cleanups) dispose();
-			if (channelRef.current === channel) {
-				channelRef.current = null;
-			}
-			client.releaseChannel(channelId);
 		};
-	}, [client, channelId, sendSync]);
+	}, [channel, sendSync, clearPendingTimers]);
 
 	const submitHandler = useMemo(
 		() =>

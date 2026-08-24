@@ -14,6 +14,8 @@ from pulse.transpiler import (
 	Member,
 	New,
 	emit,
+	get_registered_imports,
+	javascript,
 )
 from pulse.transpiler.imports import clear_import_registry
 from pulse.transpiler.js_module import Class
@@ -117,6 +119,23 @@ class TestJsModule:
 		assert isinstance(expr, Member)
 		assert isinstance(expr.obj, Import)
 		assert expr.prop == "useState"
+
+	def test_pulse_channel_lifetime_binding(self) -> None:
+		"""The Pulse hook binding forwards the explicit tab lifetime."""
+		from pulse.js.pulse import usePulseChannel
+
+		@javascript
+		def use_tab_channel():
+			return usePulseChannel("notifications", "tab")
+
+		code = emit(use_tab_channel.transpile())
+		imports = get_registered_imports()
+
+		assert '"notifications", "tab"' in code
+		assert any(
+			item.name == "usePulseChannel" and item.src == "pulse-ui-client"
+			for item in imports
+		)
 
 
 class TestClassNode:

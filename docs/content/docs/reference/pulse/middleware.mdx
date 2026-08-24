@@ -176,17 +176,17 @@ async def channel(
 ) -> Ok[None] | Deny
 ```
 
-Handle channel message authorization.
+Handle channel message authorization. Called for data-plane events and for subscription lifecycle.
 
 **Parameters:**
 - `channel_id` - Channel identifier.
-- `event` - Event name.
-- `payload` - Event payload.
-- `request_id` - Request ID if awaiting response.
+- `event` - Data-plane event name (`"syncValues"`, `"message"`, …), or `"connect"` / `"disconnect"` for subscription lifecycle.
+- `payload` - Event payload. For `"connect"` / `"disconnect"`, this is the owner token (or `None`).
+- `request_id` - Request ID if awaiting a response. `None` for connect/disconnect.
 - `session` - Session data dictionary.
-- `next` - Callable to continue the middleware chain.
+- `next` - Callable to continue the middleware chain. Call `next()` on connect to accept the subscription.
 
-**Returns:** `Ok[None]` to allow, `Deny` to block.
+**Returns:** `Ok[None]` to allow, `Deny` to block. Deny on connect rejects the subscription (client receives `connect_ack` with `accepted=false`). Deny on disconnect still disconnects.
 
 ### MiddlewareStack
 

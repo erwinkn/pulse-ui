@@ -238,14 +238,16 @@ class PulseMiddleware:
 
 		Args:
 			channel_id: Channel identifier.
-			event: Event name.
-			payload: Event payload.
-			request_id: Request ID if awaiting response.
+			event: Channel event name for data-plane messages, or ``"connect"`` /
+				``"disconnect"`` for subscription lifecycle.
+			payload: Event payload. For connect/disconnect, this is the owner.
+			request_id: Request ID if awaiting a response.
 			session: Session data dictionary.
 			next: Callable to continue the middleware chain.
 
 		Returns:
-			``Ok[None]`` to allow, ``Deny`` to block.
+			``Ok[None]`` to allow, ``Deny`` to block. Deny on disconnect still
+			disconnects.
 		"""
 		return await next()
 

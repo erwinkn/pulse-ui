@@ -4,12 +4,18 @@ import { ChannelBridge, createRandomId, PulseChannelResetError } from "./channel
 import type { RouteInfo } from "./helpers";
 import { pulseFetch } from "./http";
 import type {
+	ChannelCloseMessage,
+	ChannelConnectAckMessage,
+	ChannelConnectMessage,
+	ChannelDisconnectMessage,
+	ChannelEventMessage,
+	ChannelRequestMessage,
+	ChannelResponseMessage,
 	ClientApiResultMessage,
 	ClientCallbackMessage,
 	ClientJsResultMessage,
 	ClientMessage,
 	ServerApiCallMessage,
-	ServerChannelMessage,
 	ServerError,
 	ServerJsExecMessage,
 	ServerMessage,
@@ -29,6 +35,7 @@ function browserIsOnline(): boolean {
 
 const PAGE_INSTANCE_AUTH_KEY = "__pulse_page_instance_id";
 const RENDER_ID_COLLISION_CODE = "render_id_collision";
+const DISCONNECTED_CHANNEL_EMIT_BUFFER_CAP = 64;
 const pageWindow =
 	typeof window === "undefined"
 		? undefined
@@ -57,6 +64,21 @@ export interface MountedView {
 export type ConnectionStatus = "ok" | "connecting" | "reconnecting" | "error";
 export type ConnectionStatusListener = (status: ConnectionStatus) => void;
 
+export interface ChannelOwnership {
+	token?: string;
+	attachPath?: string;
+}
+
+interface ChannelEntry {
+	bridge: ChannelBridge;
+	ownerToken?: string;
+	attachPath?: string;
+	queue: ChannelEventMessage[];
+	refCount: number;
+	subscribed: boolean;
+	subscriptionId: string | null;
+}
+
 export interface PulseClient {
 	// Connection management
 	connect(): Promise<void>;
@@ -81,7 +103,7 @@ export class PulseSocketIOClient {
 	#socket: Socket | null = null;
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
-	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
+	#channels: Map<string, ChannelEntry> = new Map();
 	#url: string;
 	#frameworkNavigate: NavigateFunction;
 	#directives: Directives;
@@ -219,6 +241,9 @@ export class PulseSocketIOClient {
 				for (const [path, route] of this.#activeViews) {
 					this.#sendAttach(path, route.routeInfo, socket);
 				}
+				for (const entry of this.#channels.values()) {
+					this.#connectChannelIfReady(entry, socket);
+				}
 
 				for (const payload of this.#messageQueue) {
 					// Already sent above
@@ -279,6 +304,37 @@ export class PulseSocketIOClient {
 	}
 
 	public sendMessage(payload: ClientMessage) {
+		if (payload.type === "channel" && (payload.action === "event" || payload.action === "request")) {
+			const entry = this.#channels.get(payload.channel);
+			if (!entry || entry.bridge.closed) {
+				if (payload.action === "request") {
+					throw new PulseChannelResetError("Channel is closed");
+				}
+				return;
+			}
+			if (!this.isConnected() || !entry.subscribed) {
+				if (payload.action === "request") {
+					throw new PulseChannelResetError("Channel is disconnected");
+				}
+				if (entry.queue.length === DISCONNECTED_CHANNEL_EMIT_BUFFER_CAP) {
+					entry.queue.shift();
+					console.warn(
+						`Dropping oldest buffered event for disconnected channel '${payload.channel}'`,
+					);
+				}
+				entry.queue.push(deserialize(serialize(payload)));
+				return;
+			}
+		}
+		if (
+			payload.type === "channel" &&
+			(payload.action === "event" || payload.action === "request" || payload.action === "response")
+		) {
+			const entry = this.#channels.get(payload.channel);
+			if (entry?.subscribed && entry.subscriptionId !== null) {
+				payload = { ...payload, subscriptionId: entry.subscriptionId };
+			}
+		}
 		if (this.isConnected()) {
 			// console.log("[SocketIOTransport] Sending:", payload);
 			this.#socket!.emit("message", serialize(payload as any));
@@ -443,8 +499,26 @@ export class PulseSocketIOClient {
 				this.#handleAttachAck(message.path, message.attachId);
 				break;
 			}
-			case "channel_message": {
-				this.#routeChannelMessage(message);
+			case "channel": {
+				switch (message.action) {
+					case "connect_ack": {
+						this.#handleChannelConnectAck(message);
+						break;
+					}
+					case "close": {
+						this.#handleChannelClose(message);
+						break;
+					}
+					case "event":
+					case "request":
+					case "response": {
+						this.#routeChannelMessage(message);
+						break;
+					}
+					default: {
+						console.error("Unexpected message:", message);
+					}
+				}
 				break;
 			}
 			case "js_exec": {
@@ -539,58 +613,163 @@ export class PulseSocketIOClient {
 		this.sendMessage(msg);
 	}
 
-	public acquireChannel(id: string): ChannelBridge {
-		const entry = this.#ensureChannelEntry(id);
-		entry.refCount += 1;
-		return entry.bridge;
+	public ensureChannel(id: string): ChannelBridge {
+		const entry = this.#channels.get(id);
+		if (entry && !entry.bridge.closed) {
+			return entry.bridge;
+		}
+		const bridge = new ChannelBridge(this, id);
+		this.#channels.set(id, {
+			bridge,
+			queue: [],
+			refCount: 0,
+			subscribed: false,
+			subscriptionId: null,
+		});
+		return bridge;
 	}
 
-	public releaseChannel(id: string): void {
-		const entry = this.#channels.get(id);
-		if (!entry) {
+	public subscribeChannel(bridge: ChannelBridge, ownership?: ChannelOwnership): void {
+		if (bridge.closed) {
+			return;
+		}
+		let entry = this.#channels.get(bridge.id);
+		if (!entry || entry.bridge !== bridge) {
+			if (entry && !entry.bridge.closed) {
+				throw new Error(`Pulse channel '${bridge.id}' is already acquired by another owner`);
+			}
+			entry = {
+				bridge,
+				ownerToken: ownership?.token,
+				attachPath: ownership?.attachPath,
+				queue: [],
+				refCount: 0,
+				subscribed: false,
+				subscriptionId: null,
+			};
+			this.#channels.set(bridge.id, entry);
+		} else if (
+			entry.refCount > 0 &&
+			(entry.ownerToken !== ownership?.token || entry.attachPath !== ownership?.attachPath)
+		) {
+			throw new Error(`Pulse channel '${bridge.id}' is already acquired by another owner`);
+		} else if (entry.refCount === 0) {
+			entry.ownerToken = ownership?.token;
+			entry.attachPath = ownership?.attachPath;
+		}
+		entry.refCount += 1;
+		if (this.isConnected()) {
+			this.#connectChannelIfReady(entry, this.#socket!);
+		}
+	}
+
+	public unsubscribeChannel(bridge: ChannelBridge): void {
+		const entry = this.#channels.get(bridge.id);
+		if (!entry || entry.bridge !== bridge) {
 			return;
 		}
 		entry.refCount = Math.max(0, entry.refCount - 1);
 		if (entry.refCount === 0) {
-			entry.bridge.dispose(new PulseChannelResetError("Channel released"));
-			this.sendMessage({
-				type: "channel_message",
-				channel: id,
-				event: "__close__",
-				payload: { reason: "refcount_zero" },
-			});
-			this.#channels.delete(id);
+			if (this.isConnected() && entry.subscriptionId !== null) {
+				this.#sendChannelDisconnect(entry, this.#socket!);
+			}
+			entry.subscribed = false;
+			entry.subscriptionId = null;
+			entry.queue = [];
 		}
 	}
 
-	#ensureChannelEntry(id: string): {
-		bridge: ChannelBridge;
-		refCount: number;
-	} {
-		let entry = this.#channels.get(id);
-		if (!entry) {
-			entry = {
-				bridge: new ChannelBridge(this, id),
-				refCount: 0,
-			};
-			this.#channels.set(id, entry);
-		}
-		return entry;
+	public acquireChannel(id: string, ownership?: ChannelOwnership): ChannelBridge {
+		const bridge = this.ensureChannel(id);
+		this.subscribeChannel(bridge, ownership);
+		return bridge;
 	}
 
-	#routeChannelMessage(message: ServerChannelMessage): void {
-		const entry = this.#ensureChannelEntry(message.channel);
-		const closed = entry.bridge.handleServerMessage(message);
-		if (closed && entry.refCount === 0) {
-			this.#channels.delete(message.channel);
-		}
+	public releaseChannel(_id: string, bridge: ChannelBridge): void {
+		this.unsubscribeChannel(bridge);
+	}
+
+	#routeChannelMessage(
+		message: ChannelEventMessage | ChannelRequestMessage | ChannelResponseMessage,
+	): void {
+		const entry = this.#channels.get(message.channel);
+		if (!entry || !entry.subscribed) return;
+		if (message.subscriptionId !== entry.subscriptionId) return;
+		entry.bridge.handleServerMessage(message);
 	}
 
 	#handleTransportDisconnect(): void {
 		this.#ackedAttachIds.clear();
 		for (const entry of this.#channels.values()) {
+			entry.subscribed = false;
+			entry.subscriptionId = null;
 			entry.bridge.handleDisconnect(new PulseChannelResetError("Connection lost"));
 		}
+	}
+
+	#sendChannelConnect(entry: ChannelEntry, socket: Socket): void {
+		entry.subscribed = false;
+		const subscriptionId = createRandomId();
+		entry.subscriptionId = subscriptionId;
+		const message: ChannelConnectMessage = {
+			type: "channel",
+			action: "connect",
+			channel: entry.bridge.id,
+			subscriptionId,
+			...(entry.ownerToken === undefined ? {} : { owner: entry.ownerToken }),
+		};
+		socket.emit("message", serialize(message));
+	}
+
+	#sendChannelDisconnect(entry: ChannelEntry, socket: Socket): void {
+		const subscriptionId = entry.subscriptionId;
+		if (subscriptionId === null) return;
+		const message: ChannelDisconnectMessage = {
+			type: "channel",
+			action: "disconnect",
+			channel: entry.bridge.id,
+			subscriptionId,
+			...(entry.ownerToken === undefined ? {} : { owner: entry.ownerToken }),
+		};
+		socket.emit("message", serialize(message));
+	}
+
+	#handleChannelConnectAck(message: ChannelConnectAckMessage): void {
+		const entry = this.#channels.get(message.channel);
+		if (!entry || entry.subscriptionId !== message.subscriptionId) return;
+		if (!message.accepted) {
+			entry.queue = [];
+			entry.subscribed = false;
+			entry.subscriptionId = null;
+			entry.bridge.dispose(
+				new PulseChannelResetError(message.error ?? "Channel subscription rejected"),
+			);
+			this.#channels.delete(message.channel);
+			return;
+		}
+		if (!this.isConnected() || entry.bridge.closed) return;
+		entry.subscribed = true;
+		const queued = entry.queue;
+		entry.queue = [];
+		for (const payload of queued) {
+			this.#socket!.emit(
+				"message",
+				serialize({ ...payload, subscriptionId: message.subscriptionId }),
+			);
+		}
+	}
+
+	#handleChannelClose(message: ChannelCloseMessage): void {
+		const entry = this.#channels.get(message.channel);
+		if (!entry || entry.subscriptionId !== message.subscriptionId) return;
+		entry.bridge.dispose(new PulseChannelResetError("Channel closed by server"));
+		this.#channels.delete(message.channel);
+	}
+
+	#connectChannelIfReady(entry: ChannelEntry, socket: Socket): void {
+		if (entry.bridge.closed || entry.subscriptionId !== null || entry.refCount === 0) return;
+		if (entry.attachPath !== undefined && !this.#isAttachAcked(entry.attachPath)) return;
+		this.#sendChannelConnect(entry, socket);
 	}
 
 	#sendAttach(path: string, routeInfo: RouteInfo, socket?: Socket): void {
@@ -619,6 +798,12 @@ export class PulseSocketIOClient {
 		if (this.#activeAttachIds.get(path) !== attachId) return;
 		this.#ackedAttachIds.set(path, attachId);
 		this.#flushPendingCallbacks(path);
+		if (!this.#socket) return;
+		for (const entry of this.#channels.values()) {
+			if (entry.attachPath === path) {
+				this.#connectChannelIfReady(entry, this.#socket);
+			}
+		}
 	}
 
 	#queueCallback(message: ClientCallbackMessage): void {
@@ -637,10 +822,4 @@ export class PulseSocketIOClient {
 		}
 	}
 
-	_ensureChannelEntry(id: string): {
-		bridge: ChannelBridge;
-		refCount: number;
-	} {
-		return this.#ensureChannelEntry(id);
-	}
 }

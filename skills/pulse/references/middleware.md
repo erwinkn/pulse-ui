@@ -239,7 +239,14 @@ async def message(
 
 ### `channel`
 
-Called when channel messages are received. Authorize by channel, event, or payload.
+Called for channel data-plane messages and subscription lifecycle. Authorize by channel, event, or payload.
+
+Signature is unchanged. `event` meaning:
+
+- Data-plane: the channel event name (`"syncValues"`, `"message"`, `"delete"`, …)
+- Lifecycle: `"connect"` or `"disconnect"` — not `"__connect__"` / `"__disconnect__"` / `"__close__"`
+- For connect/disconnect, `payload` is the owner token (or `None`)
+- `request_id` is `None` for lifecycle
 
 ```python
 from typing import Any
@@ -255,17 +262,22 @@ async def channel(
     session: dict,
     next,
 ) -> Ok | Deny:
-    # Authorize based on channel
-    if channel_id.startswith("admin:"):
-        if not session.get("is_admin"):
+    # Subscription start. Call next() to accept; Deny rejects
+    # (client gets connect_ack accepted=false). Channel stays open.
+    if event == "connect":
+        if channel_id.startswith("admin:") and not session.get("is_admin"):
             return Deny()
+        return await next()
 
-    # Authorize based on event type
+    # Client unsubscribe. Deny still disconnects — cannot keep them subscribed.
+    if event == "disconnect":
+        return await next()
+
+    # Data-plane: event is the channel event name
     if event == "delete" and not session.get("can_delete"):
         return Deny()
 
-    # Check payload
-    if payload.get("sensitive") and not session.get("verified"):
+    if isinstance(payload, dict) and payload.get("sensitive") and not session.get("verified"):
         return Deny()
 
     return await next()
@@ -273,11 +285,17 @@ async def channel(
 
 **Returns:** `await next()` or `Deny()`
 
+**Rules:**
+- Deny on connect → subscription rejected; server channel is not destroyed
+- Returning `Ok(None)` without calling `next()` on connect also rejects
+- Deny on disconnect → client still disconnects
+- Disconnect does not destroy the server channel
+
 **Parameters:**
 - `channel_id`: Channel identifier (e.g., `"chat:room-123"`)
-- `event`: Event name (e.g., `"message"`, `"typing"`)
-- `payload`: Event data
-- `request_id`: Correlation ID if client awaits response (for request/response pattern)
+- `event`: Data-plane event name, or `"connect"` / `"disconnect"`
+- `payload`: Event data. For connect/disconnect, the owner token (or `None`)
+- `request_id`: Correlation ID if client awaits a response; `None` for lifecycle
 - `session`: Session data dictionary
 
 ## Response Types

@@ -12,19 +12,16 @@ def MyChannelComponent(*, channel_id: str):
 
     # Subscribe to events
     useEffect(
-        lambda: bridge and bridge.on("server:notify", lambda payload: console.log(payload)),
+        lambda: bridge.on("server:notify", lambda payload: console.log(payload)),
         [bridge],
     )
 
     # Emit events to server
     def send_ping():
-        if bridge:
-            bridge.emit("client:ping", {"message": "hello"})
+        bridge.emit("client:ping", {"message": "hello"})
 
     # Make requests to server
     async def send_request():
-        if not bridge:
-            return
         response = await bridge.request("client:request", {"data": 123})
         console.log(response)
 
@@ -38,6 +35,7 @@ def MyChannelComponent(*, channel_id: str):
 from collections.abc import Awaitable as _Awaitable
 from collections.abc import Callable as _Callable
 from typing import Any as _Any
+from typing import Literal as _Literal
 from typing import TypeVar as _TypeVar
 
 from pulse.transpiler.js_module import JsModule
@@ -63,8 +61,16 @@ class ChannelBridge:
 		"""The unique channel identifier."""
 		...
 
+	@property
+	def closed(self) -> bool:
+		"""Whether the server has closed this channel."""
+		...
+
 	def emit(self, event: str, payload: _Any = None) -> None:
 		"""Emit an event to the server.
+
+		Queues the event while the client is not subscribed, up to 64 events.
+		Does nothing if the channel has been closed.
 
 		Args:
 		    event: The event name to emit.
@@ -99,7 +105,10 @@ class ChannelBridge:
 		...
 
 
-def usePulseChannel(channel_id: str) -> ChannelBridge | None:
+def usePulseChannel(
+	channel_id: str,
+	lifetime: _Literal["route", "tab"] = "route",
+) -> ChannelBridge:
 	"""React hook to connect to a Pulse channel.
 
 	Must be called from within a React component. The channel connection
@@ -107,6 +116,7 @@ def usePulseChannel(channel_id: str) -> ChannelBridge | None:
 
 	Args:
 	    channel_id: The unique identifier for the channel to connect to.
+	    lifetime: ``"route"`` for route ownership or ``"tab"`` for tab ownership.
 
 	Returns:
 	    A ChannelBridge instance for interacting with the channel.

@@ -7,7 +7,11 @@ from dataclasses import dataclass, field
 from typing import Any, Generic, ParamSpec, TypeVar
 
 from pulse.context import PULSE_CONTEXT
-from pulse.scheduling import TimerHandleLike, later
+from pulse.scheduling import (
+	TimerHandleLike,
+	clamp_delay,
+	later,
+)
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -60,7 +64,7 @@ class Debounced(Generic[P, R]):
 					loop = asyncio.get_event_loop()
 				except RuntimeError as exc:
 					raise RuntimeError("debounced() requires an event loop") from exc
-			handle = loop.call_later(delay, _run)
+			handle = loop.call_later(clamp_delay(delay), _run)
 
 		object.__setattr__(self, "_handle", handle)
 

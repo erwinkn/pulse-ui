@@ -6,7 +6,7 @@ import pytest
 from pulse.render_session import RenderSession
 from pulse.renderer import RenderTree
 from pulse.routing import RouteTree
-from pulse.test_helpers import wait_for
+from pulse.test_helpers import slow_delay, wait_for
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -291,7 +291,7 @@ async def test_mutation_is_running_state():
 		@ps.mutation
 		async def slow_mutation(self) -> str:
 			running_states.append(self.slow_mutation.is_running)
-			await asyncio.sleep(0.01)
+			await asyncio.sleep(slow_delay())
 			running_states.append(self.slow_mutation.is_running)
 			return "done"
 

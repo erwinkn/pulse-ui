@@ -190,6 +190,10 @@ def run(
 		announced = True
 		logger.write_ready_announcement(address, port, local_server_url(address, port))
 
+	_validate_reload_args(
+		supervised_reload=supervised_reload, server_args=server_args, logger=logger
+	)
+
 	web_port: int | None = None
 	web_port_reservation: PortReservation | None = None
 	web_host: str | None = None
@@ -738,6 +742,17 @@ def _reserve_web_port(
 		raise typer.Exit(1) from None
 
 
+def _validate_reload_args(
+	*, supervised_reload: bool, server_args: list[str], logger: CLILogger
+) -> None:
+	if supervised_reload and server_args:
+		logger.error(
+			"Raw Uvicorn arguments are not supported with Pulse reload yet. "
+			+ "Use --no-reload to pass them through."
+		)
+		raise typer.Exit(1)
+
+
 def _build_run_commands(
 	*,
 	app_ctx: AppLoadResult,
@@ -760,13 +775,6 @@ def _build_run_commands(
 	mark_web_ready: Callable[[], None],
 	logger: CLILogger,
 ) -> tuple[list[CommandSpec], CommandSpec | None, CommandSpec | None]:
-	if supervised_reload and server_args:
-		logger.error(
-			"Raw Uvicorn arguments are not supported with Pulse reload yet. "
-			+ "Use --no-reload to pass them through."
-		)
-		raise typer.Exit(1)
-
 	commands: list[CommandSpec] = []
 	web_cmd: CommandSpec | None = None
 	server_cmd: CommandSpec | None = None

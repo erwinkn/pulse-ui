@@ -8,11 +8,10 @@ import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast, final
+from typing import Any, Callable, cast, final
 
 import pulse.cli.cmd as cmd_mod
 import pytest
-from pulse.cli import processes as process_module
 from pulse.cli.dependencies import (
 	DependencyPlan,
 	DependencyResolutionError,
@@ -36,7 +35,7 @@ from pulse.cli.packages import (
 	spec_satisfies,
 )
 from pulse.cli.ports import PortReservation
-from pulse.cli.processes import execute_commands
+from pulse.cli.processes import ManagedProcess, execute_commands
 from pulse.cli.secrets import resolve_dev_secret
 from pulse.env import ENV_PULSE_HMR_CLIENT_PORT, ENV_PULSE_REACT_SERVER_ADDRESS, env
 from pulse.transpiler.imports import Import, clear_import_registry
@@ -1016,115 +1015,151 @@ def test_execute_commands_preserves_clean_exit_when_stopping_survivor(
 	assert "server-finished" not in output
 
 
-@pytest.mark.parametrize(
-	"mode,expected",
-	[
-		("stop-induced", 0),
-		("independent-failure", 1),
-		("first-independent", 1),
-	],
-)
-def test_execute_commands_uses_recorded_exit_state_and_order(
-	mode: str,
-	expected: int,
-	tmp_path: Path,
+@final
+class _FakeCommandProcess:
+	def __init__(self) -> None:
+		self.alive = True
+		self.code: int | None = None
+		self.stop_requested = False
+		self.stop_induced = False
+		self.on_exit: Callable[[int], None] | None = None
+		self.on_request_stop: Callable[[], None] | None = None
+
+	@property
+	def returncode(self) -> int | None:
+		return self.code
+
+	def is_alive(self) -> bool:
+		return self.alive
+
+	def request_stop(self) -> None:
+		self.stop_requested = True
+		if self.on_request_stop is not None:
+			self.on_request_stop()
+
+	def kill_tree(self) -> None:
+		self.stop_requested = True
+		self.exit(-9)
+
+	def close(self) -> None:
+		return None
+
+	def exit(self, code: int) -> None:
+		if not self.alive:
+			return
+		self.alive = False
+		self.code = code
+		self.stop_induced = self.stop_requested
+		assert self.on_exit is not None
+		self.on_exit(code)
+
+
+def _install_fake_command_processes(
 	monkeypatch: pytest.MonkeyPatch,
+	processes: dict[str, _FakeCommandProcess],
 ) -> None:
-	@final
-	class FakeProcess:
-		all_processes: list[Any] = []
-
-		def __init__(self, name: str, on_exit: Any, behavior: str) -> None:
-			self.name = name
-			self.on_exit = on_exit
-			self.behavior = behavior
-			self.alive = True
-			self.code: int | None = None
-			self.stop_requested = False
-			self.stop_induced = False
-
-		@property
-		def returncode(self) -> int | None:
-			return self.code
-
-		def is_alive(self) -> bool:
-			return self.alive
-
-		def request_stop(self) -> None:
-			self.stop_requested = True
-			if self.behavior == "stop1":
-				self.exit(1)
-			elif self.behavior in {"trigger-failure", "exit0-trigger-failure"}:
-				self._find("web").exit(1)
-				if self.behavior == "trigger-failure":
-					self.exit(0)
-			elif self.behavior == "exit1-trigger-larger":
-				self._find("web").exit(9)
-
-		def kill_tree(self) -> None:
-			self.stop_requested = True
-			self.exit(-9)
-
-		def close(self) -> None:
-			return None
-
-		def exit(self, code: int) -> None:
-			if not self.alive:
-				return
-			self.alive = False
-			self.code = code
-			self.stop_induced = self.stop_requested
-			self.on_exit(code)
-
-		def _find(self, name: str) -> "FakeProcess":
-			return next(
-				process for process in self.all_processes if process.name == name
-			)
-
 	@classmethod
 	def start(
-		_cls: type[FakeProcess],
+		_cls: type[ManagedProcess],
 		spec: CommandSpec,
-		_on_output: Any,
-		on_exit: Any,
+		_on_output: Callable[[str], None],
+		on_exit: Callable[[int], None],
 		*,
 		pass_fds: tuple[int, ...] = (),
-	) -> FakeProcess:
-		if mode == "stop-induced":
-			behavior = "stop1" if spec.name == "server" else "exit0"
-		elif mode == "independent-failure":
-			behavior = "exit0-trigger-failure" if spec.name == "server" else "idle"
-		else:
-			behavior = "exit1-trigger-larger" if spec.name == "server" else "idle"
-		process = FakeProcess(spec.name, on_exit, behavior)
-		FakeProcess.all_processes.append(process)
-		if behavior == "exit0-trigger-failure":
-			process.stop_requested = True
-			process.exit(0)
-		elif behavior == "exit0":
-			process.exit(0)
-		elif behavior in {"exit1", "exit1-trigger-larger"}:
-			process.exit(1)
+	) -> _FakeCommandProcess:
+		process = processes[spec.name]
+		process.on_exit = on_exit
+		if spec.on_spawn is not None:
+			spec.on_spawn()
 		return process
 
-	FakeProcess.all_processes = []
-	monkeypatch.setattr(process_module.ManagedProcess, "start", classmethod(start))
-	specs = [
-		CommandSpec(
-			name="server",
-			args=["server"],
-			cwd=tmp_path,
-			env={},
-		),
-		CommandSpec(
-			name="web",
-			args=["web"],
-			cwd=tmp_path,
-			env={},
-		),
-	]
+	monkeypatch.setattr(ManagedProcess, "start", start)
 
-	assert execute_commands(specs, tag_mode="plain") == expected
+
+def test_execute_commands_ignores_stop_induced_exit_code_one(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	server = _FakeCommandProcess()
+	web = _FakeCommandProcess()
+	server.on_request_stop = lambda: server.exit(1)
+	_install_fake_command_processes(monkeypatch, {"server": server, "web": web})
+	web_spec = CommandSpec(
+		name="web", args=["web"], cwd=tmp_path, env={}, on_spawn=lambda: web.exit(0)
+	)
+
+	assert (
+		execute_commands(
+			[
+				CommandSpec(name="server", args=["server"], cwd=tmp_path, env={}),
+				web_spec,
+			],
+			tag_mode="plain",
+		)
+		== 0
+	)
+
+
+def test_execute_commands_reports_independent_exit_code_one_during_shutdown(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	server = _FakeCommandProcess()
+	web = _FakeCommandProcess()
+
+	def stop_server() -> None:
+		web.exit(1)
+		server.exit(0)
+
+	server.on_request_stop = stop_server
+
+	def start_server() -> None:
+		server.stop_requested = True
+		server.exit(0)
+
+	_install_fake_command_processes(monkeypatch, {"server": server, "web": web})
+
+	assert (
+		execute_commands(
+			[
+				CommandSpec(
+					name="server",
+					args=["server"],
+					cwd=tmp_path,
+					env={},
+					on_spawn=start_server,
+				),
+				CommandSpec(name="web", args=["web"], cwd=tmp_path, env={}),
+			],
+			tag_mode="plain",
+		)
+		== 1
+	)
+
+
+def test_execute_commands_returns_first_independent_exit(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	server = _FakeCommandProcess()
+	web = _FakeCommandProcess()
+	server.on_request_stop = lambda: web.exit(9)
+	_install_fake_command_processes(monkeypatch, {"server": server, "web": web})
+	server_spec = CommandSpec(
+		name="server",
+		args=["server"],
+		cwd=tmp_path,
+		env={},
+		on_spawn=lambda: server.exit(1),
+	)
+
+	assert (
+		execute_commands(
+			[
+				server_spec,
+				CommandSpec(name="web", args=["web"], cwd=tmp_path, env={}),
+			],
+			tag_mode="plain",
+		)
+		== 1
+	)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group behavior")

@@ -36,6 +36,21 @@ def test_process_liveness_rejects_out_of_range_pids(pid: int):
 
 
 @pytest.mark.parametrize(
+	("family", "pid"),
+	[("posix", 2**31), ("windows", 2**32)],
+)
+def test_process_liveness_bound_follows_platform_pid_width(
+	monkeypatch: pytest.MonkeyPatch,
+	family: str,
+	pid: int,
+) -> None:
+	# os.kill() raises OverflowError past signed pid_t, so the POSIX bound has to
+	# be narrower than the unsigned DWORD Windows accepts.
+	monkeypatch.setattr(lock_mod, "os_family", lambda: family)
+	assert not is_process_alive(pid)
+
+
+@pytest.mark.parametrize(
 	"wait_result",
 	[lock_mod.WAIT_OBJECT_0, lock_mod.WAIT_FAILED],
 )

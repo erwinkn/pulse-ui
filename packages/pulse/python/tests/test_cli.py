@@ -6,9 +6,10 @@ import re
 import socket
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, cast, final
+from typing import Any, cast, final
 
 import pulse.cli.cmd as cmd_mod
 import pytest

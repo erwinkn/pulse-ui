@@ -17,6 +17,7 @@ from pulse.cli.models import CommandSpec
 
 PROCESS_STOP_TIMEOUT = 4.0
 PROCESS_KILL_TIMEOUT = 1.0
+USER_INTERRUPT_EXIT_CODE = 130
 
 
 # Exit-code contract shared by command execution and the development
@@ -276,6 +277,8 @@ class ManagedProcess:
 				code = process.wait()
 				managed._reaped = True
 			managed._exit_code = code
+			# A narrow race remains: an independent exit immediately after
+			# request_stop() can be observed as stop-induced here.
 			managed.stop_induced = managed.stop_requested
 			on_exit(code)
 
@@ -455,7 +458,7 @@ def execute_commands(
 	except KeyboardInterrupt:
 		sys.stdout.write("\nShutting down...\n")
 		sys.stdout.flush()
-		return normalize_exit_code(130)
+		return USER_INTERRUPT_EXIT_CODE
 	finally:
 		stop_processes(processes)
 		signal.signal(signal.SIGTERM, previous_sigterm)
@@ -491,9 +494,6 @@ def stop_processes(
 		time.sleep(0.05)
 	for process in processes:
 		process.close()
-
-
-_stop_processes = stop_processes
 
 
 def _call_on_spawn(spec: CommandSpec) -> None:

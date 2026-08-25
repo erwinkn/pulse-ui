@@ -1,6 +1,7 @@
 import asyncio
 import io
 import os
+import signal
 import socket
 import sys
 from collections.abc import Callable
@@ -300,9 +301,25 @@ async def test_rapid_edit_kills_starting_backend(
 
 
 @pytest.mark.asyncio
-async def test_interrupted_backend_start_cancels_readiness_waiter(
+async def test_replace_backend_interrupt_cancels_readiness_waiter(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	install_process_script(monkeypatch, events, [("server", "stall")])
+	replace_task = asyncio.create_task(supervisor._replace_backend())  # pyright: ignore[reportPrivateUsage]
+	await wait_until(lambda: "server1:start" in events)
+	supervisor.changed.set()
+	assert await replace_task == "changed"
+	await asyncio.sleep(0)
+
+	current = asyncio.current_task()
+	assert current is not None
+	assert {task for task in asyncio.all_tasks() if not task.done()} == {current}
+
+
+@pytest.mark.asyncio
+async def test_race_cancellation_cleans_owned_waiters(tmp_path: Path) -> None:
 	supervisor = supervisor_shell(tmp_path)
 	ready = asyncio.Event()
 	race_task = asyncio.create_task(
@@ -342,6 +359,37 @@ async def test_second_interrupt_kills_without_grace(
 	supervisor._handle_interrupt()  # pyright: ignore[reportPrivateUsage]
 	assert "web1:kill" in events
 	assert "server1:kill" in events
+
+
+@pytest.mark.asyncio
+async def test_run_installs_and_restores_all_signal_handlers(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	calls: list[tuple[int, object]] = []
+
+	def fake_signal(signum: int, handler: object) -> object:
+		calls.append((signum, handler))
+		return f"previous-{signum}"
+
+	monkeypatch.setattr(signal, "signal", fake_signal)
+	supervisor.shutdown.set()
+
+	assert await supervisor.run() == 130
+
+	expected_signals = [signal.SIGINT, signal.SIGTERM]
+	sigbreak = getattr(signal, "SIGBREAK", None)
+	if sigbreak is not None:
+		expected_signals.append(sigbreak)
+	assert [
+		signum for signum, _handler in calls[: len(expected_signals)]
+	] == expected_signals
+	assert [
+		signum for signum, _handler in calls[len(expected_signals) :]
+	] == expected_signals
+	assert all(
+		calls[index][1] is calls[0][1] for index in range(1, len(expected_signals))
+	)
 
 
 @pytest.mark.asyncio

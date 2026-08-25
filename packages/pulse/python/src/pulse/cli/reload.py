@@ -15,6 +15,7 @@ from pulse.cli.helpers import os_family
 from pulse.cli.logging import TagMode
 from pulse.cli.models import CommandSpec
 from pulse.cli.processes import (
+	USER_INTERRUPT_EXIT_CODE,
 	ManagedProcess,
 	normalize_exit_code,
 	stop_processes,
@@ -132,7 +133,11 @@ class DevSupervisor:
 		def request_shutdown(_signum: int, _frame: object) -> None:
 			loop.call_soon_threadsafe(self._handle_interrupt)
 
-		for signum in (signal.SIGINT, signal.SIGTERM):
+		signals = [signal.SIGINT, signal.SIGTERM]
+		sigbreak = getattr(signal, "SIGBREAK", None)
+		if sigbreak is not None:
+			signals.append(sigbreak)
+		for signum in signals:
 			previous_handlers[signum] = signal.signal(signum, request_shutdown)
 
 		watch_task: asyncio.Task[None] | None = None
@@ -141,7 +146,7 @@ class DevSupervisor:
 			if self.web_spec is not None:
 				await self._start_web()
 				if self.shutdown.is_set():
-					return normalize_exit_code(130)
+					return USER_INTERRUPT_EXIT_CODE
 				if self._web_code is not None:
 					return normalize_exit_code(self._web_code)
 			while not self.shutdown.is_set():
@@ -182,15 +187,18 @@ class DevSupervisor:
 						flush=True,
 					)
 					await self._race("changed", "web")
-			return normalize_exit_code(130 if self.shutdown.is_set() else 0)
+			return USER_INTERRUPT_EXIT_CODE if self.shutdown.is_set() else 0
 		finally:
 			if watch_task is not None:
 				watch_task.cancel()
 				with contextlib.suppress(asyncio.CancelledError):
 					await watch_task
-			await self._stop(self.backend)
+			processes = [
+				process for process in (self.backend, self.web) if process is not None
+			]
+			if processes:
+				await asyncio.to_thread(stop_processes, processes, grace=DEV_STOP_GRACE)
 			self.backend = None
-			await self._stop(self.web)
 			self.web = None
 			for signum, handler in previous_handlers.items():
 				signal.signal(signum, cast(Any, handler))

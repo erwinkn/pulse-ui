@@ -28,6 +28,7 @@ ERROR_INVALID_PARAMETER = 87
 WAIT_OBJECT_0 = 0
 WAIT_TIMEOUT = 0x102
 WAIT_FAILED = 0xFFFFFFFF
+MAX_PID = 2**31 - 1
 
 
 def _kernel32() -> Any:
@@ -107,6 +108,8 @@ class LockInfo:
 		address = data.get("address")
 		if (
 			pid is None
+			or pid <= 0
+			or pid > MAX_PID
 			or created_at is None
 			or port is None
 			or not isinstance(hostname, str)
@@ -144,6 +147,8 @@ def _coerce_int(value: object) -> int | None:
 
 def is_process_alive(pid: int) -> bool:
 	"""Check if a process with the given PID is running."""
+	if pid <= 0 or pid > MAX_PID:
+		return False
 	if os_family() == "windows":
 		import ctypes
 

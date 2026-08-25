@@ -28,9 +28,15 @@ ERROR_INVALID_PARAMETER = 87
 WAIT_OBJECT_0 = 0
 WAIT_TIMEOUT = 0x102
 WAIT_FAILED = 0xFFFFFFFF
-# Windows PIDs are an unsigned DWORD; POSIX PIDs are far smaller. This bound
-# only exists to reject impossible values read from a lock file.
-MAX_PID = 2**32 - 1
+# Widest value that can name a process on this platform: Windows PIDs are an
+# unsigned DWORD, while POSIX pid_t is a signed 32-bit int and os.kill() raises
+# OverflowError past its range. Only used to reject impossible lock-file PIDs.
+WINDOWS_MAX_PID = 2**32 - 1
+POSIX_MAX_PID = 2**31 - 1
+
+
+def max_pid() -> int:
+	return WINDOWS_MAX_PID if os_family() == "windows" else POSIX_MAX_PID
 
 
 def _kernel32() -> Any:
@@ -111,7 +117,7 @@ class LockInfo:
 		if (
 			pid is None
 			or pid <= 0
-			or pid > MAX_PID
+			or pid > max_pid()
 			or created_at is None
 			or port is None
 			or not isinstance(hostname, str)
@@ -149,7 +155,7 @@ def _coerce_int(value: object) -> int | None:
 
 def is_process_alive(pid: int) -> bool:
 	"""Check if a process with the given PID is running."""
-	if pid <= 0 or pid > MAX_PID:
+	if pid <= 0 or pid > max_pid():
 		return False
 	if os_family() == "windows":
 		import ctypes

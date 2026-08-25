@@ -28,7 +28,9 @@ ERROR_INVALID_PARAMETER = 87
 WAIT_OBJECT_0 = 0
 WAIT_TIMEOUT = 0x102
 WAIT_FAILED = 0xFFFFFFFF
-MAX_PID = 2**31 - 1
+# Windows PIDs are an unsigned DWORD; POSIX PIDs are far smaller. This bound
+# only exists to reject impossible values read from a lock file.
+MAX_PID = 2**32 - 1
 
 
 def _kernel32() -> Any:

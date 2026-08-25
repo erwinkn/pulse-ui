@@ -14,7 +14,7 @@ from typing import final, override
 import pytest
 from pulse.cli import processes as process_module
 from pulse.cli.models import CommandSpec
-from pulse.cli.processes import ManagedProcess
+from pulse.cli.processes import ManagedProcess, normalize_exit_code
 from pulse.cli.protocol import PREFIX, VITE_CONFIGURED
 
 
@@ -284,6 +284,21 @@ def test_managed_process_preserves_io_and_target_exit_code(
 	assert lines == ["payload"]
 	assert exit_codes == [7]
 	assert process.returncode == 7
+
+
+@pytest.mark.parametrize(
+	"code,expected",
+	[
+		(0, 0),
+		(1, 1),
+		(255, 255),
+		(-15, 143),
+		(0xC0000005, 1),
+		(0xFFFFFFFF, 1),
+	],
+)
+def test_normalize_exit_code(code: int, expected: int) -> None:
+	assert normalize_exit_code(code) == expected
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")

@@ -232,6 +232,7 @@ async def test_reload_kills_backend_immediately_and_keeps_vite(
 	assert await run_task == 130
 
 	assert events.index("web1:start") < events.index("server1:start")
+	assert events.index("server1:stop") < events.index("server1:kill")
 	assert "server1:kill" in events
 	assert "web2:start" not in events
 	assert events.index("server1:kill") < events.index("server2:start")
@@ -303,21 +304,44 @@ async def test_interrupted_backend_start_cancels_readiness_waiter(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 	supervisor = supervisor_shell(tmp_path)
+	ready = asyncio.Event()
+	race_task = asyncio.create_task(
+		supervisor._race("changed", ready=ready)  # pyright: ignore[reportPrivateUsage]
+	)
+	await asyncio.sleep(0)
+	race_task.cancel()
+	with pytest.raises(asyncio.CancelledError):
+		await race_task
+	await asyncio.sleep(0)
+
+	current = asyncio.current_task()
+	assert current is not None
+	assert {task for task in asyncio.all_tasks() if not task.done()} == {current}
+
+
+@pytest.mark.asyncio
+async def test_second_interrupt_kills_without_grace(
+	tmp_path: Path,
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
 	events: list[str] = []
-	install_process_script(monkeypatch, events, [("server", "stall")])
-	waiters: list[asyncio.Task[Any]] = []
+	supervisor.web = cast(
+		ManagedProcess, cast(object, FakeProcess("web1", events, hangs=True))
+	)
+	supervisor.backend = cast(
+		ManagedProcess, cast(object, FakeProcess("server1", events, hangs=True))
+	)
 
-	async def race(*_names: str, extra: asyncio.Task[Any] | None = None) -> str:
-		assert extra is not None
-		waiters.append(extra)
-		return "changed"
+	supervisor._handle_interrupt()  # pyright: ignore[reportPrivateUsage]
+	assert supervisor.shutdown.is_set()
+	assert "web1:stop" not in events
+	assert "server1:stop" not in events
+	assert "web1:kill" not in events
+	assert "server1:kill" not in events
 
-	monkeypatch.setattr(supervisor, "_race", race)
-
-	assert await supervisor._replace_backend() == "changed"  # pyright: ignore[reportPrivateUsage]
-	assert len(waiters) == 1
-	assert waiters[0].done()
-	assert waiters[0].cancelled()
+	supervisor._handle_interrupt()  # pyright: ignore[reportPrivateUsage]
+	assert "web1:kill" in events
+	assert "server1:kill" in events
 
 
 @pytest.mark.asyncio

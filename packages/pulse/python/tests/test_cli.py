@@ -8,10 +8,11 @@ import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, cast, final
 
 import pulse.cli.cmd as cmd_mod
 import pytest
+from pulse.cli import processes as process_module
 from pulse.cli.dependencies import (
 	DependencyPlan,
 	DependencyResolutionError,
@@ -1013,6 +1014,117 @@ def test_execute_commands_preserves_clean_exit_when_stopping_survivor(
 	output = capsys.readouterr().out
 	assert "web-exited" in output
 	assert "server-finished" not in output
+
+
+@pytest.mark.parametrize(
+	"mode,expected",
+	[
+		("stop-induced", 0),
+		("independent-failure", 1),
+		("first-independent", 1),
+	],
+)
+def test_execute_commands_uses_recorded_exit_state_and_order(
+	mode: str,
+	expected: int,
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	@final
+	class FakeProcess:
+		all_processes: list[Any] = []
+
+		def __init__(self, name: str, on_exit: Any, behavior: str) -> None:
+			self.name = name
+			self.on_exit = on_exit
+			self.behavior = behavior
+			self.alive = True
+			self.code: int | None = None
+			self.stop_requested = False
+			self.stop_induced = False
+
+		@property
+		def returncode(self) -> int | None:
+			return self.code
+
+		def is_alive(self) -> bool:
+			return self.alive
+
+		def request_stop(self) -> None:
+			self.stop_requested = True
+			if self.behavior == "stop1":
+				self.exit(1)
+			elif self.behavior in {"trigger-failure", "exit0-trigger-failure"}:
+				self._find("web").exit(1)
+				if self.behavior == "trigger-failure":
+					self.exit(0)
+			elif self.behavior == "exit1-trigger-larger":
+				self._find("web").exit(9)
+
+		def kill_tree(self) -> None:
+			self.stop_requested = True
+			self.exit(-9)
+
+		def close(self) -> None:
+			return None
+
+		def exit(self, code: int) -> None:
+			if not self.alive:
+				return
+			self.alive = False
+			self.code = code
+			self.stop_induced = self.stop_requested
+			self.on_exit(code)
+
+		def _find(self, name: str) -> "FakeProcess":
+			return next(
+				process for process in self.all_processes if process.name == name
+			)
+
+	@classmethod
+	def start(
+		_cls: type[FakeProcess],
+		spec: CommandSpec,
+		_on_output: Any,
+		on_exit: Any,
+		*,
+		pass_fds: tuple[int, ...] = (),
+	) -> FakeProcess:
+		if mode == "stop-induced":
+			behavior = "stop1" if spec.name == "server" else "exit0"
+		elif mode == "independent-failure":
+			behavior = "exit0-trigger-failure" if spec.name == "server" else "idle"
+		else:
+			behavior = "exit1-trigger-larger" if spec.name == "server" else "idle"
+		process = FakeProcess(spec.name, on_exit, behavior)
+		FakeProcess.all_processes.append(process)
+		if behavior == "exit0-trigger-failure":
+			process.stop_requested = True
+			process.exit(0)
+		elif behavior == "exit0":
+			process.exit(0)
+		elif behavior in {"exit1", "exit1-trigger-larger"}:
+			process.exit(1)
+		return process
+
+	FakeProcess.all_processes = []
+	monkeypatch.setattr(process_module.ManagedProcess, "start", classmethod(start))
+	specs = [
+		CommandSpec(
+			name="server",
+			args=["server"],
+			cwd=tmp_path,
+			env={},
+		),
+		CommandSpec(
+			name="web",
+			args=["web"],
+			cwd=tmp_path,
+			env={},
+		),
+	]
+
+	assert execute_commands(specs, tag_mode="plain") == expected
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group behavior")

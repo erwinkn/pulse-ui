@@ -111,7 +111,7 @@ def test_active_lock_info_ignores_stale_lock(
 	assert active_lock_info(tmp_path) is None
 
 
-@pytest.mark.parametrize("pid", [0, -5, 2**31])
+@pytest.mark.parametrize("pid", [0, -5, 2**32])
 def test_read_lock_info_rejects_out_of_range_pid(tmp_path: Path, pid: int):
 	lock_path = lock_path_for_web_root(tmp_path)
 	info = LockInfo(

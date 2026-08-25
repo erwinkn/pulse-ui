@@ -13,7 +13,7 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Callable, cast
+from typing import Any, Callable, cast
 
 import typer
 
@@ -95,24 +95,13 @@ def run(
 	"""Run the Pulse server and web development server together."""
 	extra_flags = list(ctx.args)
 
-	# Validate mode flags (dev is default if neither specified)
-	if dev and prod:
-		logger = CLILogger("dev", plain=plain)
-		logger.error("Please specify only one of --dev or --prod.")
-		raise typer.Exit(1)
-
-	# Set mode: prod if specified, otherwise dev (default)
-	mode: PulseEnv = "prod" if prod else "dev"
-	env.pulse_env = mode
-	logger = CLILogger(mode, plain=plain)
+	logger = _configure_run_mode(dev=dev, prod=prod, plain=plain)
 
 	# Turn on reload in dev only
 	if reload is None:
 		reload = env.pulse_env == "dev"
 
-	if server_only and web_only:
-		logger.error("Cannot use --server-only and --web-only at the same time.")
-		raise typer.Exit(1)
+	_validate_run_options(server_only=server_only, web_only=web_only, logger=logger)
 
 	supervised_reload = env.pulse_env == "dev" and reload and not web_only
 	bootstrap_modules: set[str] = set(sys.modules) if supervised_reload else set()
@@ -234,6 +223,7 @@ def run(
 			ready_pattern=(None if supervised_reload else rf":{web_port}(?:[/\s]|$)"),
 			on_ready=mark_web_ready,
 			plain=plain,
+			verbose=verbose,
 		)
 		if supervised_reload and is_single_server:
 			web_cmd.env[ENV_PULSE_HMR_CLIENT_PORT] = str(port)
@@ -273,27 +263,14 @@ def run(
 	exit_code = 1
 	try:
 		with FolderLock(web_root, address=address, port=port):
-			if env.pulse_env == "dev" and not server_only:
-				try:
-					dep_plan = prepare_web_dependencies(
-						web_root,
-						pulse_version=PULSE_PY_VERSION,
-					)
-				except DependencyError as exc:
-					logger.error(str(exc))
-					raise typer.Exit(1) from None
-				try:
-					_run_dependency_plan(logger, web_root, dep_plan)
-				except subprocess.CalledProcessError:
-					logger.error("Failed to install web dependencies with Bun.")
-					raise typer.Exit(1) from None
-				logger.print("Generating routes")
-				try:
-					app_instance.run_codegen(local_server_url(address, port))
-				except Exception:
-					logger.error("Failed to generate routes")
-					logger.print_exception()
-					raise typer.Exit(1) from None
+			_prepare_run_dependencies(
+				logger=logger,
+				web_root=web_root,
+				app_instance=app_instance,
+				address=address,
+				port=port,
+				server_only=server_only,
+			)
 
 			if supervised_reload:
 				assert server_cmd is not None
@@ -308,29 +285,22 @@ def run(
 				assert public_port is not None
 				if web_port_reservation is not None:
 					web_port_reservation.close()
-				exit_code = asyncio.run(
-					DevSupervisor(
-						backend=server_cmd,
-						web=web_cmd,
-						watch_roots=(watch_root,),
-						ignored_roots=(web_root_resolved,),
-						registered_sources=registered_sources,
-						tag_mode=logger.get_tag_mode(),
-						listeners=public_port.sockets,
-						web_root=web_root,
-					).run()
+				exit_code = _run_supervised(
+					server_cmd=server_cmd,
+					web_cmd=web_cmd,
+					watch_root=watch_root,
+					web_root=web_root,
+					web_root_resolved=web_root_resolved,
+					registered_sources=registered_sources,
+					logger=logger,
+					public_port=public_port,
 				)
 			else:
-				try:
-					if web_port_reservation is not None:
-						web_port_reservation.close()
-					exit_code = execute_commands(
-						commands,
-						tag_mode=logger.get_tag_mode(),
-					)
-				except RuntimeError as exc:
-					logger.error(str(exc))
-					raise typer.Exit(1) from None
+				exit_code = _run_commands(
+					commands=commands,
+					web_port_reservation=web_port_reservation,
+					logger=logger,
+				)
 	except typer.Exit:
 		raise
 	except RuntimeError as exc:
@@ -646,6 +616,7 @@ def build_web_command(
 	port: int | None = None,
 	strict_port: bool = True,
 	mode: PulseEnv = "dev",
+	verbose: bool = False,
 	ready_pattern: str | None = None,
 	on_ready: Callable[[], None] | None = None,
 	plain: bool = False,
@@ -690,6 +661,17 @@ def build_web_command(
 	else:
 		command_env["FORCE_COLOR"] = "1"
 
+	output_filters = (
+		()
+		if verbose
+		else (
+			"Network: use --host to expose",
+			"press h + enter to show help",
+			"➜  Local:",
+			"/__manifest",
+			"?import",
+		)
+	)
 	return CommandSpec(
 		name="web",
 		args=args,
@@ -697,7 +679,100 @@ def build_web_command(
 		env=command_env,
 		ready_pattern=ready_pattern,
 		on_ready=on_ready,
+		output_filters=output_filters,
 	)
+
+
+def _configure_run_mode(*, dev: bool, prod: bool, plain: bool) -> CLILogger:
+	if dev and prod:
+		logger = CLILogger("dev", plain=plain)
+		logger.error("Please specify only one of --dev or --prod.")
+		raise typer.Exit(1)
+
+	mode: PulseEnv = "prod" if prod else "dev"
+	env.pulse_env = mode
+	return CLILogger(mode, plain=plain)
+
+
+def _validate_run_options(
+	*, server_only: bool, web_only: bool, logger: CLILogger
+) -> None:
+	if server_only and web_only:
+		logger.error("Cannot use --server-only and --web-only at the same time.")
+		raise typer.Exit(1)
+
+
+def _prepare_run_dependencies(
+	*,
+	logger: CLILogger,
+	web_root: Path,
+	app_instance: Any,
+	address: str,
+	port: int,
+	server_only: bool,
+) -> None:
+	if env.pulse_env != "dev" or server_only:
+		return
+	try:
+		dep_plan = prepare_web_dependencies(
+			web_root,
+			pulse_version=PULSE_PY_VERSION,
+		)
+	except DependencyError as exc:
+		logger.error(str(exc))
+		raise typer.Exit(1) from None
+	try:
+		_run_dependency_plan(logger, web_root, dep_plan)
+	except subprocess.CalledProcessError:
+		logger.error("Failed to install web dependencies with Bun.")
+		raise typer.Exit(1) from None
+	logger.print("Generating routes")
+	try:
+		app_instance.run_codegen(local_server_url(address, port))
+	except Exception:
+		logger.error("Failed to generate routes")
+		logger.print_exception()
+		raise typer.Exit(1) from None
+
+
+def _run_supervised(
+	*,
+	server_cmd: CommandSpec,
+	web_cmd: CommandSpec | None,
+	watch_root: Path,
+	web_root: Path,
+	web_root_resolved: Path,
+	registered_sources: set[Path],
+	logger: CLILogger,
+	public_port: PortReservation,
+) -> int:
+	return asyncio.run(
+		DevSupervisor(
+			backend=server_cmd,
+			web=web_cmd,
+			watch_roots=(watch_root,),
+			ignored_roots=(web_root_resolved,),
+			registered_sources=registered_sources,
+			tag_mode=logger.get_tag_mode(),
+			listeners=public_port.sockets,
+			web_root=web_root,
+		).run()
+	)
+
+
+def _run_commands(
+	*,
+	commands: list[CommandSpec],
+	web_port_reservation: PortReservation | None,
+	logger: CLILogger,
+) -> int:
+	try:
+		if web_port_reservation is not None:
+			web_port_reservation.close()
+		return execute_commands(commands, tag_mode=logger.get_tag_mode())
+	except RuntimeError as exc:
+		logger.error(str(exc))
+		raise typer.Exit(1) from None
 
 
 def _apply_app_context_to_env(app_ctx: AppLoadResult) -> None:

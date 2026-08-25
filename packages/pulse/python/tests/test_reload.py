@@ -44,6 +44,7 @@ class FakeProcess:
 		self.code: int | None = None
 		self.on_exit: Callable[[int], None] | None = None
 		self.pass_fds: tuple[int, ...] = ()
+		self.output_filters: tuple[str, ...] = ()
 
 	@property
 	def returncode(self) -> int | None:
@@ -88,6 +89,7 @@ def supervisor_shell(
 	tmp_path: Path,
 	listeners: tuple[socket.socket, ...] = (),
 	web_root: Path | None = None,
+	**kwargs: float,
 ) -> DevSupervisor:
 	return DevSupervisor(
 		backend=command("server", tmp_path),
@@ -98,6 +100,7 @@ def supervisor_shell(
 		tag_mode="plain",
 		listeners=listeners,
 		web_root=web_root,
+		**kwargs,
 	)
 
 
@@ -129,6 +132,7 @@ def install_process_script(
 		process = FakeProcess(name, events, hangs=outcome == "hang")
 		process.on_exit = on_exit
 		process.pass_fds = pass_fds
+		process.output_filters = spec.output_filters
 		processes.append(process)
 		events.append(f"{name}:start")
 		if spec.name == "server":
@@ -486,8 +490,7 @@ async def test_vite_ready_after_ready_is_inert(
 async def test_missing_vite_plugin_exits(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-	supervisor = supervisor_shell(tmp_path)
-	supervisor.vite_plugin_timeout = 0.2
+	supervisor = supervisor_shell(tmp_path, vite_plugin_timeout=0.2)
 	events: list[str] = []
 	install_process_script(monkeypatch, events, [("web", "hang")])
 
@@ -497,12 +500,26 @@ async def test_missing_vite_plugin_exits(
 
 
 @pytest.mark.asyncio
+async def test_start_web_preserves_output_filters(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	assert supervisor.web_spec is not None
+	supervisor.web_spec.output_filters = ("filtered",)
+	processes = install_process_script(monkeypatch, [], [("web", "ready")])
+
+	await supervisor._start_web()  # pyright: ignore[reportPrivateUsage]
+
+	assert processes[0].output_filters == ("filtered",)
+
+
+@pytest.mark.asyncio
 async def test_vite_listening_timeout_fails_startup(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-	monkeypatch.setattr(reload_mod, "VITE_LISTENING_TIMEOUT", 0.2)
-	supervisor = supervisor_shell(tmp_path)
-	supervisor.vite_plugin_timeout = 0.2
+	supervisor = supervisor_shell(
+		tmp_path, vite_plugin_timeout=0.2, vite_listening_timeout=0.2
+	)
 	events: list[str] = []
 	install_process_script(monkeypatch, events, [("web", "configured")])
 
@@ -519,8 +536,7 @@ async def test_missing_vite_plugin_names_config_and_setup(
 	web_root.mkdir()
 	config = web_root / "vite.config.mts"
 	config.write_text("export default {};\n")
-	supervisor = supervisor_shell(tmp_path, web_root=web_root)
-	supervisor.vite_plugin_timeout = 0.2
+	supervisor = supervisor_shell(tmp_path, web_root=web_root, vite_plugin_timeout=0.2)
 	events: list[str] = []
 	install_process_script(monkeypatch, events, [("web", "hang")])
 

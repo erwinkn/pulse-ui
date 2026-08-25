@@ -1,4 +1,8 @@
-"""Exit the wrapped command when the supervisor's stdin pipe closes."""
+"""Exit the wrapped command when the supervisor's stdin pipe closes.
+
+This POSIX watchdog intentionally remains separate from _windows_launcher,
+which owns Windows' suspended-start handshake and Job Object setup.
+"""
 
 from __future__ import annotations
 

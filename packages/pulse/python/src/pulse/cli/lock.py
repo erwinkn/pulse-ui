@@ -173,9 +173,6 @@ def is_process_alive(pid: int) -> bool:
 	except PermissionError:
 		# Process exists but we may not have permission
 		return True
-	except Exception:
-		# Best-effort: assume alive if uncertain
-		return True
 	return True
 
 

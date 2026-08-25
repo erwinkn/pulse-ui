@@ -98,6 +98,7 @@ class DevSupervisor:
 		listeners: tuple[socket.socket, ...],
 		web_root: Path | None = None,
 		vite_plugin_timeout: float = VITE_PLUGIN_TIMEOUT,
+		vite_listening_timeout: float = VITE_LISTENING_TIMEOUT,
 	) -> None:
 		self.backend_spec = backend
 		self.web_spec = web
@@ -111,6 +112,7 @@ class DevSupervisor:
 		self.listeners = listeners
 		self.web_root = web_root.resolve() if web_root is not None else None
 		self.vite_plugin_timeout = vite_plugin_timeout
+		self.vite_listening_timeout = vite_listening_timeout
 		self.changed = asyncio.Event()
 		self.shutdown = asyncio.Event()
 		self.backend: ManagedProcess | None = None
@@ -253,7 +255,12 @@ class DevSupervisor:
 			# Suppress only the padding newlines around markers, not genuine
 			# blank lines from the child.
 			if text or not messages:
-				write_tagged_line(self.backend_spec.name, text, self.tag_mode)
+				write_tagged_line(
+					self.backend_spec.name,
+					text,
+					self.tag_mode,
+					self.backend_spec.output_filters,
+				)
 			if WORKER_READY in messages:
 				loop.call_soon_threadsafe(self._note_backend_ready, gen)
 
@@ -265,6 +272,7 @@ class DevSupervisor:
 			args=self.backend_spec.args,
 			cwd=self.backend_spec.cwd,
 			env=env,
+			output_filters=self.backend_spec.output_filters,
 		)
 		try:
 			self.backend = ManagedProcess.start(
@@ -285,16 +293,6 @@ class DevSupervisor:
 		self.backend = None
 		return "changed" if result == "changed" else "failed"
 
-	async def _wait_vite_signal(
-		self, event: asyncio.Event, *, timeout: float | None
-	) -> bool:
-		if timeout is None:
-			result = await self._race("web", ready=event)
-		else:
-			async with asyncio.timeout(timeout):
-				result = await self._race("web", ready=event)
-		return result == "ready"
-
 	async def _start_web(self) -> None:
 		assert self.web_spec is not None
 		web_spec = self.web_spec
@@ -305,7 +303,9 @@ class DevSupervisor:
 		def on_output(line: str) -> None:
 			messages, text = parse(line)
 			if text or not messages:
-				write_tagged_line(web_spec.name, text, self.tag_mode)
+				write_tagged_line(
+					web_spec.name, text, self.tag_mode, web_spec.output_filters
+				)
 			if VITE_CONFIGURED in messages:
 				loop.call_soon_threadsafe(self._vite_configured.set)
 			if VITE_LISTENING in messages:
@@ -331,67 +331,73 @@ class DevSupervisor:
 			args=web_args,
 			cwd=web_spec.cwd,
 			env=env,
+			output_filters=web_spec.output_filters,
 		)
 		self.web = ManagedProcess.start(spec, on_output, on_exit)
-		try:
-			got = await self._wait_vite_signal(
-				self._vite_configured, timeout=self.vite_plugin_timeout
-			)
-		except TimeoutError:
-			if not self.shutdown.is_set() and self._web_code is None:
-				vite_config: Path | None = None
-				if self.web_root is not None:
-					for filename in (
-						"vite.config.ts",
-						"vite.config.mts",
-						"vite.config.js",
-						"vite.config.mjs",
-						"vite.config.cts",
-						"vite.config.cjs",
-					):
-						candidate = self.web_root / filename
-						if candidate.is_file():
-							vite_config = candidate.resolve()
-							break
-				config_location = (
-					f" in {vite_config}"
-					if vite_config is not None
-					else " in vite.config.ts"
-				)
-				print(
-					"Vite did not load pulse() within "
-					+ f"{self.vite_plugin_timeout:g}s. Add it to the plugins "
-					+ "array"
-					+ config_location
-					+ '. Add `import { pulse } from "pulse-ui-client/vite";` '
-					+ "and include it as `plugins: [..., pulse()]`.",
-					flush=True,
-				)
-				await self._stop(self.web)
-				self.web = None
-				self._web_code = 1
-			return
+		got = await self._wait_vite_signal(
+			self._vite_configured,
+			timeout=self.vite_plugin_timeout,
+			timeout_message=self._vite_plugin_timeout_message(),
+		)
 		if not got:
 			return
-		try:
-			got = await self._wait_vite_signal(
-				self._vite_listening, timeout=VITE_LISTENING_TIMEOUT
-			)
-		except TimeoutError:
-			if not self.shutdown.is_set() and self._web_code is None:
-				print(
-					"Vite loaded pulse() but never reported listening within "
-					+ f"{VITE_LISTENING_TIMEOUT:g}s.",
-					flush=True,
-				)
-				await self._stop(self.web)
-				self.web = None
-				self._web_code = 1
-			return
+		got = await self._wait_vite_signal(
+			self._vite_listening,
+			timeout=self.vite_listening_timeout,
+			timeout_message=(
+				"Vite loaded pulse() but never reported listening within "
+				f"{self.vite_listening_timeout:g}s."
+			),
+		)
 		if not got:
 			return
 		if web_spec.on_ready is not None:
 			web_spec.on_ready()
+
+	def _vite_plugin_timeout_message(self) -> str:
+		vite_config: Path | None = None
+		if self.web_root is not None:
+			for filename in (
+				"vite.config.ts",
+				"vite.config.mts",
+				"vite.config.js",
+				"vite.config.mjs",
+				"vite.config.cts",
+				"vite.config.cjs",
+			):
+				candidate = self.web_root / filename
+				if candidate.is_file():
+					vite_config = candidate.resolve()
+					break
+		config_location = (
+			f" in {vite_config}" if vite_config is not None else " in vite.config.ts"
+		)
+		return (
+			"Vite did not load pulse() within "
+			+ f"{self.vite_plugin_timeout:g}s. Add it to the plugins "
+			+ "array"
+			+ config_location
+			+ '. Add `import { pulse } from "pulse-ui-client/vite";` '
+			+ "and include it as `plugins: [..., pulse()]`."
+		)
+
+	async def _wait_vite_signal(
+		self,
+		event: asyncio.Event,
+		*,
+		timeout: float,
+		timeout_message: str,
+	) -> bool:
+		try:
+			async with asyncio.timeout(timeout):
+				return await self._race("web", ready=event) == "ready"
+		except TimeoutError:
+			if not self.shutdown.is_set() and self._web_code is None:
+				print(timeout_message, flush=True)
+				await self._stop(self.web)
+				self.web = None
+				self._web_code = 1
+			return False
 
 	def _note_web_exit(self, code: int) -> None:
 		self._web_code = code

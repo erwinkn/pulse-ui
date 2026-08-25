@@ -855,6 +855,28 @@ def test_build_web_command_passes_host_to_dev_server(tmp_path: Path) -> None:
 	assert "HOST" not in spec.env
 
 
+def test_build_web_command_filters_vite_output_unless_verbose(
+	tmp_path: Path,
+) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+
+	filtered = cmd_mod.build_web_command(
+		web_root=web_root,
+		extra_args=[],
+		verbose=False,
+	)
+	verbose = cmd_mod.build_web_command(
+		web_root=web_root,
+		extra_args=[],
+		verbose=True,
+	)
+
+	assert "Network: use --host to expose" in filtered.output_filters
+	assert "?import" in filtered.output_filters
+	assert verbose.output_filters == ()
+
+
 def test_web_workspaces_using_pulse_ui_client_declare_ws() -> None:
 	root = Path(__file__).resolve().parents[4]
 	workspace_manifests = [

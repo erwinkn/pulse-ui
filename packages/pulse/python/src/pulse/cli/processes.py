@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from collections.abc import Callable, Sequence
 from typing import IO, Any, cast, final
 
@@ -423,14 +424,15 @@ def execute_commands(
 		ready = threading.Event()
 
 		def on_output(line: str) -> None:
-			write_tagged_line(spec.name, line, tag_mode)
+			write_tagged_line(spec.name, line, tag_mode, spec.output_filters)
 			if spec.ready_pattern and not ready.is_set() and _matches_ready(spec, line):
 				ready.set()
 				if spec.on_ready:
 					try:
 						spec.on_ready()
 					except Exception:
-						pass
+						# This thread must keep draining output after callback failures.
+						traceback.print_exc()
 
 		def on_exit(code: int) -> None:
 			with exit_lock:
@@ -499,10 +501,9 @@ def stop_processes(
 def _call_on_spawn(spec: CommandSpec) -> None:
 	"""Call the on_spawn callback if it exists."""
 	if spec.on_spawn:
-		try:
-			spec.on_spawn()
-		except Exception:
-			pass
+		# ManagedProcess.start calls this on the caller's thread, so failures
+		# should propagate; no output-drain thread needs protection here.
+		spec.on_spawn()
 
 
 def _matches_ready(spec: CommandSpec, line: str) -> bool:
@@ -511,7 +512,12 @@ def _matches_ready(spec: CommandSpec, line: str) -> bool:
 	)
 
 
-def write_tagged_line(name: str, message: str, tag_mode: TagMode) -> None:
+def write_tagged_line(
+	name: str,
+	message: str,
+	tag_mode: TagMode,
+	output_filters: tuple[str, ...] = (),
+) -> None:
 	"""Write a line of output with optional process tag.
 
 	Args:
@@ -521,15 +527,8 @@ def write_tagged_line(name: str, message: str, tag_mode: TagMode) -> None:
 			- "colored": Show [name] with ANSI colors
 			- "plain": Show [name] without colors
 	"""
-	# Filter out unwanted web server messages
 	clean_message = ANSI_ESCAPE.sub("", message)
-	if (
-		"Network: use --host to expose" in clean_message
-		or "press h + enter to show help" in clean_message
-		or "➜  Local:" in clean_message
-		or "/__manifest" in clean_message
-		or "?import" in clean_message
-	):
+	if any(output_filter in clean_message for output_filter in output_filters):
 		return
 
 	message = ANSI_TERMINAL_CONTROL.sub("", message)

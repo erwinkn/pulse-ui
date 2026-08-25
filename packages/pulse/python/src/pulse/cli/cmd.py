@@ -13,7 +13,7 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Callable, cast
+from typing import TYPE_CHECKING, Callable, cast
 
 import typer
 
@@ -45,6 +45,9 @@ from pulse.env import (
 from pulse.helpers import find_available_port, local_server_url
 from pulse.transpiler.assets import get_registered_assets
 from pulse.version import __version__ as PULSE_PY_VERSION
+
+if TYPE_CHECKING:
+	from pulse.app import App
 
 cli = typer.Typer(
 	name="pulse",
@@ -95,24 +98,13 @@ def run(
 	"""Run the Pulse server and web development server together."""
 	extra_flags = list(ctx.args)
 
-	# Validate mode flags (dev is default if neither specified)
-	if dev and prod:
-		logger = CLILogger("dev", plain=plain)
-		logger.error("Please specify only one of --dev or --prod.")
-		raise typer.Exit(1)
-
-	# Set mode: prod if specified, otherwise dev (default)
-	mode: PulseEnv = "prod" if prod else "dev"
-	env.pulse_env = mode
-	logger = CLILogger(mode, plain=plain)
+	logger = _configure_run_mode(dev=dev, prod=prod, plain=plain)
 
 	# Turn on reload in dev only
 	if reload is None:
 		reload = env.pulse_env == "dev"
 
-	if server_only and web_only:
-		logger.error("Cannot use --server-only and --web-only at the same time.")
-		raise typer.Exit(1)
+	_validate_run_options(server_only=server_only, web_only=web_only, logger=logger)
 
 	supervised_reload = env.pulse_env == "dev" and reload and not web_only
 	bootstrap_modules: set[str] = set(sys.modules) if supervised_reload else set()
@@ -150,17 +142,14 @@ def run(
 				f"Stopped existing Pulse dev server at {stopped.url} (pid={stopped.pid})."
 			)
 
-	public_port: PortReservation | None = None
-	if supervised_reload:
-		try:
-			public_port = reserve_port(address, port, find_port=find_port)
-			ctx.call_on_close(public_port.close)
-			port = public_port.port
-		except RuntimeError as exc:
-			logger.error(str(exc))
-			raise typer.Exit(1) from None
-	elif find_port:
-		port = find_available_port(port)
+	port, public_port = _reserve_public_port(
+		ctx=ctx,
+		logger=logger,
+		address=address,
+		port=port,
+		find_port=find_port,
+		supervised_reload=supervised_reload,
+	)
 
 	dev_secret: str | None = None
 	if app_instance.env != "prod":
@@ -170,14 +159,6 @@ def run(
 
 	server_args = extra_flags if not web_only else []
 	web_args = extra_flags if web_only else []
-
-	commands: list[CommandSpec] = []
-	if supervised_reload and server_args:
-		logger.error(
-			"Raw Uvicorn arguments are not supported with Pulse reload yet. "
-			+ "Use --no-reload to pass them through."
-		)
-		raise typer.Exit(1)
 
 	# Track readiness for announcement
 	server_ready = {"server": False, "web": False}
@@ -209,91 +190,54 @@ def run(
 		announced = True
 		logger.write_ready_announcement(address, port, local_server_url(address, port))
 
-	# Build web command first (when needed) so we can set PULSE_REACT_SERVER_ADDRESS
-	# before building the uvicorn command, which needs that env var
+	_validate_reload_args(
+		supervised_reload=supervised_reload, server_args=server_args, logger=logger
+	)
+
 	web_port: int | None = None
 	web_port_reservation: PortReservation | None = None
-	web_cmd: CommandSpec | None = None
-	server_cmd: CommandSpec | None = None
+	web_host: str | None = None
 	if not server_only:
-		web_host = "127.0.0.1" if is_single_server else address
-		try:
-			web_port_reservation = reserve_port(web_host, 5173, find_port=find_port)
-			ctx.call_on_close(web_port_reservation.close)
-			web_port = web_port_reservation.port
-		except RuntimeError as exc:
-			logger.error(str(exc))
-			raise typer.Exit(1) from None
-		web_cmd = build_web_command(
-			web_root=web_root,
-			extra_args=web_args,
-			host=web_host,
-			port=web_port,
-			strict_port=True,
-			mode=app_instance.env,
-			ready_pattern=(None if supervised_reload else rf":{web_port}(?:[/\s]|$)"),
-			on_ready=mark_web_ready,
-			plain=plain,
+		web_host, web_port, web_port_reservation = _reserve_web_port(
+			ctx=ctx,
+			logger=logger,
+			address=address,
+			is_single_server=is_single_server,
+			find_port=find_port,
 		)
-		if supervised_reload and is_single_server:
-			web_cmd.env[ENV_PULSE_HMR_CLIENT_PORT] = str(port)
-		if not supervised_reload:
-			commands.append(web_cmd)
-		env.react_server_address = local_server_url(web_host, web_port)
-
-	if not web_only:
-		if supervised_reload:
-			server_cmd = build_dev_worker_command(
-				app_ctx=app_ctx,
-				address=address,
-				port=port,
-				dev_secret=dev_secret,
-				verbose=verbose,
-				on_ready=mark_server_ready,
-				plain=plain,
-			)
-		else:
-			server_cmd = build_uvicorn_command(
-				app_ctx=app_ctx,
-				address=address,
-				port=port,
-				web_root=web_root,
-				reload_enabled=reload,
-				extra_args=server_args,
-				dev_secret=dev_secret,
-				server_only=server_only,
-				verbose=verbose,
-				ready_pattern=r"Application startup complete",
-				on_ready=mark_server_ready,
-				plain=plain,
-			)
-		if not supervised_reload:
-			commands.append(server_cmd)
+	commands, web_cmd, server_cmd = _build_run_commands(
+		app_ctx=app_ctx,
+		address=address,
+		port=port,
+		web_root=web_root,
+		dev_secret=dev_secret,
+		server_args=server_args,
+		web_args=web_args,
+		reload=reload,
+		supervised_reload=supervised_reload,
+		server_only=server_only,
+		web_only=web_only,
+		is_single_server=is_single_server,
+		plain=plain,
+		verbose=verbose,
+		web_host=web_host,
+		web_port=web_port,
+		mark_server_ready=mark_server_ready,
+		mark_web_ready=mark_web_ready,
+		logger=logger,
+	)
 
 	exit_code = 1
 	try:
 		with FolderLock(web_root, address=address, port=port):
-			if env.pulse_env == "dev" and not server_only:
-				try:
-					dep_plan = prepare_web_dependencies(
-						web_root,
-						pulse_version=PULSE_PY_VERSION,
-					)
-				except DependencyError as exc:
-					logger.error(str(exc))
-					raise typer.Exit(1) from None
-				try:
-					_run_dependency_plan(logger, web_root, dep_plan)
-				except subprocess.CalledProcessError:
-					logger.error("Failed to install web dependencies with Bun.")
-					raise typer.Exit(1) from None
-				logger.print("Generating routes")
-				try:
-					app_instance.run_codegen(local_server_url(address, port))
-				except Exception:
-					logger.error("Failed to generate routes")
-					logger.print_exception()
-					raise typer.Exit(1) from None
+			_prepare_run_dependencies(
+				logger=logger,
+				web_root=web_root,
+				app_instance=app_instance,
+				address=address,
+				port=port,
+				server_only=server_only,
+			)
 
 			if supervised_reload:
 				assert server_cmd is not None
@@ -308,29 +252,22 @@ def run(
 				assert public_port is not None
 				if web_port_reservation is not None:
 					web_port_reservation.close()
-				exit_code = asyncio.run(
-					DevSupervisor(
-						backend=server_cmd,
-						web=web_cmd,
-						watch_roots=(watch_root,),
-						ignored_roots=(web_root_resolved,),
-						registered_sources=registered_sources,
-						tag_mode=logger.get_tag_mode(),
-						listeners=public_port.sockets,
-						web_root=web_root,
-					).run()
+				exit_code = _run_supervised(
+					server_cmd=server_cmd,
+					web_cmd=web_cmd,
+					watch_root=watch_root,
+					web_root=web_root,
+					web_root_resolved=web_root_resolved,
+					registered_sources=registered_sources,
+					logger=logger,
+					public_port=public_port,
 				)
 			else:
-				try:
-					if web_port_reservation is not None:
-						web_port_reservation.close()
-					exit_code = execute_commands(
-						commands,
-						tag_mode=logger.get_tag_mode(),
-					)
-				except RuntimeError as exc:
-					logger.error(str(exc))
-					raise typer.Exit(1) from None
+				exit_code = _run_commands(
+					commands=commands,
+					web_port_reservation=web_port_reservation,
+					logger=logger,
+				)
 	except typer.Exit:
 		raise
 	except RuntimeError as exc:
@@ -646,6 +583,7 @@ def build_web_command(
 	port: int | None = None,
 	strict_port: bool = True,
 	mode: PulseEnv = "dev",
+	verbose: bool = False,
 	ready_pattern: str | None = None,
 	on_ready: Callable[[], None] | None = None,
 	plain: bool = False,
@@ -690,6 +628,17 @@ def build_web_command(
 	else:
 		command_env["FORCE_COLOR"] = "1"
 
+	output_filters = (
+		()
+		if verbose
+		else (
+			"Network: use --host to expose",
+			"press h + enter to show help",
+			"➜  Local:",
+			"/__manifest",
+			"?import",
+		)
+	)
 	return CommandSpec(
 		name="web",
 		args=args,
@@ -697,7 +646,229 @@ def build_web_command(
 		env=command_env,
 		ready_pattern=ready_pattern,
 		on_ready=on_ready,
+		output_filters=output_filters,
 	)
+
+
+def _configure_run_mode(*, dev: bool, prod: bool, plain: bool) -> CLILogger:
+	if dev and prod:
+		logger = CLILogger("dev", plain=plain)
+		logger.error("Please specify only one of --dev or --prod.")
+		raise typer.Exit(1)
+
+	mode: PulseEnv = "prod" if prod else "dev"
+	env.pulse_env = mode
+	return CLILogger(mode, plain=plain)
+
+
+def _validate_run_options(
+	*, server_only: bool, web_only: bool, logger: CLILogger
+) -> None:
+	if server_only and web_only:
+		logger.error("Cannot use --server-only and --web-only at the same time.")
+		raise typer.Exit(1)
+
+
+def _prepare_run_dependencies(
+	*,
+	logger: CLILogger,
+	web_root: Path,
+	app_instance: App,
+	address: str,
+	port: int,
+	server_only: bool,
+) -> None:
+	if env.pulse_env != "dev" or server_only:
+		return
+	try:
+		dep_plan = prepare_web_dependencies(
+			web_root,
+			pulse_version=PULSE_PY_VERSION,
+		)
+	except DependencyError as exc:
+		logger.error(str(exc))
+		raise typer.Exit(1) from None
+	try:
+		_run_dependency_plan(logger, web_root, dep_plan)
+	except subprocess.CalledProcessError:
+		logger.error("Failed to install web dependencies with Bun.")
+		raise typer.Exit(1) from None
+	logger.print("Generating routes")
+	try:
+		app_instance.run_codegen(local_server_url(address, port))
+	except Exception:
+		logger.error("Failed to generate routes")
+		logger.print_exception()
+		raise typer.Exit(1) from None
+
+
+def _reserve_public_port(
+	*,
+	ctx: typer.Context,
+	logger: CLILogger,
+	address: str,
+	port: int,
+	find_port: bool,
+	supervised_reload: bool,
+) -> tuple[int, PortReservation | None]:
+	if supervised_reload:
+		try:
+			reservation = reserve_port(address, port, find_port=find_port)
+			ctx.call_on_close(reservation.close)
+			return reservation.port, reservation
+		except RuntimeError as exc:
+			logger.error(str(exc))
+			raise typer.Exit(1) from None
+	if find_port:
+		return find_available_port(port), None
+	return port, None
+
+
+def _reserve_web_port(
+	*,
+	ctx: typer.Context,
+	logger: CLILogger,
+	address: str,
+	is_single_server: bool,
+	find_port: bool,
+) -> tuple[str, int, PortReservation]:
+	web_host = "127.0.0.1" if is_single_server else address
+	try:
+		reservation = reserve_port(web_host, 5173, find_port=find_port)
+		ctx.call_on_close(reservation.close)
+		return web_host, reservation.port, reservation
+	except RuntimeError as exc:
+		logger.error(str(exc))
+		raise typer.Exit(1) from None
+
+
+def _validate_reload_args(
+	*, supervised_reload: bool, server_args: list[str], logger: CLILogger
+) -> None:
+	if supervised_reload and server_args:
+		logger.error(
+			"Raw Uvicorn arguments are not supported with Pulse reload yet. "
+			+ "Use --no-reload to pass them through."
+		)
+		raise typer.Exit(1)
+
+
+def _build_run_commands(
+	*,
+	app_ctx: AppLoadResult,
+	address: str,
+	port: int,
+	web_root: Path,
+	dev_secret: str | None,
+	server_args: list[str],
+	web_args: list[str],
+	reload: bool,
+	supervised_reload: bool,
+	server_only: bool,
+	web_only: bool,
+	is_single_server: bool,
+	plain: bool,
+	verbose: bool,
+	web_host: str | None,
+	web_port: int | None,
+	mark_server_ready: Callable[[], None],
+	mark_web_ready: Callable[[], None],
+	logger: CLILogger,
+) -> tuple[list[CommandSpec], CommandSpec | None, CommandSpec | None]:
+	commands: list[CommandSpec] = []
+	web_cmd: CommandSpec | None = None
+	server_cmd: CommandSpec | None = None
+	if not server_only:
+		assert web_host is not None
+		assert web_port is not None
+		web_cmd = build_web_command(
+			web_root=web_root,
+			extra_args=web_args,
+			host=web_host,
+			port=web_port,
+			strict_port=True,
+			mode=app_ctx.app.env,
+			ready_pattern=(None if supervised_reload else rf":{web_port}(?:[/\s]|$)"),
+			on_ready=mark_web_ready,
+			plain=plain,
+			verbose=verbose,
+		)
+		if supervised_reload and is_single_server:
+			web_cmd.env[ENV_PULSE_HMR_CLIENT_PORT] = str(port)
+		if not supervised_reload:
+			commands.append(web_cmd)
+		env.react_server_address = local_server_url(web_host, web_port)
+
+	if not web_only:
+		if supervised_reload:
+			server_cmd = build_dev_worker_command(
+				app_ctx=app_ctx,
+				address=address,
+				port=port,
+				dev_secret=dev_secret,
+				verbose=verbose,
+				on_ready=mark_server_ready,
+				plain=plain,
+			)
+		else:
+			server_cmd = build_uvicorn_command(
+				app_ctx=app_ctx,
+				address=address,
+				port=port,
+				web_root=web_root,
+				reload_enabled=reload,
+				extra_args=server_args,
+				dev_secret=dev_secret,
+				server_only=server_only,
+				verbose=verbose,
+				ready_pattern=r"Application startup complete",
+				on_ready=mark_server_ready,
+				plain=plain,
+			)
+		if not supervised_reload:
+			commands.append(server_cmd)
+
+	return commands, web_cmd, server_cmd
+
+
+def _run_supervised(
+	*,
+	server_cmd: CommandSpec,
+	web_cmd: CommandSpec | None,
+	watch_root: Path,
+	web_root: Path,
+	web_root_resolved: Path,
+	registered_sources: set[Path],
+	logger: CLILogger,
+	public_port: PortReservation,
+) -> int:
+	return asyncio.run(
+		DevSupervisor(
+			backend=server_cmd,
+			web=web_cmd,
+			watch_roots=(watch_root,),
+			ignored_roots=(web_root_resolved,),
+			registered_sources=registered_sources,
+			tag_mode=logger.get_tag_mode(),
+			listeners=public_port.sockets,
+			web_root=web_root,
+		).run()
+	)
+
+
+def _run_commands(
+	*,
+	commands: list[CommandSpec],
+	web_port_reservation: PortReservation | None,
+	logger: CLILogger,
+) -> int:
+	try:
+		if web_port_reservation is not None:
+			web_port_reservation.close()
+		return execute_commands(commands, tag_mode=logger.get_tag_mode())
+	except RuntimeError as exc:
+		logger.error(str(exc))
+		raise typer.Exit(1) from None
 
 
 def _apply_app_context_to_env(app_ctx: AppLoadResult) -> None:

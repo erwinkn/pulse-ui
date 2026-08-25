@@ -7,14 +7,21 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from collections.abc import Sequence
 from pathlib import Path
 from typing import final, override
 
 import pytest
 from pulse.cli import processes as process_module
+from pulse.cli.logging import TagMode
 from pulse.cli.models import CommandSpec
-from pulse.cli.processes import ManagedProcess
+from pulse.cli.processes import (
+	ManagedProcess,
+	execute_commands,
+	normalize_exit_code,
+	write_tagged_line,
+)
 from pulse.cli.protocol import PREFIX, VITE_CONFIGURED
 
 
@@ -64,6 +71,30 @@ def test_windows_launcher_waits_for_gate_and_preserves_process_contract(
 	assert stdout.splitlines() == ["space arg|unicode-ü", "environment", "payload"]
 	assert stderr == ""
 	assert (tmp_path / "started").read_text() == "yes"
+
+
+def test_windows_launcher_reports_handshake_failure(tmp_path: Path) -> None:
+	launcher = Path(process_module.__file__).with_name("_windows_launcher.py")
+	process = subprocess.run(
+		[
+			sys.executable,
+			"-I",
+			str(launcher),
+			sys.executable,
+			"-c",
+			"pass",
+		],
+		cwd=tmp_path,
+		input="x",
+		capture_output=True,
+		text=True,
+		check=False,
+	)
+
+	assert process.returncode == 125
+	assert process.stderr == (
+		"pulse Windows launcher handshake failed: expected supervisor gate\n"
+	)
 
 
 def test_windows_start_assigns_job_before_releasing_launcher(
@@ -286,6 +317,21 @@ def test_managed_process_preserves_io_and_target_exit_code(
 	assert process.returncode == 7
 
 
+@pytest.mark.parametrize(
+	"code,expected",
+	[
+		(0, 0),
+		(1, 1),
+		(255, 255),
+		(-15, 143),
+		(0xC0000005, 1),
+		(0xFFFFFFFF, 1),
+	],
+)
+def test_normalize_exit_code(code: int, expected: int) -> None:
+	assert normalize_exit_code(code) == expected
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
 def test_kill_tree_kills_grandchildren_after_leader_exit(tmp_path: Path) -> None:
 	lines: list[str] = []
@@ -380,6 +426,90 @@ def test_managed_process_keeps_last_output_line(tmp_path: Path) -> None:
 
 	assert process.returncode == 3
 	assert "traceback-tail" in lines
+
+
+def test_write_tagged_line_applies_ansi_stripped_filters(
+	capsys: pytest.CaptureFixture[str],
+) -> None:
+	filters = ("Network: use --host to expose",)
+
+	write_tagged_line(
+		"web",
+		"\033[90mNetwork: use --host to expose\033[0m",
+		"plain",
+		filters,
+	)
+	write_tagged_line("web", "visible", "plain", filters)
+
+	assert capsys.readouterr().out == "[web] visible\n"
+
+
+def test_spawn_callback_failures_propagate() -> None:
+	def fail() -> None:
+		raise RuntimeError("spawn callback failed")
+
+	with pytest.raises(RuntimeError, match="spawn callback failed"):
+		process_module._call_on_spawn(  # pyright: ignore[reportPrivateUsage]
+			CommandSpec(
+				name="worker",
+				args=[],
+				cwd=Path("."),
+				env={},
+				on_spawn=fail,
+			)
+		)
+
+
+def test_ready_callback_traceback_does_not_stop_output_drain(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	lines: list[str] = []
+	tracebacks: list[str] = []
+
+	def fail() -> None:
+		raise RuntimeError("ready callback failed")
+
+	def record_traceback() -> None:
+		tracebacks.append("ready callback failed")
+
+	monkeypatch.setattr(traceback, "print_exc", record_traceback)
+
+	def capture_line(
+		_name: str,
+		message: str,
+		_tag_mode: TagMode,
+		_filters: tuple[str, ...] = (),
+	) -> None:
+		lines.append(message)
+
+	monkeypatch.setattr(
+		process_module,
+		"write_tagged_line",
+		capture_line,
+	)
+	assert (
+		execute_commands(
+			[
+				CommandSpec(
+					name="worker",
+					args=[
+						sys.executable,
+						"-c",
+						"print('ready', flush=True); print('after', flush=True)",
+					],
+					cwd=tmp_path,
+					env=os.environ.copy(),
+					ready_pattern="ready",
+					on_ready=fail,
+				)
+			],
+			tag_mode="plain",
+		)
+		== 0
+	)
+
+	assert lines == ["ready", "after"]
+	assert tracebacks == ["ready callback failed"]
 
 
 def test_guard_forwards_protocol_markers_and_output(tmp_path: Path) -> None:

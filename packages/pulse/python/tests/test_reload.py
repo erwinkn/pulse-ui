@@ -1,6 +1,7 @@
 import asyncio
 import io
 import os
+import signal
 import socket
 import sys
 from collections.abc import Callable
@@ -43,6 +44,7 @@ class FakeProcess:
 		self.code: int | None = None
 		self.on_exit: Callable[[int], None] | None = None
 		self.pass_fds: tuple[int, ...] = ()
+		self.output_filters: tuple[str, ...] = ()
 
 	@property
 	def returncode(self) -> int | None:
@@ -87,6 +89,7 @@ def supervisor_shell(
 	tmp_path: Path,
 	listeners: tuple[socket.socket, ...] = (),
 	web_root: Path | None = None,
+	**kwargs: float,
 ) -> DevSupervisor:
 	return DevSupervisor(
 		backend=command("server", tmp_path),
@@ -97,6 +100,7 @@ def supervisor_shell(
 		tag_mode="plain",
 		listeners=listeners,
 		web_root=web_root,
+		**kwargs,
 	)
 
 
@@ -128,6 +132,7 @@ def install_process_script(
 		process = FakeProcess(name, events, hangs=outcome == "hang")
 		process.on_exit = on_exit
 		process.pass_fds = pass_fds
+		process.output_filters = spec.output_filters
 		processes.append(process)
 		events.append(f"{name}:start")
 		if spec.name == "server":
@@ -232,6 +237,7 @@ async def test_reload_kills_backend_immediately_and_keeps_vite(
 	assert await run_task == 130
 
 	assert events.index("web1:start") < events.index("server1:start")
+	assert events.index("server1:stop") < events.index("server1:kill")
 	assert "server1:kill" in events
 	assert "web2:start" not in events
 	assert events.index("server1:kill") < events.index("server2:start")
@@ -299,25 +305,95 @@ async def test_rapid_edit_kills_starting_backend(
 
 
 @pytest.mark.asyncio
-async def test_interrupted_backend_start_cancels_readiness_waiter(
+async def test_replace_backend_interrupt_cancels_readiness_waiter(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 	supervisor = supervisor_shell(tmp_path)
 	events: list[str] = []
 	install_process_script(monkeypatch, events, [("server", "stall")])
-	waiters: list[asyncio.Task[Any]] = []
+	replace_task = asyncio.create_task(supervisor._replace_backend())  # pyright: ignore[reportPrivateUsage]
+	await wait_until(lambda: "server1:start" in events)
+	supervisor.changed.set()
+	assert await replace_task == "changed"
+	await asyncio.sleep(0)
 
-	async def race(*_names: str, extra: asyncio.Task[Any] | None = None) -> str:
-		assert extra is not None
-		waiters.append(extra)
-		return "changed"
+	current = asyncio.current_task()
+	assert current is not None
+	assert {task for task in asyncio.all_tasks() if not task.done()} == {current}
 
-	monkeypatch.setattr(supervisor, "_race", race)
 
-	assert await supervisor._replace_backend() == "changed"  # pyright: ignore[reportPrivateUsage]
-	assert len(waiters) == 1
-	assert waiters[0].done()
-	assert waiters[0].cancelled()
+@pytest.mark.asyncio
+async def test_race_cancellation_cleans_owned_waiters(tmp_path: Path) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	ready = asyncio.Event()
+	race_task = asyncio.create_task(
+		supervisor._race("changed", ready=ready)  # pyright: ignore[reportPrivateUsage]
+	)
+	await asyncio.sleep(0)
+	race_task.cancel()
+	with pytest.raises(asyncio.CancelledError):
+		await race_task
+	await asyncio.sleep(0)
+
+	current = asyncio.current_task()
+	assert current is not None
+	assert {task for task in asyncio.all_tasks() if not task.done()} == {current}
+
+
+@pytest.mark.asyncio
+async def test_second_interrupt_kills_without_grace(
+	tmp_path: Path,
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	events: list[str] = []
+	supervisor.web = cast(
+		ManagedProcess, cast(object, FakeProcess("web1", events, hangs=True))
+	)
+	supervisor.backend = cast(
+		ManagedProcess, cast(object, FakeProcess("server1", events, hangs=True))
+	)
+
+	supervisor._handle_interrupt()  # pyright: ignore[reportPrivateUsage]
+	assert supervisor.shutdown.is_set()
+	assert "web1:stop" not in events
+	assert "server1:stop" not in events
+	assert "web1:kill" not in events
+	assert "server1:kill" not in events
+
+	supervisor._handle_interrupt()  # pyright: ignore[reportPrivateUsage]
+	assert "web1:kill" in events
+	assert "server1:kill" in events
+
+
+@pytest.mark.asyncio
+async def test_run_installs_and_restores_all_signal_handlers(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	calls: list[tuple[int, object]] = []
+
+	def fake_signal(signum: int, handler: object) -> object:
+		calls.append((signum, handler))
+		return f"previous-{signum}"
+
+	monkeypatch.setattr(signal, "signal", fake_signal)
+	supervisor.shutdown.set()
+
+	assert await supervisor.run() == 130
+
+	expected_signals = [signal.SIGINT, signal.SIGTERM]
+	sigbreak = getattr(signal, "SIGBREAK", None)
+	if sigbreak is not None:
+		expected_signals.append(sigbreak)
+	assert [
+		signum for signum, _handler in calls[: len(expected_signals)]
+	] == expected_signals
+	assert [
+		signum for signum, _handler in calls[len(expected_signals) :]
+	] == expected_signals
+	assert all(
+		calls[index][1] is calls[0][1] for index in range(1, len(expected_signals))
+	)
 
 
 @pytest.mark.asyncio
@@ -414,8 +490,7 @@ async def test_vite_ready_after_ready_is_inert(
 async def test_missing_vite_plugin_exits(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-	supervisor = supervisor_shell(tmp_path)
-	supervisor.vite_plugin_timeout = 0.2
+	supervisor = supervisor_shell(tmp_path, vite_plugin_timeout=0.2)
 	events: list[str] = []
 	install_process_script(monkeypatch, events, [("web", "hang")])
 
@@ -425,12 +500,26 @@ async def test_missing_vite_plugin_exits(
 
 
 @pytest.mark.asyncio
+async def test_start_web_preserves_output_filters(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	supervisor = supervisor_shell(tmp_path)
+	assert supervisor.web_spec is not None
+	supervisor.web_spec.output_filters = ("filtered",)
+	processes = install_process_script(monkeypatch, [], [("web", "ready")])
+
+	await supervisor._start_web()  # pyright: ignore[reportPrivateUsage]
+
+	assert processes[0].output_filters == ("filtered",)
+
+
+@pytest.mark.asyncio
 async def test_vite_listening_timeout_fails_startup(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-	monkeypatch.setattr(reload_mod, "VITE_LISTENING_TIMEOUT", 0.2)
-	supervisor = supervisor_shell(tmp_path)
-	supervisor.vite_plugin_timeout = 0.2
+	supervisor = supervisor_shell(
+		tmp_path, vite_plugin_timeout=0.2, vite_listening_timeout=0.2
+	)
 	events: list[str] = []
 	install_process_script(monkeypatch, events, [("web", "configured")])
 
@@ -447,8 +536,7 @@ async def test_missing_vite_plugin_names_config_and_setup(
 	web_root.mkdir()
 	config = web_root / "vite.config.mts"
 	config.write_text("export default {};\n")
-	supervisor = supervisor_shell(tmp_path, web_root=web_root)
-	supervisor.vite_plugin_timeout = 0.2
+	supervisor = supervisor_shell(tmp_path, web_root=web_root, vite_plugin_timeout=0.2)
 	events: list[str] = []
 	install_process_script(monkeypatch, events, [("web", "hang")])
 

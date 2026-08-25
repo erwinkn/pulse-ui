@@ -14,7 +14,13 @@ from watchfiles import Change, awatch
 from pulse.cli.helpers import os_family
 from pulse.cli.logging import TagMode
 from pulse.cli.models import CommandSpec
-from pulse.cli.processes import ManagedProcess, write_tagged_line
+from pulse.cli.processes import (
+	USER_INTERRUPT_EXIT_CODE,
+	ManagedProcess,
+	normalize_exit_code,
+	stop_processes,
+	write_tagged_line,
+)
 from pulse.cli.protocol import VITE_CONFIGURED, VITE_LISTENING, WORKER_READY, parse
 from pulse.env import ENV_PULSE_LISTEN_FDS, ENV_PULSE_SUPERVISED
 
@@ -37,8 +43,10 @@ IGNORED_DIRECTORIES = frozenset(
 PYTHON_EXTENSIONS = frozenset({".py", ".pyx", ".pyd"})
 VITE_PLUGIN_TIMEOUT = 15.0
 VITE_LISTENING_TIMEOUT = 30.0
+DEV_STOP_GRACE = 1.0
 
 Wait = Literal["shutdown", "changed", "backend", "web", "ready"]
+WaitName = Literal["changed", "backend", "web"]
 BackendStart = Literal["ready", "failed", "changed"]
 
 
@@ -90,6 +98,7 @@ class DevSupervisor:
 		listeners: tuple[socket.socket, ...],
 		web_root: Path | None = None,
 		vite_plugin_timeout: float = VITE_PLUGIN_TIMEOUT,
+		vite_listening_timeout: float = VITE_LISTENING_TIMEOUT,
 	) -> None:
 		self.backend_spec = backend
 		self.web_spec = web
@@ -103,6 +112,7 @@ class DevSupervisor:
 		self.listeners = listeners
 		self.web_root = web_root.resolve() if web_root is not None else None
 		self.vite_plugin_timeout = vite_plugin_timeout
+		self.vite_listening_timeout = vite_listening_timeout
 		self.changed = asyncio.Event()
 		self.shutdown = asyncio.Event()
 		self.backend: ManagedProcess | None = None
@@ -125,7 +135,11 @@ class DevSupervisor:
 		def request_shutdown(_signum: int, _frame: object) -> None:
 			loop.call_soon_threadsafe(self._handle_interrupt)
 
-		for signum in (signal.SIGINT, signal.SIGTERM):
+		signals = [signal.SIGINT, signal.SIGTERM]
+		sigbreak = getattr(signal, "SIGBREAK", None)
+		if sigbreak is not None:
+			signals.append(sigbreak)
+		for signum in signals:
 			previous_handlers[signum] = signal.signal(signum, request_shutdown)
 
 		watch_task: asyncio.Task[None] | None = None
@@ -134,18 +148,18 @@ class DevSupervisor:
 			if self.web_spec is not None:
 				await self._start_web()
 				if self.shutdown.is_set():
-					return 130
+					return USER_INTERRUPT_EXIT_CODE
 				if self._web_code is not None:
-					return self._web_code
+					return normalize_exit_code(self._web_code)
 			while not self.shutdown.is_set():
 				if self._web_code is not None:
-					return self._web_code
+					return normalize_exit_code(self._web_code)
 				self.changed.clear()
 				backend_start = await self._replace_backend()
 				if self.shutdown.is_set():
 					break
 				if self._web_code is not None:
-					return self._web_code
+					return normalize_exit_code(self._web_code)
 				if backend_start != "ready":
 					if backend_start == "failed":
 						print(
@@ -158,7 +172,9 @@ class DevSupervisor:
 					self.backend_spec.on_ready()
 				result = await self._race("changed", "backend", "web")
 				if result == "web":
-					return self._web_code if self._web_code is not None else 1
+					return normalize_exit_code(
+						self._web_code if self._web_code is not None else 1
+					)
 				if result == "shutdown":
 					break
 				if result == "backend" and not self.changed.is_set():
@@ -173,25 +189,30 @@ class DevSupervisor:
 						flush=True,
 					)
 					await self._race("changed", "web")
-			return 130 if self.shutdown.is_set() else 0
+			return USER_INTERRUPT_EXIT_CODE if self.shutdown.is_set() else 0
 		finally:
 			if watch_task is not None:
 				watch_task.cancel()
 				with contextlib.suppress(asyncio.CancelledError):
 					await watch_task
-			await self._stop(self.backend)
+			processes = [
+				process for process in (self.backend, self.web) if process is not None
+			]
+			if processes:
+				await asyncio.to_thread(stop_processes, processes, grace=DEV_STOP_GRACE)
 			self.backend = None
-			await self._stop(self.web)
 			self.web = None
 			for signum, handler in previous_handlers.items():
 				signal.signal(signum, cast(Any, handler))
 
 	def _handle_interrupt(self) -> None:
-		self.shutdown.set()
-		if self.backend is not None:
-			self.backend.kill_tree()
-		if self.web is not None:
-			self.web.kill_tree()
+		if self.shutdown.is_set():
+			if self.backend is not None:
+				self.backend.kill_tree()
+			if self.web is not None:
+				self.web.kill_tree()
+		else:
+			self.shutdown.set()
 
 	def _note_backend_ready(self, gen: int) -> None:
 		# A late marker relayed by a replaced generation's output thread must
@@ -234,7 +255,12 @@ class DevSupervisor:
 			# Suppress only the padding newlines around markers, not genuine
 			# blank lines from the child.
 			if text or not messages:
-				write_tagged_line(self.backend_spec.name, text, self.tag_mode)
+				write_tagged_line(
+					self.backend_spec.name,
+					text,
+					self.tag_mode,
+					self.backend_spec.output_filters,
+				)
 			if WORKER_READY in messages:
 				loop.call_soon_threadsafe(self._note_backend_ready, gen)
 
@@ -246,6 +272,7 @@ class DevSupervisor:
 			args=self.backend_spec.args,
 			cwd=self.backend_spec.cwd,
 			env=env,
+			output_filters=self.backend_spec.output_filters,
 		)
 		try:
 			self.backend = ManagedProcess.start(
@@ -254,41 +281,17 @@ class DevSupervisor:
 		finally:
 			for listener in self.listeners:
 				listener.set_inheritable(False)
-		waiter = asyncio.create_task(self._backend_ready.wait())
-		try:
-			result = await self._race(
-				"changed",
-				"backend",
-				"web",
-				extra=waiter,
-			)
-			if result == "ready":
-				return "ready"
-			await self._stop(self.backend)
-			self.backend = None
-			return "changed" if result == "changed" else "failed"
-		finally:
-			if not waiter.done():
-				waiter.cancel()
-				with contextlib.suppress(asyncio.CancelledError):
-					await waiter
-
-	async def _wait_vite_signal(
-		self, event: asyncio.Event, *, timeout: float | None
-	) -> bool:
-		waiter = asyncio.create_task(event.wait())
-		try:
-			if timeout is None:
-				result = await self._race("web", extra=waiter)
-			else:
-				async with asyncio.timeout(timeout):
-					result = await self._race("web", extra=waiter)
-			return result == "ready"
-		finally:
-			if not waiter.done():
-				waiter.cancel()
-				with contextlib.suppress(asyncio.CancelledError):
-					await waiter
+		result = await self._race(
+			"changed",
+			"backend",
+			"web",
+			ready=self._backend_ready,
+		)
+		if result == "ready":
+			return "ready"
+		await self._stop(self.backend)
+		self.backend = None
+		return "changed" if result == "changed" else "failed"
 
 	async def _start_web(self) -> None:
 		assert self.web_spec is not None
@@ -300,15 +303,16 @@ class DevSupervisor:
 		def on_output(line: str) -> None:
 			messages, text = parse(line)
 			if text or not messages:
-				write_tagged_line(web_spec.name, text, self.tag_mode)
+				write_tagged_line(
+					web_spec.name, text, self.tag_mode, web_spec.output_filters
+				)
 			if VITE_CONFIGURED in messages:
 				loop.call_soon_threadsafe(self._vite_configured.set)
 			if VITE_LISTENING in messages:
 				loop.call_soon_threadsafe(self._vite_listening.set)
 
 		def on_exit(code: int) -> None:
-			self._web_code = code
-			loop.call_soon_threadsafe(self._web_exit.set)
+			loop.call_soon_threadsafe(self._note_web_exit, code)
 
 		env = dict(web_spec.env)
 		env[ENV_PULSE_SUPERVISED] = "1"
@@ -327,72 +331,82 @@ class DevSupervisor:
 			args=web_args,
 			cwd=web_spec.cwd,
 			env=env,
+			output_filters=web_spec.output_filters,
 		)
 		self.web = ManagedProcess.start(spec, on_output, on_exit)
-		try:
-			got = await self._wait_vite_signal(
-				self._vite_configured, timeout=self.vite_plugin_timeout
-			)
-		except TimeoutError:
-			if not self.shutdown.is_set() and self._web_code is None:
-				vite_config: Path | None = None
-				if self.web_root is not None:
-					for filename in (
-						"vite.config.ts",
-						"vite.config.mts",
-						"vite.config.js",
-						"vite.config.mjs",
-						"vite.config.cts",
-						"vite.config.cjs",
-					):
-						candidate = self.web_root / filename
-						if candidate.is_file():
-							vite_config = candidate.resolve()
-							break
-				config_location = (
-					f" in {vite_config}"
-					if vite_config is not None
-					else " in vite.config.ts"
-				)
-				print(
-					"Vite did not load pulse() within "
-					+ f"{self.vite_plugin_timeout:g}s. Add it to the plugins "
-					+ "array"
-					+ config_location
-					+ '. Add `import { pulse } from "pulse-ui-client/vite";` '
-					+ "and include it as `plugins: [..., pulse()]`.",
-					flush=True,
-				)
-				await self._stop(self.web)
-				self.web = None
-				self._web_code = 1
-			return
+		got = await self._wait_vite_signal(
+			self._vite_configured,
+			timeout=self.vite_plugin_timeout,
+			timeout_message=self._vite_plugin_timeout_message(),
+		)
 		if not got:
 			return
-		try:
-			got = await self._wait_vite_signal(
-				self._vite_listening, timeout=VITE_LISTENING_TIMEOUT
-			)
-		except TimeoutError:
-			if not self.shutdown.is_set() and self._web_code is None:
-				print(
-					"Vite loaded pulse() but never reported listening within "
-					+ f"{VITE_LISTENING_TIMEOUT:g}s.",
-					flush=True,
-				)
-				await self._stop(self.web)
-				self.web = None
-				self._web_code = 1
-			return
+		got = await self._wait_vite_signal(
+			self._vite_listening,
+			timeout=self.vite_listening_timeout,
+			timeout_message=(
+				"Vite loaded pulse() but never reported listening within "
+				f"{self.vite_listening_timeout:g}s."
+			),
+		)
 		if not got:
 			return
 		if web_spec.on_ready is not None:
 			web_spec.on_ready()
 
+	def _vite_plugin_timeout_message(self) -> str:
+		vite_config: Path | None = None
+		if self.web_root is not None:
+			for filename in (
+				"vite.config.ts",
+				"vite.config.mts",
+				"vite.config.js",
+				"vite.config.mjs",
+				"vite.config.cts",
+				"vite.config.cjs",
+			):
+				candidate = self.web_root / filename
+				if candidate.is_file():
+					vite_config = candidate.resolve()
+					break
+		config_location = (
+			f" in {vite_config}" if vite_config is not None else " in vite.config.ts"
+		)
+		return (
+			"Vite did not load pulse() within "
+			+ f"{self.vite_plugin_timeout:g}s. Add it to the plugins "
+			+ "array"
+			+ config_location
+			+ '. Add `import { pulse } from "pulse-ui-client/vite";` '
+			+ "and include it as `plugins: [..., pulse()]`."
+		)
+
+	async def _wait_vite_signal(
+		self,
+		event: asyncio.Event,
+		*,
+		timeout: float,
+		timeout_message: str,
+	) -> bool:
+		try:
+			async with asyncio.timeout(timeout):
+				return await self._race("web", ready=event) == "ready"
+		except TimeoutError:
+			if not self.shutdown.is_set() and self._web_code is None:
+				print(timeout_message, flush=True)
+				await self._stop(self.web)
+				self.web = None
+				self._web_code = 1
+			return False
+
+	def _note_web_exit(self, code: int) -> None:
+		self._web_code = code
+		self._web_exit.set()
+
 	async def _race(
 		self,
-		*names: str,
-		extra: asyncio.Task[Any] | None = None,
+		*names: WaitName,
+		ready: asyncio.Event | None = None,
 	) -> Wait:
 		waiters: dict[str, asyncio.Task[Any]] = {
 			"shutdown": asyncio.create_task(self.shutdown.wait()),
@@ -403,22 +417,21 @@ class DevSupervisor:
 			waiters["backend"] = asyncio.create_task(self._backend_exit.wait())
 		if "web" in names and self.web is not None:
 			waiters["web"] = asyncio.create_task(self._web_exit.wait())
-		if extra is not None:
-			waiters["ready"] = extra
+		if ready is not None:
+			waiters["ready"] = asyncio.create_task(ready.wait())
 		try:
 			done, _pending = await asyncio.wait(
 				waiters.values(), return_when=asyncio.FIRST_COMPLETED
 			)
 		finally:
-			owned = [task for task in waiters.values() if task is not extra]
-			for task in owned:
+			for task in waiters.values():
 				if not task.done():
 					task.cancel()
-			await asyncio.gather(*owned, return_exceptions=True)
+			await asyncio.gather(*waiters.values(), return_exceptions=True)
 		for name, task in waiters.items():
 			if task in done and not task.cancelled():
 				return cast(Wait, name)
-		return "shutdown"
+		raise asyncio.CancelledError
 
 	async def _watch(self) -> None:
 		async for _changes in awatch(
@@ -438,5 +451,4 @@ class DevSupervisor:
 	async def _stop(self, process: ManagedProcess | None) -> None:
 		if process is None:
 			return
-		process.kill_tree()
-		await asyncio.to_thread(process.close)
+		await asyncio.to_thread(stop_processes, [process], grace=DEV_STOP_GRACE)

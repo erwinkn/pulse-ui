@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from collections.abc import Callable, Sequence
 from typing import IO, Any, cast, final
 
@@ -17,6 +18,23 @@ from pulse.cli.models import CommandSpec
 
 PROCESS_STOP_TIMEOUT = 4.0
 PROCESS_KILL_TIMEOUT = 1.0
+USER_INTERRUPT_EXIT_CODE = 130
+
+
+# Exit-code contract shared by command execution and the development
+# supervisor: 0 is clean; an unstopped POSIX signal is 128 + signal, capped
+# at 255; 130 is the cross-platform user-interrupt code; codes in 1..255 are
+# unchanged; and every other value is generic failure. In particular, full
+# Windows statuses are not truncated with POSIX-style "& 0xFF".
+def normalize_exit_code(code: int) -> int:
+	if code == 0:
+		return 0
+	if code < 0:
+		return min(128 - code, 255)
+	if 1 <= code <= 255:
+		return code
+	return 1
+
 
 # ANSI color codes for tagged output
 ANSI_CODES = {
@@ -169,6 +187,8 @@ class ManagedProcess:
 		self._wait_thread: threading.Thread | None = None
 		self._job = job
 		self._exit_code: int | None = None
+		self.stop_requested = False
+		self.stop_induced = False
 
 	@classmethod
 	def start(
@@ -258,6 +278,9 @@ class ManagedProcess:
 				code = process.wait()
 				managed._reaped = True
 			managed._exit_code = code
+			# A narrow race remains: an independent exit immediately after
+			# request_stop() can be observed as stop-induced here.
+			managed.stop_induced = managed.stop_requested
 			on_exit(code)
 
 		output_thread = threading.Thread(
@@ -290,6 +313,7 @@ class ManagedProcess:
 		return self.returncode is None
 
 	def request_stop(self) -> None:
+		self.stop_requested = True
 		if os_family() == "windows":
 			if not self.is_alive():
 				return
@@ -314,6 +338,7 @@ class ManagedProcess:
 		self.process.stdin.flush()
 
 	def kill_tree(self) -> None:
+		self.stop_requested = True
 		if self._job is not None:
 			self._job.terminate()
 			return
@@ -385,84 +410,78 @@ def execute_commands(
 	if not commands:
 		return 0
 
-	def _is_stop_induced(code: int) -> bool:
-		if os_family() == "windows":
-			# 1: TerminateProcess via Popen.terminate/job kill fallback.
-			# 0xFFFFFFFF: job-object termination of survivors.
-			# 0xC000013A: STATUS_CONTROL_C_EXIT after CTRL_BREAK.
-			return code in (1, 0xFFFFFFFF, 0xC000013A)
-		return code < 0
-
 	def interrupt_on_sigterm(_signum: int, _frame: object) -> None:
 		raise KeyboardInterrupt
 
 	previous_sigterm = signal.signal(signal.SIGTERM, interrupt_on_sigterm)
 	processes: list[ManagedProcess] = []
-	self_exit_codes: dict[str, int] = {}
-	first_exit_code: int | None = None
+	exit_order: list[int] = []
+	exit_codes: dict[int, int] = {}
+	exit_lock = threading.Lock()
 	exited = threading.Event()
-	stopping = threading.Event()
 
-	def start(spec: CommandSpec) -> ManagedProcess:
+	def start(index: int, spec: CommandSpec) -> ManagedProcess:
 		ready = threading.Event()
 
 		def on_output(line: str) -> None:
-			write_tagged_line(spec.name, line, tag_mode)
+			write_tagged_line(spec.name, line, tag_mode, spec.output_filters)
 			if spec.ready_pattern and not ready.is_set() and _matches_ready(spec, line):
 				ready.set()
 				if spec.on_ready:
 					try:
 						spec.on_ready()
 					except Exception:
-						pass
+						# This thread must keep draining output after callback failures.
+						traceback.print_exc()
 
 		def on_exit(code: int) -> None:
-			nonlocal first_exit_code
-			# Codes reported after the shutdown began are usually stop-induced
-			# (signal deaths on POSIX, TerminateProcess/CTRL_BREAK exits on
-			# Windows) and must not mask or fabricate a failure — but a
-			# genuine failure exit that lands after stopping still counts.
-			if not stopping.is_set() or not _is_stop_induced(code):
-				self_exit_codes[spec.name] = code
-			if first_exit_code is None:
-				first_exit_code = code
+			with exit_lock:
+				exit_order.append(index)
+				exit_codes[index] = code
 			exited.set()
 
 		return ManagedProcess.start(spec, on_output, on_exit)
 
 	try:
 		for spec in commands:
-			processes.append(start(spec))
+			processes.append(start(len(processes), spec))
 		# Poll the event instead of blocking forever: on Windows a bare
 		# Event.wait() would swallow Ctrl+C.
 		while not exited.wait(0.2):
 			pass
-		stopping.set()
-		# _stop_processes is idempotent for the finally below.
-		_stop_processes(processes)
-		if self_exit_codes:
-			return max(self_exit_codes.values())
-		return first_exit_code if first_exit_code is not None else 0
+		stop_processes(processes)
+		with exit_lock:
+			ordered_exits = tuple(exit_order)
+			recorded_codes = dict(exit_codes)
+		for index in ordered_exits:
+			if not processes[index].stop_induced:
+				return normalize_exit_code(recorded_codes[index])
+		return 0
 	except KeyboardInterrupt:
 		sys.stdout.write("\nShutting down...\n")
 		sys.stdout.flush()
-		return 130
+		return USER_INTERRUPT_EXIT_CODE
 	finally:
-		_stop_processes(processes)
+		stop_processes(processes)
 		signal.signal(signal.SIGTERM, previous_sigterm)
 
 
-def _stop_processes(processes: list[ManagedProcess]) -> None:
+def stop_processes(
+	processes: Sequence[ManagedProcess],
+	*,
+	grace: float = PROCESS_STOP_TIMEOUT,
+) -> None:
 	"""Stop processes gracefully, then terminate every owned descendant tree.
 
 	Output threads keep draining throughout, so full pipes cannot prevent a
 	child from completing its shutdown hooks. A second Ctrl+C skips the grace
 	period and goes straight to the kill.
 	"""
+	processes = tuple(processes)
 	for process in processes:
 		process.request_stop()
 	with contextlib.suppress(KeyboardInterrupt):
-		deadline = time.monotonic() + PROCESS_STOP_TIMEOUT
+		deadline = time.monotonic() + grace
 		while (
 			any(process.is_alive() for process in processes)
 			and time.monotonic() < deadline
@@ -482,10 +501,9 @@ def _stop_processes(processes: list[ManagedProcess]) -> None:
 def _call_on_spawn(spec: CommandSpec) -> None:
 	"""Call the on_spawn callback if it exists."""
 	if spec.on_spawn:
-		try:
-			spec.on_spawn()
-		except Exception:
-			pass
+		# ManagedProcess.start calls this on the caller's thread, so failures
+		# should propagate; no output-drain thread needs protection here.
+		spec.on_spawn()
 
 
 def _matches_ready(spec: CommandSpec, line: str) -> bool:
@@ -494,7 +512,12 @@ def _matches_ready(spec: CommandSpec, line: str) -> bool:
 	)
 
 
-def write_tagged_line(name: str, message: str, tag_mode: TagMode) -> None:
+def write_tagged_line(
+	name: str,
+	message: str,
+	tag_mode: TagMode,
+	output_filters: tuple[str, ...] = (),
+) -> None:
 	"""Write a line of output with optional process tag.
 
 	Args:
@@ -504,15 +527,8 @@ def write_tagged_line(name: str, message: str, tag_mode: TagMode) -> None:
 			- "colored": Show [name] with ANSI colors
 			- "plain": Show [name] without colors
 	"""
-	# Filter out unwanted web server messages
 	clean_message = ANSI_ESCAPE.sub("", message)
-	if (
-		"Network: use --host to expose" in clean_message
-		or "press h + enter to show help" in clean_message
-		or "➜  Local:" in clean_message
-		or "/__manifest" in clean_message
-		or "?import" in clean_message
-	):
+	if any(output_filter in clean_message for output_filter in output_filters):
 		return
 
 	message = ANSI_TERMINAL_CONTROL.sub("", message)

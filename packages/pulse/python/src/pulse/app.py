@@ -190,6 +190,11 @@ class App:
 		cors: CORS configuration. Auto-configured based on mode if not provided.
 		fastapi: FastAPI OpenAPI and generated documentation configuration.
 		session_timeout: Session cleanup timeout in seconds. Defaults to 60.0.
+		shell_render_timeout: Cleanup timeout in seconds for placeholder
+			"shell" renders minted on stale-render-id reconnect. These have no
+			mounts and only tell the client to reload, so they are reaped well
+			before the longer session_timeout reconnect grace window. Defaults
+			to 30.0.
 		connection_status: Connection status UI timing configuration.
 
 	Attributes:
@@ -253,6 +258,7 @@ class App:
 	_proxy: ReactProxy | None
 	proxy: Proxy
 	session_timeout: float
+	shell_render_timeout: float
 	connection_status: ConnectionStatusConfig
 	render_loop_limit: int
 	prerender_queue_timeout: float
@@ -276,6 +282,7 @@ class App:
 		cors: CORSOptions | None = None,
 		fastapi: FastAPIConfig | None = None,
 		session_timeout: float = 60.0,
+		shell_render_timeout: float = 30.0,
 		prerender_queue_timeout: float = 60.0,
 		disconnect_queue_timeout: float = 300.0,
 		connection_status: ConnectionStatusConfig | None = None,
@@ -338,7 +345,10 @@ class App:
 		self._tasks = TaskRegistry(name="app")
 		self._timers = TimerRegistry(tasks=self._tasks, name="app")
 		self._proxy = None
+		if shell_render_timeout < 0:
+			raise ValueError("shell_render_timeout must be >= 0")
 		self.session_timeout = session_timeout
+		self.shell_render_timeout = shell_render_timeout
 		self.prerender_queue_timeout = prerender_queue_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
 		self.connection_status = connection_status or ConnectionStatusConfig()
@@ -660,17 +670,22 @@ class App:
 			client_addr: str | None = get_client_address(request)
 			# Reuse render session from header (set by middleware) or create new one
 			render = PulseContext.get().render
+			if render is not None and self.render_sessions.get(render.id) is not render:
+				# The render was closed (e.g. its cleanup timer fired) between the
+				# HTTP middleware resolving it and this handler running. Mint a
+				# fresh one instead of prerendering on a dead render.
+				render = None
 			if render is not None:
 				render_id = render.id
+				# Hold the render alive while prerendering; rescheduled below once
+				# mount state is final.
+				self._cancel_render_cleanup(render_id)
 			else:
 				# Create new render session
 				render_id = new_sid()
 				render = self.create_render(
 					render_id, session, client_address=client_addr
 				)
-			# Schedule cleanup timeout (will cancel/reschedule on activity)
-			if not render.connected:
-				self._schedule_render_cleanup(render_id)
 
 			def _normalize_prerender_result(
 				captured: ServerInitMessage | ServerNavigateToMessage,
@@ -687,46 +702,53 @@ class App:
 				# Fallback: shouldn't happen, return not found to be safe
 				return NotFound()
 
-			with PulseContext.update(render=render):
-				# Call top-level prerender middleware, which wraps the route processing
-				async def _process_routes() -> PrerenderResponse:
-					result_data: Prerender = {
-						"views": {},
-						"directives": {
-							"headers": {"X-Pulse-Render-Id": render_id},
-							"query": {},
-							"socketio": {
-								"auth": {"render_id": render_id},
-								"headers": {},
+			try:
+				with PulseContext.update(render=render):
+					# Call top-level prerender middleware, which wraps the route processing
+					async def _process_routes() -> PrerenderResponse:
+						result_data: Prerender = {
+							"views": {},
+							"directives": {
+								"headers": {"X-Pulse-Render-Id": render_id},
 								"query": {},
+								"socketio": {
+									"auth": {"render_id": render_id},
+									"headers": {},
+									"query": {},
+								},
 							},
-						},
-					}
+						}
 
-					captured = render.prerender(paths, route_info)
+						captured = render.prerender(paths, route_info)
 
-					for p in paths:
-						res = _normalize_prerender_result(captured[p])
-						if isinstance(res, Ok):
-							# Aggregate results
-							result_data["views"][p] = res.payload
-						elif isinstance(res, Redirect):
-							# Return redirect immediately
-							return Redirect(path=res.path or "/")
-						elif isinstance(res, NotFound):
-							# Return not found immediately
-							return NotFound()
-						else:
-							raise ValueError("Unexpected prerender response:", res)
+						for p in paths:
+							res = _normalize_prerender_result(captured[p])
+							if isinstance(res, Ok):
+								# Aggregate results
+								result_data["views"][p] = res.payload
+							elif isinstance(res, Redirect):
+								# Return redirect immediately
+								return Redirect(path=res.path or "/")
+							elif isinstance(res, NotFound):
+								# Return not found immediately
+								return NotFound()
+							else:
+								raise ValueError("Unexpected prerender response:", res)
 
-					return Ok(result_data)
+						return Ok(result_data)
 
-				result = await self.middleware.prerender(
-					payload=payload,
-					request=PulseRequest.from_fastapi(request),
-					session=session.data,
-					next=_process_routes,
-				)
+					result = await self.middleware.prerender(
+						payload=payload,
+						request=PulseRequest.from_fastapi(request),
+						session=session.data,
+						next=_process_routes,
+					)
+			finally:
+				# (Re)schedule cleanup now that mount state is final, so a shell
+				# that stayed mount-less gets the short TTL and a shell-turned-real
+				# gets the full session_timeout.
+				if not render.connected:
+					self._schedule_render_cleanup(render_id)
 
 			# Handle redirect/notFound responses
 			if isinstance(result, Redirect):
@@ -838,8 +860,16 @@ class App:
 			render = self.render_sessions.get(rid)
 			created_render = render is None
 			if render is None:
+				# The client will try to attach to a non-existing RouteMount, which will cause a reload down the line.
+				# Mark it as a shell so it's reaped on the short shell TTL rather
+				# than held for the full session_timeout reconnect window: it has
+				# no mounts and the client reloads with a fresh render id, so it
+				# can never become a reconnectable session.
 				render = self.create_render(
-					rid, session, client_address=get_client_address_socketio(environ)
+					rid,
+					session,
+					client_address=get_client_address_socketio(environ),
+					shell=True,
 				)
 			else:
 				owner = self._render_to_user.get(render.id)
@@ -978,7 +1008,15 @@ class App:
 			self._timers.discard(cleanup_handle)
 
 	def _schedule_render_cleanup(self, rid: str):
-		"""Schedule cleanup of a RenderSession after the configured timeout."""
+		"""Schedule cleanup of a RenderSession after the configured timeout.
+
+		A mount-less shell render (minted on stale-render-id reconnect, only
+		ever told the client to reload) can never reconnect usefully, so it is
+		reaped on the short shell_render_timeout instead of being held for the
+		full session_timeout grace window. The decision is made here, from the
+		render's current mount state, so every scheduling path (disconnect,
+		failed connect, prerender) picks the right timeout.
+		"""
 		render = self.render_sessions.get(rid)
 		if render is None:
 			return
@@ -989,6 +1027,8 @@ class App:
 		# Cancel any existing cleanup task for this render session
 		self._cancel_render_cleanup(rid)
 
+		delay = self.shell_render_timeout if render.is_shell else self.session_timeout
+
 		# Schedule new cleanup task
 		def _cleanup():
 			render = self.render_sessions.get(rid)
@@ -996,12 +1036,10 @@ class App:
 				return
 			# Only cleanup if not connected (if connected, keep it alive)
 			if not render.connected:
-				logger.info(
-					f"RenderSession {rid} expired after {self.session_timeout}s timeout"
-				)
+				logger.info(f"RenderSession {rid} expired after {delay}s timeout")
 				self.close_render(rid)
 
-		handle = self._timers.later(self.session_timeout, _cleanup)
+		handle = self._timers.later(delay, _cleanup)
 		self._render_cleanups[rid] = handle
 
 	async def _handle_socket_message(self, sid: str, data: Serialized) -> None:
@@ -1239,7 +1277,12 @@ class App:
 		return render
 
 	def create_render(
-		self, rid: str, session: UserSession, *, client_address: str | None = None
+		self,
+		rid: str,
+		session: UserSession,
+		*,
+		client_address: str | None = None,
+		shell: bool = False,
 	):
 		if rid in self.render_sessions:
 			raise ValueError(f"RenderSession {rid} already exists")
@@ -1248,6 +1291,7 @@ class App:
 			self.routes,
 			server_address=self.server_address,
 			client_address=client_address,
+			created_as_shell=shell,
 			prerender_queue_timeout=self.prerender_queue_timeout,
 			# Development React StrictMode replays PulseView effects as
 			# attach -> detach -> attach on first mount. Production should keep the

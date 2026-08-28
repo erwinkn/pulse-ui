@@ -37,6 +37,7 @@ app = ps.App(
 | `cors` | `CORSOptions` | Auto | CORS configuration |
 | `fastapi` | `FastAPIConfig` | `None` | Generated FastAPI docs and OpenAPI configuration |
 | `session_timeout` | `float` | `60.0` | How long a disconnected render session stays resumable before being closed (seconds) |
+| `serializer` | `Serializer` | `None` | Serializer used for client messages and render sessions |
 
 FastAPI's generated reference defaults to `/_pulse/docs` and
 `/_pulse/openapi.json`; ReDoc is disabled. Configure different URLs or enable

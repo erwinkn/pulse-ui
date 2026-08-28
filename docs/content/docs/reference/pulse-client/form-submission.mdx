@@ -1,0 +1,34 @@
+---
+title: "Form submission"
+description: "Submit a browser form through Pulse"
+---
+
+`submitForm` submits a form with `fetch`. `PulseForm` uses it internally.
+
+```ts
+import { submitForm } from "pulse-ui-client";
+
+await submitForm({
+  event,
+  action: "/api/submit",
+  formData: new FormData(event.currentTarget),
+});
+```
+
+```ts
+interface SubmitFormOptions {
+  event: FormEvent<HTMLFormElement>;
+  action: string;
+  onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
+  formData?: FormData;
+  force?: boolean;
+}
+```
+
+`force` submits even when the event is already default-prevented. The promise
+rejects with `FormSubmissionError` when the endpoint returns a non-2xx response.
+
+## See also
+
+- [Client components](/docs/reference/pulse-client/components)
+- [File uploads](/docs/cookbook/forms/forms-upload)

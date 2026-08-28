@@ -69,6 +69,8 @@ Register a handler for an incoming event.
 
 **Returns:** Callable that removes the handler when invoked.
 
+Calls without a payload pass `None` to the handler.
+
 **Raises:** `ChannelClosed` if channel is closed.
 
 ```python
@@ -90,7 +92,7 @@ Send a fire-and-forget event to the client.
 
 **Parameters:**
 - `event` - Event name.
-- `payload` - Data to send (optional).
+- `payload` - Data to send. Defaults to `None`, which sends JSON `null`.
 
 **Raises:** `ChannelClosed` if channel is closed.
 
@@ -114,10 +116,13 @@ Send a request to the client and await the response.
 
 **Parameters:**
 - `event` - Event name.
-- `payload` - Data to send (optional).
+- `payload` - Data to send. Defaults to `None`, which sends JSON `null`.
 - `timeout` - Timeout in seconds (optional).
 
 **Returns:** Response payload from client.
+
+Handlers that do not return a value respond with JSON `null`, which arrives as
+`None` in Python and `null` in JavaScript.
 
 **Raises:**
 - `ChannelClosed` if channel is closed.

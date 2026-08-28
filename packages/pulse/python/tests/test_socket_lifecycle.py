@@ -106,6 +106,28 @@ async def test_stale_socket_disconnect_does_not_clobber_live_connection(
 
 
 @pytest.mark.asyncio
+async def test_malformed_socket_message_is_dropped_without_raising(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	app = make_app(monkeypatch)
+	environ = make_environ(app, "user-1")
+	auth = {"render_id": "render-1"}
+	connect = connect_handler(app)
+
+	await connect("socket-a", environ, auth)
+	render = app.render_sessions["render-1"]
+	assert render.connected
+
+	# Not a valid v5 envelope; the strict decoder raises, but the socket
+	# handler must swallow it instead of raising into socket.io.
+	await app._handle_socket_message("socket-a", {"type": "attach"})  # pyright: ignore[reportPrivateUsage]
+	await app._handle_socket_message("socket-a", [4, {"type": "attach"}])  # pyright: ignore[reportPrivateUsage]
+
+	assert render.connected
+	await app.close()
+
+
+@pytest.mark.asyncio
 async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 	monkeypatch: pytest.MonkeyPatch,
 ):

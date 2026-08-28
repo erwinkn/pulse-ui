@@ -10,6 +10,8 @@ from pulse.channel import Channel
 from pulse.context import PulseContext
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
 from pulse.messages import (
+	ClientJsResultErrorMessage,
+	ClientJsResultSuccessMessage,
 	ServerApiCallMessage,
 	ServerErrorPhase,
 	ServerInitMessage,
@@ -36,6 +38,7 @@ from pulse.scheduling import (
 	TimerRegistry,
 	create_future,
 )
+from pulse.serializer import Serializer
 from pulse.state.query_param import QueryParamSync
 from pulse.state.state import State
 from pulse.transpiler.id import next_id
@@ -263,6 +266,7 @@ class RenderSession:
 	routes: RouteTree
 	channels: "ChannelsManager"
 	forms: "FormRegistry"
+	serializer: Serializer
 	query_store: QueryStore
 	route_mounts: dict[str, RouteMount]
 	url: SessionUrl
@@ -295,12 +299,14 @@ class RenderSession:
 		dev_strict_mode_detach_timeout: float = 0.0,
 		disconnect_queue_timeout: float = 300.0,
 		render_loop_limit: int = 50,
+		serializer: Serializer | None = None,
 	) -> None:
 		from pulse.channel import ChannelsManager
 		from pulse.forms import FormRegistry
 
 		self.id = id
 		self.routes = routes
+		self.serializer = serializer if serializer is not None else Serializer()
 		self.route_mounts = {}
 		self.url = cast(
 			SessionUrl,
@@ -999,17 +1005,15 @@ class RenderSession:
 
 		return None
 
-	def handle_js_result(self, data: dict[str, Any]) -> None:
+	def handle_js_result(
+		self, data: ClientJsResultSuccessMessage | ClientJsResultErrorMessage
+	) -> None:
 		"""Handle js_result message from client."""
-		exec_id = data.get("id")
-		if exec_id is None:
-			return
-		exec_id = str(exec_id)
+		exec_id = data["id"]
 		fut = self._pending_js_results.pop(exec_id, None)
 		if fut is None or fut.done():
 			return
-		error = data.get("error")
-		if error is not None:
-			fut.set_exception(JsExecError(error))
+		if data["ok"] is False:
+			fut.set_exception(JsExecError(data["error"]))
 		else:
-			fut.set_result(data.get("result"))
+			fut.set_result(data["result"])

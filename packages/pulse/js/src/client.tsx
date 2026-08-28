@@ -258,7 +258,7 @@ export class PulseSocketIOClient {
 			// Wrap in an arrow function to avoid losing the `this` reference
 			socket.on("message", (data) => {
 				if (this.#socket !== socket) return;
-				this.#handleServerMessage(deserialize(data, { coerceNullsToUndefined: true }));
+				this.#handleServerMessage(deserialize(data) as ServerMessage);
 			});
 		});
 	}
@@ -443,7 +443,9 @@ export class PulseSocketIOClient {
 				this.#handleAttachAck(message.path, message.attachId);
 				break;
 			}
-			case "channel_message": {
+			case "channel_event":
+			case "channel_request":
+			case "channel_response": {
 				this.#routeChannelMessage(message);
 				break;
 			}
@@ -501,11 +503,21 @@ export class PulseSocketIOClient {
 
 	public invokeCallback(path: string, callback: string, args: any[]) {
 		if (!this.#activeViews.has(path)) return;
+		let extracted: any[];
+		try {
+			extracted = args.map(extractEvent);
+			// Validate serializability now: a bad argument must degrade one
+			// callback, not throw inside React's event dispatch.
+			serialize(extracted);
+		} catch (err) {
+			console.error(`Failed to extract arguments for callback '${callback}'`, err);
+			return;
+		}
 		const message: ClientCallbackMessage = {
 			type: "callback",
 			path,
 			callback,
-			args: args.map(extractEvent),
+			args: extracted,
 		};
 		if (this.#isAttachAcked(path)) {
 			this.sendMessage(message);
@@ -519,23 +531,21 @@ export class PulseSocketIOClient {
 		if (!view) {
 			// View unmounted before the message arrived - send result back to unblock
 			// the server-side future (which is likely already cancelled anyway).
-			this.#sendJsResult(message.id, undefined, null);
+			this.#sendJsResult(message.id, undefined);
 			return;
 		}
 		view.onJsExec(message);
 	}
 
-	public sendJsResult(id: string, result: any, error: string | null) {
+	public sendJsResult(id: string, result: any, error?: string) {
 		this.#sendJsResult(id, result, error);
 	}
 
-	#sendJsResult(id: string, result: any, error: string | null) {
-		const msg: ClientJsResultMessage = {
-			type: "js_result",
-			id,
-			result,
-			error,
-		};
+	#sendJsResult(id: string, result: any, error?: string) {
+		const msg: ClientJsResultMessage =
+			error !== undefined
+				? { type: "js_result", id, ok: false, error }
+				: { type: "js_result", id, ok: true, result: result === undefined ? null : result };
 		this.sendMessage(msg);
 	}
 
@@ -554,7 +564,7 @@ export class PulseSocketIOClient {
 		if (entry.refCount === 0) {
 			entry.bridge.dispose(new PulseChannelResetError("Channel released"));
 			this.sendMessage({
-				type: "channel_message",
+				type: "channel_event",
 				channel: id,
 				event: "__close__",
 				payload: { reason: "refcount_zero" },
@@ -589,7 +599,7 @@ export class PulseSocketIOClient {
 	#handleTransportDisconnect(): void {
 		this.#ackedAttachIds.clear();
 		for (const entry of this.#channels.values()) {
-			entry.bridge.handleDisconnect(new PulseChannelResetError("Connection lost"));
+			entry.bridge.resetForReconnect(new PulseChannelResetError("Connection lost"));
 		}
 	}
 

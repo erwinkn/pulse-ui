@@ -24,14 +24,14 @@ ServerErrorPhase = Literal[
 ]
 
 
-class ServerErrorInfo(TypedDict, total=False):
+class ServerErrorInfo(TypedDict):
 	# High-level human message
 	message: str
 	# Full stack trace string (server formatted)
 	stack: str
 	# Which phase failed
 	phase: ServerErrorPhase
-	# Optional extra details (callback key, etc.)
+	# Extra details (callback key, etc.)
 	details: dict[str, Any]
 
 
@@ -74,22 +74,35 @@ class ServerApiCallMessage(TypedDict):
 	credentials: Literal["include", "omit"]
 
 
-class ServerChannelRequestMessage(TypedDict):
-	type: Literal["channel_message"]
+class ServerChannelEventMessage(TypedDict):
+	type: Literal["channel_event"]
 	channel: str
 	event: str
 	payload: Any
-	requestId: NotRequired[str]
-	error: NotRequired[Any]
 
 
-class ServerChannelResponseMessage(TypedDict):
-	type: Literal["channel_message"]
+class ServerChannelRequestMessage(TypedDict):
+	type: Literal["channel_request"]
 	channel: str
-	event: None
-	responseTo: str
+	event: str
+	requestId: str
 	payload: Any
-	error: NotRequired[Any]
+
+
+class ServerChannelResponseSuccessMessage(TypedDict):
+	type: Literal["channel_response"]
+	channel: str
+	responseTo: str
+	ok: Literal[True]
+	payload: Any
+
+
+class ServerChannelResponseErrorMessage(TypedDict):
+	type: Literal["channel_response"]
+	channel: str
+	responseTo: str
+	ok: Literal[False]
+	error: str
 
 
 class ServerJsExecMessage(TypedDict):
@@ -115,7 +128,7 @@ class ClientAttachMessage(TypedDict):
 	type: Literal["attach"]
 	path: str
 	routeInfo: RouteInfo
-	attachId: NotRequired[str]
+	attachId: str
 
 
 class ClientUpdateMessage(TypedDict):
@@ -138,34 +151,63 @@ class ClientApiResultMessage(TypedDict):
 	body: Any | None
 
 
-class ClientChannelRequestMessage(TypedDict):
-	type: Literal["channel_message"]
+class ClientChannelEventMessage(TypedDict):
+	type: Literal["channel_event"]
 	channel: str
 	event: str
 	payload: Any
-	requestId: NotRequired[str]
-	error: NotRequired[Any]
 
 
-class ClientChannelResponseMessage(TypedDict):
-	type: Literal["channel_message"]
+class ClientChannelRequestMessage(TypedDict):
+	type: Literal["channel_request"]
 	channel: str
-	event: None
-	responseTo: str
+	event: str
+	requestId: str
 	payload: Any
-	error: NotRequired[Any]
 
 
-class ClientJsResultMessage(TypedDict):
+class ClientChannelResponseSuccessMessage(TypedDict):
+	type: Literal["channel_response"]
+	channel: str
+	responseTo: str
+	ok: Literal[True]
+	payload: Any
+
+
+class ClientChannelResponseErrorMessage(TypedDict):
+	type: Literal["channel_response"]
+	channel: str
+	responseTo: str
+	ok: Literal[False]
+	error: str
+
+
+class ClientJsResultSuccessMessage(TypedDict):
 	"""Result of client-side JS execution."""
 
 	type: Literal["js_result"]
 	id: str
+	ok: Literal[True]
 	result: Any
-	error: str | None
 
 
-ServerChannelMessage = ServerChannelRequestMessage | ServerChannelResponseMessage
+class ClientJsResultErrorMessage(TypedDict):
+	"""Failure from client-side JS execution."""
+
+	type: Literal["js_result"]
+	id: str
+	ok: Literal[False]
+	error: str
+
+
+ServerChannelResponseMessage = (
+	ServerChannelResponseSuccessMessage | ServerChannelResponseErrorMessage
+)
+ServerChannelMessage = (
+	ServerChannelEventMessage
+	| ServerChannelRequestMessage
+	| ServerChannelResponseMessage
+)
 ServerMessage = (
 	ServerInitMessage
 	| ServerUpdateMessage
@@ -185,9 +227,14 @@ ClientPulseMessage = (
 	| ClientUpdateMessage
 	| ClientDetachMessage
 	| ClientApiResultMessage
-	| ClientJsResultMessage
+	| ClientJsResultSuccessMessage
+	| ClientJsResultErrorMessage
 )
-ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage
+ClientChannelResponseMessage = (
+	ClientChannelResponseSuccessMessage | ClientChannelResponseErrorMessage
+)
+ClientChannelIncomingMessage = ClientChannelEventMessage | ClientChannelRequestMessage
+ClientChannelMessage = ClientChannelIncomingMessage | ClientChannelResponseMessage
 ClientMessage = ClientPulseMessage | ClientChannelMessage
 
 

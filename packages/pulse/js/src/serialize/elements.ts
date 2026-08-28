@@ -310,12 +310,7 @@ const HTML_INPUT_KEYS = [
 	"willValidate",
 	"popoverTargetAction",
 ] as const satisfies readonly (keyof HTMLInputElement)[];
-const inputExtractor = withBase<HTMLInputElement>(HTML_INPUT_KEYS, {
-	valueAsNumber: (elt) => {
-		const value = elt.valueAsNumber;
-		return Number.isFinite(value) ? value : null;
-	},
-});
+const inputExtractor = withBase<HTMLInputElement>(HTML_INPUT_KEYS);
 
 const HTML_LABEL_KEYS = ["htmlFor"] as const satisfies readonly (keyof HTMLLabelElement)[];
 const labelExtractor = withBase<HTMLLabelElement>(HTML_LABEL_KEYS);
@@ -948,7 +943,9 @@ function extractHTMLElementByTagName(elt: HTMLElement): object {
 	if (extractor) {
 		return extractor(elt);
 	}
-	throw new Error(`Unexpected HTML element tag: ${tagName} (update .web/custom/serialize.ts)`);
+	// Custom elements / web components have no dedicated extractor; fall back
+	// to the shared HTMLElement projection instead of failing the callback.
+	return extractHTMLElementBase(elt);
 }
 
 function isSameRealmHTMLFormElement(elt: Element): elt is HTMLFormElement {

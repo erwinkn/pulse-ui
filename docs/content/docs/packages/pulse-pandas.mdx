@@ -1,0 +1,61 @@
+---
+title: "Pulse Pandas"
+icon: Table
+---
+
+`pulse-pandas` sends Pandas DataFrames to Pulse components as ordered columns
+and row arrays without adding Pandas to the core framework.
+
+## Installation
+
+```bash
+uv add pulse-pandas
+```
+
+## Configure the adapter
+
+```python
+import pandas as pd
+import pulse as ps
+from pulse_pandas import dataframe_adapter
+
+
+frame = pd.DataFrame(
+    {
+        "product": ["Keyboard", "Mouse"],
+        "revenue": [1200, 850],
+    }
+)
+
+serializer = ps.Serializer([dataframe_adapter])
+app = ps.App(serializer=serializer)
+
+data = serializer.deserialize(serializer.serialize(frame))
+```
+
+`data`—and any component prop containing the DataFrame—becomes:
+
+```json
+{
+  "columns": ["product", "revenue"],
+  "rows": [["Keyboard", 1200], ["Mouse", 850]]
+}
+```
+
+The index is intentionally omitted. The `columns` list preserves column order,
+and each inner `rows` array uses that same order. Row order is also preserved.
+Column names must be unique strings.
+
+`None`, `NaN`, `pd.NA`, and `NaT` become `null`. NumPy scalars become Python
+scalars before core serialization. Infinity is not missing and remains invalid.
+Dates follow Pulse's temporal convention: a calendar date becomes midnight UTC
+and arrives in the browser as a `Date`.
+
+`Series` and indexes are not serialized implicitly. Convert them explicitly or
+define another app-owned adapter.
+
+## See also
+
+- [Custom serialization](/docs/cookbook/advanced-patterns/custom-serialization)
+- [Serializer reference](/docs/reference/pulse/serializer)
+- [Pulse AG Grid](/docs/packages/pulse-ag-grid)

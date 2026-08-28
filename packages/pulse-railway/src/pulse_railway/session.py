@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import Mapping
 from typing import Any, cast, override
 
 import pulse as ps
-from pulse.serializer import Serialized, deserialize, serialize
+from pulse.user_session import decode_session_json, encode_session_json
 
 from pulse_railway.constants import PULSE_RAILWAY_REDIS_URL
 
@@ -14,6 +13,9 @@ try:
 	import redis.asyncio as redis
 except Exception:
 	redis = None
+
+
+_SESSION_VERSION = 1
 
 
 class RailwayRedisSessionStore(ps.SessionStore):
@@ -66,7 +68,7 @@ class RailwayRedisSessionStore(ps.SessionStore):
 		return values.get(PULSE_RAILWAY_REDIS_URL)
 
 	def _key(self, sid: str) -> str:
-		return f"{self.prefix}:{sid}"
+		return f"{self.prefix}:json-v{_SESSION_VERSION}:{sid}"
 
 	def _ensure_client(self) -> Any:
 		client = self.client
@@ -101,10 +103,18 @@ class RailwayRedisSessionStore(ps.SessionStore):
 		payload = await self._ensure_client().get(self._key(sid))
 		if payload is None:
 			return None
-		return cast(
-			dict[str, Any],
-			deserialize(cast(Serialized, json.loads(payload))),
-		)
+		envelope = decode_session_json(cast(str, payload))
+		if set(envelope) != {"$pulse", "version", "data"}:
+			raise ValueError("Malformed Railway session envelope")
+		if envelope["$pulse"] != "session":
+			raise ValueError("Unknown Railway session format")
+		version = envelope["version"]
+		if type(version) is not int or version != _SESSION_VERSION:
+			raise ValueError(f"Unsupported Railway session format version: {version!r}")
+		data = envelope["data"]
+		if type(data) is not dict:
+			raise TypeError("Railway session data must be an object")
+		return cast(dict[str, Any], data)
 
 	@override
 	async def create(self, sid: str) -> dict[str, Any]:
@@ -118,9 +128,12 @@ class RailwayRedisSessionStore(ps.SessionStore):
 
 	@override
 	async def save(self, sid: str, session: dict[str, Any]) -> None:
-		payload = json.dumps(
-			serialize(dict(session)),
-			separators=(",", ":"),
+		payload = encode_session_json(
+			{
+				"$pulse": "session",
+				"version": _SESSION_VERSION,
+				"data": dict(session),
+			}
 		)
 		await self._ensure_client().set(self._key(sid), payload)
 

@@ -203,7 +203,7 @@ def __init__(
 - `secret` - Signing secret. Uses `PULSE_SECRET` env var if not provided. Required in production.
 - `salt` - Salt for HMAC. Default: `"pulse.session"`.
 - `digestmod` - Hash algorithm. Default: `"sha256"`.
-- `max_cookie_bytes` - Maximum cookie size. Default: 3800.
+- `max_cookie_bytes` - Maximum cookie size. Encoding raises if this limit is exceeded. Default: 3800.
 
 **Environment Variables:**
 - `PULSE_SECRET` - Session signing secret (required in production)
@@ -217,6 +217,10 @@ store = ps.CookieSessionStore(secret="your-secret-key")
 
 app = ps.App(session_store=store)
 ```
+
+Session values must be JSON-compatible. Store dates and datetimes as ISO
+strings. Encoding invalid or oversized data raises without clearing the
+session.
 
 #### Methods
 

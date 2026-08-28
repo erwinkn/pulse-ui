@@ -1,0 +1,34 @@
+---
+title: "Route information"
+description: "Extract React Router loader context for Pulse prerendering"
+---
+
+`extractServerRouteInfo` converts React Router loader arguments into the route
+context expected by Pulse prerendering.
+
+```ts
+import { extractServerRouteInfo } from "pulse-ui-client";
+import type { LoaderFunctionArgs } from "react-router";
+
+export async function loader(args: LoaderFunctionArgs) {
+  const routeInfo = extractServerRouteInfo(args);
+  const prerender = await fetchPulsePrerender(routeInfo);
+  return { prerender };
+}
+```
+
+```ts
+interface RouteInfo {
+  pathname: string;
+  hash: string;
+  query: string;
+  queryParams: Record<string, string>;
+  pathParams: Record<string, string | undefined>;
+  catchall: string[];
+}
+```
+
+## See also
+
+- [Serialization](/docs/reference/pulse-client/serialization)
+- [Routing](/docs/reference/pulse/routing)

@@ -45,7 +45,6 @@ src/
 │
 └── serialize/          # Data serialization
     ├── serializer.ts   # Main serialize/deserialize
-    ├── clean.ts        # Data cleaning for wire transfer
     ├── elements.ts     # Element extraction from refs
     ├── events.ts       # Event serialization
     └── extractor.ts    # Data extraction utilities

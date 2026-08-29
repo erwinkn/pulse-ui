@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "bun:test";
 import { ChannelBridge, PulseChannelResetError } from "./channel";
 import { PulseSocketIOClient } from "./client";
 import type { ClientMessage } from "./messages";
-import { createPendingReplies } from "./replies";
+import { PendingReplies } from "./replies";
 
 function makeClient(channelId = "chan-1") {
 	const sent: ClientMessage[] = [];
@@ -11,7 +11,7 @@ function makeClient(channelId = "chan-1") {
 	});
 	const client = {
 		sendMessage,
-		replies: createPendingReplies(),
+		replies: new PendingReplies(),
 	};
 	const bridge = new ChannelBridge(client, channelId);
 	return { bridge, sent, sendMessage, client };
@@ -19,7 +19,7 @@ function makeClient(channelId = "chan-1") {
 
 describe("PendingReplies", () => {
 	it("mints unique ids and removes entries when they settle", async () => {
-		const replies = createPendingReplies();
+		const replies = new PendingReplies();
 		const resolved = replies.pending({ cancelKey: "resolved" });
 		const rejected = replies.pending();
 
@@ -40,7 +40,7 @@ describe("PendingReplies", () => {
 	});
 
 	it("rejects only entries in the matching cancellation group", async () => {
-		const replies = createPendingReplies();
+		const replies = new PendingReplies();
 		const firstChannel = replies.pending({ cancelKey: "chan-1" });
 		const secondChannel = replies.pending({ cancelKey: "chan-2" });
 		const error = new Error("channel closed");

@@ -32,7 +32,7 @@ except ChannelTimeout:
 ### JavaScript Execution Errors
 
 ```python
-from pulse import run_js
+from pulse import run_js, JsExecError
 
 @ps.javascript
 def risky_operation():
@@ -41,13 +41,15 @@ def risky_operation():
 async def handle_action():
     try:
         result = await run_js(risky_operation(), result=True)
-    except RuntimeError as e:
+    except JsExecError as e:
         print(f"JS error: {e}")
     except asyncio.TimeoutError:
         print("JS execution timed out")
 ```
 
-A `{type: "reply", error}` packet rejects the pending future with `RuntimeError`.
+**JsExecError** - Raised when client-side JS throws an exception.
+
+A `{type: "reply", error}` packet rejects the pending future with `JsExecError`.
 
 ### Transpiler Errors
 
@@ -263,7 +265,7 @@ When `run_js(..., result=True)` fails:
 async def action():
     try:
         result = await run_js(js_fn(), result=True, timeout=10.0)
-    except RuntimeError as e:
+    except JsExecError as e:
         # JS threw an error
         print(f"JS error: {e}")
     except asyncio.TimeoutError:

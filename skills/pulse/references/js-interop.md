@@ -408,7 +408,7 @@ Chart = ps.Import("LineChart", "recharts@^2.0.0")
 Execute JavaScript on the client from server callbacks:
 
 ```python
-from pulse import run_js
+from pulse import run_js, JsExecError
 from pulse.transpiler import javascript
 
 @javascript
@@ -462,7 +462,7 @@ def risky_operation():
 async def handle_action():
     try:
         result = await run_js(risky_operation(), result=True)
-    except RuntimeError as e:
+    except JsExecError as e:
         print(f"JS error: {e}")
 ```
 

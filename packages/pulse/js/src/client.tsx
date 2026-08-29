@@ -12,7 +12,7 @@ import type {
 	ServerJsExecMessage,
 	ServerMessage,
 } from "./messages";
-import { createPendingReplies, createRandomId } from "./replies";
+import { PendingReplies, createRandomId } from "./replies";
 import type { PulsePrerenderView } from "./pulse";
 import { extractEvent } from "./serialize/events";
 import { deserialize, serialize } from "./serialize/serializer";
@@ -81,7 +81,7 @@ export class PulseSocketIOClient {
 	#messageQueue: ClientMessage[];
 	#connectionListeners: Set<ConnectionStatusListener> = new Set();
 	#channels: Map<string, { bridge: ChannelBridge; refCount: number }> = new Map();
-	readonly replies = createPendingReplies();
+	readonly replies = new PendingReplies();
 	#url: string;
 	#frameworkNavigate: NavigateFunction;
 	#directives: Directives;

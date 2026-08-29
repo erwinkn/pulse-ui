@@ -4,7 +4,7 @@ import traceback
 import uuid
 from asyncio import iscoroutine
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, TypeVar, cast
 
 from pulse.channel import Channel
 from pulse.context import PulseContext
@@ -67,21 +67,21 @@ class RenderLoopError(RuntimeError):
 		self.batch_id = batch_id
 
 
-# Module-level convenience wrapper
-@overload
-def run_js(expr: Any, *, result: Literal[True]) -> asyncio.Future[Any]: ...
-
-
-@overload
-def run_js(expr: Any, *, result: Literal[False] = ...) -> None: ...
-
-
-def run_js(expr: Any, *, result: bool = False) -> asyncio.Future[Any] | None:
+# Module-level convenience wrappers
+def run_js(expr: Any) -> None:
 	"""Execute JavaScript on the client. Convenience wrapper for RenderSession.run_js()."""
 	ctx = PulseContext.get()
 	if ctx.render is None:
 		raise RuntimeError("run_js() can only be called during callback execution")
-	return ctx.render.run_js(expr, result=result)
+	return ctx.render.run_js(expr)
+
+
+async def eval_js(expr: Any, *, timeout: float = 10.0) -> Any:
+	"""Execute JavaScript and await its result on the client."""
+	ctx = PulseContext.get()
+	if ctx.render is None:
+		raise RuntimeError("eval_js() can only be called during callback execution")
+	return await ctx.render.eval_js(expr, timeout=timeout)
 
 
 MountState = Literal["pending", "active", "suspended", "closed"]
@@ -864,60 +864,31 @@ class RenderSession:
 				)
 			api_path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
 			url = f"{base}{api_path}"
-		corr_id = uuid.uuid4().hex
-		fut = self.replies.register(corr_id)
 		headers = headers or {}
 		headers["x-pulse-render-id"] = self.id
-		self.send(
-			ServerApiCallMessage(
-				type="api_call",
-				id=corr_id,
-				url=url,
-				method=method,
-				headers=headers,
-				body=body,
-				credentials="include" if credentials == "include" else "omit",
+		with self.replies.pending() as reply:
+			self.send(
+				ServerApiCallMessage(
+					type="api_call",
+					id=reply.id,
+					url=url,
+					method=method,
+					headers=headers,
+					body=body,
+					credentials="include" if credentials == "include" else "omit",
+				)
 			)
-		)
-		try:
-			result = await asyncio.wait_for(fut, timeout=timeout)
-		except asyncio.TimeoutError:
-			self.replies.discard(corr_id)
-			raise
-		return result
+			return await asyncio.wait_for(reply.future, timeout=timeout)
 
 	# ---- JS Execution ----
 
-	@overload
-	def run_js(
-		self, expr: Any, *, result: Literal[True], timeout: float = ...
-	) -> asyncio.Future[object]: ...
-
-	@overload
-	def run_js(
-		self,
-		expr: Any,
-		*,
-		result: Literal[False] = ...,
-		timeout: float = ...,
-	) -> None: ...
-
-	def run_js(
-		self, expr: Any, *, result: bool = False, timeout: float = 10.0
-	) -> asyncio.Future[object] | None:
-		"""Execute JavaScript on the client.
+	def run_js(self, expr: Any) -> None:
+		"""Execute JavaScript on the client without awaiting a result.
 
 		Args:
 			expr: An Expr from calling a @javascript function.
-			result: If True, returns a Future that resolves with the JS return value.
-							If False (default), returns None (fire-and-forget).
-			timeout: Maximum seconds to wait for result (default 10s, only applies when
-							 result=True). Future raises asyncio.TimeoutError if exceeded.
 
-		Returns:
-			None if result=False, otherwise a Future resolving to the JS result.
-
-		Example - Fire and forget:
+		Example:
 			@javascript
 			def focus_element(selector: str):
 				document.querySelector(selector).focus()
@@ -925,15 +896,6 @@ class RenderSession:
 			def on_save():
 				save_data()
 				run_js(focus_element("#next-input"))
-
-		Example - Await result:
-			@javascript
-			def get_scroll_position():
-				return {"x": window.scrollX, "y": window.scrollY}
-
-			async def on_click():
-				pos = await run_js(get_scroll_position(), result=True)
-				print(pos["x"], pos["y"])
 		"""
 		if not isinstance(expr, Expr):
 			raise TypeError(
@@ -941,40 +903,45 @@ class RenderSession:
 			)
 
 		ctx = PulseContext.get()
-		exec_id = uuid.uuid4().hex
 
 		# Get route pattern path (e.g., "/users/:id") not pathname (e.g., "/users/123")
 		# This must match the path used to key views on the client side
 		path = ctx.route.pulse_route.unique_path() if ctx.route else "/"
 
-		msg = ServerJsExecMessage(
-			type="js_exec",
-			path=path,
-			id=exec_id,
-			expr=expr.render(),
+		self.send(
+			ServerJsExecMessage(
+				type="js_exec",
+				path=path,
+				id=uuid.uuid4().hex,
+				expr=expr.render(),
+			)
 		)
-		if not result:
-			self.send(msg)
-			return None
 
-		future = self.replies.register(exec_id, error=JsExecError)
+	async def eval_js(self, expr: Any, *, timeout: float = 10.0) -> Any:
+		"""Execute JavaScript on the client and await its result.
 
-		def _on_timeout() -> None:
-			self.replies.reject(exec_id, asyncio.TimeoutError())
+		Args:
+			expr: An Expr from calling a @javascript function.
+			timeout: Maximum seconds to wait for the result.
+		"""
+		if not isinstance(expr, Expr):
+			raise TypeError(
+				f"eval_js() requires an Expr (from @javascript function or pulse.js module), got {type(expr).__name__}"
+			)
 
-		handle = self._timers.later(timeout, _on_timeout)
+		ctx = PulseContext.get()
 
-		def _cancel_timeout(_: asyncio.Future[object]) -> None:
-			handle.cancel()
-			self._timers.discard(handle)
-			self.replies.discard(exec_id)
+		# Get route pattern path (e.g., "/users/:id") not pathname (e.g., "/users/123")
+		# This must match the path used to key views on the client side
+		path = ctx.route.pulse_route.unique_path() if ctx.route else "/"
 
-		future.add_done_callback(_cancel_timeout)
-		try:
-			self.send(msg)
-		except Exception:
-			handle.cancel()
-			self._timers.discard(handle)
-			self.replies.discard(exec_id)
-			raise
-		return future
+		with self.replies.pending(error=JsExecError) as reply:
+			self.send(
+				ServerJsExecMessage(
+					type="js_exec",
+					path=path,
+					id=reply.id,
+					expr=expr.render(),
+				)
+			)
+			return await asyncio.wait_for(reply.future, timeout=timeout)

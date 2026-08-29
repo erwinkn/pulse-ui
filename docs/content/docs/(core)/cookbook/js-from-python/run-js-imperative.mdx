@@ -50,7 +50,7 @@ def MyForm():
 
 ## Getting values from the browser
 
-Use `result=True` to await a value from JavaScript:
+Use `eval_js` to await a value from JavaScript:
 
 ```python
 @ps.javascript
@@ -74,12 +74,12 @@ class TrackerState(ps.State):
     selection: str = ""
 
     async def check_scroll(self):
-        pos = await ps.run_js(get_scroll_position(), result=True)
+        pos = await ps.eval_js(get_scroll_position())
         self.scroll_x = pos["x"]
         self.scroll_y = pos["y"]
 
     async def capture_selection(self):
-        self.selection = await ps.run_js(get_selected_text(), result=True)
+        self.selection = await ps.eval_js(get_selected_text())
 ```
 
 ## Available browser APIs
@@ -113,7 +113,7 @@ class ShareState(ps.State):
     copied: bool = False
 
     async def copy_link(self, url: str):
-        await ps.run_js(copy_to_clipboard(url), result=True)
+        await ps.eval_js(copy_to_clipboard(url))
         self.copied = True
 ```
 
@@ -137,7 +137,7 @@ class PreferencesState(ps.State):
     theme: str = "light"
 
     async def load_theme(self):
-        stored = await ps.run_js(load_from_storage("theme"), result=True)
+        stored = await ps.eval_js(load_from_storage("theme"))
         if stored:
             self.theme = stored
 
@@ -155,7 +155,7 @@ from pulse import JsExecError
 
 async def safe_js_call():
     try:
-        result = await ps.run_js(some_js_function(), result=True)
+        result = await ps.eval_js(some_js_function())
     except JsExecError as e:
         print(f"JavaScript error: {e}")
 ```

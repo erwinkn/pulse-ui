@@ -32,7 +32,7 @@ except ChannelTimeout:
 ### JavaScript Execution Errors
 
 ```python
-from pulse import run_js, JsExecError
+from pulse import JsExecError, eval_js
 
 @ps.javascript
 def risky_operation():
@@ -40,7 +40,7 @@ def risky_operation():
 
 async def handle_action():
     try:
-        result = await run_js(risky_operation(), result=True)
+        result = await eval_js(risky_operation())
     except JsExecError as e:
         print(f"JS error: {e}")
     except asyncio.TimeoutError:
@@ -49,7 +49,7 @@ async def handle_action():
 
 **JsExecError** - Raised when client-side JS throws an exception.
 
-A `{type: "reply", error}` packet rejects the pending future with `JsExecError`.
+A `{type: "reply", error}` packet rejects the pending `eval_js()` call with `JsExecError`.
 
 ### Transpiler Errors
 
@@ -259,12 +259,12 @@ WebSocket disconnection is handled automatically:
 
 ### JS Execution Errors
 
-When `run_js(..., result=True)` fails:
+When `eval_js()` fails:
 
 ```python
 async def action():
     try:
-        result = await run_js(js_fn(), result=True, timeout=10.0)
+        result = await eval_js(js_fn(), timeout=10.0)
     except JsExecError as e:
         # JS threw an error
         print(f"JS error: {e}")

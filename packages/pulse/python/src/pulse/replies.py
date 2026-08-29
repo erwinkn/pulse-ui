@@ -1,6 +1,6 @@
 """Single request/reply primitive for server-initiated exchanges.
 
-`call_api`, `run_js`, and `Channel.request` all follow the same protocol:
+`call_api`, `eval_js`, and `Channel.request` all follow the same protocol:
 mint a correlation id, park a future here, send a typed command to the
 client, and await the future. The matching `{type: "reply", id}` packet
 resolves it synchronously — no middleware, no awaits between packet and
@@ -12,6 +12,9 @@ can race a timeout or a channel close, and the loser must be a no-op.
 """
 
 import asyncio
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,6 +26,12 @@ class _Pending:
 	future: asyncio.Future[Any]
 	cancel_key: str | None
 	error: type[BaseException]
+
+
+@dataclass(slots=True)
+class _PendingHandle:
+	id: str
+	future: asyncio.Future[Any]
 
 
 class PendingReplies:
@@ -39,23 +48,25 @@ class PendingReplies:
 	def __contains__(self, reply_id: str) -> bool:
 		return reply_id in self._pending
 
-	def register(
+	@contextmanager
+	def pending(
 		self,
-		reply_id: str,
 		*,
 		cancel_key: str | None = None,
 		error: type[BaseException] = RuntimeError,
-	) -> asyncio.Future[Any]:
-		"""Create and park a future until the client reply for `reply_id` arrives.
+	) -> Iterator[_PendingHandle]:
+		"""Create and park a future until the client reply arrives.
 
 		`cancel_key` groups requests that die together (e.g. all inflight
 		requests of one channel), failed via `reject_where`.
 		"""
-		if reply_id in self._pending:
-			raise ValueError(f"Duplicate pending reply id {reply_id!r}")
+		reply_id = uuid.uuid4().hex
 		future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
 		self._pending[reply_id] = _Pending(future, cancel_key, error)
-		return future
+		try:
+			yield _PendingHandle(reply_id, future)
+		finally:
+			self._pending.pop(reply_id, None)
 
 	def apply(self, message: ReplyMessage) -> None:
 		"""Resolve or reject from a `reply` packet. Missing ids are no-ops."""

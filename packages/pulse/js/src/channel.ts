@@ -12,7 +12,7 @@ export class PulseChannelResetError extends Error {
 export type ChannelEventHandler = (payload: any) => any | Promise<any>;
 
 export interface ChannelHost {
-	sendMessage(message: ClientMessage): void | Promise<void>;
+	sendMessage(message: ClientMessage): void;
 	replies: {
 		register(id: string): Promise<any>;
 		reject(id: string, error: unknown): void;
@@ -61,17 +61,21 @@ export class ChannelBridge {
 		this.ensureOpen();
 		const requestId = createRandomId();
 		this.pendingIds.add(requestId);
-		const pending = this.client.replies.register(requestId);
-		this.client.sendMessage({
-			type: "channel_message",
-			channel: this.id,
-			event,
-			payload,
-			requestId,
-		});
-		return pending.finally(() => {
+		const pending = this.client.replies.register(requestId).finally(() => {
 			this.pendingIds.delete(requestId);
 		});
+		try {
+			this.client.sendMessage({
+				type: "channel_message",
+				channel: this.id,
+				event,
+				payload,
+				requestId,
+			});
+		} catch (err) {
+			this.client.replies.reject(requestId, err);
+		}
+		return pending;
 	}
 
 	on(event: string, handler: ChannelEventHandler): () => void {

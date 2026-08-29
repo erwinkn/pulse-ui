@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ClientMessage, ReplyMessage, ServerChannelRequestMessage } from "./messages";
 import { usePulseClient } from "./pulse";
+import type { PendingReply } from "./replies";
 
 export class PulseChannelResetError extends Error {
 	constructor(message: string) {
@@ -14,16 +15,10 @@ export type ChannelEventHandler = (payload: any) => any | Promise<any>;
 export interface ChannelHost {
 	sendMessage(message: ClientMessage): void;
 	replies: {
-		register(id: string): Promise<any>;
+		pending(options?: { cancelKey?: string }): PendingReply;
 		reject(id: string, error: unknown): void;
+		rejectWhere(cancelKey: string, error: unknown): void;
 	};
-}
-
-export function createRandomId(): string {
-	if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-		return crypto.randomUUID().replace(/-/g, "");
-	}
-	return Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
 }
 
 function formatError(error: unknown): string {
@@ -38,7 +33,6 @@ function formatError(error: unknown): string {
 
 export class ChannelBridge {
 	private handlers = new Map<string, Set<ChannelEventHandler>>();
-	private pendingIds = new Set<string>();
 	private backlog: ServerChannelRequestMessage[] = [];
 	private closed = false;
 
@@ -59,23 +53,19 @@ export class ChannelBridge {
 
 	request(event: string, payload?: any): Promise<any> {
 		this.ensureOpen();
-		const requestId = createRandomId();
-		this.pendingIds.add(requestId);
-		const pending = this.client.replies.register(requestId).finally(() => {
-			this.pendingIds.delete(requestId);
-		});
+		const pending = this.client.replies.pending({ cancelKey: this.id });
 		try {
 			this.client.sendMessage({
 				type: "channel_message",
 				channel: this.id,
 				event,
 				payload,
-				requestId,
+				requestId: pending.id,
 			});
 		} catch (err) {
-			this.client.replies.reject(requestId, err);
+			this.client.replies.reject(pending.id, err);
 		}
-		return pending;
+		return pending.promise;
 	}
 
 	on(event: string, handler: ChannelEventHandler): () => void {
@@ -197,10 +187,7 @@ export class ChannelBridge {
 			return;
 		}
 		this.closed = true;
-		for (const id of this.pendingIds) {
-			this.client.replies.reject(id, reason);
-		}
-		this.pendingIds.clear();
+		this.client.replies.rejectWhere(this.id, reason);
 		this.handlers.clear();
 		this.backlog = [];
 	}

@@ -1256,7 +1256,7 @@ async def test_call_api_success_before_timeout():
 
 @pytest.mark.asyncio
 async def test_run_js_timeout():
-	"""Test that run_js future raises TimeoutError when no response arrives."""
+	"""Test that eval_js raises TimeoutError when no response arrives."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
 
@@ -1267,17 +1267,12 @@ async def test_run_js_timeout():
 		session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
-	# Run JS with result=True and short timeout
 	with ps.PulseContext.update(render=session, route=session.route_mounts["/a"].route):
-		future = session.run_js(get_answer(), result=True, timeout=0.05)
+		task = asyncio.create_task(session.eval_js(get_answer(), timeout=0.05))
 
-	assert future is not None
-
-	# Wait for timeout
 	with pytest.raises(asyncio.TimeoutError):
-		await future
+		await task
 
-	# Verify the pending JS result was cleaned up
 	assert len(session.replies) == 0
 
 	session.close()
@@ -1285,7 +1280,7 @@ async def test_run_js_timeout():
 
 @pytest.mark.asyncio
 async def test_run_js_cancellation_discards_pending_reply():
-	"""Cancelling run_js must remove its pending reply registration."""
+	"""Cancelling eval_js must remove its pending reply registration."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
 
@@ -1297,16 +1292,17 @@ async def test_run_js_cancellation_discards_pending_reply():
 		session.attach("/a", make_route_info("/a"))
 
 	with ps.PulseContext.update(render=session, route=session.route_mounts["/a"].route):
-		future = session.run_js(get_answer(), result=True, timeout=60.0)
+		task = asyncio.create_task(session.eval_js(get_answer(), timeout=60.0))
 
-	assert future is not None
-	exec_id = cast(Any, [m for m in messages if m.get("type") == "js_exec"][0])["id"]
+	await wait_for(lambda: len(messages) == 1)
+	exec_id = cast(Any, messages[0])["id"]
 	assert exec_id in session.replies
 
-	future.cancel()
-	await asyncio.sleep(0)
+	task.cancel()
+	with pytest.raises(asyncio.CancelledError):
+		await task
 
-	assert exec_id not in session.replies
+	assert len(session.replies) == 0
 	session.close()
 
 
@@ -1328,17 +1324,13 @@ async def test_run_js_registers_before_send():
 		session.attach("/a", make_route_info("/a"))
 
 	with ps.PulseContext.update(render=session, route=session.route_mounts["/a"].route):
-		future = session.run_js(get_answer(), result=True, timeout=1.0)
-
-	assert future is not None
-	assert future.done()
-	assert future.result() == 99
+		assert await session.eval_js(get_answer(), timeout=1.0) == 99
 	session.close()
 
 
 @pytest.mark.asyncio
 async def test_run_js_success_before_timeout():
-	"""Test that run_js future resolves when response arrives before timeout."""
+	"""Test that eval_js resolves when response arrives before timeout."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
 
@@ -1349,23 +1341,16 @@ async def test_run_js_success_before_timeout():
 		session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
-	# Run JS with result=True
 	with ps.PulseContext.update(render=session, route=session.route_mounts["/a"].route):
-		future = session.run_js(get_answer(), result=True, timeout=1.0)
+		task = asyncio.create_task(session.eval_js(get_answer(), timeout=1.0))
 
-	assert future is not None
-
-	# Find the js_exec message and get its ID
-	js_msgs = [m for m in messages if m.get("type") == "js_exec"]
-	assert len(js_msgs) == 1
-	exec_id = cast(Any, js_msgs[0])["id"]
+	await wait_for(lambda: len(messages) == 1)
+	exec_id = cast(Any, messages[0])["id"]
 	assert uuid.UUID(hex=exec_id).hex == exec_id
 
-	# Simulate client response
 	session.replies.apply({"type": "reply", "id": exec_id, "payload": 42})
 
-	# The future should resolve with the result
-	result = await future
+	result = await task
 	assert result == 42
 	assert len(session.replies) == 0
 
@@ -1386,21 +1371,21 @@ async def test_run_js_error_uses_js_exec_error():
 		session.attach("/a", make_route_info("/a"))
 
 	with ps.PulseContext.update(render=session, route=session.route_mounts["/a"].route):
-		future = session.run_js(get_answer(), result=True, timeout=1.0)
+		task = asyncio.create_task(session.eval_js(get_answer(), timeout=1.0))
 
-	assert future is not None
-	exec_id = cast(Any, [m for m in messages if m.get("type") == "js_exec"][0])["id"]
+	await wait_for(lambda: len(messages) == 1)
+	exec_id = cast(Any, messages[0])["id"]
 	session.replies.apply({"type": "reply", "id": exec_id, "error": "boom"})
 
 	with pytest.raises(ps.JsExecError, match="boom"):
-		await future
+		await task
 	assert len(session.replies) == 0
 	session.close()
 
 
 @pytest.mark.asyncio
 async def test_run_js_send_failure_cleans_up():
-	"""A synchronous send failure removes the reply and timeout registration."""
+	"""A synchronous send failure removes the pending reply."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
 
@@ -1415,7 +1400,7 @@ async def test_run_js_send_failure_cleans_up():
 	baseline = len(session._timers._handles)  # pyright: ignore[reportPrivateUsage]
 	with ps.PulseContext.update(render=session, route=session.route_mounts["/a"].route):
 		with pytest.raises(RuntimeError, match="send failed"):
-			session.run_js(get_answer(), result=True, timeout=60.0)
+			await session.eval_js(get_answer(), timeout=60.0)
 
 	assert len(session.replies) == 0
 	assert len(session._timers._handles) == baseline  # pyright: ignore[reportPrivateUsage]
@@ -1424,7 +1409,7 @@ async def test_run_js_send_failure_cleans_up():
 
 @pytest.mark.asyncio
 async def test_run_js_reply_cancels_timeout_timer():
-	"""The timeout timer must not stay registered after the reply arrives."""
+	"""eval_js must not schedule a render timeout timer."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
 
@@ -1437,16 +1422,13 @@ async def test_run_js_reply_cancels_timeout_timer():
 
 	baseline = len(session._timers._handles)  # pyright: ignore[reportPrivateUsage]
 	with ps.PulseContext.update(render=session, route=session.route_mounts["/a"].route):
-		future = session.run_js(get_answer(), result=True, timeout=60.0)
+		task = asyncio.create_task(session.eval_js(get_answer(), timeout=60.0))
 
-	assert future is not None
-	assert len(session._timers._handles) == baseline + 1  # pyright: ignore[reportPrivateUsage]
-
-	js_msgs = [m for m in messages if m.get("type") == "js_exec"]
-	exec_id = cast(Any, js_msgs[0])["id"]
+	await wait_for(lambda: len(messages) == 1)
+	assert len(session._timers._handles) == baseline  # pyright: ignore[reportPrivateUsage]
+	exec_id = cast(Any, messages[0])["id"]
 	session.replies.apply({"type": "reply", "id": exec_id, "payload": 42})
-	assert await future == 42
-	await asyncio.sleep(0)  # let the done callback run
+	assert await task == 42
 	assert len(session._timers._handles) == baseline  # pyright: ignore[reportPrivateUsage]
 
 	session.close()
@@ -1465,15 +1447,10 @@ async def test_session_close_cancels_pending_api():
 		session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
-	# Create a pending API future manually (simulating an in-flight request)
-	fut = session.replies.register("test-id")
-
-	# Close the session
-	session.close()
-
-	# The future should be cancelled
-	assert fut.cancelled()
-	assert len(session.replies) == 0
+	with session.replies.pending() as reply:
+		session.close()
+		assert reply.future.cancelled()
+		assert len(session.replies) == 0
 
 
 @pytest.mark.asyncio
@@ -1489,15 +1466,10 @@ async def test_session_close_cancels_pending_js():
 		session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
-	# Create a pending JS future manually
-	fut = session.replies.register("test-id")
-
-	# Close the session
-	session.close()
-
-	# The future should be cancelled
-	assert fut.cancelled()
-	assert len(session.replies) == 0
+	with session.replies.pending() as reply:
+		session.close()
+		assert reply.future.cancelled()
+		assert len(session.replies) == 0
 
 
 @pytest.mark.asyncio

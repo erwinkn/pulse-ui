@@ -413,29 +413,24 @@ class Channel:
 		"""
 
 		self._ensure_open()
-		request_id = uuid.uuid4().hex
-		fut = self._manager.replies.register(request_id, cancel_key=self.id)
-		msg = ServerChannelRequestMessage(
-			type="channel_message",
-			channel=self.id,
-			event=event,
-			payload=payload,
-			requestId=request_id,
-		)
-		self._manager.send_to_client(
-			channel=self,
-			msg=msg,
-		)
-		try:
-			if timeout is None:
-				return await fut
-			return await asyncio.wait_for(fut, timeout=timeout)
-		except TimeoutError as exc:
-			raise ChannelTimeout("Channel request timed out") from exc
-		finally:
-			# Success/close/timeout all pop the entry; this covers outer
-			# cancellation of the awaiting task, which would otherwise leak it.
-			self._manager.replies.discard(request_id)
+		with self._manager.replies.pending(cancel_key=self.id) as reply:
+			msg = ServerChannelRequestMessage(
+				type="channel_message",
+				channel=self.id,
+				event=event,
+				payload=payload,
+				requestId=reply.id,
+			)
+			self._manager.send_to_client(
+				channel=self,
+				msg=msg,
+			)
+			try:
+				if timeout is None:
+					return await reply.future
+				return await asyncio.wait_for(reply.future, timeout=timeout)
+			except TimeoutError as exc:
+				raise ChannelTimeout("Channel request timed out") from exc
 
 	# ---------------------------------------------------------------------
 	def close(self) -> None:

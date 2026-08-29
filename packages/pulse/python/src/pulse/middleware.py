@@ -235,8 +235,10 @@ class PulseMiddleware:
 			data: Client message data.
 			session: Session data dictionary.
 			next: Callable to continue the middleware chain. Returns the
-				downstream decision. A downstream ``Deny`` is final: the
-				command never ran, so returning ``Ok`` cannot override it.
+				downstream decision. A downstream ``Deny`` is sticky and an
+				outer ``Ok`` cannot override it, but it does not imply the
+				command did not run: denying after awaiting ``next()`` means
+				it already ran, side effects included.
 
 		Returns:
 			``Ok[None]`` to allow, ``Deny`` to block.
@@ -262,8 +264,10 @@ class PulseMiddleware:
 			request_id: Request ID if awaiting response.
 			session: Session data dictionary.
 			next: Callable to continue the middleware chain. Returns the
-				downstream decision. A downstream ``Deny`` is final: the
-				command never ran, so returning ``Ok`` cannot override it.
+				downstream decision. A downstream ``Deny`` is sticky and an
+				outer ``Ok`` cannot override it, but it does not imply the
+				command did not run: denying after awaiting ``next()`` means
+				it already ran, side effects included.
 
 		Returns:
 			``Ok[None]`` to allow, ``Deny`` to block.
@@ -404,8 +408,8 @@ class MiddlewareStack(PulseMiddleware):
 			res = _coerce_decision(
 				await mw.message(session=session, data=data, next=_next)
 			)
-			# A downstream Deny is final: the command never ran, so an outer
-			# Ok cannot claim it was allowed.
+			# A downstream Deny is sticky: an outer Ok cannot override it, but
+			# denying after awaiting next() means it already ran, side effects included.
 			return Deny() if denied and not isinstance(res, Deny) else res
 
 		return await dispatch(0)
@@ -444,8 +448,8 @@ class MiddlewareStack(PulseMiddleware):
 					next=_next,
 				)
 			)
-			# A downstream Deny is final: the command never ran, so an outer
-			# Ok cannot claim it was allowed.
+			# A downstream Deny is sticky: an outer Ok cannot override it, but
+			# denying after awaiting next() means it already ran, side effects included.
 			return Deny() if denied and not isinstance(res, Deny) else res
 
 		return await dispatch(0)

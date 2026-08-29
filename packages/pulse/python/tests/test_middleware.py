@@ -1,8 +1,9 @@
 """Decision semantics of MiddlewareStack.
 
 Decision hooks must return Ok or Deny; anything else raises (fail closed).
-Decisions propagate through `next()` — an inner Deny is final because the
-command never ran, so an outer Ok cannot override it.
+Decisions propagate through `next()` — a downstream Deny is sticky and an outer
+Ok cannot override it, but it does not imply the command didn't run: denying
+after awaiting `next()` means it already ran, side effects included.
 """
 
 from types import SimpleNamespace

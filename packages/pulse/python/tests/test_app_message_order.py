@@ -332,6 +332,60 @@ async def test_same_path_detach_cannot_overtake_parked_attach():
 	render.close()
 
 
+@pytest.mark.asyncio
+async def test_same_path_lock_normalizes_leading_slash():
+	class RecordingMiddleware(PulseMiddleware):
+		paths: list[str]
+		started: asyncio.Event
+		release: asyncio.Event
+
+		def __init__(self) -> None:
+			super().__init__()
+			self.paths = []
+			self.started = asyncio.Event()
+			self.release = asyncio.Event()
+
+		@override
+		async def message(
+			self,
+			*,
+			data: ClientMessage,
+			session: dict[str, Any],
+			next: Callable[[], Awaitable[Ok[None] | Deny]],
+		) -> Ok[None] | Deny:
+			self.paths.append(str(data.get("path", "")))
+			if len(self.paths) == 1:
+				self.started.set()
+				await self.release.wait()
+			return await next()
+
+	middleware = RecordingMiddleware()
+	app = ps.App(middleware=middleware)
+	render = RenderSession("render-1", app.routes)
+	session = SimpleNamespace(sid="session-1", data={})
+	_bind_render(app, render, session)
+
+	first = _spawn(
+		app,
+		"socket-1",
+		{"type": "callback", "path": "foo", "callback": "missing", "args": []},
+	)
+	await middleware.started.wait()
+	second = _spawn(
+		app,
+		"socket-1",
+		{"type": "callback", "path": "/foo", "callback": "missing", "args": []},
+	)
+	await asyncio.sleep(0)
+	assert middleware.paths == ["foo"]
+
+	middleware.release.set()
+	await first
+	await second
+	assert middleware.paths == ["foo", "/foo"]
+	render.close()
+
+
 def test_socketio_async_handlers():
 	app = ps.App()
 

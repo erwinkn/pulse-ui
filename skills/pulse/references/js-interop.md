@@ -408,7 +408,7 @@ Chart = ps.Import("LineChart", "recharts@^2.0.0")
 Execute JavaScript on the client from server callbacks:
 
 ```python
-from pulse import run_js
+from pulse import eval_js, run_js
 from pulse.transpiler import javascript
 
 @javascript
@@ -424,9 +424,9 @@ def on_save():
     save_data()
     run_js(focus_element("#next-input"))
 
-# With result (must await)
+# Await a result
 async def on_click():
-    pos = await run_js(get_scroll_position(), result=True)
+    pos = await eval_js(get_scroll_position())
     print(pos["x"], pos["y"])
 ```
 
@@ -435,25 +435,28 @@ async def on_click():
 ```python
 def run_js(
     expr: Expr,
-    *,
-    result: bool = False,
-    timeout: float = 10.0,
-) -> Future[Any] | None:
+) -> None:
     """Execute JavaScript on the client.
 
     Args:
         expr: An Expr from calling a @javascript function.
-        result: If True, returns a Future that resolves with the JS return value.
-                If False (default), returns None (fire-and-forget).
-        timeout: Maximum seconds to wait for result (default 10s, only applies when
-                 result=True). Future raises asyncio.TimeoutError if exceeded.
     """
+```
+
+### `eval_js()` — Await a JavaScript result
+
+```python
+from pulse import eval_js
+
+async def on_click():
+    pos = await eval_js(get_scroll_position(), timeout=10.0)
+    print(pos["x"], pos["y"])
 ```
 
 ### Error Handling
 
 ```python
-from pulse import run_js, JsExecError
+from pulse import JsExecError, eval_js
 
 @javascript
 def risky_operation():
@@ -461,7 +464,7 @@ def risky_operation():
 
 async def handle_action():
     try:
-        result = await run_js(risky_operation(), result=True)
+        result = await eval_js(risky_operation())
     except JsExecError as e:
         print(f"JS error: {e}")
 ```

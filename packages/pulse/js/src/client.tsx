@@ -1,6 +1,6 @@
 import type { NavigateFunction } from "react-router";
 import { io, type Socket } from "socket.io-client";
-import { ChannelBridge, createRandomId, PulseChannelResetError } from "./channel";
+import { ChannelBridge, PulseChannelResetError } from "./channel";
 import type { RouteInfo } from "./helpers";
 import { pulseFetch } from "./http";
 import type {
@@ -12,7 +12,7 @@ import type {
 	ServerJsExecMessage,
 	ServerMessage,
 } from "./messages";
-import { createPendingReplies } from "./replies";
+import { createPendingReplies, createRandomId } from "./replies";
 import type { PulsePrerenderView } from "./pulse";
 import { extractEvent } from "./serialize/events";
 import { deserialize, serialize } from "./serialize/serializer";

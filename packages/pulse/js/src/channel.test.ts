@@ -4,7 +4,7 @@ import { PulseSocketIOClient } from "./client";
 import type { ClientMessage } from "./messages";
 import { createPendingReplies } from "./replies";
 
-function makeClient() {
+function makeClient(channelId = "chan-1") {
 	const sent: ClientMessage[] = [];
 	const sendMessage = vi.fn((message: ClientMessage) => {
 		sent.push(message);
@@ -13,9 +13,57 @@ function makeClient() {
 		sendMessage,
 		replies: createPendingReplies(),
 	};
-	const bridge = new ChannelBridge(client, "chan-1");
+	const bridge = new ChannelBridge(client, channelId);
 	return { bridge, sent, sendMessage, client };
 }
+
+describe("PendingReplies", () => {
+	it("mints unique ids and removes entries when they settle", async () => {
+		const replies = createPendingReplies();
+		const resolved = replies.pending({ cancelKey: "resolved" });
+		const rejected = replies.pending();
+
+		expect(resolved.id).not.toBe(rejected.id);
+		replies.apply({
+			type: "reply",
+			id: resolved.id,
+			payload: "done",
+		});
+		const error = new Error("failed");
+		replies.reject(rejected.id, error);
+
+		await expect(resolved.promise).resolves.toBe("done");
+		await expect(rejected.promise).rejects.toBe(error);
+
+		replies.rejectWhere("resolved", new Error("stale"));
+		await expect(resolved.promise).resolves.toBe("done");
+	});
+
+	it("rejects only entries in the matching cancellation group", async () => {
+		const replies = createPendingReplies();
+		const firstChannel = replies.pending({ cancelKey: "chan-1" });
+		const secondChannel = replies.pending({ cancelKey: "chan-2" });
+		const error = new Error("channel closed");
+
+		replies.rejectWhere("chan-1", error);
+		await expect(firstChannel.promise).rejects.toBe(error);
+
+		let secondSettled = false;
+		void secondChannel.promise.then(
+			() => {
+				secondSettled = true;
+			},
+			() => {
+				secondSettled = true;
+			},
+		);
+		await Promise.resolve();
+		expect(secondSettled).toBe(false);
+
+		replies.rejectWhere("chan-2", error);
+		await expect(secondChannel.promise).rejects.toBe(error);
+	});
+});
 
 describe("ChannelBridge", () => {
 	it("queues request and resolves on reply", async () => {
@@ -98,7 +146,8 @@ describe("ChannelBridge", () => {
 	});
 
 	it("rejects pending requests when closed", async () => {
-		const { bridge } = makeClient();
+		const { bridge, client } = makeClient();
+		const rejectWhere = vi.spyOn(client.replies, "rejectWhere");
 		const pending = bridge.request("close-me");
 		bridge.handleServerMessage({
 			type: "channel_message",
@@ -106,6 +155,24 @@ describe("ChannelBridge", () => {
 			event: "__close__",
 		});
 		await expect(pending).rejects.toBeInstanceOf(PulseChannelResetError);
+		bridge.dispose(new PulseChannelResetError("closed again"));
+		expect(rejectWhere).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not reject settled requests when closed", async () => {
+		const { bridge, client, sent } = makeClient();
+		const pending = bridge.request("settled");
+		const request = sent[0];
+		const requestId = request && "requestId" in request ? request.requestId : undefined;
+		client.replies.apply({
+			type: "reply",
+			id: requestId!,
+			payload: "done",
+		});
+		await expect(pending).resolves.toBe("done");
+
+		bridge.dispose(new PulseChannelResetError("closed"));
+		await expect(pending).resolves.toBe("done");
 	});
 
 	it("reacquires a fresh bridge after release closes a channel", () => {

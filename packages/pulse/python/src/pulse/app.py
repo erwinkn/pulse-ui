@@ -1010,6 +1010,8 @@ class App:
 	async def _handle_socket_message(self, sid: str, data: Serialized) -> None:
 		msg = cast(ClientMessage, deserialize(data))
 		if sid in self._connecting_sockets:
+			# Connect middleware is still running; the render is not mapped
+			# yet. _drain_pending_socket_messages replays these in order.
 			# Replies resolve server-parked futures by correlation id; they
 			# never wait behind queued commands. Apply immediately once the
 			# socket is mapped to its render.
@@ -1021,7 +1023,7 @@ class App:
 					return
 			self._queue_pending_socket_message(sid, msg)
 			return
-		await self._process_socket_message(sid, msg)
+		await self._deliver_socket_message(sid, msg)
 
 	def _queue_pending_socket_message(self, sid: str, msg: ClientMessage) -> None:
 		queue = self._pending_socket_messages.setdefault(sid, [])
@@ -1053,11 +1055,17 @@ class App:
 					else:
 						commands.append(msg)
 				for msg in commands:
-					await self._process_socket_message(sid, msg)
+					# First-load replay stays ordered (attach then callback).
+					await self._deliver_socket_message(sid, msg)
 		finally:
 			self._connecting_sockets.discard(sid)
 
-	async def _process_socket_message(self, sid: str, msg: ClientMessage) -> None:
+	async def _deliver_socket_message(self, sid: str, msg: ClientMessage) -> None:
+		"""Route a packet to its render. `reply` completes a pending
+		request; commands await middleware. Live EVENTs are already tasks
+		(async_handlers). Connect drain awaits this so first-load attach
+		then callback stays ordered."""
+		# Route. The packet carries no render id; the socket does.
 		rid = self._socket_to_render.get(sid)
 		if not rid:
 			return
@@ -1070,7 +1078,7 @@ class App:
 		session = self.user_sessions.get(owner_sid)
 		if session is None:
 			return
-		# Cancel any leftover cleanup for connected sessions. Never cancel
+		# Cancel leftover cleanup for connected sessions only. Never cancel
 		# for disconnected renders: nothing would reschedule it and the
 		# session would survive past its timeout.
 		if render.connected:
@@ -1082,6 +1090,15 @@ class App:
 		if msg["type"] == "reply":
 			render.replies.apply(msg)
 			return
+		await self._run_command(rid, render, session, msg)
+
+	async def _run_command(
+		self,
+		rid: str,
+		render: RenderSession,
+		session: UserSession,
+		msg: ClientPulseMessage | ClientChannelRequestMessage,
+	) -> None:
 		# Commands that target the same route (or channel) must apply in
 		# arrival order: an awaited middleware must not let a later
 		# detach/update overtake an earlier attach. Unrelated targets and
@@ -1098,14 +1115,14 @@ class App:
 				return
 			try:
 				if msg["type"] == "channel_message":
-					await self._handle_channel_message(render, session, msg)
+					await self._handle_channel_command(render, session, msg)
 				else:
-					await self._handle_pulse_message(render, session, msg)
+					await self._handle_pulse_command(render, session, msg)
 			except Exception as e:
 				path = msg.get("path", "")
 				render.report_error(path, "server", e)
 
-	async def _handle_pulse_message(
+	async def _handle_pulse_command(
 		self, render: RenderSession, session: UserSession, msg: ClientPulseMessage
 	) -> None:
 		async def _next() -> Ok[None]:
@@ -1152,7 +1169,7 @@ class App:
 					{"kind": "deny"},
 				)
 
-	async def _handle_channel_message(
+	async def _handle_channel_command(
 		self,
 		render: RenderSession,
 		session: UserSession,

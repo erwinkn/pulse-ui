@@ -151,10 +151,12 @@ class PreferencesState(ps.State):
 Catch JavaScript errors in Python when awaiting results:
 
 ```python
+from pulse import JsExecError
+
 async def safe_js_call():
     try:
         result = await ps.run_js(some_js_function(), result=True)
-    except RuntimeError as e:
+    except JsExecError as e:
         print(f"JavaScript error: {e}")
 ```
 

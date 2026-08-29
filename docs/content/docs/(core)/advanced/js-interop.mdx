@@ -189,10 +189,12 @@ def debounced_log(message: str):
 JavaScript errors propagate to Python when awaiting results:
 
 ```python
+from pulse import JsExecError
+
 async def on_click():
     try:
         result = await ps.run_js(might_fail(), result=True)
-    except RuntimeError as e:
+    except JsExecError as e:
         print(f"JS error: {e}")
 ```
 

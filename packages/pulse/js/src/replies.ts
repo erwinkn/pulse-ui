@@ -13,8 +13,8 @@ export function createRandomId(): string {
 }
 
 /** Correlation id -> promise and cancellation group. Same machine as Python `PendingReplies`. */
-export function createPendingReplies() {
-	const pending = new Map<
+export class PendingReplies {
+	private entries = new Map<
 		string,
 		{
 			resolve: (value: any) => void;
@@ -22,38 +22,38 @@ export function createPendingReplies() {
 			cancelKey?: string;
 		}
 	>();
-	return {
-		pending({ cancelKey }: { cancelKey?: string } = {}): PendingReply {
-			const id = createRandomId();
-			const promise = new Promise<any>((resolve, reject) => {
-				pending.set(id, { resolve, reject, cancelKey });
-			});
-			return { id, promise };
-		},
-		apply(message: ReplyMessage): void {
-			const entry = pending.get(message.id);
-			if (!entry) return;
-			pending.delete(message.id);
-			if (message.error != null) {
-				entry.reject(new Error(String(message.error)));
-			} else {
-				entry.resolve(message.payload);
-			}
-		},
-		reject(id: string, error: unknown): void {
-			const entry = pending.get(id);
-			if (!entry) return;
-			pending.delete(id);
-			entry.reject(error);
-		},
-		rejectWhere(cancelKey: string, error: unknown): void {
-			for (const [id, entry] of pending) {
-				if (entry.cancelKey !== cancelKey) continue;
-				pending.delete(id);
-				entry.reject(error);
-			}
-		},
-	};
-}
 
-export type PendingReplies = ReturnType<typeof createPendingReplies>;
+	pending({ cancelKey }: { cancelKey?: string } = {}): PendingReply {
+		const id = createRandomId();
+		const promise = new Promise<any>((resolve, reject) => {
+			this.entries.set(id, { resolve, reject, cancelKey });
+		});
+		return { id, promise };
+	}
+
+	apply(message: ReplyMessage): void {
+		const entry = this.entries.get(message.id);
+		if (!entry) return;
+		this.entries.delete(message.id);
+		if (message.error != null) {
+			entry.reject(new Error(String(message.error)));
+		} else {
+			entry.resolve(message.payload);
+		}
+	}
+
+	reject(id: string, error: unknown): void {
+		const entry = this.entries.get(id);
+		if (!entry) return;
+		this.entries.delete(id);
+		entry.reject(error);
+	}
+
+	rejectWhere(cancelKey: string, error: unknown): void {
+		for (const [id, entry] of this.entries) {
+			if (entry.cancelKey !== cancelKey) continue;
+			this.entries.delete(id);
+			entry.reject(error);
+		}
+	}
+}

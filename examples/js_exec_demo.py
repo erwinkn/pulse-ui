@@ -12,7 +12,7 @@ This example demonstrates:
 from typing import Any, cast
 
 import pulse as ps
-from pulse import App, JsExecError, Route, component, javascript, run_js
+from pulse import App, JsExecError, Route, component, eval_js, javascript, run_js
 from pulse.js import Error, console, document, navigator, window
 
 
@@ -98,13 +98,13 @@ def JsExecDemo():
 	# 3. Await result from client
 	async def on_get_window_info():
 		state.add_log("Requesting window info...")
-		result = await run_js(get_window_info(), result=True)
+		result = await eval_js(get_window_info())
 		state.result = result
 		state.add_log(f"Received: {result['innerWidth']}x{result['innerHeight']}")
 
 	async def on_get_selection():
 		state.add_log("Requesting selected text...")
-		result = await run_js(get_selected_text(), result=True)
+		result = await eval_js(get_selected_text())
 		state.result = {"selectedText": result or "(nothing selected)"}
 		state.add_log(f"Received: '{result or '(empty)'}'")
 
@@ -112,7 +112,7 @@ def JsExecDemo():
 	async def on_cause_error():
 		state.add_log("Triggering JS error...")
 		try:
-			await run_js(cause_error(), result=True)  # pyright: ignore[reportArgumentType]
+			await eval_js(cause_error())
 		except JsExecError as e:
 			state.error = str(e)
 			state.add_log(f"Caught error: {e}")

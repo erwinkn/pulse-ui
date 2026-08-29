@@ -81,11 +81,11 @@ ps.run_js(my_js_function(arg1, arg2))
 ps.run_js("window.scrollTo(0, 0)")  # TypeError
 ```
 
-To get a return value, use `result=True` and await:
+To get a return value, use `eval_js` and await:
 
 ```python
 async def check_scroll():
-    pos = await ps.run_js(window.scrollY, result=True)
+    pos = await ps.eval_js(window.scrollY)
     print(f"Scroll position: {pos}")
 ```
 
@@ -145,7 +145,7 @@ def get_scroll_position():
     return {"x": window.scrollX, "y": window.scrollY}
 
 async def on_check():
-    pos = await ps.run_js(get_scroll_position(), result=True)
+    pos = await ps.eval_js(get_scroll_position())
     print(f"Position: {pos['x']}, {pos['y']}")
 ```
 
@@ -193,7 +193,7 @@ from pulse import JsExecError
 
 async def on_click():
     try:
-        result = await ps.run_js(might_fail(), result=True)
+        result = await ps.eval_js(might_fail())
     except JsExecError as e:
         print(f"JS error: {e}")
 ```

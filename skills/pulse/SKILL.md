@@ -683,7 +683,7 @@ result = await ps.call_api("/api/login", method="POST", body={"email": email})
 
 ### Executing JavaScript
 
-Use `run_js()` for imperative JS execution:
+Use `run_js()` for fire-and-forget imperative JS execution:
 
 ```python
 from pulse import run_js
@@ -696,8 +696,10 @@ def show_alert(msg: str):
 # Fire-and-forget
 run_js(show_alert("Hello!"))
 
-# With result
-result = await run_js(get_window_width(), result=True)
+# Await a result
+from pulse import eval_js
+
+result = await eval_js(get_window_width())
 ```
 
 ## Production Configuration

@@ -47,6 +47,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__file__)
 
 
+class JsExecError(Exception):
+	"""Raised when client-side JS execution fails."""
+
+
 class RenderLoopError(RuntimeError):
 	path: str
 	renders: int
@@ -953,7 +957,7 @@ class RenderSession:
 			self.send(msg)
 			return None
 
-		future = self.replies.register(exec_id)
+		future = self.replies.register(exec_id, error=JsExecError)
 
 		def _on_timeout() -> None:
 			self.replies.reject(exec_id, asyncio.TimeoutError())
@@ -966,5 +970,11 @@ class RenderSession:
 			self.replies.discard(exec_id)
 
 		future.add_done_callback(_cancel_timeout)
-		self.send(msg)
+		try:
+			self.send(msg)
+		except Exception:
+			handle.cancel()
+			self._timers.discard(handle)
+			self.replies.discard(exec_id)
+			raise
 		return future

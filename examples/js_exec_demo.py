@@ -12,7 +12,7 @@ This example demonstrates:
 from typing import Any, cast
 
 import pulse as ps
-from pulse import App, Route, component, javascript, run_js
+from pulse import App, JsExecError, Route, component, javascript, run_js
 from pulse.js import Error, console, document, navigator, window
 
 
@@ -113,7 +113,7 @@ def JsExecDemo():
 		state.add_log("Triggering JS error...")
 		try:
 			await run_js(cause_error(), result=True)  # pyright: ignore[reportArgumentType]
-		except RuntimeError as e:
+		except JsExecError as e:
 			state.error = str(e)
 			state.add_log(f"Caught error: {e}")
 

@@ -322,12 +322,28 @@ async def on_check():
 
 ### Errors
 
-Raises `JsExecError` when client-side JavaScript throws an exception and
-`asyncio.TimeoutError` when no result arrives before `timeout`.
+Raises `JsExecError` when client-side JavaScript throws an exception; see
+[`JsExecError`](#jsexecerror). Raises `asyncio.TimeoutError` when no result
+arrives before `timeout`.
 
 ### Reply protocol
 
 A failed `eval_js(...)` arrives as `{type: "reply", error}` and rejects the future with `JsExecError`.
+
+---
+
+## JsExecError
+
+Raised when client-side JavaScript execution fails.
+
+```python
+from pulse import JsExecError
+```
+
+```python
+class JsExecError(Exception):
+    pass
+```
 
 ---
 

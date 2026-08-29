@@ -1088,7 +1088,8 @@ class App:
 		if msg["type"] == "channel_message":
 			key = f"channel:{msg.get('channel', '')}"
 		else:
-			key = f"path:{msg.get('path', '')}"
+			path = ensure_absolute_path(msg.get("path", ""))
+			key = f"path:{path}"
 		locks = self._command_locks.setdefault(rid, {})
 		lock = locks.setdefault(key, asyncio.Lock())
 		async with lock:

@@ -1373,6 +1373,56 @@ async def test_run_js_success_before_timeout():
 
 
 @pytest.mark.asyncio
+async def test_run_js_error_uses_js_exec_error():
+	"""Client-side JS errors raise the public JsExecError type."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	messages: list[ServerMessage] = []
+	session.connect(lambda msg: messages.append(msg))
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	with ps.PulseContext.update(render=session, route=session.route_mounts["/a"].route):
+		future = session.run_js(get_answer(), result=True, timeout=1.0)
+
+	assert future is not None
+	exec_id = cast(Any, [m for m in messages if m.get("type") == "js_exec"][0])["id"]
+	session.replies.apply({"type": "reply", "id": exec_id, "error": "boom"})
+
+	with pytest.raises(ps.JsExecError, match="boom"):
+		await future
+	assert len(session.replies) == 0
+	session.close()
+
+
+@pytest.mark.asyncio
+async def test_run_js_send_failure_cleans_up():
+	"""A synchronous send failure removes the reply and timeout registration."""
+	routes = RouteTree([Route("a", simple_component)])
+	session = RenderSession("test-id", routes)
+
+	def fail_send(_: ServerMessage) -> None:
+		raise RuntimeError("send failed")
+
+	session.connect(fail_send)
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"])
+		session.attach("/a", make_route_info("/a"))
+
+	baseline = len(session._timers._handles)  # pyright: ignore[reportPrivateUsage]
+	with ps.PulseContext.update(render=session, route=session.route_mounts["/a"].route):
+		with pytest.raises(RuntimeError, match="send failed"):
+			session.run_js(get_answer(), result=True, timeout=60.0)
+
+	assert len(session.replies) == 0
+	assert len(session._timers._handles) == baseline  # pyright: ignore[reportPrivateUsage]
+	session.close()
+
+
+@pytest.mark.asyncio
 async def test_run_js_reply_cancels_timeout_timer():
 	"""The timeout timer must not stay registered after the reply arrives."""
 	routes = RouteTree([Route("a", simple_component)])

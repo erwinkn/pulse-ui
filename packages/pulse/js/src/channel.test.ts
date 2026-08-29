@@ -6,7 +6,7 @@ import { createPendingReplies } from "./replies";
 
 function makeClient() {
 	const sent: ClientMessage[] = [];
-	const sendMessage = vi.fn(async (message: ClientMessage) => {
+	const sendMessage = vi.fn((message: ClientMessage) => {
 		sent.push(message);
 	});
 	const client = {
@@ -49,6 +49,21 @@ describe("ChannelBridge", () => {
 			expect(error).toBeInstanceOf(Error);
 			expect(error).not.toBeInstanceOf(PulseChannelResetError);
 		});
+	});
+
+	it("rejects and clears pending registration when sending throws", async () => {
+		const { bridge, client, sendMessage } = makeClient();
+		const error = new Error("serialize failed");
+		const reject = vi.spyOn(client.replies, "reject");
+		sendMessage.mockImplementationOnce(() => {
+			throw error;
+		});
+
+		const pending = bridge.request("echo", { bad: BigInt(1) });
+
+		await expect(pending).rejects.toBe(error);
+		bridge.dispose(new PulseChannelResetError("closed"));
+		expect(reject).toHaveBeenCalledTimes(1);
 	});
 
 	it("dispatches events to registered handlers", () => {

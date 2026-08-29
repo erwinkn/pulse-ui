@@ -156,7 +156,7 @@ async def message(
 
 Handle per-message authorization for client-initiated commands. `{type: "reply"}` completions skip this hook.
 
-Commands targeting the same route path (or the same channel) run in arrival order, even while this hook awaits. Commands for different paths, and replies, proceed concurrently.
+Commands targeting the same route path run in arrival order, even while this hook awaits. Channel messages for the same channel enter middleware in arrival order, but their handlers run as separate tasks and may overlap. Commands for different paths, and replies, proceed concurrently.
 
 **Parameters:**
 - `data` - Client message data.

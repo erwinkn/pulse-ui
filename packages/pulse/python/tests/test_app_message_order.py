@@ -91,57 +91,58 @@ async def test_replies_resolve_while_command_middleware_is_parked():
 	session = SimpleNamespace(sid="session-1", data={})
 	_bind_render(app, render, session)
 
-	api_fut = render.replies.register("corr-1")
-	js_fut = render.replies.register("js-1")
-	channel_fut = render.replies.register("req-1", cancel_key="ch-1")
+	with (
+		render.replies.pending() as api_reply,
+		render.replies.pending() as js_reply,
+		render.replies.pending(cancel_key="ch-1") as channel_reply,
+	):
+		parked = _spawn(
+			app,
+			"socket-1",
+			{"type": "attach", "path": "/", "routeInfo": _route_info("/")},
+		)
+		await middleware.started.wait()
+		assert not middleware.release.is_set()
+		assert not api_reply.future.done()
+		assert not js_reply.future.done()
+		assert not channel_reply.future.done()
 
-	parked = _spawn(
-		app,
-		"socket-1",
-		{"type": "attach", "path": "/", "routeInfo": _route_info("/")},
-	)
-	await middleware.started.wait()
-	assert not middleware.release.is_set()
-	assert not api_fut.done()
-	assert not js_fut.done()
-	assert not channel_fut.done()
-
-	await _send(
-		app,
-		"socket-1",
-		{
-			"type": "reply",
-			"id": "corr-1",
-			"payload": {
-				"ok": True,
-				"status": 200,
-				"headers": {},
-				"body": {"n": 1},
+		await _send(
+			app,
+			"socket-1",
+			{
+				"type": "reply",
+				"id": api_reply.id,
+				"payload": {
+					"ok": True,
+					"status": 200,
+					"headers": {},
+					"body": {"n": 1},
+				},
 			},
-		},
-	)
-	assert api_fut.done()
-	assert api_fut.result()["body"] == {"n": 1}
-	assert not middleware.release.is_set()
+		)
+		assert api_reply.future.done()
+		assert api_reply.future.result()["body"] == {"n": 1}
+		assert not middleware.release.is_set()
 
-	await _send(
-		app,
-		"socket-1",
-		{"type": "reply", "id": "js-1", "payload": 42},
-	)
-	assert js_fut.done()
-	assert js_fut.result() == 42
+		await _send(
+			app,
+			"socket-1",
+			{"type": "reply", "id": js_reply.id, "payload": 42},
+		)
+		assert js_reply.future.done()
+		assert js_reply.future.result() == 42
 
-	await _send(
-		app,
-		"socket-1",
-		{"type": "reply", "id": "req-1", "payload": "pong"},
-	)
-	assert channel_fut.done()
-	assert channel_fut.result() == "pong"
+		await _send(
+			app,
+			"socket-1",
+			{"type": "reply", "id": channel_reply.id, "payload": "pong"},
+		)
+		assert channel_reply.future.done()
+		assert channel_reply.future.result() == "pong"
 
-	middleware.release.set()
-	await parked
+		middleware.release.set()
+		await parked
 	render.close()
 
 
@@ -219,50 +220,49 @@ async def test_parked_command_does_not_block_other_path_or_reply():
 		render.prerender(["/a", "/b"])
 	callback_key = next(iter(render.route_mounts["/b"].tree.callbacks))
 
-	api_fut = render.replies.register("corr-b")
+	with render.replies.pending() as api_reply:
+		parked = _spawn(
+			app,
+			"socket-1",
+			{"type": "attach", "path": "/a", "routeInfo": _route_info("/a")},
+		)
+		await middleware.started.wait()
+		assert render.route_mounts["/a"].state == "pending"
 
-	parked = _spawn(
-		app,
-		"socket-1",
-		{"type": "attach", "path": "/a", "routeInfo": _route_info("/a")},
-	)
-	await middleware.started.wait()
-	assert render.route_mounts["/a"].state == "pending"
-
-	await _send(
-		app,
-		"socket-1",
-		{"type": "attach", "path": "/b", "routeInfo": _route_info("/b")},
-	)
-	assert await wait_for(lambda: render.route_mounts["/b"].state == "active")
-	await _send(
-		app,
-		"socket-1",
-		{"type": "callback", "path": "/b", "callback": callback_key, "args": []},
-	)
-	assert await wait_for(lambda: clicked == ["active"])
-	await _send(
-		app,
-		"socket-1",
-		{
-			"type": "reply",
-			"id": "corr-b",
-			"payload": {
-				"ok": True,
-				"status": 200,
-				"headers": {},
-				"body": None,
+		await _send(
+			app,
+			"socket-1",
+			{"type": "attach", "path": "/b", "routeInfo": _route_info("/b")},
+		)
+		assert await wait_for(lambda: render.route_mounts["/b"].state == "active")
+		await _send(
+			app,
+			"socket-1",
+			{"type": "callback", "path": "/b", "callback": callback_key, "args": []},
+		)
+		assert await wait_for(lambda: clicked == ["active"])
+		await _send(
+			app,
+			"socket-1",
+			{
+				"type": "reply",
+				"id": api_reply.id,
+				"payload": {
+					"ok": True,
+					"status": 200,
+					"headers": {},
+					"body": None,
+				},
 			},
-		},
-	)
+		)
 
-	assert api_fut.done()
-	assert render.route_mounts["/a"].state == "pending"
-	assert not middleware.release.is_set()
+		assert api_reply.future.done()
+		assert render.route_mounts["/a"].state == "pending"
+		assert not middleware.release.is_set()
 
-	middleware.release.set()
-	await parked
-	assert render.route_mounts["/a"].state == "active"
+		middleware.release.set()
+		await parked
+		assert render.route_mounts["/a"].state == "active"
 	render.close()
 
 

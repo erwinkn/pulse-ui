@@ -29,7 +29,7 @@ class _Pending:
 
 
 @dataclass(slots=True)
-class _PendingHandle:
+class PendingReply:
 	id: str
 	future: asyncio.Future[Any]
 
@@ -54,7 +54,7 @@ class PendingReplies:
 		*,
 		cancel_key: str | None = None,
 		error: type[BaseException] = RuntimeError,
-	) -> Iterator[_PendingHandle]:
+	) -> Iterator[PendingReply]:
 		"""Create and park a future until the client reply arrives.
 
 		`cancel_key` groups requests that die together (e.g. all inflight
@@ -64,7 +64,7 @@ class PendingReplies:
 		future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
 		self._pending[reply_id] = _Pending(future, cancel_key, error)
 		try:
-			yield _PendingHandle(reply_id, future)
+			yield PendingReply(reply_id, future)
 		finally:
 			self._pending.pop(reply_id, None)
 

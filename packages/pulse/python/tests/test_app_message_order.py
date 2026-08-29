@@ -550,14 +550,15 @@ async def test_reply_applies_immediately_while_connect_is_pending():
 	render = _wire_render(app, "socket-1")
 	app._connecting_sockets.add("socket-1")  # pyright: ignore[reportPrivateUsage]
 
-	fut = render.replies.register("corr-1")
-	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
-		"socket-1", serialize({"type": "reply", "id": "corr-1", "payload": 7})
-	)
+	with render.replies.pending() as reply:
+		await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+			"socket-1",
+			serialize({"type": "reply", "id": reply.id, "payload": 7}),
+		)
 
-	assert fut.done()
-	assert fut.result() == 7
-	assert app._pending_socket_messages.get("socket-1", []) == []  # pyright: ignore[reportPrivateUsage]
+		assert reply.future.done()
+		assert reply.future.result() == 7
+		assert app._pending_socket_messages.get("socket-1", []) == []  # pyright: ignore[reportPrivateUsage]
 	render.close()
 
 
@@ -567,39 +568,40 @@ async def test_connect_queue_overflow_never_drops_replies(
 ):
 	app = ps.App()
 	app._connecting_sockets.add("socket-1")  # pyright: ignore[reportPrivateUsage]
-
-	for i in range(150):
-		await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
-			"socket-1",
-			serialize(
-				{
-					"type": "callback",
-					"path": "/",
-					"callback": f"{i}.onClick",
-					"args": [],
-				}
-			),
-		)
-	# Queue is full of commands; a reply must still be queued.
-	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
-		"socket-1", serialize({"type": "reply", "id": "corr-1", "payload": 1})
-	)
-	queue = app._pending_socket_messages["socket-1"]  # pyright: ignore[reportPrivateUsage]
-	assert len(queue) == 101
-	assert queue[-1]["type"] == "reply"
-
 	render = _wire_render(app, "socket-1")
-	fut = render.replies.register("corr-1")
+	app._socket_to_render.pop("socket-1")  # pyright: ignore[reportPrivateUsage]
 
 	async def handle_pulse_message(*_args: object) -> None:
 		pass
 
 	monkeypatch.setattr(app, "_handle_pulse_message", handle_pulse_message)
-	await app._drain_pending_socket_messages(  # pyright: ignore[reportPrivateUsage]
-		"socket-1"
-	)
-	assert fut.done()
-	assert fut.result() == 1
+	with render.replies.pending() as reply:
+		for i in range(150):
+			await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+				"socket-1",
+				serialize(
+					{
+						"type": "callback",
+						"path": "/",
+						"callback": f"{i}.onClick",
+						"args": [],
+					}
+				),
+			)
+		# Queue is full of commands; a reply must still be queued.
+		await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+			"socket-1",
+			serialize({"type": "reply", "id": reply.id, "payload": 1}),
+		)
+		queue = app._pending_socket_messages["socket-1"]  # pyright: ignore[reportPrivateUsage]
+		assert len(queue) == 101
+		assert queue[-1]["type"] == "reply"
+		app._socket_to_render["socket-1"] = render.id  # pyright: ignore[reportPrivateUsage]
+		await app._drain_pending_socket_messages(  # pyright: ignore[reportPrivateUsage]
+			"socket-1"
+		)
+		assert reply.future.done()
+		assert reply.future.result() == 1
 	render.close()
 
 
@@ -668,19 +670,7 @@ async def test_drain_applies_replies_before_parked_commands(
 ):
 	app = ps.App()
 	app._connecting_sockets.add("socket-1")  # pyright: ignore[reportPrivateUsage]
-
-	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
-		"socket-1",
-		serialize(
-			{"type": "callback", "path": "/", "callback": "1.onClick", "args": []}
-		),
-	)
-	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
-		"socket-1", serialize({"type": "reply", "id": "corr-1", "payload": 3})
-	)
-
 	render = _wire_render(app, "socket-1")
-	fut = render.replies.register("corr-1")
 
 	started = asyncio.Event()
 	release = asyncio.Event()
@@ -691,16 +681,27 @@ async def test_drain_applies_replies_before_parked_commands(
 
 	monkeypatch.setattr(app, "_handle_pulse_message", handle_pulse_message)
 
-	drain = asyncio.create_task(
-		app._drain_pending_socket_messages(  # pyright: ignore[reportPrivateUsage]
-			"socket-1"
+	with render.replies.pending() as reply:
+		await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+			"socket-1",
+			serialize(
+				{"type": "callback", "path": "/", "callback": "1.onClick", "args": []}
+			),
 		)
-	)
-	await started.wait()
-	# The command is parked, but the reply already resolved.
-	assert fut.done()
-	assert fut.result() == 3
+		await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
+			"socket-1",
+			serialize({"type": "reply", "id": reply.id, "payload": 3}),
+		)
+		drain = asyncio.create_task(
+			app._drain_pending_socket_messages(  # pyright: ignore[reportPrivateUsage]
+				"socket-1"
+			)
+		)
+		await started.wait()
+		# The command is parked, but the reply already resolved.
+		assert reply.future.done()
+		assert reply.future.result() == 3
 
-	release.set()
-	await drain
+		release.set()
+		await drain
 	render.close()

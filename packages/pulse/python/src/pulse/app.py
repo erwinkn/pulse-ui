@@ -49,9 +49,7 @@ from pulse.helpers import (
 )
 from pulse.hooks.core import hooks
 from pulse.messages import (
-	ClientChannelMessage,
 	ClientChannelRequestMessage,
-	ClientChannelResponseMessage,
 	ClientMessage,
 	ClientPulseMessage,
 	Prerender,
@@ -245,7 +243,7 @@ class App:
 	_render_to_page_instance: dict[str, str | None]
 	_render_connect_attempts: dict[str, object]
 	_connecting_sockets: set[str]
-	_pending_socket_messages: dict[str, list[Serialized]]
+	_pending_socket_messages: dict[str, list[ClientMessage]]
 	_render_cleanups: dict[str, TimerHandleLike]
 	_render_message_locks: dict[str, asyncio.Lock]
 	_tasks: TaskRegistry
@@ -1005,34 +1003,59 @@ class App:
 		self._render_cleanups[rid] = handle
 
 	async def _handle_socket_message(self, sid: str, data: Serialized) -> None:
+		msg = cast(ClientMessage, deserialize(data))
 		if sid in self._connecting_sockets:
-			self._queue_pending_socket_message(sid, data)
+			# Replies resolve server-parked futures by correlation id; they
+			# never wait behind queued commands. Apply immediately once the
+			# socket is mapped to its render.
+			if msg["type"] == "reply":
+				rid = self._socket_to_render.get(sid)
+				render = self.render_sessions.get(rid) if rid else None
+				if render is not None:
+					render.replies.apply(msg)
+					return
+			self._queue_pending_socket_message(sid, msg)
 			return
-		await self._process_socket_message(sid, data)
+		await self._process_socket_message(sid, msg)
 
-	def _queue_pending_socket_message(self, sid: str, data: Serialized) -> None:
+	def _queue_pending_socket_message(self, sid: str, msg: ClientMessage) -> None:
 		queue = self._pending_socket_messages.setdefault(sid, [])
-		if len(queue) >= MAX_PENDING_SOCKET_MESSAGES:
+		queued_replies = sum(queued["type"] == "reply" for queued in queue)
+		if (
+			msg["type"] == "reply" and queued_replies >= MAX_PENDING_SOCKET_MESSAGES
+		) or (
+			msg["type"] != "reply"
+			and len(queue) - queued_replies >= MAX_PENDING_SOCKET_MESSAGES
+		):
 			logger.warning(
 				"Dropping socket message for %s while connect is pending; queue is full",
 				sid,
 			)
 			return
-		queue.append(data)
+		queue.append(msg)
 
 	async def _drain_pending_socket_messages(self, sid: str) -> None:
 		try:
 			while pending := self._pending_socket_messages.pop(sid, []):
-				for data in pending:
-					await self._process_socket_message(sid, data)
+				# Apply queued replies first: they resolve futures without
+				# middleware and must not wait behind commands that may await.
+				rid = self._socket_to_render.get(sid)
+				render = self.render_sessions.get(rid) if rid else None
+				commands: list[ClientMessage] = []
+				for msg in pending:
+					if msg["type"] == "reply" and render is not None:
+						render.replies.apply(msg)
+					else:
+						commands.append(msg)
+				for msg in commands:
+					await self._process_socket_message(sid, msg)
 		finally:
 			self._connecting_sockets.discard(sid)
 
-	async def _process_socket_message(self, sid: str, data: Serialized) -> None:
+	async def _process_socket_message(self, sid: str, msg: ClientMessage) -> None:
 		rid = self._socket_to_render.get(sid)
 		if not rid:
 			return
-		msg = cast(ClientMessage, deserialize(data))
 		lock = self._render_message_locks.setdefault(rid, asyncio.Lock())
 		async with lock:
 			render = self.render_sessions.get(rid)
@@ -1049,6 +1072,13 @@ class App:
 			# session would survive past its timeout.
 			if render.connected:
 				self._cancel_render_cleanup(rid)
+			# Completions skip middleware and apply immediately. A reply is
+			# the other half of a server request, not a command to authorize;
+			# putting apply behind `await` can deadlock if that await waits
+			# on another reply.
+			if msg["type"] == "reply":
+				render.replies.apply(msg)
+				return
 			try:
 				if msg["type"] == "channel_message":
 					await self._handle_channel_message(render, session, msg)
@@ -1080,10 +1110,6 @@ class App:
 			elif msg["type"] == "detach":
 				render.detach(msg["path"])
 				render.channels.remove_route(msg["path"])
-			elif msg["type"] == "api_result":
-				render.handle_api_result(dict(msg))
-			elif msg["type"] == "js_result":
-				render.handle_js_result(dict(msg))
 			else:
 				logger.warning("Unknown message type received: %s", msg)
 			return Ok()
@@ -1107,7 +1133,7 @@ class App:
 				return
 
 			if isinstance(res, Deny):
-				path = cast(str, msg.get("path", "api_response"))
+				path = msg.get("path", "api_response")
 				render.report_error(
 					path,
 					"server",
@@ -1116,41 +1142,39 @@ class App:
 				)
 
 	async def _handle_channel_message(
-		self, render: RenderSession, session: UserSession, msg: ClientChannelMessage
+		self,
+		render: RenderSession,
+		session: UserSession,
+		msg: ClientChannelRequestMessage,
 	) -> None:
-		if msg.get("responseTo"):
-			msg = cast(ClientChannelResponseMessage, msg)
-			render.channels.handle_client_response(msg)
-		else:
-			channel_id = str(msg.get("channel", ""))
-			msg = cast(ClientChannelRequestMessage, msg)
+		channel_id = str(msg.get("channel", ""))
 
-			async def _next() -> Ok[None]:
-				render.channels.handle_client_event(
-					render=render, session=session, message=msg
-				)
-				return Ok(None)
+		async def _next() -> Ok[None]:
+			render.channels.handle_client_event(
+				render=render, session=session, message=msg
+			)
+			return Ok(None)
 
-			def _normalize_message_response(res: Any) -> Ok[None] | Deny:
-				if isinstance(res, (Ok, Deny)):
-					return res  # type: ignore[return-value]
-				# Treat any other value as allow
-				return Ok(None)
+		def _normalize_message_response(res: Any) -> Ok[None] | Deny:
+			if isinstance(res, (Ok, Deny)):
+				return res  # type: ignore[return-value]
+			# Treat any other value as allow
+			return Ok(None)
 
-			with PulseContext.update(session=session, render=render):
-				res = await self.middleware.channel(
-					channel_id=channel_id,
-					event=msg.get("event", ""),
-					payload=msg.get("payload"),
-					request_id=msg.get("requestId"),
-					session=session.data,
-					next=_next,
-				)
-				res = _normalize_message_response(res)
+		with PulseContext.update(session=session, render=render):
+			res = await self.middleware.channel(
+				channel_id=channel_id,
+				event=msg.get("event", ""),
+				payload=msg.get("payload"),
+				request_id=msg.get("requestId"),
+				session=session.data,
+				next=_next,
+			)
+			res = _normalize_message_response(res)
 
-			if isinstance(res, Deny):
-				if req_id := msg.get("requestId"):
-					render.channels.send_error(channel_id, req_id, "Denied")
+		if isinstance(res, Deny):
+			if req_id := msg.get("requestId"):
+				render.channels.send_error(req_id, "Denied")
 
 	def get_route(self, path: str):
 		return self.routes.find(path)

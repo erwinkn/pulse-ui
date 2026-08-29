@@ -1434,6 +1434,7 @@ from pulse.render_session import (
 from pulse.render_session import (
 	RouteMount as RouteMount,
 )
+from pulse.render_session import eval_js as eval_js
 from pulse.render_session import run_js as run_js
 
 # Request

@@ -60,14 +60,14 @@ ps.run_js(window.scrollTo(0, 0))
 ps.run_js("window.scrollTo(0, 0)")  # TypeError
 ```
 
-For operations that return values, use `result=True` and await:
+For operations that return values, use `eval_js` and await:
 
 ```python
 from pulse.js import window
 
 async def get_window_size(self):
-    width = await ps.run_js(window.innerWidth, result=True)
-    height = await ps.run_js(window.innerHeight, result=True)
+    width = await ps.eval_js(window.innerWidth)
+    height = await ps.eval_js(window.innerHeight)
     print(f"Window is {width}x{height}")
 ```
 
@@ -157,7 +157,7 @@ def get_selection():
 
 class EditorState(ps.State):
     async def copy_selection(self):
-        text = await ps.run_js(get_selection(), result=True)
+        text = await ps.eval_js(get_selection())
         if text:
             print(f"User selected: {text}")
 ```

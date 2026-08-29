@@ -68,7 +68,7 @@ class AuthMiddleware(ps.PulseMiddleware):
         session: dict,
         next,
     ) -> Ok | Deny:
-        # Every WebSocket message
+        # Client-initiated commands (not {type: "reply"} completions)
         return await next()
 ```
 
@@ -212,7 +212,7 @@ async def prerender_route(
 
 ### `message`
 
-Called on every WebSocket message (callbacks, navigation, etc.).
+Called on client-initiated WebSocket commands (callbacks, navigation, etc.). Reply completions skip this hook.
 
 ```python
 @override

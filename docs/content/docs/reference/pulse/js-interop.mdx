@@ -314,17 +314,20 @@ async def on_check():
 
 ---
 
-## Reply errors
+## JsExecError
 
-A failed `run_js(..., result=True)` arrives as `{type: "reply", error}` and rejects the future with `RuntimeError`.
+Exception raised when client-side JS execution fails.
 
 ```python
-async def on_check():
-    try:
-        await run_js(might_fail(), result=True)
-    except RuntimeError as e:
-        print(e)
+from pulse import JsExecError
 ```
+
+```python
+class JsExecError(Exception):
+    pass
+```
+
+A failed `run_js(..., result=True)` arrives as `{type: "reply", error}` and rejects the future with `JsExecError`.
 
 ---
 

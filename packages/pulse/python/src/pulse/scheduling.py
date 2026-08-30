@@ -290,7 +290,6 @@ class TimerRegistry:
 		try:
 			loop = asyncio.get_running_loop()
 		except RuntimeError:
-			loop = None
 			try:
 				loop = asyncio.get_event_loop()
 			except RuntimeError:

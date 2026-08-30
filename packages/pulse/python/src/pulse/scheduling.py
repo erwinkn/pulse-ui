@@ -58,12 +58,6 @@ def create_task(
 	return task_registry.create_task(coroutine, name=name, on_done=on_done)
 
 
-def create_future() -> asyncio.Future[Any]:
-	"""Create an asyncio Future on the main event loop from any thread."""
-	task_registry, _ = _resolve_registries()
-	return task_registry.create_future()
-
-
 def later(
 	delay: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
 ) -> TimerHandleLike:
@@ -157,17 +151,6 @@ class TaskRegistry:
 			task = from_thread.run(_runner)
 
 		return self.track(task)
-
-	def create_future(self) -> asyncio.Future[Any]:
-		"""Create an asyncio Future on the main event loop from any thread."""
-		try:
-			return asyncio.get_running_loop().create_future()
-		except RuntimeError:
-
-			async def _create():
-				return asyncio.get_running_loop().create_future()
-
-			return from_thread.run(_create)
 
 	def cancel_all(self) -> None:
 		for task in list(self._tasks):
@@ -287,22 +270,36 @@ class TimerRegistry:
 		reactive dependencies from the calling context. Other context vars (like
 		PulseContext) are preserved normally.
 		"""
+
+		def _schedule_on_loop(loop: asyncio.AbstractEventLoop) -> TimerHandleLike:
+			tracked_box: list[TimerHandleLike] = []
+			run = self._prepare_run(
+				loop,
+				tracked_box,
+				fn,
+				args,
+				kwargs,
+				untrack=untrack,
+			)
+			handle = loop.call_later(clamp_delay(delay), run)
+			tracked = _TrackedTimerHandle(handle, self)
+			tracked_box.append(tracked)
+			self._handles.add(tracked)
+			return tracked
+
 		try:
 			loop = asyncio.get_running_loop()
 		except RuntimeError:
+			loop = None
 			try:
 				loop = asyncio.get_event_loop()
-			except RuntimeError as exc:
-				raise RuntimeError("later() requires an event loop") from exc
+			except RuntimeError:
 
-		tracked_box: list[TimerHandleLike] = []
-		_run = self._prepare_run(loop, tracked_box, fn, args, kwargs, untrack=untrack)
+				async def _runner() -> TimerHandleLike:
+					return _schedule_on_loop(asyncio.get_running_loop())
 
-		handle = loop.call_later(clamp_delay(delay), _run)
-		tracked = _TrackedTimerHandle(handle, self)
-		tracked_box.append(tracked)
-		self._handles.add(tracked)
-		return tracked
+				return from_thread.run(_runner)
+		return _schedule_on_loop(loop)
 
 	def _schedule_soon(
 		self,

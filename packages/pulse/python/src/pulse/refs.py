@@ -12,7 +12,7 @@ from pulse.context import PulseContext
 from pulse.helpers import Disposable
 from pulse.hooks.core import HookMetadata, HookState, hooks
 from pulse.hooks.state import collect_component_identity
-from pulse.scheduling import create_future, create_task
+from pulse.scheduling import create_task
 
 T = TypeVar("T")
 Number = int | float
@@ -184,7 +184,7 @@ class RefHandle(Disposable, Generic[T]):
 	async def wait_mounted(self, timeout: float | None = None) -> None:
 		if self._mounted:
 			return
-		fut = create_future()
+		fut = asyncio.get_running_loop().create_future()
 		self._mount_waiters.append(fut)
 		try:
 			if timeout is None:

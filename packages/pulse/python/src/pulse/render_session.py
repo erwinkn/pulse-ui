@@ -34,7 +34,6 @@ from pulse.scheduling import (
 	TaskRegistry,
 	TimerHandleLike,
 	TimerRegistry,
-	create_future,
 )
 from pulse.state.query_param import QueryParamSync
 from pulse.state.state import State
@@ -875,7 +874,7 @@ class RenderSession:
 			api_path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
 			url = f"{base}{api_path}"
 		corr_id = uuid.uuid4().hex
-		fut = create_future()
+		fut = asyncio.get_running_loop().create_future()
 		self._pending_api[corr_id] = fut
 		headers = headers or {}
 		headers["x-pulse-render-id"] = self.id

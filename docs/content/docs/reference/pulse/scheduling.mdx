@@ -8,7 +8,7 @@ Pulse provides scheduling primitives for running code after delays, at intervals
 All scheduling functions are available from `pulse.scheduling`:
 
 ```python
-from pulse.scheduling import later, repeat, create_task, create_future, call_soon
+from pulse.scheduling import later, repeat, create_task, call_soon
 ```
 
 For common cases, `later` and `repeat` are also available directly on the `pulse` module:
@@ -274,35 +274,6 @@ This prevents orphaned tasks and resource leaks.
 
 ---
 
-## create_future
-
-Create an asyncio Future on the main event loop.
-
-```python
-def create_future() -> asyncio.Future[Any]
-```
-
-### Returns
-
-`asyncio.Future[Any]` created on the main event loop.
-
-### Example
-
-```python
-from pulse.scheduling import create_future
-
-class PromiseState(ps.State):
-    result: str = ""
-
-    async def wait_for_signal(self):
-        future = create_future()
-        # Some external code will resolve this
-        register_callback(future.set_result)
-        self.result = await future
-```
-
----
-
 ## Automatic cleanup
 
 All scheduling primitives are scoped to the current **render session** (if inside a component render) or the **app** (if outside). When the session closes or app shuts down:
@@ -328,17 +299,22 @@ def PollingComponent():
 
 ## Thread safety
 
-These functions work from any thread. If called from a background thread, they schedule work on the main event loop using `anyio.from_thread.run()`.
+These functions work from an AnyIO worker thread, such as a synchronous
+FastAPI endpoint or `anyio.to_thread.run_sync`. They schedule work on the main
+event loop using `anyio.from_thread.run()`.
 
 ```python
-import threading
+import anyio
+import pulse as ps
 
-def background_thread():
-    # Works from any thread
+def background_work():
     ps.later(1.0, lambda: print("Hello from main loop"))
 
-threading.Thread(target=background_thread).start()
+async def run_in_worker_thread():
+    await anyio.to_thread.run_sync(background_work)
 ```
+
+A bare `threading.Thread` is not supported and raises a `RuntimeError`.
 
 ---
 

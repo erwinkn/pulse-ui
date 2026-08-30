@@ -14,7 +14,6 @@ from pulse.messages import (
 	ServerChannelRequestMessage,
 	ServerChannelResponseMessage,
 )
-from pulse.scheduling import create_future
 
 if TYPE_CHECKING:
 	from pulse.render_session import RenderSession
@@ -505,7 +504,7 @@ class Channel:
 
 		self._ensure_open()
 		request_id = uuid.uuid4().hex
-		fut = create_future()
+		fut = asyncio.get_running_loop().create_future()
 		self._manager.register_pending(request_id, fut, self.id)
 		msg = ServerChannelRequestMessage(
 			type="channel_message",

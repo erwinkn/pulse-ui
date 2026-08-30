@@ -1,7 +1,9 @@
 import asyncio
+import threading
 
 import pulse as ps
 import pytest
+from anyio import to_thread
 from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteTree
 from pulse.scheduling import TaskRegistry, TimerRegistry, call_soon, create_task
@@ -78,6 +80,62 @@ async def test_timer_registry_later_runs_sync_and_discards():
 		lambda: len(registry._handles) == 0,  # pyright: ignore[reportPrivateUsage]
 		timeout=0.2,
 	)
+
+
+@pytest.mark.asyncio
+async def test_timer_registry_later_from_anyio_worker_thread_runs_on_loop():
+	tasks = TaskRegistry(name="tasks")
+	registry = TimerRegistry(tasks=tasks, name="test")
+	fired = asyncio.Event()
+
+	def callback():
+		fired.set()
+
+	handle = await to_thread.run_sync(lambda: registry.later(0.01, callback))
+
+	assert handle in registry._handles  # pyright: ignore[reportPrivateUsage]
+	assert await wait_for(lambda: fired.is_set(), timeout=0.2)
+
+
+@pytest.mark.asyncio
+async def test_timer_registry_later_from_anyio_worker_thread_can_cancel():
+	tasks = TaskRegistry(name="tasks")
+	registry = TimerRegistry(tasks=tasks, name="test")
+	fired = False
+
+	def callback():
+		nonlocal fired
+		fired = True
+
+	handle = await to_thread.run_sync(lambda: registry.later(0.05, callback))
+
+	assert handle in registry._handles  # pyright: ignore[reportPrivateUsage]
+	handle.cancel()
+	await asyncio.sleep(0.1)
+
+	assert fired is False
+	assert len(registry._handles) == 0  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
+async def test_timer_registry_later_from_bare_thread_raises():
+	tasks = TaskRegistry(name="tasks")
+	registry = TimerRegistry(tasks=tasks, name="test")
+	errors: list[BaseException] = []
+
+	def schedule():
+		try:
+			registry.later(0.01, lambda: None)
+		except BaseException as exc:
+			errors.append(exc)
+
+	thread = threading.Thread(target=schedule)
+	thread.start()
+	thread.join()
+
+	assert len(errors) == 1
+	assert isinstance(errors[0], RuntimeError)
+	assert "AnyIO worker thread" in str(errors[0])
 
 
 @pytest.mark.asyncio

@@ -67,7 +67,7 @@ async def test_task_registry_cancel_all_cancels_and_clears():
 @pytest.mark.asyncio
 async def test_timer_registry_later_runs_sync_and_discards():
 	tasks = TaskRegistry(name="tasks")
-	registry = TimerRegistry(tasks=tasks, name="test")
+	registry = TimerRegistry(tasks=tasks)
 	fired = False
 
 	def callback():
@@ -86,8 +86,8 @@ async def test_timer_registry_later_runs_sync_and_discards():
 @pytest.mark.asyncio
 async def test_timer_registry_later_from_anyio_worker_thread_runs_on_loop():
 	tasks = TaskRegistry(name="tasks")
-	tasks.bind_loop(asyncio.get_running_loop())
-	registry = TimerRegistry(tasks=tasks, name="test")
+	tasks.loop.bind(asyncio.get_running_loop())
+	registry = TimerRegistry(tasks=tasks)
 	fired = asyncio.Event()
 
 	def callback():
@@ -102,8 +102,8 @@ async def test_timer_registry_later_from_anyio_worker_thread_runs_on_loop():
 @pytest.mark.asyncio
 async def test_timer_registry_later_from_anyio_worker_thread_can_cancel():
 	tasks = TaskRegistry(name="tasks")
-	tasks.bind_loop(asyncio.get_running_loop())
-	registry = TimerRegistry(tasks=tasks, name="test")
+	tasks.loop.bind(asyncio.get_running_loop())
+	registry = TimerRegistry(tasks=tasks)
 	fired = False
 
 	def callback():
@@ -123,8 +123,8 @@ async def test_timer_registry_later_from_anyio_worker_thread_can_cancel():
 @pytest.mark.asyncio
 async def test_timer_registry_later_from_anyio_worker_thread_can_cancel_in_worker():
 	tasks = TaskRegistry(name="tasks")
-	tasks.bind_loop(asyncio.get_running_loop())
-	registry = TimerRegistry(tasks=tasks, name="test")
+	tasks.loop.bind(asyncio.get_running_loop())
+	registry = TimerRegistry(tasks=tasks)
 	fired = False
 
 	def callback():
@@ -148,8 +148,8 @@ async def test_timer_registry_later_from_anyio_worker_thread_can_cancel_in_worke
 @pytest.mark.asyncio
 async def test_timer_registry_repeat_from_anyio_worker_thread_runs():
 	tasks = TaskRegistry(name="tasks")
-	tasks.bind_loop(asyncio.get_running_loop())
-	registry = TimerRegistry(tasks=tasks, name="test")
+	tasks.loop.bind(asyncio.get_running_loop())
+	registry = TimerRegistry(tasks=tasks)
 	fired = asyncio.Event()
 	count = 0
 
@@ -173,7 +173,7 @@ async def test_timer_registry_repeat_from_anyio_worker_thread_runs():
 @pytest.mark.asyncio
 async def test_timer_registry_repeat_can_cancel_from_anyio_worker_thread():
 	tasks = TaskRegistry(name="tasks")
-	registry = TimerRegistry(tasks=tasks, name="test")
+	registry = TimerRegistry(tasks=tasks)
 	fired = asyncio.Event()
 	count = 0
 
@@ -196,8 +196,8 @@ async def test_timer_registry_repeat_can_cancel_from_anyio_worker_thread():
 @pytest.mark.asyncio
 async def test_timer_registry_later_and_repeat_from_bare_thread_run_on_loop():
 	tasks = TaskRegistry(name="tasks")
-	tasks.bind_loop(asyncio.get_running_loop())
-	registry = TimerRegistry(tasks=tasks, name="test")
+	tasks.loop.bind(asyncio.get_running_loop())
+	registry = TimerRegistry(tasks=tasks)
 	later_fired = asyncio.Event()
 	repeat_fired = asyncio.Event()
 	callback_thread_ids: list[int] = []
@@ -235,8 +235,8 @@ async def test_timer_registry_later_and_repeat_from_bare_thread_run_on_loop():
 @pytest.mark.asyncio
 async def test_timer_registry_later_and_repeat_from_asyncio_worker_thread_run_on_loop():
 	tasks = TaskRegistry(name="tasks")
-	tasks.bind_loop(asyncio.get_running_loop())
-	registry = TimerRegistry(tasks=tasks, name="test")
+	tasks.loop.bind(asyncio.get_running_loop())
+	registry = TimerRegistry(tasks=tasks)
 	later_fired = asyncio.Event()
 	repeat_fired = asyncio.Event()
 	repeat_count = 0
@@ -270,8 +270,8 @@ async def test_timer_registry_later_and_repeat_from_asyncio_worker_thread_run_on
 @pytest.mark.asyncio
 async def test_timer_registry_worker_with_idle_loop_runs_on_bound_loop():
 	tasks = TaskRegistry(name="tasks")
-	tasks.bind_loop(asyncio.get_running_loop())
-	registry = TimerRegistry(tasks=tasks, name="test")
+	tasks.loop.bind(asyncio.get_running_loop())
+	registry = TimerRegistry(tasks=tasks)
 	fired = asyncio.Event()
 
 	def callback():
@@ -293,8 +293,8 @@ async def test_timer_registry_worker_with_idle_loop_runs_on_bound_loop():
 @pytest.mark.asyncio
 async def test_timer_registry_different_running_loop_raises():
 	tasks = TaskRegistry(name="tasks")
-	tasks.bind_loop(asyncio.get_running_loop())
-	registry = TimerRegistry(tasks=tasks, name="test")
+	tasks.loop.bind(asyncio.get_running_loop())
+	registry = TimerRegistry(tasks=tasks)
 
 	def schedule():
 		async def run():
@@ -304,7 +304,7 @@ async def test_timer_registry_different_running_loop_raises():
 
 	with pytest.raises(
 		RuntimeError,
-		match="different event loop than the one bound to the tasks registry",
+		match="different event loop",
 	):
 		await asyncio.to_thread(schedule)
 
@@ -313,12 +313,10 @@ async def test_timer_registry_different_running_loop_raises():
 async def test_timer_registry_thread_scheduling_requires_bound_loop():
 	def schedule():
 		tasks = TaskRegistry(name="tasks")
-		registry = TimerRegistry(tasks=tasks, name="test")
+		registry = TimerRegistry(tasks=tasks)
 		registry.later(0.01, lambda: None)
 
-	with pytest.raises(
-		RuntimeError, match="cannot schedule: tasks registry has no bound loop"
-	):
+	with pytest.raises(RuntimeError, match="tasks has no bound event loop"):
 		await asyncio.to_thread(schedule)
 
 
@@ -343,7 +341,7 @@ async def test_render_session_created_without_running_loop_uses_app_loop():
 @pytest.mark.asyncio
 async def test_timer_registry_later_runs_async_and_discards():
 	tasks = TaskRegistry(name="tasks")
-	registry = TimerRegistry(tasks=tasks, name="test")
+	registry = TimerRegistry(tasks=tasks)
 	fired = asyncio.Event()
 
 	async def callback():
@@ -362,7 +360,7 @@ async def test_timer_registry_later_runs_async_and_discards():
 @pytest.mark.asyncio
 async def test_timer_registry_later_runs_coroutine_return():
 	tasks = TaskRegistry(name="tasks")
-	registry = TimerRegistry(tasks=tasks, name="test")
+	registry = TimerRegistry(tasks=tasks)
 	fired = asyncio.Event()
 
 	async def inner():
@@ -380,7 +378,7 @@ async def test_timer_registry_later_runs_coroutine_return():
 @pytest.mark.asyncio
 async def test_timer_registry_cancel_discards_handle():
 	tasks = TaskRegistry(name="tasks")
-	registry = TimerRegistry(tasks=tasks, name="test")
+	registry = TimerRegistry(tasks=tasks)
 
 	def callback():
 		return None
@@ -396,7 +394,7 @@ async def test_timer_registry_cancel_discards_handle():
 @pytest.mark.asyncio
 async def test_timer_registry_cancel_all_cancels_and_clears():
 	tasks = TaskRegistry(name="tasks")
-	registry = TimerRegistry(tasks=tasks, name="test")
+	registry = TimerRegistry(tasks=tasks)
 	fired = False
 
 	def callback():

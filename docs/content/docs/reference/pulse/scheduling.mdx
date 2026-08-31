@@ -319,6 +319,8 @@ def refresh():
 ```
 
 A handle returned from another thread can also be cancelled from that thread.
+Cross-thread calls block until the loop picks up the work and raise
+`TimeoutError` after 30 seconds if it does not.
 
 ---
 

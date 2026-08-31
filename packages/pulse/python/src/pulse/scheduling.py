@@ -76,7 +76,7 @@ def _resolve_loop(
 		if bound is None or running is bound:
 			return running, True
 		raise RuntimeError(
-			f"cannot schedule from a thread running a different event loop: {registry_name} registry is bound to another event loop"
+			f"cannot schedule from a thread running a different event loop than the one bound to the {registry_name} registry"
 		)
 	if bound is not None:
 		return bound, False

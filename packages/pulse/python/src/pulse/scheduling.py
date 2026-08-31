@@ -60,14 +60,23 @@ def _running_loop() -> asyncio.AbstractEventLoop | None:
 
 def _resolve_loop(
 	bound: asyncio.AbstractEventLoop | None,
+	name: str | None,
 ) -> tuple[asyncio.AbstractEventLoop, bool]:
-	"""Resolve inline, cross-thread, idle-main-thread, and error cases for scheduling."""
+	"""Resolve the loop for each scheduling case.
+
+	- Running loop is bound, or registry is unbound: schedule inline.
+	- Running loop is different: raise an error.
+	- No running loop and bound registry: marshal via ``run_on_loop``.
+	- No running loop, unbound registry, main thread with idle loop: schedule inline.
+	- Otherwise: raise an error.
+	"""
+	registry_name = name or "unnamed"
 	running = _running_loop()
 	if running is not None:
 		if bound is None or running is bound:
 			return running, True
 		raise RuntimeError(
-			"cannot schedule from a thread running a different event loop"
+			f"cannot schedule from a thread running a different event loop: {registry_name} registry is bound to another event loop"
 		)
 	if bound is not None:
 		return bound, False
@@ -76,7 +85,7 @@ def _resolve_loop(
 			return asyncio.get_event_loop(), True
 		except RuntimeError:
 			pass
-	raise RuntimeError("cannot schedule: registry has no bound loop")
+	raise RuntimeError(f"cannot schedule: {registry_name} registry has no bound loop")
 
 
 def _resolve_registries() -> tuple["TaskRegistry", "TimerRegistry"]:
@@ -207,7 +216,7 @@ class TaskRegistry:
 				task.add_done_callback(on_done)
 			return self.track(task)
 
-		loop, inline = _resolve_loop(self._loop)
+		loop, inline = _resolve_loop(self._loop, self.name)
 		if inline:
 			return _make_task()
 		return run_on_loop(loop, _make_task)
@@ -250,7 +259,7 @@ class TimerRegistry:
 	def call_soon(
 		self, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
 	) -> TimerHandleLike:
-		loop, inline = _resolve_loop(self._tasks.loop)
+		loop, inline = _resolve_loop(self._tasks.loop, self._tasks.name)
 		if inline:
 			return self._schedule_soon(loop, fn, args, dict(kwargs))
 		return run_on_loop(
@@ -341,7 +350,7 @@ class TimerRegistry:
 			self._handles.add(tracked)
 			return tracked
 
-		loop, inline = _resolve_loop(self._tasks.loop)
+		loop, inline = _resolve_loop(self._tasks.loop, self._tasks.name)
 		if inline:
 			return _schedule_on_loop(loop)
 		return run_on_loop(loop, lambda: _schedule_on_loop(loop))
@@ -441,7 +450,7 @@ class _TrackedTimerHandle:
 		if self._cancelled:
 			return
 		self._cancelled = True
-		if _running_loop() is None:
+		if _running_loop() is not self._loop:
 			self._loop.call_soon_threadsafe(self._finish_cancel)
 		else:
 			self._finish_cancel()
@@ -503,7 +512,7 @@ class _TrackedHandle:
 		if self._cancelled:
 			return
 		self._cancelled = True
-		if _running_loop() is None:
+		if _running_loop() is not self._loop:
 			self._loop.call_soon_threadsafe(self._finish_cancel)
 		else:
 			self._finish_cancel()

@@ -302,7 +302,7 @@ async def test_timer_registry_different_running_loop_raises():
 
 		asyncio.run(run())
 
-	with pytest.raises(RuntimeError, match="different event loop"):
+	with pytest.raises(RuntimeError, match="different event loop: tasks registry"):
 		await asyncio.to_thread(schedule)
 
 
@@ -314,7 +314,7 @@ async def test_timer_registry_thread_scheduling_requires_bound_loop():
 		registry.later(0.01, lambda: None)
 
 	with pytest.raises(
-		RuntimeError, match="cannot schedule: registry has no bound loop"
+		RuntimeError, match="cannot schedule: tasks registry has no bound loop"
 	):
 		await asyncio.to_thread(schedule)
 
@@ -322,21 +322,19 @@ async def test_timer_registry_thread_scheduling_requires_bound_loop():
 @pytest.mark.asyncio
 async def test_render_session_created_without_running_loop_uses_app_loop():
 	app = ps.App()
-	app._tasks.bind_loop(asyncio.get_running_loop())  # pyright: ignore[reportPrivateUsage]
 	app.server_address = "http://testserver"
 	session = UserSession("test-session", {}, app)
 	app.user_sessions[session.sid] = session
 	fired = asyncio.Event()
 
-	def create_and_schedule():
-		render = app.create_render("test-render", session)
-		render.schedule_later(0.01, fired.set)
+	async with app.fastapi.router.lifespan_context(app.fastapi):
 
-	try:
+		def create_and_schedule():
+			render = app.create_render("test-render", session)
+			render.schedule_later(0.01, fired.set)
+
 		await asyncio.to_thread(create_and_schedule)
 		assert await wait_for(lambda: fired.is_set(), timeout=0.2)
-	finally:
-		await app.close()
 
 
 @pytest.mark.asyncio

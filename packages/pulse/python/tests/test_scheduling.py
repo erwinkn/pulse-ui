@@ -302,7 +302,10 @@ async def test_timer_registry_different_running_loop_raises():
 
 		asyncio.run(run())
 
-	with pytest.raises(RuntimeError, match="different event loop: tasks registry"):
+	with pytest.raises(
+		RuntimeError,
+		match="different event loop than the one bound to the tasks registry",
+	):
 		await asyncio.to_thread(schedule)
 
 

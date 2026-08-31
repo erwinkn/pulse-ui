@@ -257,7 +257,7 @@ class TimerRegistry:
 	) -> TimerHandleLike:
 		"""
 		Run the loop-side half of `later` or `call_soon`; `delay=None` uses
-		`call_soon`. Supports calls from any thread.
+		`call_soon`.
 		Works with sync or async functions. Returns a TimerHandle; call .cancel() to cancel.
 
 		The callback can run without a reactive scope to avoid accidentally capturing
@@ -265,16 +265,13 @@ class TimerRegistry:
 		PulseContext) are preserved normally.
 		"""
 
-		when = loop.time()
-		tracked = _TrackedHandle(self, loop=loop, when=when)
+		tracked = _TrackedHandle(self, loop=loop)
 		run = self._prepare_run(loop, tracked, fn, args, kwargs, untrack=untrack)
 		if delay is None:
-			handle = loop.call_soon(run)
+			tracked.attach(loop.call_soon(run), loop.time())
 		else:
-			handle = loop.call_later(clamp_delay(delay), run)
-			tracked.attach(handle, handle.when())
-		if delay is None:
-			tracked.attach(handle)
+			timer = loop.call_later(clamp_delay(delay), run)
+			tracked.attach(timer, timer.when())
 		self._handles.add(tracked)
 		return tracked
 
@@ -352,22 +349,16 @@ class _TrackedHandle:
 		registry: "TimerRegistry",
 		*,
 		loop: asyncio.AbstractEventLoop,
-		when: float,
 	) -> None:
 		self._handle = None
 		self._registry = registry
 		self._loop = loop
-		self._when = when
+		self._when = 0.0
 		self._cancelled = False
 
-	def attach(
-		self,
-		handle: asyncio.Handle | asyncio.TimerHandle,
-		when: float | None = None,
-	) -> None:
+	def attach(self, handle: asyncio.Handle | asyncio.TimerHandle, when: float) -> None:
 		self._handle = handle
-		if when is not None:
-			self._when = when
+		self._when = when
 
 	def cancel(self) -> None:
 		if self._cancelled:

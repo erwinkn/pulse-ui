@@ -157,7 +157,7 @@ class TaskRegistry:
 	def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
 		self._loop = loop
 
-	def _require_loop(self) -> asyncio.AbstractEventLoop:
+	def require_loop(self) -> asyncio.AbstractEventLoop:
 		if self._loop is None:
 			name = self.name or "unnamed"
 			raise RuntimeError(
@@ -189,7 +189,7 @@ class TaskRegistry:
 
 		loop = _loop_for_this_thread()
 		if loop is None:
-			return run_on_loop(self._require_loop(), _make_task)
+			return run_on_loop(self.require_loop(), _make_task)
 		if loop.is_running():
 			self._loop = loop
 		return _make_task()
@@ -234,7 +234,7 @@ class TimerRegistry:
 	) -> TimerHandleLike:
 		loop = _loop_for_this_thread()
 		if loop is None:
-			loop = self._tasks._require_loop()  # pyright: ignore[reportPrivateUsage]
+			loop = self._tasks.require_loop()
 			return run_on_loop(
 				loop, lambda: self._schedule_soon(loop, fn, args, dict(kwargs))
 			)
@@ -328,7 +328,7 @@ class TimerRegistry:
 
 		loop = _loop_for_this_thread()
 		if loop is None:
-			loop = self._tasks._require_loop()  # pyright: ignore[reportPrivateUsage]
+			loop = self._tasks.require_loop()
 			return run_on_loop(loop, lambda: _schedule_on_loop(loop))
 		return _schedule_on_loop(loop)
 

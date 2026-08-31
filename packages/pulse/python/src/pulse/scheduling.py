@@ -36,6 +36,9 @@ def run_on_loop(loop: asyncio.AbstractEventLoop, fn: Callable[[], T]) -> T:
 	Blocks the calling thread; only called from a thread with no event loop,
 	so it cannot deadlock on itself.
 	"""
+	if not loop.is_running():
+		raise RuntimeError("cannot schedule on an event loop that is not running")
+
 	future: concurrent.futures.Future[T] = concurrent.futures.Future()
 
 	def _run() -> None:
@@ -44,8 +47,6 @@ def run_on_loop(loop: asyncio.AbstractEventLoop, fn: Callable[[], T]) -> T:
 		except BaseException as exc:
 			future.set_exception(exc)
 
-	if not loop.is_running():
-		raise RuntimeError("cannot schedule on an event loop that is not running")
 	loop.call_soon_threadsafe(_run)
 	return future.result()
 

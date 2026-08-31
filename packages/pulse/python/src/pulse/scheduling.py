@@ -1,6 +1,7 @@
 import asyncio
 import concurrent.futures
 import os
+import threading
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any, ParamSpec, Protocol, TypeVar, override
@@ -43,6 +44,8 @@ def run_on_loop(loop: asyncio.AbstractEventLoop, fn: Callable[[], T]) -> T:
 		except BaseException as exc:
 			future.set_exception(exc)
 
+	if not loop.is_running():
+		raise RuntimeError("cannot schedule on an event loop that is not running")
 	loop.call_soon_threadsafe(_run)
 	return future.result()
 
@@ -51,6 +54,8 @@ def _loop_for_this_thread() -> asyncio.AbstractEventLoop | None:
 	try:
 		return asyncio.get_running_loop()
 	except RuntimeError:
+		if threading.current_thread() is not threading.main_thread():
+			return None
 		try:
 			return asyncio.get_event_loop()
 		except RuntimeError:
@@ -146,13 +151,25 @@ class TaskRegistry:
 	name: str | None
 	_loop: asyncio.AbstractEventLoop | None
 
-	def __init__(self, name: str | None = None) -> None:
+	def __init__(
+		self,
+		name: str | None = None,
+		*,
+		loop: asyncio.AbstractEventLoop | None = None,
+	) -> None:
 		self._tasks = set()
 		self.name = name
-		try:
-			self._loop = asyncio.get_running_loop()
-		except RuntimeError:
-			self._loop = None
+		if loop is not None:
+			self._loop = loop
+		else:
+			try:
+				self._loop = asyncio.get_running_loop()
+			except RuntimeError:
+				self._loop = None
+
+	@property
+	def loop(self) -> asyncio.AbstractEventLoop | None:
+		return self._loop
 
 	def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
 		self._loop = loop

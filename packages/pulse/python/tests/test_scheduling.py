@@ -8,6 +8,7 @@ from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteTree
 from pulse.scheduling import TaskRegistry, TimerRegistry, call_soon, create_task
 from pulse.test_helpers import wait_for
+from pulse.user_session import UserSession
 
 
 @ps.component
@@ -261,6 +262,28 @@ async def test_timer_registry_later_and_repeat_from_asyncio_worker_thread_run_on
 
 
 @pytest.mark.asyncio
+async def test_timer_registry_worker_with_idle_loop_runs_on_bound_loop():
+	tasks = TaskRegistry(name="tasks")
+	registry = TimerRegistry(tasks=tasks, name="test")
+	fired = asyncio.Event()
+
+	def callback():
+		fired.set()
+
+	def schedule():
+		worker_loop = asyncio.new_event_loop()
+		asyncio.set_event_loop(worker_loop)
+		try:
+			registry.later(0.01, callback)
+		finally:
+			asyncio.set_event_loop(None)
+			worker_loop.close()
+
+	await asyncio.to_thread(schedule)
+	assert await wait_for(lambda: fired.is_set(), timeout=0.2)
+
+
+@pytest.mark.asyncio
 async def test_timer_registry_thread_scheduling_requires_bound_loop():
 	def schedule():
 		tasks = TaskRegistry(name="tasks")
@@ -269,6 +292,25 @@ async def test_timer_registry_thread_scheduling_requires_bound_loop():
 
 	with pytest.raises(RuntimeError, match="tasks registry has no bound loop"):
 		await asyncio.to_thread(schedule)
+
+
+@pytest.mark.asyncio
+async def test_render_session_created_without_running_loop_uses_app_loop():
+	app = ps.App()
+	app.server_address = "http://testserver"
+	session = UserSession("test-session", {}, app)
+	app.user_sessions[session.sid] = session
+	fired = asyncio.Event()
+
+	def create_and_schedule():
+		render = app.create_render("test-render", session)
+		render.schedule_later(0.01, fired.set)
+
+	try:
+		await asyncio.to_thread(create_and_schedule)
+		assert await wait_for(lambda: fired.is_set(), timeout=0.2)
+	finally:
+		await app.close()
 
 
 @pytest.mark.asyncio

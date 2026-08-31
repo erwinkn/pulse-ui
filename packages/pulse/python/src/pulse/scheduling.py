@@ -30,6 +30,16 @@ def is_pytest() -> bool:
 	)
 
 
+def _loop_for_this_thread() -> asyncio.AbstractEventLoop | None:
+	try:
+		return asyncio.get_running_loop()
+	except RuntimeError:
+		try:
+			return asyncio.get_event_loop()
+		except RuntimeError:
+			return None
+
+
 def _resolve_registries() -> tuple["TaskRegistry", "TimerRegistry"]:
 	from pulse.context import PulseContext
 
@@ -42,7 +52,7 @@ def _resolve_registries() -> tuple["TaskRegistry", "TimerRegistry"]:
 def call_soon(
 	fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
 ) -> TimerHandleLike | None:
-	"""Schedule a callback to run ASAP on the main event loop from any thread."""
+	"""Schedule a callback ASAP; supports AnyIO worker threads, not bare threads."""
 	_, timer_registry = _resolve_registries()
 	return timer_registry.call_soon(fn, *args, **kwargs)
 
@@ -53,7 +63,7 @@ def create_task(
 	name: str | None = None,
 	on_done: Callable[[asyncio.Task[T]], None] | None = None,
 ) -> asyncio.Task[T]:
-	"""Create a tracked task on the active session/app registry."""
+	"""Create a tracked task; supports AnyIO worker threads, not bare threads."""
 	task_registry, _ = _resolve_registries()
 	return task_registry.create_task(coroutine, name=name, on_done=on_done)
 
@@ -62,9 +72,8 @@ def later(
 	delay: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
 ) -> TimerHandleLike:
 	"""
-	Schedule `fn(*args, **kwargs)` to run after `delay` seconds.
+	Schedule a callback after `delay`; supports AnyIO worker threads, not bare threads.
 	Works with sync or async functions. Returns a handle; call .cancel() to cancel.
-
 	The callback runs with no reactive scope to avoid accidentally capturing
 	reactive dependencies from the calling context. Other context vars (like
 	PulseContext) are preserved normally.
@@ -76,10 +85,12 @@ def later(
 
 class RepeatHandle:
 	task: asyncio.Task[None] | None
+	loop: asyncio.AbstractEventLoop | None
 	cancelled: bool
 
 	def __init__(self) -> None:
 		self.task = None
+		self.loop = None
 		self.cancelled = False
 
 	def cancel(self):
@@ -87,12 +98,15 @@ class RepeatHandle:
 			return
 		self.cancelled = True
 		if self.task is not None and not self.task.done():
-			self.task.cancel()
+			if _loop_for_this_thread() is None and self.loop is not None:
+				self.loop.call_soon_threadsafe(self.task.cancel)
+			else:
+				self.task.cancel()
 
 
 def repeat(interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs):
 	"""
-	Repeatedly run `fn(*args, **kwargs)` every `interval` seconds.
+	Repeat a callback every `interval`; supports AnyIO worker threads, not bare threads.
 	Works with sync or async functions.
 	For async functions, waits for completion before starting the next delay.
 	Returns a handle with .cancel() to stop future runs.
@@ -129,7 +143,7 @@ class TaskRegistry:
 		name: str | None = None,
 		on_done: Callable[[asyncio.Task[T]], None] | None = None,
 	) -> asyncio.Task[T]:
-		"""Create and schedule a coroutine task on the main loop from any thread."""
+		"""Create and schedule a task; supports AnyIO worker threads, not bare threads."""
 		try:
 			asyncio.get_running_loop()
 			task = asyncio.ensure_future(coroutine)
@@ -213,7 +227,6 @@ class TimerRegistry:
 	) -> RepeatHandle:
 		from pulse.reactive import Untrack
 
-		loop = asyncio.get_running_loop()
 		handle = RepeatHandle()
 
 		async def _runner():
@@ -234,7 +247,7 @@ class TimerRegistry:
 						raise
 					except Exception as exc:
 						# Surface exceptions via the loop's exception handler and continue
-						loop.call_exception_handler(
+						asyncio.get_running_loop().call_exception_handler(
 							{
 								"message": "Unhandled exception in repeat() callback",
 								"exception": exc,
@@ -245,7 +258,13 @@ class TimerRegistry:
 				# Swallow task cancellation to avoid noisy "exception was never retrieved"
 				pass
 
-		handle.task = self._tasks.create_task(_runner())
+		coroutine = _runner()
+		try:
+			handle.task = self._tasks.create_task(coroutine)
+		except BaseException:
+			coroutine.close()
+			raise
+		handle.loop = handle.task.get_loop()
 		return handle
 
 	def cancel_all(self) -> None:
@@ -263,7 +282,7 @@ class TimerRegistry:
 		untrack: bool,
 	) -> TimerHandleLike:
 		"""
-		Schedule `fn(*args, **kwargs)` to run after `delay` seconds.
+		Schedule a callback after `delay`; supports AnyIO worker threads, not bare threads.
 		Works with sync or async functions. Returns a TimerHandle; call .cancel() to cancel.
 
 		The callback can run without a reactive scope to avoid accidentally capturing
@@ -282,22 +301,18 @@ class TimerRegistry:
 				untrack=untrack,
 			)
 			handle = loop.call_later(clamp_delay(delay), run)
-			tracked = _TrackedTimerHandle(handle, self)
+			tracked = _TrackedTimerHandle(handle, self, loop=loop)
 			tracked_box.append(tracked)
 			self._handles.add(tracked)
 			return tracked
 
-		try:
-			loop = asyncio.get_running_loop()
-		except RuntimeError:
-			try:
-				loop = asyncio.get_event_loop()
-			except RuntimeError:
+		loop = _loop_for_this_thread()
+		if loop is None:
 
-				async def _runner() -> TimerHandleLike:
-					return _schedule_on_loop(asyncio.get_running_loop())
+			async def _runner() -> TimerHandleLike:
+				return _schedule_on_loop(asyncio.get_running_loop())
 
-				return from_thread.run(_runner)
+			return from_thread.run(_runner)
 		return _schedule_on_loop(loop)
 
 	def _schedule_soon(
@@ -318,7 +333,7 @@ class TimerRegistry:
 		_run = self._prepare_run(loop, tracked_box, fn, args, kwargs, untrack=False)
 
 		handle = loop.call_soon(_run)
-		tracked = _TrackedHandle(handle, self, when=loop.time())
+		tracked = _TrackedHandle(handle, self, loop=loop, when=loop.time())
 		tracked_box.append(tracked)
 		self._handles.add(tracked)
 		return tracked
@@ -336,7 +351,10 @@ class TimerRegistry:
 		def _run():
 			from pulse.reactive import Untrack
 
+			tracked = tracked_box[0] if tracked_box else None
 			try:
+				if tracked is not None and tracked.cancelled():
+					return
 				if untrack:
 					with Untrack():
 						res = fn(*args, **kwargs)
@@ -371,27 +389,46 @@ class TimerRegistry:
 					}
 				)
 			finally:
-				self.discard(tracked_box[0] if tracked_box else None)
+				self.discard(tracked)
 
 		return _run
 
 
 class _TrackedTimerHandle:
-	__slots__: tuple[str, ...] = ("_handle", "_registry")
+	__slots__: tuple[str, ...] = ("_handle", "_registry", "_loop", "_cancelled")
 	_handle: asyncio.TimerHandle
 	_registry: "TimerRegistry"
+	_loop: asyncio.AbstractEventLoop
+	_cancelled: bool
 
-	def __init__(self, handle: asyncio.TimerHandle, registry: "TimerRegistry") -> None:
+	def __init__(
+		self,
+		handle: asyncio.TimerHandle,
+		registry: "TimerRegistry",
+		*,
+		loop: asyncio.AbstractEventLoop,
+	) -> None:
 		self._handle = handle
 		self._registry = registry
+		self._loop = loop
+		self._cancelled = False
 
 	def cancel(self) -> None:
+		if self._cancelled:
+			return
+		self._cancelled = True
+		if _loop_for_this_thread() is None:
+			self._loop.call_soon_threadsafe(self._finish_cancel)
+		else:
+			self._finish_cancel()
+
+	def _finish_cancel(self) -> None:
 		if not self._handle.cancelled():
 			self._handle.cancel()
 		self._registry.discard(self)
 
 	def cancelled(self) -> bool:
-		return self._handle.cancelled()
+		return self._cancelled or self._handle.cancelled()
 
 	def when(self) -> float:
 		return self._handle.when()
@@ -411,29 +448,49 @@ class _TrackedTimerHandle:
 
 
 class _TrackedHandle:
-	__slots__: tuple[str, ...] = ("_handle", "_registry", "_when")
+	__slots__: tuple[str, ...] = (
+		"_handle",
+		"_registry",
+		"_loop",
+		"_when",
+		"_cancelled",
+	)
 	_handle: asyncio.Handle
 	_registry: "TimerRegistry"
+	_loop: asyncio.AbstractEventLoop
 	_when: float
+	_cancelled: bool
 
 	def __init__(
 		self,
 		handle: asyncio.Handle,
 		registry: "TimerRegistry",
 		*,
+		loop: asyncio.AbstractEventLoop,
 		when: float,
 	) -> None:
 		self._handle = handle
 		self._registry = registry
+		self._loop = loop
 		self._when = when
+		self._cancelled = False
 
 	def cancel(self) -> None:
+		if self._cancelled:
+			return
+		self._cancelled = True
+		if _loop_for_this_thread() is None:
+			self._loop.call_soon_threadsafe(self._finish_cancel)
+		else:
+			self._finish_cancel()
+
+	def _finish_cancel(self) -> None:
 		if not self._handle.cancelled():
 			self._handle.cancel()
 		self._registry.discard(self)
 
 	def cancelled(self) -> bool:
-		return self._handle.cancelled()
+		return self._cancelled or self._handle.cancelled()
 
 	def when(self) -> float:
 		return self._when

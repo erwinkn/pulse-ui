@@ -118,6 +118,77 @@ async def test_timer_registry_later_from_anyio_worker_thread_can_cancel():
 
 
 @pytest.mark.asyncio
+async def test_timer_registry_later_from_anyio_worker_thread_can_cancel_in_worker():
+	tasks = TaskRegistry(name="tasks")
+	registry = TimerRegistry(tasks=tasks, name="test")
+	fired = False
+
+	def callback():
+		nonlocal fired
+		fired = True
+
+	def schedule_and_cancel():
+		handle = registry.later(0.05, callback)
+		handle.cancel()
+
+	await to_thread.run_sync(schedule_and_cancel)
+	assert await wait_for(
+		lambda: len(registry._handles) == 0,  # pyright: ignore[reportPrivateUsage]
+		timeout=0.2,
+	)
+	await asyncio.sleep(0.1)
+
+	assert fired is False
+
+
+@pytest.mark.asyncio
+async def test_timer_registry_repeat_from_anyio_worker_thread_runs():
+	tasks = TaskRegistry(name="tasks")
+	registry = TimerRegistry(tasks=tasks, name="test")
+	fired = asyncio.Event()
+	count = 0
+
+	def callback():
+		nonlocal count
+		count += 1
+		if count >= 2:
+			fired.set()
+
+	handle = await to_thread.run_sync(lambda: registry.repeat(0.01, callback))
+
+	assert handle.task is not None
+	await wait_for(lambda: fired.is_set(), timeout=0.2)
+	handle.cancel()
+	finished_count = count
+	await asyncio.sleep(0.05)
+
+	assert count == finished_count
+
+
+@pytest.mark.asyncio
+async def test_timer_registry_repeat_can_cancel_from_anyio_worker_thread():
+	tasks = TaskRegistry(name="tasks")
+	registry = TimerRegistry(tasks=tasks, name="test")
+	fired = asyncio.Event()
+	count = 0
+
+	def callback():
+		nonlocal count
+		count += 1
+		if count >= 2:
+			fired.set()
+
+	handle = registry.repeat(0.01, callback)
+
+	await wait_for(lambda: fired.is_set(), timeout=0.2)
+	await to_thread.run_sync(handle.cancel)
+	finished_count = count
+	await asyncio.sleep(0.05)
+
+	assert count == finished_count
+
+
+@pytest.mark.asyncio
 async def test_timer_registry_later_from_bare_thread_raises():
 	tasks = TaskRegistry(name="tasks")
 	registry = TimerRegistry(tasks=tasks, name="test")
@@ -136,6 +207,21 @@ async def test_timer_registry_later_from_bare_thread_raises():
 	assert len(errors) == 1
 	assert isinstance(errors[0], RuntimeError)
 	assert "AnyIO worker thread" in str(errors[0])
+
+	repeat_errors: list[BaseException] = []
+
+	def repeat_from_bare_thread():
+		try:
+			registry.repeat(0.01, lambda: None)
+		except BaseException as exc:
+			repeat_errors.append(exc)
+
+	thread = threading.Thread(target=repeat_from_bare_thread)
+	thread.start()
+	thread.join()
+
+	assert len(repeat_errors) == 1
+	assert isinstance(repeat_errors[0], RuntimeError)
 
 
 @pytest.mark.asyncio

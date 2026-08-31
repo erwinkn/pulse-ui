@@ -314,6 +314,8 @@ async def run_in_worker_thread():
     await anyio.to_thread.run_sync(background_work)
 ```
 
+A handle returned from a worker thread can also be cancelled from that thread.
+
 A bare `threading.Thread` is not supported and raises a `RuntimeError`.
 
 ---

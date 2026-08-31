@@ -74,6 +74,7 @@ def later(
 	"""
 	Schedule a callback after `delay`; supports AnyIO worker threads, not bare threads.
 	Works with sync or async functions. Returns a handle; call .cancel() to cancel.
+
 	The callback runs with no reactive scope to avoid accidentally capturing
 	reactive dependencies from the calling context. Other context vars (like
 	PulseContext) are preserved normally.

@@ -418,7 +418,6 @@ class App:
 	async def fastapi_lifespan(self, _: FastAPI):
 		loop = asyncio.get_running_loop()
 		self._tasks.bind_loop(loop)
-		self._timers.bind_loop(loop)
 
 		try:
 			if isinstance(self.session_store, SessionStore):
@@ -560,6 +559,11 @@ class App:
 		if self.status >= AppStatus.initialized:
 			logger.warning("Called App.setup() on an already initialized application")
 			return
+
+		try:
+			self._tasks.bind_loop(asyncio.get_running_loop())
+		except RuntimeError:
+			pass
 
 		self.server_address = server_address
 		PULSE_CONTEXT.set(PulseContext(app=self))

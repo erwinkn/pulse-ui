@@ -149,7 +149,10 @@ class TaskRegistry:
 	def __init__(self, name: str | None = None) -> None:
 		self._tasks = set()
 		self.name = name
-		self._loop = None
+		try:
+			self._loop = asyncio.get_running_loop()
+		except RuntimeError:
+			self._loop = None
 
 	def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
 		self._loop = loop
@@ -202,24 +205,11 @@ class TimerRegistry:
 	_handles: set[TimerHandleLike]
 	_tasks: TaskRegistry
 	name: str | None
-	_loop: asyncio.AbstractEventLoop | None
 
 	def __init__(self, *, tasks: TaskRegistry, name: str | None = None) -> None:
 		self._handles = set()
 		self._tasks = tasks
 		self.name = name
-		self._loop = None
-
-	def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
-		self._loop = loop
-
-	def _require_loop(self) -> asyncio.AbstractEventLoop:
-		if self._loop is None:
-			name = self.name or "unnamed"
-			raise RuntimeError(
-				f"cannot schedule from a thread with no event loop: {name} registry has no bound loop"
-			)
-		return self._loop
 
 	def track(self, handle: TimerHandleLike) -> TimerHandleLike:
 		self._handles.add(handle)
@@ -244,7 +234,7 @@ class TimerRegistry:
 	) -> TimerHandleLike:
 		loop = _loop_for_this_thread()
 		if loop is None:
-			loop = self._require_loop()
+			loop = self._tasks._require_loop()  # pyright: ignore[reportPrivateUsage]
 			return run_on_loop(
 				loop, lambda: self._schedule_soon(loop, fn, args, dict(kwargs))
 			)
@@ -333,12 +323,12 @@ class TimerRegistry:
 			tracked_box.append(tracked)
 			self._handles.add(tracked)
 			if loop.is_running():
-				self._loop = loop
+				self._tasks.bind_loop(loop)
 			return tracked
 
 		loop = _loop_for_this_thread()
 		if loop is None:
-			loop = self._require_loop()
+			loop = self._tasks._require_loop()  # pyright: ignore[reportPrivateUsage]
 			return run_on_loop(loop, lambda: _schedule_on_loop(loop))
 		return _schedule_on_loop(loop)
 
@@ -357,7 +347,7 @@ class TimerRegistry:
 		tracked_box.append(tracked)
 		self._handles.add(tracked)
 		if loop.is_running():
-			self._loop = loop
+			self._tasks.bind_loop(loop)
 		return tracked
 
 	def _prepare_run(

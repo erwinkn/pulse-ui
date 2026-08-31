@@ -51,16 +51,32 @@ def run_on_loop(loop: asyncio.AbstractEventLoop, fn: Callable[[], T]) -> T:
 	return future.result()
 
 
-def _loop_for_this_thread() -> asyncio.AbstractEventLoop | None:
+def _running_loop() -> asyncio.AbstractEventLoop | None:
 	try:
 		return asyncio.get_running_loop()
 	except RuntimeError:
-		if threading.current_thread() is not threading.main_thread():
-			return None
+		return None
+
+
+def _resolve_loop(
+	bound: asyncio.AbstractEventLoop | None,
+) -> tuple[asyncio.AbstractEventLoop, bool]:
+	"""Resolve inline, cross-thread, idle-main-thread, and error cases for scheduling."""
+	running = _running_loop()
+	if running is not None:
+		if bound is None or running is bound:
+			return running, True
+		raise RuntimeError(
+			"cannot schedule from a thread running a different event loop"
+		)
+	if bound is not None:
+		return bound, False
+	if threading.current_thread() is threading.main_thread():
 		try:
-			return asyncio.get_event_loop()
+			return asyncio.get_event_loop(), True
 		except RuntimeError:
-			return None
+			pass
+	raise RuntimeError("cannot schedule: registry has no bound loop")
 
 
 def _resolve_registries() -> tuple["TaskRegistry", "TimerRegistry"]:
@@ -122,7 +138,7 @@ class RepeatHandle:
 			return
 		self.cancelled = True
 		if self.task is not None and not self.task.done():
-			if _loop_for_this_thread() is None and self.loop is not None:
+			if _running_loop() is not self.loop and self.loop is not None:
 				self.loop.call_soon_threadsafe(self.task.cancel)
 			else:
 				self.task.cancel()
@@ -160,13 +176,7 @@ class TaskRegistry:
 	) -> None:
 		self._tasks = set()
 		self.name = name
-		if loop is not None:
-			self._loop = loop
-		else:
-			try:
-				self._loop = asyncio.get_running_loop()
-			except RuntimeError:
-				self._loop = None
+		self._loop = loop
 
 	@property
 	def loop(self) -> asyncio.AbstractEventLoop | None:
@@ -174,14 +184,6 @@ class TaskRegistry:
 
 	def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
 		self._loop = loop
-
-	def require_loop(self) -> asyncio.AbstractEventLoop:
-		if self._loop is None:
-			name = self.name or "unnamed"
-			raise RuntimeError(
-				f"cannot schedule from a thread with no event loop: {name} registry has no bound loop"
-			)
-		return self._loop
 
 	def track(self, task: asyncio.Task[T]) -> asyncio.Task[T]:
 		self._tasks.add(task)
@@ -205,12 +207,10 @@ class TaskRegistry:
 				task.add_done_callback(on_done)
 			return self.track(task)
 
-		loop = _loop_for_this_thread()
-		if loop is None:
-			return run_on_loop(self.require_loop(), _make_task)
-		if loop.is_running():
-			self._loop = loop
-		return _make_task()
+		loop, inline = _resolve_loop(self._loop)
+		if inline:
+			return _make_task()
+		return run_on_loop(loop, _make_task)
 
 	def cancel_all(self) -> None:
 		for task in list(self._tasks):
@@ -250,13 +250,12 @@ class TimerRegistry:
 	def call_soon(
 		self, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
 	) -> TimerHandleLike:
-		loop = _loop_for_this_thread()
-		if loop is None:
-			loop = self._tasks.require_loop()
-			return run_on_loop(
-				loop, lambda: self._schedule_soon(loop, fn, args, dict(kwargs))
-			)
-		return self._schedule_soon(loop, fn, args, dict(kwargs))
+		loop, inline = _resolve_loop(self._tasks.loop)
+		if inline:
+			return self._schedule_soon(loop, fn, args, dict(kwargs))
+		return run_on_loop(
+			loop, lambda: self._schedule_soon(loop, fn, args, dict(kwargs))
+		)
 
 	def repeat(
 		self, interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
@@ -340,15 +339,12 @@ class TimerRegistry:
 			tracked = _TrackedTimerHandle(handle, self, loop=loop)
 			tracked_box.append(tracked)
 			self._handles.add(tracked)
-			if loop.is_running():
-				self._tasks.bind_loop(loop)
 			return tracked
 
-		loop = _loop_for_this_thread()
-		if loop is None:
-			loop = self._tasks.require_loop()
-			return run_on_loop(loop, lambda: _schedule_on_loop(loop))
-		return _schedule_on_loop(loop)
+		loop, inline = _resolve_loop(self._tasks.loop)
+		if inline:
+			return _schedule_on_loop(loop)
+		return run_on_loop(loop, lambda: _schedule_on_loop(loop))
 
 	def _schedule_soon(
 		self,
@@ -364,8 +360,6 @@ class TimerRegistry:
 		tracked = _TrackedHandle(handle, self, loop=loop, when=loop.time())
 		tracked_box.append(tracked)
 		self._handles.add(tracked)
-		if loop.is_running():
-			self._tasks.bind_loop(loop)
 		return tracked
 
 	def _prepare_run(
@@ -447,7 +441,7 @@ class _TrackedTimerHandle:
 		if self._cancelled:
 			return
 		self._cancelled = True
-		if _loop_for_this_thread() is None:
+		if _running_loop() is None:
 			self._loop.call_soon_threadsafe(self._finish_cancel)
 		else:
 			self._finish_cancel()
@@ -509,7 +503,7 @@ class _TrackedHandle:
 		if self._cancelled:
 			return
 		self._cancelled = True
-		if _loop_for_this_thread() is None:
+		if _running_loop() is None:
 			self._loop.call_soon_threadsafe(self._finish_cancel)
 		else:
 			self._finish_cancel()

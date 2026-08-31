@@ -299,8 +299,10 @@ def PollingComponent():
 
 ## Thread safety
 
-These functions work from any thread. Scheduling from another thread requires
-the app to be running so Pulse can use its event loop.
+These functions run inline on the loop that owns the registry. Scheduling from
+another thread requires the app to be running so Pulse can use the loop bound
+during the FastAPI lifespan. A thread running a different event loop raises a
+`RuntimeError`.
 
 ```python
 import pulse as ps

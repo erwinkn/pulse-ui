@@ -336,7 +336,7 @@ class App:
 		self._render_cleanups = {}
 		self._render_message_locks = {}
 		self._tasks = TaskRegistry(name="app")
-		self._timers = TimerRegistry(tasks=self._tasks, name="app")
+		self._timers = TimerRegistry(tasks=self._tasks)
 		self._proxy = None
 		self.session_timeout = session_timeout
 		self.prerender_queue_timeout = prerender_queue_timeout
@@ -416,8 +416,7 @@ class App:
 
 	@asynccontextmanager
 	async def fastapi_lifespan(self, _: FastAPI):
-		loop = asyncio.get_running_loop()
-		self._tasks.bind_loop(loop)
+		self._tasks.loop.bind(asyncio.get_running_loop())
 
 		try:
 			if isinstance(self.session_store, SessionStore):

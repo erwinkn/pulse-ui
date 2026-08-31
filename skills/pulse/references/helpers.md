@@ -23,6 +23,9 @@ calls `ps.navigate()`, that navigation is route-bound by default and is ignored
 after the source route has unmounted; use `force=True` only for intentionally
 global navigation.
 
+Calls from another thread block until the event loop picks them up and raise
+`TimeoutError` after 30 seconds if it does not.
+
 ```python
 # Delayed cleanup
 def cleanup():

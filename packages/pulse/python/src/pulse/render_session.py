@@ -294,6 +294,7 @@ class RenderSession:
 		dev_strict_mode_detach_timeout: float = 0.0,
 		disconnect_queue_timeout: float = 300.0,
 		render_loop_limit: int = 50,
+		loop: asyncio.AbstractEventLoop | None = None,
 	) -> None:
 		from pulse.channel import ChannelsManager
 		from pulse.forms import FormRegistry
@@ -321,7 +322,7 @@ class RenderSession:
 		self._pending_js_results = {}
 		self._ref_channel = None
 		self._ref_channels_by_route = {}
-		self._tasks = TaskRegistry(name=f"render:{id}")
+		self._tasks = TaskRegistry(name=f"render:{id}", loop=loop)
 		self._timers = TimerRegistry(tasks=self._tasks, name=f"render:{id}")
 		self.query_store = QueryStore()
 		self.prerender_queue_timeout = prerender_queue_timeout

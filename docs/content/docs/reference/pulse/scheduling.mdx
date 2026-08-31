@@ -310,7 +310,7 @@ app = ps.App()
 def background_work():
     ps.later(1.0, lambda: print("Hello from main loop"))
 
-@app.get("/refresh")
+@app.fastapi.get("/refresh")
 def refresh():
     background_work()
     return {"ok": True}

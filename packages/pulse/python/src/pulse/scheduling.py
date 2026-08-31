@@ -1,10 +1,9 @@
 import asyncio
+import concurrent.futures
 import os
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any, ParamSpec, Protocol, TypeVar, override
-
-from anyio import from_thread
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -30,6 +29,24 @@ def is_pytest() -> bool:
 	)
 
 
+def run_on_loop(loop: asyncio.AbstractEventLoop, fn: Callable[[], T]) -> T:
+	"""
+	Run `fn` on `loop`'s thread and return its result.
+	Blocks the calling thread; only called from a thread with no event loop,
+	so it cannot deadlock on itself.
+	"""
+	future: concurrent.futures.Future[T] = concurrent.futures.Future()
+
+	def _run() -> None:
+		try:
+			future.set_result(fn())
+		except BaseException as exc:
+			future.set_exception(exc)
+
+	loop.call_soon_threadsafe(_run)
+	return future.result()
+
+
 def _loop_for_this_thread() -> asyncio.AbstractEventLoop | None:
 	try:
 		return asyncio.get_running_loop()
@@ -51,8 +68,8 @@ def _resolve_registries() -> tuple["TaskRegistry", "TimerRegistry"]:
 
 def call_soon(
 	fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
-) -> TimerHandleLike | None:
-	"""Schedule a callback ASAP; supports AnyIO worker threads, not bare threads."""
+) -> TimerHandleLike:
+	"""Schedule a callback ASAP; supports calls from any thread."""
 	_, timer_registry = _resolve_registries()
 	return timer_registry.call_soon(fn, *args, **kwargs)
 
@@ -63,7 +80,7 @@ def create_task(
 	name: str | None = None,
 	on_done: Callable[[asyncio.Task[T]], None] | None = None,
 ) -> asyncio.Task[T]:
-	"""Create a tracked task; supports AnyIO worker threads, not bare threads."""
+	"""Create a tracked task; supports calls from any thread."""
 	task_registry, _ = _resolve_registries()
 	return task_registry.create_task(coroutine, name=name, on_done=on_done)
 
@@ -72,7 +89,7 @@ def later(
 	delay: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
 ) -> TimerHandleLike:
 	"""
-	Schedule a callback after `delay`; supports AnyIO worker threads, not bare threads.
+	Schedule a callback after `delay`; supports calls from any thread.
 	Works with sync or async functions. Returns a handle; call .cancel() to cancel.
 
 	The callback runs with no reactive scope to avoid accidentally capturing
@@ -107,7 +124,7 @@ class RepeatHandle:
 
 def repeat(interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs):
 	"""
-	Repeat a callback every `interval`; supports AnyIO worker threads, not bare threads.
+	Repeat a callback every `interval`; supports calls from any thread.
 	Works with sync or async functions.
 	For async functions, waits for completion before starting the next delay.
 	Returns a handle with .cancel() to stop future runs.
@@ -127,10 +144,23 @@ def repeat(interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwa
 class TaskRegistry:
 	_tasks: set[asyncio.Task[Any]]
 	name: str | None
+	_loop: asyncio.AbstractEventLoop | None
 
 	def __init__(self, name: str | None = None) -> None:
 		self._tasks = set()
 		self.name = name
+		self._loop = None
+
+	def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+		self._loop = loop
+
+	def _require_loop(self) -> asyncio.AbstractEventLoop:
+		if self._loop is None:
+			name = self.name or "unnamed"
+			raise RuntimeError(
+				f"cannot schedule from a thread with no event loop: {name} registry has no bound loop"
+			)
+		return self._loop
 
 	def track(self, task: asyncio.Task[T]) -> asyncio.Task[T]:
 		self._tasks.add(task)
@@ -144,28 +174,22 @@ class TaskRegistry:
 		name: str | None = None,
 		on_done: Callable[[asyncio.Task[T]], None] | None = None,
 	) -> asyncio.Task[T]:
-		"""Create and schedule a task; supports AnyIO worker threads, not bare threads."""
-		try:
-			asyncio.get_running_loop()
+		"""Create and schedule a task; supports calls from any thread."""
+
+		def _make_task() -> asyncio.Task[T]:
 			task = asyncio.ensure_future(coroutine)
 			if name is not None:
 				task.set_name(name)
 			if on_done:
 				task.add_done_callback(on_done)
-		except RuntimeError:
+			return self.track(task)
 
-			async def _runner():
-				asyncio.get_running_loop()
-				task = asyncio.ensure_future(coroutine)
-				if name is not None:
-					task.set_name(name)
-				if on_done:
-					task.add_done_callback(on_done)
-				return task
-
-			task = from_thread.run(_runner)
-
-		return self.track(task)
+		loop = _loop_for_this_thread()
+		if loop is None:
+			return run_on_loop(self._require_loop(), _make_task)
+		if loop.is_running():
+			self._loop = loop
+		return _make_task()
 
 	def cancel_all(self) -> None:
 		for task in list(self._tasks):
@@ -178,11 +202,24 @@ class TimerRegistry:
 	_handles: set[TimerHandleLike]
 	_tasks: TaskRegistry
 	name: str | None
+	_loop: asyncio.AbstractEventLoop | None
 
 	def __init__(self, *, tasks: TaskRegistry, name: str | None = None) -> None:
 		self._handles = set()
 		self._tasks = tasks
 		self.name = name
+		self._loop = None
+
+	def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+		self._loop = loop
+
+	def _require_loop(self) -> asyncio.AbstractEventLoop:
+		if self._loop is None:
+			name = self.name or "unnamed"
+			raise RuntimeError(
+				f"cannot schedule from a thread with no event loop: {name} registry has no bound loop"
+			)
+		return self._loop
 
 	def track(self, handle: TimerHandleLike) -> TimerHandleLike:
 		self._handles.add(handle)
@@ -204,24 +241,14 @@ class TimerRegistry:
 
 	def call_soon(
 		self, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
-	) -> TimerHandleLike | None:
-		def _schedule():
-			return self._schedule_soon(fn, args, dict(kwargs))
-
-		try:
-			asyncio.get_running_loop()
-			return _schedule()
-		except RuntimeError:
-
-			async def _runner():
-				return _schedule()
-
-			try:
-				return from_thread.run(_runner)
-			except RuntimeError:
-				if not is_pytest():
-					raise
-				return None
+	) -> TimerHandleLike:
+		loop = _loop_for_this_thread()
+		if loop is None:
+			loop = self._require_loop()
+			return run_on_loop(
+				loop, lambda: self._schedule_soon(loop, fn, args, dict(kwargs))
+			)
+		return self._schedule_soon(loop, fn, args, dict(kwargs))
 
 	def repeat(
 		self, interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
@@ -283,7 +310,7 @@ class TimerRegistry:
 		untrack: bool,
 	) -> TimerHandleLike:
 		"""
-		Schedule a callback after `delay`; supports AnyIO worker threads, not bare threads.
+		Schedule a callback after `delay`; supports calls from any thread.
 		Works with sync or async functions. Returns a TimerHandle; call .cancel() to cancel.
 
 		The callback can run without a reactive scope to avoid accidentally capturing
@@ -305,31 +332,23 @@ class TimerRegistry:
 			tracked = _TrackedTimerHandle(handle, self, loop=loop)
 			tracked_box.append(tracked)
 			self._handles.add(tracked)
+			if loop.is_running():
+				self._loop = loop
 			return tracked
 
 		loop = _loop_for_this_thread()
 		if loop is None:
-
-			async def _runner() -> TimerHandleLike:
-				return _schedule_on_loop(asyncio.get_running_loop())
-
-			return from_thread.run(_runner)
+			loop = self._require_loop()
+			return run_on_loop(loop, lambda: _schedule_on_loop(loop))
 		return _schedule_on_loop(loop)
 
 	def _schedule_soon(
 		self,
+		loop: asyncio.AbstractEventLoop,
 		fn: Callable[..., Any],
 		args: tuple[Any, ...],
 		kwargs: dict[str, Any],
 	) -> TimerHandleLike:
-		try:
-			loop = asyncio.get_running_loop()
-		except RuntimeError:
-			try:
-				loop = asyncio.get_event_loop()
-			except RuntimeError as exc:
-				raise RuntimeError("call_soon() requires an event loop") from exc
-
 		tracked_box: list[TimerHandleLike] = []
 		_run = self._prepare_run(loop, tracked_box, fn, args, kwargs, untrack=False)
 
@@ -337,6 +356,8 @@ class TimerRegistry:
 		tracked = _TrackedHandle(handle, self, loop=loop, when=loop.time())
 		tracked_box.append(tracked)
 		self._handles.add(tracked)
+		if loop.is_running():
+			self._loop = loop
 		return tracked
 
 	def _prepare_run(

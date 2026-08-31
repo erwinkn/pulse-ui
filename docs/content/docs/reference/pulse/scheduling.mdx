@@ -193,7 +193,7 @@ def call_soon(
     fn: Callable[P, Any],
     *args: P.args,
     **kwargs: P.kwargs,
-) -> TimerHandleLike | None
+) -> TimerHandleLike
 ```
 
 ### Parameters
@@ -206,7 +206,7 @@ def call_soon(
 
 ### Returns
 
-`TimerHandleLike` or `None` if scheduling failed (e.g., during tests without an event loop).
+`TimerHandleLike` for the scheduled callback.
 
 ### Example
 
@@ -299,24 +299,24 @@ def PollingComponent():
 
 ## Thread safety
 
-These functions work from an AnyIO worker thread, such as a synchronous
-FastAPI endpoint or `anyio.to_thread.run_sync`. They schedule work on the main
-event loop using `anyio.from_thread.run()`.
+These functions work from any thread. Scheduling from another thread requires
+the app to be running so Pulse can use its event loop.
 
 ```python
-import anyio
 import pulse as ps
+
+app = ps.App()
 
 def background_work():
     ps.later(1.0, lambda: print("Hello from main loop"))
 
-async def run_in_worker_thread():
-    await anyio.to_thread.run_sync(background_work)
+@app.get("/refresh")
+def refresh():
+    background_work()
+    return {"ok": True}
 ```
 
-A handle returned from a worker thread can also be cancelled from that thread.
-
-A bare `threading.Thread` is not supported and raises a `RuntimeError`.
+A handle returned from another thread can also be cancelled from that thread.
 
 ---
 

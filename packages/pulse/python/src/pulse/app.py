@@ -416,6 +416,10 @@ class App:
 
 	@asynccontextmanager
 	async def fastapi_lifespan(self, _: FastAPI):
+		loop = asyncio.get_running_loop()
+		self._tasks.bind_loop(loop)
+		self._timers.bind_loop(loop)
+
 		try:
 			if isinstance(self.session_store, SessionStore):
 				await self.session_store.init()

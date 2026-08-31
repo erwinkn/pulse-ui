@@ -86,6 +86,9 @@ async def test_timer_registry_later_runs_sync_and_discards():
 async def test_timer_registry_later_from_anyio_worker_thread_runs_on_loop():
 	tasks = TaskRegistry(name="tasks")
 	registry = TimerRegistry(tasks=tasks, name="test")
+	loop = asyncio.get_running_loop()
+	tasks.bind_loop(loop)
+	registry.bind_loop(loop)
 	fired = asyncio.Event()
 
 	def callback():
@@ -101,6 +104,9 @@ async def test_timer_registry_later_from_anyio_worker_thread_runs_on_loop():
 async def test_timer_registry_later_from_anyio_worker_thread_can_cancel():
 	tasks = TaskRegistry(name="tasks")
 	registry = TimerRegistry(tasks=tasks, name="test")
+	loop = asyncio.get_running_loop()
+	tasks.bind_loop(loop)
+	registry.bind_loop(loop)
 	fired = False
 
 	def callback():
@@ -121,6 +127,9 @@ async def test_timer_registry_later_from_anyio_worker_thread_can_cancel():
 async def test_timer_registry_later_from_anyio_worker_thread_can_cancel_in_worker():
 	tasks = TaskRegistry(name="tasks")
 	registry = TimerRegistry(tasks=tasks, name="test")
+	loop = asyncio.get_running_loop()
+	tasks.bind_loop(loop)
+	registry.bind_loop(loop)
 	fired = False
 
 	def callback():
@@ -145,6 +154,9 @@ async def test_timer_registry_later_from_anyio_worker_thread_can_cancel_in_worke
 async def test_timer_registry_repeat_from_anyio_worker_thread_runs():
 	tasks = TaskRegistry(name="tasks")
 	registry = TimerRegistry(tasks=tasks, name="test")
+	loop = asyncio.get_running_loop()
+	tasks.bind_loop(loop)
+	registry.bind_loop(loop)
 	fired = asyncio.Event()
 	count = 0
 
@@ -169,6 +181,9 @@ async def test_timer_registry_repeat_from_anyio_worker_thread_runs():
 async def test_timer_registry_repeat_can_cancel_from_anyio_worker_thread():
 	tasks = TaskRegistry(name="tasks")
 	registry = TimerRegistry(tasks=tasks, name="test")
+	loop = asyncio.get_running_loop()
+	tasks.bind_loop(loop)
+	registry.bind_loop(loop)
 	fired = asyncio.Event()
 	count = 0
 
@@ -189,39 +204,89 @@ async def test_timer_registry_repeat_can_cancel_from_anyio_worker_thread():
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_later_from_bare_thread_raises():
+async def test_timer_registry_later_and_repeat_from_bare_thread_run_on_loop():
 	tasks = TaskRegistry(name="tasks")
 	registry = TimerRegistry(tasks=tasks, name="test")
-	errors: list[BaseException] = []
+	tasks.bind_loop(asyncio.get_running_loop())
+	registry.bind_loop(asyncio.get_running_loop())
+	later_fired = asyncio.Event()
+	repeat_fired = asyncio.Event()
+	callback_thread_ids: list[int] = []
+	repeat_count = 0
+	handles = []
+
+	def later_callback():
+		callback_thread_ids.append(threading.get_ident())
+		later_fired.set()
+
+	def repeat_callback():
+		nonlocal repeat_count
+		repeat_count += 1
+		if repeat_count >= 2:
+			repeat_fired.set()
 
 	def schedule():
-		try:
-			registry.later(0.01, lambda: None)
-		except BaseException as exc:
-			errors.append(exc)
+		handles.append(registry.later(0.01, later_callback))
+		handles.append(registry.repeat(0.01, repeat_callback))
 
 	thread = threading.Thread(target=schedule)
 	thread.start()
-	thread.join()
+	await asyncio.to_thread(thread.join)
 
-	assert len(errors) == 1
-	assert isinstance(errors[0], RuntimeError)
-	assert "AnyIO worker thread" in str(errors[0])
+	assert await wait_for(lambda: later_fired.is_set(), timeout=0.2)
+	assert await wait_for(lambda: repeat_fired.is_set(), timeout=0.2)
+	assert callback_thread_ids == [threading.get_ident()]
 
-	repeat_errors: list[BaseException] = []
+	handles[1].cancel()
+	finished_count = repeat_count
+	await asyncio.sleep(0.05)
+	assert repeat_count == finished_count
 
-	def repeat_from_bare_thread():
-		try:
-			registry.repeat(0.01, lambda: None)
-		except BaseException as exc:
-			repeat_errors.append(exc)
 
-	thread = threading.Thread(target=repeat_from_bare_thread)
-	thread.start()
-	thread.join()
+@pytest.mark.asyncio
+async def test_timer_registry_later_and_repeat_from_asyncio_worker_thread_run_on_loop():
+	tasks = TaskRegistry(name="tasks")
+	registry = TimerRegistry(tasks=tasks, name="test")
+	loop = asyncio.get_running_loop()
+	tasks.bind_loop(loop)
+	registry.bind_loop(loop)
+	later_fired = asyncio.Event()
+	repeat_fired = asyncio.Event()
+	repeat_count = 0
 
-	assert len(repeat_errors) == 1
-	assert isinstance(repeat_errors[0], RuntimeError)
+	def later_callback():
+		later_fired.set()
+
+	def repeat_callback():
+		nonlocal repeat_count
+		repeat_count += 1
+		if repeat_count >= 2:
+			repeat_fired.set()
+
+	def schedule():
+		return (
+			registry.later(0.01, later_callback),
+			registry.repeat(0.01, repeat_callback),
+		)
+
+	later_handle, repeat_handle = await asyncio.to_thread(schedule)
+
+	assert await wait_for(lambda: later_fired.is_set(), timeout=0.2)
+	assert await wait_for(lambda: repeat_fired.is_set(), timeout=0.2)
+	repeat_handle.cancel()
+	finished_count = repeat_count
+	await asyncio.sleep(0.05)
+	assert repeat_count == finished_count
+	later_handle.cancel()
+
+
+@pytest.mark.asyncio
+async def test_timer_registry_thread_scheduling_requires_bound_loop():
+	tasks = TaskRegistry(name="tasks")
+	registry = TimerRegistry(tasks=tasks, name="test")
+
+	with pytest.raises(RuntimeError, match="test registry has no bound loop"):
+		await asyncio.to_thread(registry.later, 0.01, lambda: None)
 
 
 @pytest.mark.asyncio

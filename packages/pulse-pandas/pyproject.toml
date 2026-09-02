@@ -1,7 +1,7 @@
 [project]
 name = "pulse-pandas"
 version = "0.1.0"
-description = "Pandas serialization adapters for Pulse"
+description = "Pandas and NumPy serialization plugin for Pulse"
 readme = "README.md"
 authors = [{ name = "Erwin Kuhn", email = "erwin.kuhn@protonmail.com" }]
 requires-python = ">=3.12"

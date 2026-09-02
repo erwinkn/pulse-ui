@@ -403,6 +403,10 @@ class Plugin:
         """Return middleware to add to the app."""
         return []
 
+    def serializer_adapters(self) -> list[SerializerAdapter[Any]]:
+        """Return serializer adapters to add to the app."""
+        return []
+
     def on_setup(self, app: App) -> None:
         """Called after FastAPI routes are configured."""
         ...
@@ -427,6 +431,9 @@ class AuthPlugin(ps.Plugin):
 
     def middleware(self):
         return [AuthMiddleware()]
+
+    def serializer_adapters(self):
+        return []
 
     def on_startup(self, app):
         print("Auth plugin started")

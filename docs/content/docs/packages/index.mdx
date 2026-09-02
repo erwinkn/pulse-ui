@@ -57,11 +57,18 @@ The JavaScript client library that powers the browser side of Pulse applications
 
 ### pulse-pandas
 
-Optional Pandas `DataFrame` serialization as ordered row records. Keeps Pandas
-out of Pulse core and lets each app opt in explicitly.
+Pandas and NumPy serialization as an opt-in Pulse plugin. DataFrames use
+ordered row records by default and support a compact column format.
 
 ```bash
 uv add pulse-pandas
+```
+
+```python
+import pulse as ps
+from pulse_pandas import PulsePandas
+
+app = ps.App(plugins=[PulsePandas()])
 ```
 
 [Read more](/docs/packages/pulse-pandas)

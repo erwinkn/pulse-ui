@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from pulse._serializer.types import SerializerAdapter
 from pulse.middleware import PulseMiddleware
 from pulse.routing import Layout, Route
 
@@ -59,6 +60,10 @@ class Plugin:
 		Returns:
 			List of PulseMiddleware instances to register.
 		"""
+		return []
+
+	def serializer_adapters(self) -> list[SerializerAdapter[Any]]:
+		"""Return serializer adapters to add to the application."""
 		return []
 
 	def on_setup(self, app: App) -> None:

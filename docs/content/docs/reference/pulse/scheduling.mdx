@@ -302,8 +302,10 @@ def PollingComponent():
 These functions run inline on the loop that owns the registry. Scheduling from
 another thread requires the owning loop to be running. An unbound registry
 binds itself to the first running loop that uses it, and the app registry is
-rebound to the serving loop during FastAPI lifespan startup. A thread running a
-different event loop raises a `RuntimeError`.
+rebound to the serving loop during FastAPI lifespan startup. A thread with no
+running loop can schedule only after the registry has been used on its serving
+loop at least once. A thread running a different event loop raises a
+`RuntimeError`.
 
 ```python
 import pulse as ps

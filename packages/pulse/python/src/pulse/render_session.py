@@ -30,12 +30,7 @@ from pulse.routing import (
 	RouteTree,
 	ensure_absolute_path,
 )
-from pulse.scheduling import (
-	TaskRegistry,
-	TimerHandleLike,
-	TimerRegistry,
-	create_future,
-)
+from pulse.scheduling import Scheduler, Task, create_future
 from pulse.state.query_param import QueryParamSync
 from pulse.state.state import State
 from pulse.transpiler.id import next_id
@@ -115,7 +110,7 @@ class RouteMount:
 	ever_active: bool
 	dispose_on_timeout: bool
 	queue: list[ServerMessage] | None
-	queue_timeout: TimerHandleLike | None
+	queue_timeout: Task[None] | None
 	mount_id: str
 	render_batch_id: int
 	render_batch_renders: int
@@ -152,7 +147,6 @@ class RouteMount:
 	def _cancel_pending_timeout(self) -> None:
 		if self.queue_timeout is not None:
 			self.queue_timeout.cancel()
-			self.render.discard_timer(self.queue_timeout)
 			self.queue_timeout = None
 
 	def _on_pending_timeout(self) -> None:
@@ -281,8 +275,7 @@ class RenderSession:
 	_ref_channels_by_route: dict[str, Channel]
 	_global_states: dict[str, State]
 	_global_queue: list[ServerMessage]
-	_tasks: TaskRegistry
-	_timers: TimerRegistry
+	scheduler: Scheduler
 
 	def __init__(
 		self,
@@ -322,8 +315,7 @@ class RenderSession:
 		self._pending_js_results = {}
 		self._ref_channel = None
 		self._ref_channels_by_route = {}
-		self._tasks = TaskRegistry(name=f"render:{id}")
-		self._timers = TimerRegistry(tasks=self._tasks, name=f"render:{id}")
+		self.scheduler = Scheduler(f"render:{id}")
 		self.query_store = QueryStore()
 		self.prerender_queue_timeout = prerender_queue_timeout
 		self.dev_strict_mode_detach_timeout = dev_strict_mode_detach_timeout
@@ -701,12 +693,9 @@ class RenderSession:
 
 	# ---- Helpers ----
 
-	def close(self):
-		# Close all pending timers at the start, to avoid anything firing while we clean up
-		self._timers.cancel_all()
+	async def close(self):
 		self.query_param_sync.dispose()
 		self.forms.dispose()
-		self._tasks.cancel_all()
 		for path, mount in list(self.route_mounts.items()):
 			self.dispose_mount(path, mount)
 		self.route_mounts.clear()
@@ -729,8 +718,7 @@ class RenderSession:
 		self._pending_js_results.clear()
 		self._ref_channel = None
 		self._ref_channels_by_route.clear()
-		# Close any timer that may have been scheduled during cleanup (ex: query GC)
-		self._timers.cancel_all()
+		await self.scheduler.close()
 		self._global_queue = []
 		self._send_message = None
 		self.connected = False
@@ -791,22 +779,18 @@ class RenderSession:
 		coroutine: Callable[[], Any] | Awaitable[Any],
 		*,
 		name: str | None = None,
-		on_done: Callable[[asyncio.Task[Any]], None] | None = None,
-	) -> asyncio.Task[Any]:
+		on_done: Callable[[Task[Any]], None] | None = None,
+	) -> Task[Any]:
 		"""Create a tracked task tied to this render session."""
 		if callable(coroutine):
-			return self._tasks.create_task(coroutine(), name=name, on_done=on_done)
-		return self._tasks.create_task(coroutine, name=name, on_done=on_done)
+			return self.scheduler.create_task(coroutine(), name=name, on_done=on_done)
+		return self.scheduler.create_task(coroutine, name=name, on_done=on_done)
 
 	def schedule_later(
 		self, delay: float, fn: Callable[..., Any], *args: Any, **kwargs: Any
-	) -> TimerHandleLike:
+	) -> Task[None]:
 		"""Schedule a tracked timer tied to this render session."""
-		return self._timers.later(delay, fn, *args, **kwargs)
-
-	def discard_timer(self, handle: TimerHandleLike | None) -> None:
-		"""Remove a timer handle from the session registry."""
-		self._timers.discard(handle)
+		return self.scheduler.later(delay, fn, *args, **kwargs)
 
 	def execute_callback(self, path: str, key: str, args: list[Any] | tuple[Any, ...]):
 		path = ensure_absolute_path(path)
@@ -837,13 +821,10 @@ class RenderSession:
 				res = cb.fn(*(args if cb.accepts_varargs else args[: cb.n_args]))
 				if iscoroutine(res):
 
-					def _on_done(t: asyncio.Task[Any]) -> None:
+					def _on_done(t: Task[Any]) -> None:
 						if t.cancelled():
 							return
-						try:
-							exc = t.exception()
-						except asyncio.CancelledError:
-							return
+						exc = t.exception
 						if exc:
 							report(exc, True)
 
@@ -993,7 +974,7 @@ class RenderSession:
 				if not future.done():
 					future.set_exception(asyncio.TimeoutError())
 
-			self._timers.later(timeout, _on_timeout)
+			self.scheduler.later(timeout, _on_timeout)
 
 			return future
 

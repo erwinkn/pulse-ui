@@ -3,19 +3,21 @@ import pytest
 from pulse.user_session import UserSession
 
 
-def test_app_prerender_queue_timeout_config():
+@pytest.mark.asyncio
+async def test_app_prerender_queue_timeout_config():
 	app = ps.App(
 		prerender_queue_timeout=12.5,
 		session_store=ps.CookieSessionStore(secret="test-secret"),
 	)
 	session = UserSession("test-session", {}, app)
-	render = app.create_render("test-render", session)
+	render = await app.create_render("test-render", session)
 	assert render.prerender_queue_timeout == 12.5
-	render.close()
+	await render.close()
 	session.dispose()
 
 
-def test_app_proxy_config():
+@pytest.mark.asyncio
+async def test_app_proxy_config():
 	proxy = ps.Proxy(
 		max_concurrency=7,
 		disconnect_watch_timeout=2.5,
@@ -30,15 +32,16 @@ def test_app_proxy_config():
 	("pulse_env", "expected_timeout"),
 	[("dev", 0.1), ("prod", 0.0), ("ci", 0.0)],
 )
-def test_app_enables_strict_mode_detach_grace_only_in_dev(
+@pytest.mark.asyncio
+async def test_app_enables_strict_mode_detach_grace_only_in_dev(
 	monkeypatch: pytest.MonkeyPatch, pulse_env: str, expected_timeout: float
 ):
 	monkeypatch.setenv("PULSE_ENV", pulse_env)
 	app = ps.App(session_store=ps.CookieSessionStore(secret="test-secret"))
 	session = UserSession("test-session", {}, app)
-	render = app.create_render("test-render", session)
+	render = await app.create_render("test-render", session)
 
 	assert render.dev_strict_mode_detach_timeout == expected_timeout
 
-	render.close()
+	await render.close()
 	session.dispose()

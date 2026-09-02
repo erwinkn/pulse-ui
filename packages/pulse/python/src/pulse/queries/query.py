@@ -37,7 +37,7 @@ from pulse.queries.common import (
 from pulse.queries.effect import AsyncQueryEffect
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.scheduling import (
-	TimerHandleLike,
+	Task,
 	clamp_delay,
 	create_task,
 	is_pytest,
@@ -349,9 +349,9 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 	key: Key
 	state: QueryState[T]
 	observers: "list[KeyedQueryResult[T]]"
-	_task: asyncio.Task[None] | None
+	_task: Task[None] | None
 	_task_initiator: "KeyedQueryResult[T] | None"
-	_gc_handle: TimerHandleLike | None
+	_gc_handle: Task[None] | None
 	_interval_effect: Effect | None
 	_interval: float | None
 	_interval_observer: "KeyedQueryResult[T] | None"
@@ -475,7 +475,7 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 		fetch_fn: Callable[[], Awaitable[T]],
 		cancel_previous: bool = True,
 		initiator: "KeyedQueryResult[T] | None" = None,
-	) -> asyncio.Task[None]:
+	) -> Task[None]:
 		"""
 		Start a fetch with the given fetch function.
 		Cancels any in-flight fetch if cancel_previous is True.

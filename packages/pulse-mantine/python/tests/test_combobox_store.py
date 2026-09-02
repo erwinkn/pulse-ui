@@ -20,12 +20,14 @@ class DummyRender:
 		self.sent.append(message)
 
 
-def build_context():
+async def build_context():
 	app = ps.App()
+	await app.scheduler.start()
 	render = DummyRender()
 	session = SimpleNamespace(sid="session-1")
 
 	real_render = ps.RenderSession(render.id, app.routes)
+	await real_render.scheduler.start()
 	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
 
 	app.render_sessions[render.id] = real_render
@@ -36,7 +38,7 @@ def build_context():
 
 @pytest.mark.asyncio
 async def test_combobox_store_emits_actions():
-	app, render, session, real_render = build_context()
+	app, render, session, real_render = await build_context()
 
 	with ps.PulseContext(
 		app=app,
@@ -59,7 +61,7 @@ async def test_combobox_store_emits_actions():
 
 @pytest.mark.asyncio
 async def test_combobox_store_optional_payloads():
-	app, render, session, real_render = build_context()
+	app, render, session, real_render = await build_context()
 
 	with ps.PulseContext(
 		app=app,
@@ -82,7 +84,7 @@ async def test_combobox_store_optional_payloads():
 
 @pytest.mark.asyncio
 async def test_combobox_store_request_roundtrip():
-	app, render, session, real_render = build_context()
+	app, render, session, real_render = await build_context()
 
 	with ps.PulseContext(
 		app=app,
@@ -119,7 +121,7 @@ async def test_combobox_store_request_roundtrip():
 
 @pytest.mark.asyncio
 async def test_combobox_store_callbacks():
-	app, render, session, real_render = build_context()
+	app, render, session, real_render = await build_context()
 	opened: list[bool] = []
 	opened_sources: list[str] = []
 	closed_sources: list[str] = []

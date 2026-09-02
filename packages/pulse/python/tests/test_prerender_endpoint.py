@@ -15,6 +15,7 @@ async def test_prerender_normalizes_paths(monkeypatch: pytest.MonkeyPatch):
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[Route("a", prerender_home)])
 	app.setup("http://example.com")
+	await app.scheduler.start()
 
 	transport = httpx.ASGITransport(app=app.fastapi)
 	async with httpx.AsyncClient(
@@ -39,3 +40,4 @@ async def test_prerender_normalizes_paths(monkeypatch: pytest.MonkeyPatch):
 	payload = deserialize(resp.json())
 	assert "/a" in payload["views"]
 	assert "a" not in payload["views"]
+	await app.close()

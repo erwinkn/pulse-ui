@@ -1,10 +1,12 @@
 import asyncio
+import threading
 
 import pulse as ps
 import pytest
+from anyio import to_thread
 from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteTree
-from pulse.scheduling import TaskRegistry, TimerRegistry, call_soon, create_task
+from pulse.scheduling import Scheduler, Task
 from pulse.test_helpers import wait_for
 
 
@@ -14,269 +16,219 @@ def simple_component():
 
 
 @pytest.mark.asyncio
-async def test_task_registry_tracks_and_discards_on_done():
-	registry = TaskRegistry(name="test")
-	started = asyncio.Event()
-	finished = asyncio.Event()
+async def test_scheduler_creates_and_tracks_tasks():
+	async with Scheduler("test") as scheduler:
+		started = asyncio.Event()
 
-	async def work():
-		started.set()
-		await asyncio.sleep(0)
-		finished.set()
-		return 1
+		async def work():
+			started.set()
+			return 1
 
-	task = registry.create_task(work(), name="test.task")
-	assert task in registry._tasks  # pyright: ignore[reportPrivateUsage]
-
-	assert await wait_for(lambda: started.is_set(), timeout=0.2)
-	assert await wait_for(lambda: finished.is_set(), timeout=0.2)
-	assert await wait_for(
-		lambda: len(registry._tasks) == 0,  # pyright: ignore[reportPrivateUsage]
-		timeout=0.2,
-	)
-	assert task.done()
+		task = scheduler.create_task(work(), name="test.task")
+		assert isinstance(task, Task)
+		assert task.name == "test.task"
+		assert await task == 1
+		assert started.is_set()
+		assert task.done()
 
 
 @pytest.mark.asyncio
-async def test_task_registry_cancel_all_cancels_and_clears():
-	registry = TaskRegistry(name="test")
-	started = asyncio.Event()
+async def test_scheduler_later_call_soon_and_repeat():
+	async with Scheduler("test") as scheduler:
+		events: list[str] = []
+		repeated = asyncio.Event()
+
+		def later_callback():
+			events.append("later")
+
+		def soon_callback():
+			events.append("soon")
+
+		def repeat_callback():
+			events.append("repeat")
+			repeated.set()
+
+		scheduler.later(0.01, later_callback)
+		scheduler.call_soon(soon_callback)
+		repeat = scheduler.repeat(0.01, repeat_callback)
+		await wait_for(lambda: repeated.is_set(), timeout=0.2)
+		repeat.cancel()
+		await asyncio.sleep(0)
+		assert events[0] == "soon"
+		assert "later" in events
+		assert repeat.done() or repeat.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_runs_async_callbacks():
+	async with Scheduler("test") as scheduler:
+		fired = asyncio.Event()
+
+		async def callback():
+			await asyncio.sleep(0)
+			fired.set()
+
+		task = scheduler.later(0.01, callback)
+		await task
+		assert fired.is_set()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_dispatches_from_worker_threads():
+	async with Scheduler("test") as scheduler:
+		fired = asyncio.Event()
+		results: list[Task[None]] = []
+
+		def callback():
+			fired.set()
+
+		await to_thread.run_sync(lambda: results.append(scheduler.call_soon(callback)))
+		await asyncio.to_thread(lambda: results.append(scheduler.call_soon(callback)))
+
+		thread = threading.Thread(
+			target=lambda: results.append(scheduler.call_soon(callback))
+		)
+		thread.start()
+		await asyncio.to_thread(thread.join)
+		await wait_for(lambda: fired.is_set(), timeout=0.2)
+		assert len(results) == 3
+
+
+@pytest.mark.asyncio
+async def test_scheduler_rejects_foreign_loop():
+	async with Scheduler("test") as scheduler:
+
+		async def schedule():
+			with pytest.raises(RuntimeError, match="different event loop"):
+				scheduler.call_soon(lambda: None)
+
+		await asyncio.to_thread(lambda: asyncio.run(schedule()))
+
+
+@pytest.mark.asyncio
+async def test_scheduler_rejects_before_start_and_after_close():
+	scheduler = Scheduler("test")
+	with pytest.raises(RuntimeError, match="scheduler is not running"):
+		scheduler.call_soon(lambda: None)
+	await scheduler.start()
+	await scheduler.close()
+	with pytest.raises(RuntimeError, match="scheduler is not running"):
+		scheduler.call_soon(lambda: None)
+
+
+@pytest.mark.asyncio
+async def test_scheduler_start_twice_and_close_twice():
+	scheduler = Scheduler("test")
+	await scheduler.start()
+	with pytest.raises(RuntimeError, match="already running"):
+		await scheduler.start()
+	await scheduler.close()
+	await scheduler.close()
+	assert not scheduler.running
+
+
+@pytest.mark.asyncio
+async def test_scheduler_cancel_before_first_tick():
+	async with Scheduler("test") as scheduler:
+		fired = False
+
+		def callback():
+			nonlocal fired
+			fired = True
+
+		task = scheduler.later(0.01, callback)
+		task.cancel()
+		await asyncio.sleep(0.05)
+		assert not fired
+		assert task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_task_cancel_from_thread():
+	async with Scheduler("test") as scheduler:
+		task = scheduler.create_task(asyncio.sleep(10))
+		thread = threading.Thread(target=task.cancel)
+		thread.start()
+		await asyncio.to_thread(thread.join)
+		with pytest.raises(asyncio.CancelledError):
+			await task
+		assert task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_close_drains_cancelled_tasks():
+	scheduler = Scheduler("test")
+	await scheduler.start()
 	cancelled = asyncio.Event()
 
 	async def work():
-		started.set()
 		try:
 			await asyncio.sleep(10)
 		except asyncio.CancelledError:
 			cancelled.set()
 			raise
 
-	task = registry.create_task(work(), name="test.cancel")
-	assert await wait_for(lambda: started.is_set(), timeout=0.2)
-
-	registry.cancel_all()
-
-	assert len(registry._tasks) == 0  # pyright: ignore[reportPrivateUsage]
-	assert await wait_for(lambda: cancelled.is_set(), timeout=0.2)
+	task = scheduler.create_task(work())
+	await asyncio.sleep(0)
+	await scheduler.close()
+	assert cancelled.is_set()
 	assert task.cancelled()
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_later_runs_sync_and_discards():
-	tasks = TaskRegistry(name="tasks")
-	registry = TimerRegistry(tasks=tasks, name="test")
-	fired = False
-
-	def callback():
-		nonlocal fired
-		fired = True
-
-	registry.later(0.01, callback)
-
-	assert await wait_for(lambda: fired, timeout=0.2)
-	assert await wait_for(
-		lambda: len(registry._handles) == 0,  # pyright: ignore[reportPrivateUsage]
-		timeout=0.2,
-	)
-
-
-@pytest.mark.asyncio
-async def test_timer_registry_later_runs_async_and_discards():
-	tasks = TaskRegistry(name="tasks")
-	registry = TimerRegistry(tasks=tasks, name="test")
-	fired = asyncio.Event()
-
-	async def callback():
+async def test_scheduler_isolates_task_exceptions():
+	async with Scheduler("test") as scheduler:
+		loop = asyncio.get_running_loop()
+		contexts: list[dict[str, object]] = []
+		loop.set_exception_handler(lambda _, context: contexts.append(context))
+		scheduler.create_task(_raise(ValueError("task")))
+		survivor = scheduler.create_task(asyncio.sleep(0.02))
+		await survivor
 		await asyncio.sleep(0)
-		fired.set()
-
-	registry.later(0.01, callback)
-
-	assert await wait_for(lambda: fired.is_set(), timeout=0.2)
-	assert await wait_for(
-		lambda: len(registry._handles) == 0,  # pyright: ignore[reportPrivateUsage]
-		timeout=0.2,
-	)
+		assert contexts
+		assert isinstance(contexts[0]["exception"], ValueError)
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_later_runs_coroutine_return():
-	tasks = TaskRegistry(name="tasks")
-	registry = TimerRegistry(tasks=tasks, name="test")
-	fired = asyncio.Event()
-
-	async def inner():
-		await asyncio.sleep(0)
-		fired.set()
-
-	def callback():
-		return inner()
-
-	registry.later(0.01, callback)
-
-	assert await wait_for(lambda: fired.is_set(), timeout=0.2)
+async def test_scheduler_reports_callback_exceptions_without_stopping():
+	async with Scheduler("test") as scheduler:
+		loop = asyncio.get_running_loop()
+		contexts: list[dict[str, object]] = []
+		loop.set_exception_handler(lambda _, context: contexts.append(context))
+		scheduler.call_soon(_raise_callback)
+		survivor = scheduler.create_task(asyncio.sleep(0.02))
+		await survivor
+		assert contexts
+		assert contexts[0]["message"] == "Unhandled exception in later() callback"
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_cancel_discards_handle():
-	tasks = TaskRegistry(name="tasks")
-	registry = TimerRegistry(tasks=tasks, name="test")
-
-	def callback():
-		return None
-
-	handle = registry.later(10, callback)
-	assert len(registry._handles) == 1  # pyright: ignore[reportPrivateUsage]
-
-	handle.cancel()
-
-	assert len(registry._handles) == 0  # pyright: ignore[reportPrivateUsage]
+async def test_scheduler_callbacks_run_untracked():
+	async with Scheduler("test") as scheduler:
+		task = scheduler.call_soon(lambda: None)
+		await task
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_cancel_all_cancels_and_clears():
-	tasks = TaskRegistry(name="tasks")
-	registry = TimerRegistry(tasks=tasks, name="test")
-	fired = False
-
-	def callback():
-		nonlocal fired
-		fired = True
-
-	registry.later(0.05, callback)
-	registry.later(0.05, callback)
-	registry.cancel_all()
-
-	assert len(registry._handles) == 0  # pyright: ignore[reportPrivateUsage]
-	await asyncio.sleep(0.1)
-	assert fired is False
-
-
-@pytest.mark.asyncio
-async def test_later_tracks_render_tasks_and_cancels_on_close():
-	routes = RouteTree([Route("a", simple_component)])
-	session = RenderSession("test-id", routes)
-
+async def test_render_session_scheduler_closes_without_lingering_tasks():
+	session = RenderSession("test-id", RouteTree([Route("a", simple_component)]))
+	await session.scheduler.start()
 	started = asyncio.Event()
-	cancelled = asyncio.Event()
 
 	async def work():
 		started.set()
-		try:
-			await asyncio.sleep(10)
-		except asyncio.CancelledError:
-			cancelled.set()
-			raise
-
-	def callback():
-		return work()
+		await asyncio.sleep(10)
 
 	with ps.PulseContext.update(render=session):
-		ps.later(0.01, callback)
-
-	assert await wait_for(lambda: started.is_set(), timeout=0.2)
-
-	session.close()
-
-	assert await wait_for(lambda: cancelled.is_set(), timeout=0.2)
+		task = session.create_task(work())
+	await wait_for(lambda: started.is_set(), timeout=0.2)
+	await session.close()
+	assert task.cancelled()
 
 
-@pytest.mark.asyncio
-async def test_create_task_tracks_render_task_and_cancels_on_close():
-	routes = RouteTree([Route("a", simple_component)])
-	session = RenderSession("test-id", routes)
-
-	started = asyncio.Event()
-	cancelled = asyncio.Event()
-
-	async def work():
-		started.set()
-		try:
-			await asyncio.sleep(10)
-		except asyncio.CancelledError:
-			cancelled.set()
-			raise
-
-	with ps.PulseContext.update(render=session):
-		task = create_task(work())
-
-	assert task in session._tasks._tasks  # pyright: ignore[reportPrivateUsage]
-	assert await wait_for(lambda: started.is_set(), timeout=0.2)
-
-	session.close()
-
-	assert await wait_for(lambda: cancelled.is_set(), timeout=0.2)
+async def _raise(exception: Exception) -> None:
+	raise exception
 
 
-@pytest.mark.asyncio
-async def test_call_soon_tracks_render_task_and_cancels_on_close():
-	routes = RouteTree([Route("a", simple_component)])
-	session = RenderSession("test-id", routes)
-
-	started = asyncio.Event()
-	cancelled = asyncio.Event()
-
-	async def work():
-		started.set()
-		try:
-			await asyncio.sleep(10)
-		except asyncio.CancelledError:
-			cancelled.set()
-			raise
-
-	def callback():
-		return work()
-
-	with ps.PulseContext.update(render=session):
-		call_soon(callback)
-
-	assert await wait_for(lambda: started.is_set(), timeout=0.2)
-
-	session.close()
-
-	assert await wait_for(lambda: cancelled.is_set(), timeout=0.2)
-
-
-@pytest.mark.asyncio
-async def test_repeat_tracks_render_task_and_cancels_on_close():
-	routes = RouteTree([Route("a", simple_component)])
-	session = RenderSession("test-id", routes)
-
-	with ps.PulseContext.update(render=session):
-		handle = ps.repeat(10, lambda: None)
-
-	task = handle.task
-	assert task is not None
-	assert (
-		task in session._tasks._tasks  # pyright: ignore[reportPrivateUsage]
-	)
-
-	session.close()
-
-	assert await wait_for(lambda: task.done(), timeout=0.2)
-
-
-@pytest.mark.asyncio
-async def test_later_uses_app_registry_without_render():
-	app = ps.PulseContext.get().app
-	started = asyncio.Event()
-	cancelled = asyncio.Event()
-
-	async def work():
-		started.set()
-		try:
-			await asyncio.sleep(10)
-		except asyncio.CancelledError:
-			cancelled.set()
-			raise
-
-	def callback():
-		return work()
-
-	ps.later(0.01, callback)
-
-	assert await wait_for(lambda: started.is_set(), timeout=0.2)
-
-	await app.close()
-
-	assert await wait_for(lambda: cancelled.is_set(), timeout=0.2)
+def _raise_callback() -> None:
+	raise ValueError("callback")

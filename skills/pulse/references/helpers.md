@@ -15,7 +15,7 @@ handle = ps.later(delay, fn, *args, **kwargs)
 - `fn` - Sync or async function
 - `*args, **kwargs` - Arguments passed to fn
 
-**Returns:** `asyncio.TimerHandle` with `.cancel()` method
+**Returns:** `Task[None]` with `.cancel()` and await support
 
 `ps.later()` callbacks are not canceled by route unmounting. They run unless you
 cancel the returned handle or the render session/app closes. If a later callback
@@ -58,7 +58,7 @@ handle = ps.repeat(interval, fn, *args, **kwargs)
 - `fn` - Sync or async function
 - `*args, **kwargs` - Arguments passed to fn
 
-**Returns:** `RepeatHandle` with `.cancel()` method
+**Returns:** `Task[None]` with `.cancel()` and await support
 
 ```python
 class DashboardState(ps.State):
@@ -225,15 +225,17 @@ lambda name, idx: ... # 2 args
 
 These are used internally but available if needed:
 
-### RepeatHandle
+### Task
 
 ```python
-class RepeatHandle:
-    task: asyncio.Task | None
-    cancelled: bool
+class Task[T]:
+    name: str | None
 
     def cancel(self) -> None: ...
 ```
+
+Tasks returned by `later()`, `repeat()`, `call_soon()`, and `create_task()`
+can be awaited and report cancellation or callback errors.
 
 ### Disposable
 

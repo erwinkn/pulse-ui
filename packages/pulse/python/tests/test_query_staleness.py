@@ -12,12 +12,23 @@ from typing import Any
 
 import pulse as ps
 import pytest
+import pytest_asyncio
 from pulse.queries.query import KeyedQueryResult, UnkeyedQueryResult
 from pulse.queries.store import QueryStore
 from pulse.reactive import Computed
 from pulse.render_session import RenderSession
 from pulse.routing import RouteTree
 from pulse.test_helpers import wait_for
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _pulse_context():  # pyright: ignore[reportUnusedFunction]
+	app = ps.App()
+	await app.scheduler.start()
+	ctx = ps.PulseContext(app=app)
+	with ctx:
+		yield
+	await app.scheduler.close()
 
 
 class FetchCounter:
@@ -308,6 +319,7 @@ async def test_infinite_interval_resume_does_not_stack_fetch_on_inflight():
 @pytest.mark.asyncio
 async def test_session_connection_drives_query_suspension():
 	session = RenderSession("test-id", RouteTree([]))
+	await session.scheduler.start()
 	store = session.query_store
 	counter = FetchCounter()
 	result = observe(store, ("a",), counter, stale_time=0.0)
@@ -329,7 +341,7 @@ async def test_session_connection_drives_query_suspension():
 	await wait_for(lambda: counter.count == 2)
 
 	result.dispose()
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -341,6 +353,7 @@ async def test_resume_fetch_runs_with_session_context():
 	layer wraps it), rather than taking it as a parameter."""
 	sentinel = object()
 	render = RenderSession("test-id", RouteTree([]))
+	await render.scheduler.start()
 	store = render.query_store
 	seen: list[Any] = []
 
@@ -362,4 +375,4 @@ async def test_resume_fetch_runs_with_session_context():
 	await wait_for(lambda: sentinel in seen)
 
 	result.dispose()
-	render.close()
+	await render.close()

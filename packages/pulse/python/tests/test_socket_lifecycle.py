@@ -25,10 +25,11 @@ type ConnectHandler = Callable[
 ]
 
 
-def make_app(monkeypatch: pytest.MonkeyPatch) -> ps.App:
+async def make_app(monkeypatch: pytest.MonkeyPatch) -> ps.App:
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[])
 	app.setup("http://example.com")
+	await app.scheduler.start()
 	return app
 
 
@@ -72,7 +73,7 @@ def Counter():
 async def test_stale_socket_disconnect_does_not_clobber_live_connection(
 	monkeypatch: pytest.MonkeyPatch,
 ):
-	app = make_app(monkeypatch)
+	app = await make_app(monkeypatch)
 	environ = make_environ(app, "user-1")
 	auth = {
 		"render_id": "render-1",
@@ -112,6 +113,7 @@ async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[ps.Route("/", Counter)])
 	app.setup("http://example.com")
+	await app.scheduler.start()
 	environ = make_environ(app, "user-1")
 	auth = {"render_id": "render-1"}
 	connect = app.sio.handlers["/"]["connect"]
@@ -224,7 +226,7 @@ async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 async def test_legacy_client_reconnect_still_replaces_its_socket(
 	monkeypatch: pytest.MonkeyPatch,
 ):
-	app = make_app(monkeypatch)
+	app = await make_app(monkeypatch)
 	environ = make_environ(app, "user-1")
 	connect = connect_handler(app)
 	disconnect = app.sio.handlers["/"]["disconnect"]
@@ -244,7 +246,7 @@ async def test_legacy_client_reconnect_still_replaces_its_socket(
 async def test_different_page_instance_cannot_evict_live_render(
 	monkeypatch: pytest.MonkeyPatch,
 ):
-	app = make_app(monkeypatch)
+	app = await make_app(monkeypatch)
 	environ = make_environ(app, "user-1")
 	connect = connect_handler(app)
 	disconnect = app.sio.handlers["/"]["disconnect"]
@@ -363,6 +365,7 @@ async def test_reconnect_cannot_overwrite_render_recreated_during_middleware(
 	middleware = BlockingReconnectMiddleware()
 	app = ps.App(routes=[], middleware=middleware)
 	app.setup("http://example.com")
+	await app.scheduler.start()
 	environ = make_environ(app, "user-1")
 	connect = connect_handler(app)
 	disconnect = app.sio.handlers["/"]["disconnect"]
@@ -382,7 +385,7 @@ async def test_reconnect_cannot_overwrite_render_recreated_during_middleware(
 	)
 	await middleware.reconnect_started.wait()
 
-	app.close_render("render-1")
+	await app.close_render("render-1")
 	successor = asyncio.create_task(
 		connect(
 			"socket-b",
@@ -418,6 +421,7 @@ async def test_older_same_page_connect_cannot_evict_newer_socket(
 	middleware = BlockingReconnectMiddleware()
 	app = ps.App(routes=[], middleware=middleware)
 	app.setup("http://example.com")
+	await app.scheduler.start()
 	environ = make_environ(app, "user-1")
 	connect = connect_handler(app)
 	auth = {
@@ -453,6 +457,7 @@ async def test_older_denied_connect_cannot_close_newer_socket(
 	middleware = OrderedConnectMiddleware(deny_first=True)
 	app = ps.App(routes=[], middleware=middleware)
 	app.setup("http://example.com")
+	await app.scheduler.start()
 	environ = make_environ(app, "user-1")
 	connect = connect_handler(app)
 	auth = {
@@ -481,6 +486,7 @@ async def test_newer_denied_connect_leaves_stale_render_expirable(
 	middleware = OrderedConnectMiddleware(deny_first=False)
 	app = ps.App(routes=[], middleware=middleware)
 	app.setup("http://example.com")
+	await app.scheduler.start()
 	environ = make_environ(app, "user-1")
 	connect = connect_handler(app)
 	auth = {
@@ -511,6 +517,7 @@ async def test_denied_reconnect_does_not_destroy_existing_render(
 	mw = TogglableDenyMiddleware()
 	app = ps.App(routes=[], middleware=mw)
 	app.setup("http://example.com")
+	await app.scheduler.start()
 	environ = make_environ(app, "user-1")
 	auth = {"render_id": "render-1"}
 	connect = connect_handler(app)
@@ -544,6 +551,7 @@ async def test_denied_fresh_connection_disposes_created_render(
 	mw.deny = True
 	app = ps.App(routes=[], middleware=mw)
 	app.setup("http://example.com")
+	await app.scheduler.start()
 	environ = make_environ(app, "user-1")
 	connect = connect_handler(app)
 
@@ -575,6 +583,7 @@ async def test_connect_middleware_exception_is_surfaced_after_bind(
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[], middleware=RaisingConnectMiddleware())
 	app.setup("http://example.com")
+	await app.scheduler.start()
 	environ = make_environ(app, "user-1")
 	connect = connect_handler(app)
 
@@ -614,14 +623,14 @@ async def test_connect_middleware_exception_is_surfaced_after_bind(
 
 @pytest.mark.asyncio
 async def test_close_render_unmaps_socket(monkeypatch: pytest.MonkeyPatch):
-	app = make_app(monkeypatch)
+	app = await make_app(monkeypatch)
 	environ = make_environ(app, "user-1")
 	auth = {"render_id": "render-1"}
 
 	connect = connect_handler(app)
 	await connect("socket-a", environ, auth)
 
-	app.close_render("render-1")
+	await app.close_render("render-1")
 	assert app._socket_to_render == {}  # pyright: ignore[reportPrivateUsage]
 	assert app._render_to_socket == {}  # pyright: ignore[reportPrivateUsage]
 	assert app._render_to_page_instance == {}  # pyright: ignore[reportPrivateUsage]

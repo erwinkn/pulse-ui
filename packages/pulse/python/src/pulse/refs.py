@@ -12,7 +12,7 @@ from pulse.context import PulseContext
 from pulse.helpers import Disposable
 from pulse.hooks.core import HookMetadata, HookState, hooks
 from pulse.hooks.state import collect_component_identity
-from pulse.scheduling import create_future, create_task
+from pulse.scheduling import Task, create_future, create_task
 
 T = TypeVar("T")
 Number = int | float
@@ -722,18 +722,13 @@ class RefHandle(Disposable, Generic[T]):
 				# Fail early: propagate on next render via error log if desired
 				raise
 			if inspect.isawaitable(result):
-				task = create_task(result, name=f"ref:{self.id}:{label}")
 
-				def _on_done(done_task: asyncio.Future[Any]) -> None:
+				def _on_done(done_task: Task[Any]) -> None:
 					if done_task.cancelled():
 						return
-					try:
-						done_task.result()
-					except asyncio.CancelledError:
-						return
-					except Exception as exc:
-						loop = done_task.get_loop()
-						loop.call_exception_handler(
+					exc = done_task.exception
+					if exc is not None:
+						asyncio.get_running_loop().call_exception_handler(
 							{
 								"message": f"Unhandled exception in ref {label} handler",
 								"exception": exc,
@@ -741,7 +736,11 @@ class RefHandle(Disposable, Generic[T]):
 							}
 						)
 
-				task.add_done_callback(_on_done)
+				create_task(
+					result,
+					name=f"ref:{self.id}:{label}",
+					on_done=_on_done,
+				)
 
 	@override
 	def dispose(self) -> None:

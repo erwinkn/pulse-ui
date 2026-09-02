@@ -133,6 +133,7 @@ async def test_invalid_structured_form_payload_returns_400(
 
 	app = ps.App(routes=[ps.Route("a", home)])
 	app.setup("http://example.com")
+	await app.scheduler.start()
 	try:
 		transport = httpx.ASGITransport(app=app.fastapi)
 		async with httpx.AsyncClient(

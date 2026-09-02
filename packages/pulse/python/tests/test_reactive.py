@@ -5,6 +5,7 @@ from typing import Any, ClassVar, NamedTuple, cast
 
 import pulse as ps
 import pytest
+import pytest_asyncio
 from pulse import (
 	AsyncEffect,
 	Computed,
@@ -27,6 +28,19 @@ from pulse.reactive_extensions import (
 	unwrap,
 )
 from pulse.test_helpers import wait_for
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _scheduler_context(request: pytest.FixtureRequest):  # pyright: ignore[reportUnusedFunction]
+	if request.node.get_closest_marker("asyncio") is None:
+		yield
+		return
+	app = ps.App()
+	await app.scheduler.start()
+	with ps.PulseContext(app=app):
+		yield
+	flush_effects()
+	await app.scheduler.close()
 
 
 def test_signal_creation_and_access():
@@ -573,6 +587,7 @@ async def test_sync_writes_are_batched():
 
 	# Give the async loop time to run the effect
 	await asyncio.sleep(0)
+	await asyncio.sleep(0)
 	assert e.runs == 1
 
 	a.write(2)
@@ -582,10 +597,12 @@ async def test_sync_writes_are_batched():
 
 	# Give the async loop time to process queued tasks
 	await asyncio.sleep(0)
+	await asyncio.sleep(0)
 	assert e.runs == 2
 
 	a.write(3)
 	assert e.runs == 2
+	await asyncio.sleep(0)
 	await asyncio.sleep(0)
 	assert e.runs == 3
 	b.write(6)

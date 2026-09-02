@@ -109,8 +109,11 @@ async def _client(
 	app: ps.App, *, raise_app_exceptions: bool = True
 ) -> AsyncIterator[httpx.AsyncClient]:
 	owns_setup = app.status < AppStatus.initialized
+	owns_scheduler = not app.scheduler.running
 	if owns_setup:
 		app.setup("http://testserver")
+	if owns_scheduler:
+		await app.scheduler.start()
 	transport = httpx.ASGITransport(
 		app=app.fastapi, raise_app_exceptions=raise_app_exceptions
 	)
@@ -122,6 +125,8 @@ async def _client(
 	finally:
 		if owns_setup:
 			await app.close()
+		elif owns_scheduler:
+			await app.scheduler.close()
 
 
 @pytest.mark.asyncio
@@ -227,27 +232,24 @@ async def test_api_middleware_skips_pulse_framework_and_docs_routes():
 	)
 	app.setup("http://testserver")
 
-	try:
-		async with _client(app) as client:
-			health = await client.get("/_pulse/health")
-			docs = await client.get("/_pulse/docs")
-			openapi = await client.get("/_pulse/openapi.json")
-			prerender = await client.post(
-				"/_pulse/prerender",
-				json={
-					"paths": ["/"],
-					"routeInfo": {
-						"pathname": "/",
-						"hash": "",
-						"query": "",
-						"queryParams": {},
-						"pathParams": {},
-						"catchall": [],
-					},
+	async with _client(app) as client:
+		health = await client.get("/_pulse/health")
+		docs = await client.get("/_pulse/docs")
+		openapi = await client.get("/_pulse/openapi.json")
+		prerender = await client.post(
+			"/_pulse/prerender",
+			json={
+				"paths": ["/"],
+				"routeInfo": {
+					"pathname": "/",
+					"hash": "",
+					"query": "",
+					"queryParams": {},
+					"pathParams": {},
+					"catchall": [],
 				},
-			)
-	finally:
-		await app.close()
+			},
+		)
 
 	assert health.status_code == 200
 	assert docs.status_code == 200

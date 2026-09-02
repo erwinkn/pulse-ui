@@ -19,7 +19,7 @@ from pulse.helpers import (
 	values_equal,
 )
 from pulse.scheduling import (
-	TimerHandleLike,
+	Task,
 	call_soon,
 	create_task,
 )
@@ -395,7 +395,7 @@ class Effect(Disposable):
 	immediate: bool
 	_lazy: bool
 	_interval: float | None
-	_interval_handle: TimerHandleLike | None
+	_interval_handle: Task[None] | None
 	update_deps: bool
 	batch: "Batch | None"
 	paused: bool
@@ -724,7 +724,7 @@ class AsyncEffect(Effect):
 
 	fn: AsyncEffectFn  # pyright: ignore[reportIncompatibleMethodOverride]
 	batch: None  # pyright: ignore[reportIncompatibleVariableOverride]
-	_task: asyncio.Task[None] | None
+	_task: Task[None] | None
 	_task_started: bool
 
 	def __init__(
@@ -781,7 +781,7 @@ class AsyncEffect(Effect):
 		return kwargs
 
 	@override
-	def run(self) -> asyncio.Task[Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+	def run(self) -> Task[Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
 		"""Start the async effect, cancelling any previous run.
 
 		Returns:
@@ -791,7 +791,7 @@ class AsyncEffect(Effect):
 
 		# Cancel any previous run still in flight, but preserve the interval
 		self.cancel(cancel_interval=False)
-		this_task: asyncio.Task[None] | None = None
+		this_task: Task[None] | None = None
 
 		async def _runner():
 			nonlocal execution_epoch, this_task
@@ -1006,8 +1006,15 @@ class GlobalBatch(Batch):
 	@override
 	def register_effect(self, effect: Effect):
 		if not self.is_scheduled:
-			call_soon(self.flush)
-			self.is_scheduled = True
+			from pulse.context import PulseContext
+
+			ctx = PulseContext.get()
+			scheduler = (
+				ctx.render.scheduler if ctx.render is not None else ctx.app.scheduler
+			)
+			if scheduler.running:
+				call_soon(self.flush)
+				self.is_scheduled = True
 		return super().register_effect(effect)
 
 	@override

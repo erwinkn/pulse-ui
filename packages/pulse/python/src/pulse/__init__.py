@@ -1442,12 +1442,8 @@ from pulse.requirements import require as require
 from pulse.routing import Layout as Layout
 from pulse.routing import Route as Route
 from pulse.routing import RouteInfo as RouteInfo
-from pulse.scheduling import (
-	TaskRegistry as TaskRegistry,
-)
-from pulse.scheduling import (
-	TimerRegistry as TimerRegistry,
-)
+from pulse.scheduling import Scheduler as Scheduler
+from pulse.scheduling import Task as Task
 from pulse.scheduling import (
 	later as later,
 )

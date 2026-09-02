@@ -3,9 +3,22 @@ from typing import cast
 
 import pulse as ps
 import pytest
+import pytest_asyncio
 from pulse import HookContext, Signal
 from pulse.reactive import AsyncEffect, Batch, Computed, Effect
 from pulse.test_helpers import wait_for
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _scheduler_context(request: pytest.FixtureRequest):  # pyright: ignore[reportUnusedFunction]
+	if request.node.get_closest_marker("asyncio") is None:
+		yield
+		return
+	app = ps.App()
+	await app.scheduler.start()
+	with ps.PulseContext(app=app):
+		yield
+	await app.scheduler.close()
 
 
 class TestBasicCaching:

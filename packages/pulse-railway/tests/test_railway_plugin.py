@@ -99,10 +99,11 @@ async def test_plugin_exposes_internal_session_endpoint(monkeypatch) -> None:
 	app = ps.App(routes=[], plugins=[plugin], mode="subdomains")
 	plugin.on_startup(app)
 	app.setup("https://app.example.com")
+	await app.scheduler.start()
 	session = await app.get_or_create_session(None)
-	connected = app.create_render("connected", session)
+	connected = await app.create_render("connected", session)
 	connected.connect(lambda _message: None)
-	resumable = app.create_render("resumable", session)
+	resumable = await app.create_render("resumable", session)
 	render_sessions = _TrackedRenderSessions()
 	render_sessions[connected.id] = connected
 	render_sessions[resumable.id] = resumable
@@ -138,10 +139,11 @@ async def test_plugin_exposes_internal_reload_endpoint(monkeypatch) -> None:
 	app = ps.App(routes=[], plugins=[plugin], mode="subdomains")
 	plugin.on_startup(app)
 	app.setup("https://app.example.com")
+	await app.scheduler.start()
 	session = await app.get_or_create_session(None)
-	connected = app.create_render("connected", session)
+	connected = await app.create_render("connected", session)
 	connected.connect(lambda _message: None)
-	resumable = app.create_render("resumable", session)
+	resumable = await app.create_render("resumable", session)
 	render_sessions = _TrackedRenderSessions()
 	render_sessions[connected.id] = connected
 	render_sessions[resumable.id] = resumable

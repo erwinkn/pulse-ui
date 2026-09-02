@@ -5,6 +5,7 @@ from typing import Any, ParamSpec, TypeVar, cast, final
 
 import pulse as ps
 import pytest
+import pytest_asyncio
 from pulse.helpers import MISSING
 from pulse.queries.protocol import QueryResult
 from pulse.queries.query import (
@@ -66,19 +67,18 @@ async def test_query_gc_uses_render_timers():
 	app = ps.PulseContext.get().app
 	routes = RouteTree([])
 	session = RenderSession("test-session", routes)
+	await session.scheduler.start()
 	query = session.query_store.ensure(("gc", "timers"), gc_time=0.05, retries=0)
 
-	app_handles = len(app._timers._handles)  # pyright: ignore[reportPrivateUsage]
-	assert len(session._timers._handles) == 0  # pyright: ignore[reportPrivateUsage]
+	assert app.scheduler.running
 
 	with ps.PulseContext.update(render=session):
 		query.schedule_gc()
 
-	assert len(session._timers._handles) == 1  # pyright: ignore[reportPrivateUsage]
-	assert len(app._timers._handles) == app_handles  # pyright: ignore[reportPrivateUsage]
+	assert session.scheduler.running
 
 	query.cancel_gc()
-	session._timers.cancel_all()  # pyright: ignore[reportPrivateUsage]
+	await session.scheduler.close()
 
 
 @pytest.mark.asyncio
@@ -736,13 +736,15 @@ async def test_query_retry_cancellation():
 	assert attempts == 1  # Only first attempt ran
 
 
-@pytest.fixture(autouse=True)
-def _pulse_context():  # pyright: ignore[reportUnusedFunction]
+@pytest_asyncio.fixture(autouse=True)
+async def _pulse_context():  # pyright: ignore[reportUnusedFunction]
 	"""Set up a PulseContext with an App for all tests."""
 	app = ps.App()
+	await app.scheduler.start()
 	ctx = ps.PulseContext(app=app)
 	with ctx:
 		yield
+	await app.scheduler.close()
 
 
 def with_render_session(fn: Callable[P, Awaitable[R]]):
@@ -752,8 +754,12 @@ def with_render_session(fn: Callable[P, Awaitable[R]]):
 		# Create a minimal RouteTree for the session (not needed for query tests)
 		routes = RouteTree([])
 		session = RenderSession("test-session", routes)
-		with ps.PulseContext.update(render=session):
-			return await fn(*args, **kwargs)
+		await session.scheduler.start()
+		try:
+			with ps.PulseContext.update(render=session):
+				return await fn(*args, **kwargs)
+		finally:
+			await session.close()
 
 	return wrapper
 

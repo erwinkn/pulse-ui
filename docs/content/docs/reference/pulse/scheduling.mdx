@@ -30,7 +30,7 @@ def later(
     fn: Callable[P, Any],
     *args: P.args,
     **kwargs: P.kwargs,
-) -> TimerHandleLike
+) -> Task[None]
 ```
 
 ### Parameters
@@ -44,7 +44,7 @@ def later(
 
 ### Returns
 
-`TimerHandleLike` with `.cancel()` method to cancel the scheduled callback.
+`Task[None]` with `.cancel()` and await support.
 
 Route unmounting does not cancel `later()` callbacks. A callback scheduled from a
 route continues to run unless you cancel its handle or the render session/app
@@ -96,7 +96,7 @@ Call `.cancel()` on the returned handle to prevent the callback from running:
 ```python
 class TypeaheadState(ps.State):
     query: str = ""
-    _debounce_handle: TimerHandleLike | None = None
+    _debounce_handle: ps.Task[None] | None = None
 
     def on_input(self, value: str):
         self.query = value
@@ -123,7 +123,7 @@ def repeat(
     fn: Callable[P, Any],
     *args: P.args,
     **kwargs: P.kwargs,
-) -> RepeatHandle
+) -> Task[None]
 ```
 
 ### Parameters
@@ -137,7 +137,7 @@ def repeat(
 
 ### Returns
 
-`RepeatHandle` with `.cancel()` method to stop the repeating callback.
+`Task[None]` with `.cancel()` and await support.
 
 ### Example
 
@@ -146,7 +146,7 @@ import pulse as ps
 
 class LiveDataState(ps.State):
     data: dict = {}
-    _poll_handle: RepeatHandle | None = None
+    _poll_handle: ps.Task[None] | None = None
 
     def start_polling(self):
         if self._poll_handle:
@@ -193,7 +193,7 @@ def call_soon(
     fn: Callable[P, Any],
     *args: P.args,
     **kwargs: P.kwargs,
-) -> TimerHandleLike | None
+) -> Task[None]
 ```
 
 ### Parameters
@@ -206,7 +206,7 @@ def call_soon(
 
 ### Returns
 
-`TimerHandleLike` or `None` if scheduling failed (e.g., during tests without an event loop).
+`Task[None]` that can be cancelled or awaited.
 
 ### Example
 
@@ -229,8 +229,8 @@ def create_task(
     coroutine: Awaitable[T],
     *,
     name: str | None = None,
-    on_done: Callable[[asyncio.Task[T]], None] | None = None,
-) -> asyncio.Task[T]
+    on_done: Callable[[Task[T]], None] | None = None,
+) -> Task[T]
 ```
 
 ### Parameters
@@ -243,7 +243,7 @@ def create_task(
 
 ### Returns
 
-`asyncio.Task[T]` that's tracked by the current registry.
+`Task[T]` owned by the current render session or app scheduler.
 
 ### Example
 
@@ -266,9 +266,9 @@ class BackgroundWorkState(ps.State):
 
 Unlike `asyncio.create_task()`, tasks created with `create_task` are:
 
-- **Tracked** by the render session or app registry
+- **Owned** by the render session's or app's scheduler
 - **Cancelled automatically** when the session closes or app shuts down
-- **Cleaned up** from the registry when they complete
+- **Drained** as part of scheduler shutdown
 
 This prevents orphaned tasks and resource leaks.
 
@@ -328,7 +328,11 @@ def PollingComponent():
 
 ## Thread safety
 
-These functions work from any thread. If called from a background thread, they schedule work on the main event loop using `anyio.from_thread.run()`.
+These functions work on the owning event loop or from a thread without a
+running event loop. The app scheduler binds to the serving loop at lifespan
+startup; a render-session scheduler binds when it is first used on its loop.
+Off-loop calls from a thread require that binding to have happened first.
+Calls from a different running event loop raise an error.
 
 ```python
 import threading

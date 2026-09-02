@@ -178,6 +178,12 @@ def test_ndarray_normalizes_missing_values() -> None:
 	assert roundtrip(array) == [[1.0, None], [3.0, 4.0]]
 
 
+def test_float_ndarray_fast_path_normalizes_nan_in_core_encoder() -> None:
+	array = np.array([1.0, np.nan])
+
+	assert roundtrip(array) == [1.0, None]
+
+
 @pytest.mark.parametrize("unit", ["ns", "us"])
 def test_datetime64_array_uses_timestamp_normalization(unit: str) -> None:
 	array = np.array(["2026-01-01"], dtype=f"datetime64[{unit}]")

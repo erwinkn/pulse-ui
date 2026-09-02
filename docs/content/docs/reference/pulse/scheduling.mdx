@@ -328,11 +328,12 @@ def PollingComponent():
 
 ## Thread safety
 
-These functions work on the owning event loop or from a thread without a
-running event loop. The app scheduler binds to the serving loop at lifespan
-startup; a render-session scheduler binds when it is first used on its loop.
-Off-loop calls from a thread require that binding to have happened first.
-Calls from a different running event loop raise an error.
+Each scheduler binds to the event loop where `await scheduler.start()` runs.
+`App.scheduler` starts in the FastAPI lifespan, and a render session's
+scheduler starts in `App.create_render`. The synchronous scheduling functions
+work on that loop or from a thread without a running event loop. Calls from a
+different running event loop, before `start()`, or after `close()` raise an
+error.
 
 ```python
 import threading

@@ -307,7 +307,7 @@ class Scheduler:
 		return self._run_on_loop(
 			lambda: self._spawn(
 				self._callback(0, fn, args, dict(kwargs)),
-				error_message="Unhandled exception in later() callback",
+				error_message="Unhandled exception in call_soon() callback",
 				callback=fn,
 			)
 		)
@@ -341,10 +341,10 @@ class Scheduler:
 		)
 
 	def _create_future(self) -> asyncio.Future[Any]:
-		return self._run_on_loop(asyncio.get_running_loop().create_future)  # pyright: ignore[reportPrivateUsage]
+		return self._run_on_loop(lambda: asyncio.get_running_loop().create_future())
 
 
-def _current_scheduler() -> Scheduler:
+def current_scheduler() -> Scheduler:
 	from pulse.context import PulseContext
 
 	ctx = PulseContext.get()
@@ -355,7 +355,7 @@ def _current_scheduler() -> Scheduler:
 
 def call_soon(fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs) -> Task[None]:
 	"""Schedule a callback to run ASAP on the active scheduler."""
-	return _current_scheduler().call_soon(fn, *args, **kwargs)
+	return current_scheduler().call_soon(fn, *args, **kwargs)
 
 
 def create_task(
@@ -365,23 +365,23 @@ def create_task(
 	on_done: Callable[[Task[T]], None] | None = None,
 ) -> Task[T]:
 	"""Create a task in the active scheduler."""
-	return _current_scheduler().create_task(coroutine, name=name, on_done=on_done)
+	return current_scheduler().create_task(coroutine, name=name, on_done=on_done)
 
 
 def create_future() -> asyncio.Future[Any]:
 	"""Create a future on the active scheduler's event loop."""
-	return _current_scheduler()._create_future()  # pyright: ignore[reportPrivateUsage]
+	return current_scheduler()._create_future()  # pyright: ignore[reportPrivateUsage]
 
 
 def later(
 	delay: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
 ) -> Task[None]:
 	"""Schedule a callback after a delay on the active scheduler."""
-	return _current_scheduler().later(delay, fn, *args, **kwargs)
+	return current_scheduler().later(delay, fn, *args, **kwargs)
 
 
 def repeat(
 	interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
 ) -> Task[None]:
 	"""Repeat a callback on the active scheduler."""
-	return _current_scheduler().repeat(interval, fn, *args, **kwargs)
+	return current_scheduler().repeat(interval, fn, *args, **kwargs)

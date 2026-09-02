@@ -1,12 +1,14 @@
 import asyncio
 import threading
+from contextvars import copy_context
 
 import pulse as ps
 import pytest
 from anyio import to_thread
+from pulse.reactive import Scope, Signal
 from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteTree
-from pulse.scheduling import Scheduler, Task
+from pulse.scheduling import Scheduler, Task, create_future
 from pulse.test_helpers import wait_for
 
 
@@ -60,6 +62,26 @@ async def test_scheduler_later_call_soon_and_repeat():
 
 
 @pytest.mark.asyncio
+async def test_scheduler_repeat_immediate_runs_before_first_interval():
+	async with Scheduler("test") as scheduler:
+		started = asyncio.Event()
+		loop = asyncio.get_running_loop()
+		start = loop.time()
+
+		def callback():
+			started.set()
+
+		task = scheduler.repeat(
+			10,
+			callback,
+			immediate=True,  # pyright: ignore[reportCallIssue]
+		)
+		await started.wait()
+		assert loop.time() - start < 10
+		task.cancel()
+
+
+@pytest.mark.asyncio
 async def test_scheduler_runs_async_callbacks():
 	async with Scheduler("test") as scheduler:
 		fired = asyncio.Event()
@@ -92,6 +114,27 @@ async def test_scheduler_dispatches_from_worker_threads():
 		await asyncio.to_thread(thread.join)
 		await wait_for(lambda: fired.is_set(), timeout=0.2)
 		assert len(results) == 3
+
+
+@pytest.mark.asyncio
+async def test_create_future_from_bare_thread():
+	app = ps.App()
+	await app.scheduler.start()
+	futures: list[asyncio.Future[int]] = []
+
+	with ps.PulseContext(app=app):
+		context = copy_context()
+		thread = threading.Thread(
+			target=lambda: context.run(lambda: futures.append(create_future()))
+		)
+		thread.start()
+		await asyncio.to_thread(thread.join)
+
+	await app.scheduler.close()
+	future = futures[0]
+	assert future.get_loop() is asyncio.get_running_loop()
+	future.set_result(1)
+	assert await future == 1
 
 
 @pytest.mark.asyncio
@@ -199,14 +242,44 @@ async def test_scheduler_reports_callback_exceptions_without_stopping():
 		survivor = scheduler.create_task(asyncio.sleep(0.02))
 		await survivor
 		assert contexts
-		assert contexts[0]["message"] == "Unhandled exception in later() callback"
+		assert contexts[0]["message"] == "Unhandled exception in call_soon() callback"
 
 
 @pytest.mark.asyncio
 async def test_scheduler_callbacks_run_untracked():
 	async with Scheduler("test") as scheduler:
-		task = scheduler.call_soon(lambda: None)
-		await task
+		signal = Signal(1)
+		with Scope() as scope:
+			task = scheduler.call_soon(signal)
+			await task
+		assert scope.deps == {}
+
+
+@pytest.mark.asyncio
+async def test_scheduler_on_done_receives_task_exception_without_reporting():
+	async with Scheduler("test") as scheduler:
+		loop = asyncio.get_running_loop()
+		contexts: list[dict[str, object]] = []
+		loop.set_exception_handler(lambda _, context: contexts.append(context))
+		failures: list[BaseException | None] = []
+
+		task = scheduler.create_task(
+			_raise(ValueError("task")),
+			on_done=lambda completed: failures.append(completed.exception),
+		)
+		with pytest.raises(ValueError, match="task"):
+			await task
+		assert len(failures) == 1
+		assert isinstance(failures[0], ValueError)
+		assert contexts == []
+
+
+@pytest.mark.asyncio
+async def test_awaiting_task_reraises_its_exception():
+	async with Scheduler("test") as scheduler:
+		task = scheduler.create_task(_raise(ValueError("task")))
+		with pytest.raises(ValueError, match="task"):
+			await task
 
 
 @pytest.mark.asyncio

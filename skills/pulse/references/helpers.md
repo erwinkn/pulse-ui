@@ -26,6 +26,9 @@ global navigation.
 Calls from another thread block until the event loop picks them up and raise
 `TimeoutError` after 30 seconds if it does not.
 
+A registry binds itself to the first running loop that uses it. The app registry
+is rebound to the serving loop during FastAPI lifespan startup.
+
 ```python
 # Delayed cleanup
 def cleanup():

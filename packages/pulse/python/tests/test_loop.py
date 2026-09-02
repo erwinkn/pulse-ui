@@ -14,11 +14,18 @@ async def test_run_inline_on_loop_passes_loop():
 
 
 @pytest.mark.asyncio
-async def test_run_unbound_adopts_running_loop_without_binding():
+async def test_run_unbound_binds_the_running_loop():
 	loop = asyncio.get_running_loop()
 	ref = LoopRef()
 
 	assert ref.run(lambda received: received) is loop
+	assert ref.loop is loop
+
+
+def test_run_unbound_uses_idle_loop_without_binding():
+	ref = LoopRef("x")
+
+	assert ref.run(lambda loop: loop) is not None
 	assert ref.loop is None
 
 

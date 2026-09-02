@@ -119,11 +119,9 @@ class TaskRegistry:
 	def __init__(
 		self,
 		name: str | None = None,
-		*,
-		loop: LoopRef | None = None,
 	) -> None:
 		self._tasks = set()
-		self._loop = loop if loop is not None else LoopRef(name)
+		self._loop = LoopRef(name)
 
 	@property
 	def loop(self) -> LoopRef:

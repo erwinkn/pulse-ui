@@ -1257,7 +1257,6 @@ class App:
 			dev_strict_mode_detach_timeout=0.1 if self.env == "dev" else 0.0,
 			disconnect_queue_timeout=self.disconnect_queue_timeout,
 			render_loop_limit=self.render_loop_limit,
-			loop=self._tasks.loop,
 		)
 		self.render_sessions[rid] = render
 		self._render_to_user[rid] = session.sid

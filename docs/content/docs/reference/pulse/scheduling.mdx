@@ -300,9 +300,10 @@ def PollingComponent():
 ## Thread safety
 
 These functions run inline on the loop that owns the registry. Scheduling from
-another thread requires the app to be running so Pulse can use the loop bound
-during the FastAPI lifespan. A thread running a different event loop raises a
-`RuntimeError`.
+another thread requires the owning loop to be running. An unbound registry
+binds itself to the first running loop that uses it, and the app registry is
+rebound to the serving loop during FastAPI lifespan startup. A thread running a
+different event loop raises a `RuntimeError`.
 
 ```python
 import pulse as ps

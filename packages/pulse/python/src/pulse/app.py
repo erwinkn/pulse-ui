@@ -75,7 +75,7 @@ from pulse.proxy import Proxy, ReactProxy
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
-from pulse.scheduling import TaskRegistry, TimerHandleLike, TimerRegistry
+from pulse.scheduling import Scheduler, TimerHandleLike
 from pulse.serializer import Serialized, deserialize, serialize
 from pulse.user_session import (
 	CookieSessionStore,
@@ -248,8 +248,7 @@ class App:
 	_pending_socket_messages: dict[str, list[Serialized]]
 	_render_cleanups: dict[str, TimerHandleLike]
 	_render_message_locks: dict[str, asyncio.Lock]
-	_tasks: TaskRegistry
-	_timers: TimerRegistry
+	scheduler: Scheduler
 	_proxy: ReactProxy | None
 	proxy: Proxy
 	session_timeout: float
@@ -335,8 +334,7 @@ class App:
 		# Map render_id -> cleanup timer handle for timeout-based expiry
 		self._render_cleanups = {}
 		self._render_message_locks = {}
-		self._tasks = TaskRegistry(name="app")
-		self._timers = TimerRegistry(tasks=self._tasks, name="app")
+		self.scheduler = Scheduler(name="app")
 		self._proxy = None
 		self.session_timeout = session_timeout
 		self.prerender_queue_timeout = prerender_queue_timeout
@@ -416,6 +414,8 @@ class App:
 
 	@asynccontextmanager
 	async def fastapi_lifespan(self, _: FastAPI):
+		self.scheduler.bind(asyncio.get_running_loop())
+
 		try:
 			if isinstance(self.session_store, SessionStore):
 				await self.session_store.init()
@@ -906,7 +906,7 @@ class App:
 
 					def on_message(message: ServerMessage):
 						payload = list(serialize(message))
-						self._tasks.create_task(
+						self.scheduler.create_task(
 							self.sio.emit("message", payload, to=sid)
 						)
 
@@ -975,7 +975,7 @@ class App:
 		if cleanup_handle:
 			if not cleanup_handle.cancelled():
 				cleanup_handle.cancel()
-			self._timers.discard(cleanup_handle)
+			self.scheduler.discard_timer(cleanup_handle)
 
 	def _schedule_render_cleanup(self, rid: str):
 		"""Schedule cleanup of a RenderSession after the configured timeout."""
@@ -1001,7 +1001,7 @@ class App:
 				)
 				self.close_render(rid)
 
-		handle = self._timers.later(self.session_timeout, _cleanup)
+		handle = self.scheduler.later(self.session_timeout, _cleanup)
 		self._render_cleanups[rid] = handle
 
 	async def _handle_socket_message(self, sid: str, data: Serialized) -> None:
@@ -1280,7 +1280,7 @@ class App:
 		self._user_to_render[session.sid].remove(rid)
 
 		if len(self._user_to_render[session.sid]) == 0:
-			self._timers.later(60, self.close_session_if_inactive, sid)
+			self.scheduler.later(60, self.close_session_if_inactive, sid)
 
 	def close_session(self, sid: str):
 		session = self.user_sessions.pop(sid, None)
@@ -1320,8 +1320,7 @@ class App:
 			self.close_session(sid)
 
 		# Cancel any remaining app-level tasks/timers
-		self._tasks.cancel_all()
-		self._timers.cancel_all()
+		self.scheduler.cancel_all()
 		if self._proxy is not None:
 			try:
 				await self._proxy.close()

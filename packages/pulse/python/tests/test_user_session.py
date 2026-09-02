@@ -55,21 +55,22 @@ async def test_server_session_save_blocks_http_response_until_persisted(
 
 	app.setup("http://example.com")
 
-	with PulseContext(app=app):
-		transport = httpx.ASGITransport(app=app.fastapi)
-		async with httpx.AsyncClient(
-			transport=transport, base_url="http://testserver"
-		) as client:
-			request_task = asyncio.create_task(
-				client.get("/login", follow_redirects=False)
-			)
+	async with app.fastapi.router.lifespan_context(app.fastapi):
+		with PulseContext(app=app):
+			transport = httpx.ASGITransport(app=app.fastapi)
+			async with httpx.AsyncClient(
+				transport=transport, base_url="http://testserver"
+			) as client:
+				request_task = asyncio.create_task(
+					client.get("/login", follow_redirects=False)
+				)
 
-			await asyncio.wait_for(store.auth_save_started.wait(), timeout=1)
-			await asyncio.sleep(0)
-			assert not request_task.done()
+				await asyncio.wait_for(store.auth_save_started.wait(), timeout=1)
+				await asyncio.sleep(0)
+				assert not request_task.done()
 
-			store.allow_auth_save.set()
-			response = await asyncio.wait_for(request_task, timeout=1)
+				store.allow_auth_save.set()
+				response = await asyncio.wait_for(request_task, timeout=1)
 
 	assert response.status_code == 307
 	assert any(session.get("auth") == "ok" for session in store.data.values())

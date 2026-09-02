@@ -8,7 +8,7 @@ Pulse provides scheduling primitives for running code after delays, at intervals
 All scheduling functions are available from `pulse.scheduling`:
 
 ```python
-from pulse.scheduling import later, repeat, create_task, create_future, call_soon
+from pulse.scheduling import later, repeat, create_task, call_soon
 ```
 
 For common cases, `later` and `repeat` are also available directly on the `pulse` module:
@@ -193,7 +193,7 @@ def call_soon(
     fn: Callable[P, Any],
     *args: P.args,
     **kwargs: P.kwargs,
-) -> TimerHandleLike | None
+) -> TimerHandleLike
 ```
 
 ### Parameters
@@ -206,7 +206,7 @@ def call_soon(
 
 ### Returns
 
-`TimerHandleLike` or `None` if scheduling failed (e.g., during tests without an event loop).
+`TimerHandleLike` for the scheduled callback.
 
 ### Example
 
@@ -243,7 +243,7 @@ def create_task(
 
 ### Returns
 
-`asyncio.Task[T]` that's tracked by the current registry.
+`asyncio.Task[T]` that's tracked by the current scheduler.
 
 ### Example
 
@@ -266,46 +266,17 @@ class BackgroundWorkState(ps.State):
 
 Unlike `asyncio.create_task()`, tasks created with `create_task` are:
 
-- **Tracked** by the render session or app registry
+- **Tracked** by the render session's scheduler or `App.scheduler`
 - **Cancelled automatically** when the session closes or app shuts down
-- **Cleaned up** from the registry when they complete
+- **Cleaned up** from the scheduler when they complete
 
 This prevents orphaned tasks and resource leaks.
 
 ---
 
-## create_future
-
-Create an asyncio Future on the main event loop.
-
-```python
-def create_future() -> asyncio.Future[Any]
-```
-
-### Returns
-
-`asyncio.Future[Any]` created on the main event loop.
-
-### Example
-
-```python
-from pulse.scheduling import create_future
-
-class PromiseState(ps.State):
-    result: str = ""
-
-    async def wait_for_signal(self):
-        future = create_future()
-        # Some external code will resolve this
-        register_callback(future.set_result)
-        self.result = await future
-```
-
----
-
 ## Automatic cleanup
 
-All scheduling primitives are scoped to the current **render session** (if inside a component render) or the **app** (if outside). When the session closes or app shuts down:
+All scheduling primitives are scoped to the current **render session** (if inside a component render) or the **app** (if outside). The render session's scheduler and `App.scheduler` own the scheduled work. When the session closes or app shuts down:
 
 - Pending `later` callbacks are cancelled
 - `repeat` loops are stopped
@@ -328,17 +299,31 @@ def PollingComponent():
 
 ## Thread safety
 
-These functions work from any thread. If called from a background thread, they schedule work on the main event loop using `anyio.from_thread.run()`.
+These functions run inline on the loop that owns the scheduler. Scheduling from
+another thread requires the owning loop to be running. A scheduler binds itself
+to the first running loop that uses it, and `App.scheduler` is rebound to the
+serving loop during FastAPI lifespan startup. A thread with no running loop can
+schedule only after the scheduler has been used on its serving loop at least
+once. A thread running a different event loop raises a
+`RuntimeError`.
 
 ```python
-import threading
+import pulse as ps
 
-def background_thread():
-    # Works from any thread
+app = ps.App()
+
+def background_work():
     ps.later(1.0, lambda: print("Hello from main loop"))
 
-threading.Thread(target=background_thread).start()
+@app.fastapi.get("/refresh")
+def refresh():
+    background_work()
+    return {"ok": True}
 ```
+
+A handle returned from another thread can also be cancelled from that thread.
+Cross-thread calls block until the loop picks up the work and raise
+`TimeoutError` after 30 seconds if it does not.
 
 ---
 

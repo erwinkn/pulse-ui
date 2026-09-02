@@ -23,6 +23,14 @@ calls `ps.navigate()`, that navigation is route-bound by default and is ignored
 after the source route has unmounted; use `force=True` only for intentionally
 global navigation.
 
+Calls from another thread block until the event loop picks them up and raise
+`TimeoutError` after 30 seconds if it does not.
+
+The scheduler binds itself to the first running loop that uses it. `App.scheduler`
+is rebound to the serving loop during FastAPI lifespan startup. A thread with no
+running loop can schedule only after the scheduler has been used on its serving
+loop at least once.
+
 ```python
 # Delayed cleanup
 def cleanup():

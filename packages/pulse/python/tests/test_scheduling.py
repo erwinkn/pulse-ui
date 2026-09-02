@@ -321,6 +321,20 @@ async def test_timer_registry_thread_scheduling_requires_bound_loop():
 
 
 @pytest.mark.asyncio
+async def test_render_session_scheduling_before_first_loop_use_raises_off_loop():
+	app = ps.App()
+	app.server_address = "http://testserver"
+	session = UserSession("test-session", {}, app)
+	app.user_sessions[session.sid] = session
+
+	async with app.fastapi.router.lifespan_context(app.fastapi):
+		render = app.create_render("test-render", session)
+
+		with pytest.raises(RuntimeError, match="no bound event loop"):
+			await asyncio.to_thread(render.schedule_later, 0.01, lambda: None)
+
+
+@pytest.mark.asyncio
 async def test_render_session_binds_its_registry_on_first_scheduling():
 	app = ps.App()
 	app.server_address = "http://testserver"
@@ -332,8 +346,10 @@ async def test_render_session_binds_its_registry_on_first_scheduling():
 		render = app.create_render("test-render", session)
 		assert render._tasks.loop is not app._tasks.loop  # pyright: ignore[reportPrivateUsage]
 		assert render._tasks.loop.loop is None  # pyright: ignore[reportPrivateUsage]
-		render.schedule_later(0.01, fired.set)
+		render.schedule_later(0.01, lambda: None)
 		assert render._tasks.loop.loop is asyncio.get_running_loop()  # pyright: ignore[reportPrivateUsage]
+
+		await asyncio.to_thread(render.schedule_later, 0.01, fired.set)
 		assert await wait_for(lambda: fired.is_set(), timeout=0.2)
 
 

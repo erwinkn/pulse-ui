@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal, override
 
 import pulse as ps
-from pulse._serializer.types import SerializerAdapter
 
 from pulse_pandas.adapters import DataFrameOrient, serializer_adapters
 
 
 class PulsePandas(ps.Plugin):
+	"""Serialize Pandas and NumPy values for Pulse applications."""
+
 	def __init__(
 		self, *, dataframes: Literal["records", "columns"] = "records"
 	) -> None:
@@ -16,7 +17,8 @@ class PulsePandas(ps.Plugin):
 			raise ValueError("dataframes must be 'records' or 'columns'")
 		self.dataframes: DataFrameOrient = dataframes
 
-	def serializer_adapters(self) -> list[SerializerAdapter[object]]:
+	@override
+	def serializer_adapters(self) -> list[ps.SerializerAdapter[Any]]:
 		return serializer_adapters(self.dataframes)
 
 

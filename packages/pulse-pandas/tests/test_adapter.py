@@ -6,13 +6,14 @@ import pandas as pd
 import pytest
 from pulse.serializer import Serializer, SerializerAdapter
 from pulse_pandas import PulsePandas
+from pulse_pandas.adapters import DataFrameOrient
 
 
-def serializer(orient: str = "records") -> Serializer:
+def serializer(orient: DataFrameOrient = "records") -> Serializer:
 	return Serializer(PulsePandas(dataframes=orient).serializer_adapters())
 
 
-def roundtrip(value: object, orient: str = "records") -> object:
+def roundtrip(value: object, orient: DataFrameOrient = "records") -> object:
 	serializer_instance = serializer(orient)
 	return serializer_instance.deserialize(serializer_instance.serialize(value))
 
@@ -97,7 +98,9 @@ def test_dataframe_preserves_numeric_string_column_order() -> None:
 
 @pytest.mark.parametrize("orient", ["records", "columns"])
 @pytest.mark.parametrize("columns", [[1], ["value", "value"]])
-def test_dataframe_rejects_invalid_columns(orient: str, columns: list[object]) -> None:
+def test_dataframe_rejects_invalid_columns(
+	orient: DataFrameOrient, columns: list[object]
+) -> None:
 	frame = pd.DataFrame([[1] * len(columns)], columns=columns)
 
 	with pytest.raises((TypeError, ValueError)):
@@ -105,7 +108,7 @@ def test_dataframe_rejects_invalid_columns(orient: str, columns: list[object]) -
 
 
 @pytest.mark.parametrize("orient", ["records", "columns"])
-def test_dataframe_rejects_string_subclass_columns(orient: str) -> None:
+def test_dataframe_rejects_string_subclass_columns(orient: DataFrameOrient) -> None:
 	class Column(str):
 		pass
 
@@ -175,6 +178,44 @@ def test_ndarray_normalizes_missing_values() -> None:
 	assert roundtrip(array) == [[1.0, None], [3.0, 4.0]]
 
 
+@pytest.mark.parametrize("unit", ["ns", "us"])
+def test_datetime64_array_uses_timestamp_normalization(unit: str) -> None:
+	array = np.array(["2026-01-01"], dtype=f"datetime64[{unit}]")
+
+	with pytest.raises(TypeError, match="tz_localize"):
+		roundtrip(array)
+
+
+def test_tz_aware_datetime_object_array_roundtrips() -> None:
+	array = np.array(
+		[pd.Timestamp("2026-01-01T00:00:00Z")],
+		dtype=object,
+	)
+
+	assert roundtrip(array) == [datetime(2026, 1, 1, tzinfo=timezone.utc)]
+
+
+def test_2d_datetime64_array_uses_timestamp_normalization() -> None:
+	array = np.array([["2026-01-01"]], dtype="datetime64[ns]")
+
+	with pytest.raises(TypeError, match="tz_localize"):
+		roundtrip(array)
+
+
+def test_timedelta64_array_has_actionable_error() -> None:
+	array = np.array([1], dtype="timedelta64[s]")
+
+	with pytest.raises(TypeError, match="formatted string"):
+		roundtrip(array)
+
+
+def test_complex_array_has_actionable_error() -> None:
+	array = np.array([1 + 2j])
+
+	with pytest.raises(TypeError, match="real component"):
+		roundtrip(array)
+
+
 def test_categorical_extension_array_preserves_missing_values() -> None:
 	array = pd.Categorical(["ready", None], categories=["ready", "waiting"])
 
@@ -203,14 +244,34 @@ def test_timestamp_adapter_supports_tz_aware_and_rejects_naive(
 	value: pd.Timestamp,
 ) -> None:
 	if value.tzinfo is None:
-		with pytest.raises(ValueError, match="timezone-aware"):
+		with pytest.raises(TypeError, match="tz_localize"):
 			roundtrip(value)
 	else:
 		assert roundtrip(value) == datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
+@pytest.mark.parametrize(
+	"value",
+	[
+		pd.Timestamp("2026-01-01"),
+		pd.Series(pd.date_range("2026-01-01", periods=1)),
+		pd.DatetimeIndex(pd.date_range("2026-01-01", periods=1)),
+	],
+)
+def test_naive_timestamps_have_actionable_error(value: object) -> None:
+	with pytest.raises(TypeError, match="tz_localize"):
+		roundtrip(value)
+
+
+def test_naive_dataframe_timestamps_have_actionable_error() -> None:
+	frame = pd.DataFrame({"at": pd.date_range("2026-01-01", periods=1)})
+
+	with pytest.raises(TypeError, match="tz_localize"):
+		roundtrip(frame)
+
+
 def test_numpy_datetime64_uses_timestamp_conversion() -> None:
-	with pytest.raises(ValueError, match="timezone-aware"):
+	with pytest.raises(TypeError, match="tz_localize"):
 		roundtrip(np.datetime64("2026-01-01T00:00:00.000000000"))
 
 

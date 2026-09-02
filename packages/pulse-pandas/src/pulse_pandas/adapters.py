@@ -33,6 +33,12 @@ def normalize_scalar(value: object) -> object:
 	if isinstance(value, np.complexfloating):
 		_unsupported(value, "a real component or a formatted string")
 	if isinstance(value, pd.Timestamp):
+		if value.tzinfo is None:
+			raise TypeError(
+				"Naive pandas timestamps are unsupported; pass "
+				'value.tz_localize("UTC") or '
+				'.dt.tz_localize("UTC") for a Series column.'
+			)
 		if value.microsecond % 1000 != 0 or value.nanosecond != 0:
 			raise ValueError("Pandas timestamps must have exact millisecond precision")
 		return value.to_pydatetime(warn=False)
@@ -79,31 +85,22 @@ def _serialize_index(index: pd.Index[Any]) -> list[object]:
 
 
 def _serialize_array(array: np.ndarray[Any, Any]) -> object:
-	return _normalize_nested(array.tolist())
-
-
-def _normalize_nested(value: object) -> object:
-	if isinstance(value, list):
-		return [_normalize_nested(item) for item in value]
-	if isinstance(value, tuple):
-		return tuple(_normalize_nested(item) for item in value)
-	return normalize_scalar(value)
+	if array.ndim == 0:
+		return normalize_scalar(array[()])
+	if array.dtype.kind in "iub" or (
+		array.dtype.kind == "f" and not np.isnan(array).any()
+	):
+		return array.tolist()
+	return [
+		_serialize_array(item)
+		if isinstance(item, np.ndarray)
+		else normalize_scalar(item)
+		for item in array
+	]
 
 
 def _serialize_extension_array(array: ExtensionArray) -> list[object]:
 	return [normalize_scalar(value) for value in array.tolist()]
-
-
-def _serialize_timestamp(value: pd.Timestamp) -> object:
-	return normalize_scalar(value)
-
-
-def _serialize_datetime64(value: np.datetime64) -> object:
-	return normalize_scalar(value)
-
-
-def _serialize_numpy_scalar(value: np.generic) -> object:
-	return normalize_scalar(value)
 
 
 def _serialize_missing(_: object) -> None:
@@ -115,34 +112,45 @@ def serializer_adapters(
 ) -> list[SerializerAdapter[Any]]:
 	return [
 		SerializerAdapter(
-			pd.DataFrame,
-			lambda frame: _serialize_dataframe(frame, orient),
+			type=pd.DataFrame,
+			serialize=lambda frame: _serialize_dataframe(frame, orient),
 		),
-		SerializerAdapter(pd.Series, _serialize_series),
-		SerializerAdapter(pd.Index, _serialize_index),
-		SerializerAdapter(np.ndarray, _serialize_array),
-		SerializerAdapter(ExtensionArray, _serialize_extension_array),
-		SerializerAdapter(pd.Timestamp, _serialize_timestamp),
-		SerializerAdapter(np.datetime64, _serialize_datetime64),
-		SerializerAdapter(np.generic, _serialize_numpy_scalar),
-		SerializerAdapter(type(pd.NaT), _serialize_missing),
-		SerializerAdapter(type(pd.NA), _serialize_missing),
+		SerializerAdapter(type=pd.Series, serialize=_serialize_series),
+		SerializerAdapter(type=pd.Index, serialize=_serialize_index),
+		SerializerAdapter(type=np.ndarray, serialize=_serialize_array),
 		SerializerAdapter(
-			pd.Timedelta,
-			lambda value: _unsupported(
+			type=ExtensionArray,
+			serialize=_serialize_extension_array,
+		),
+		SerializerAdapter(type=pd.Timestamp, serialize=normalize_scalar),
+		SerializerAdapter(type=np.datetime64, serialize=normalize_scalar),
+		SerializerAdapter(type=np.generic, serialize=normalize_scalar),
+		SerializerAdapter(type=type(pd.NaT), serialize=_serialize_missing),
+		SerializerAdapter(type=type(pd.NA), serialize=_serialize_missing),
+		SerializerAdapter(
+			type=pd.Timedelta,
+			serialize=lambda value: _unsupported(
 				value, "value.total_seconds() or a formatted string"
 			),
 		),
 		SerializerAdapter(
-			np.timedelta64,
-			lambda value: _unsupported(
+			type=np.timedelta64,
+			serialize=lambda value: _unsupported(
 				value, "value.astype('timedelta64[s]') or a formatted string"
 			),
 		),
-		SerializerAdapter(pd.Period, lambda value: _unsupported(value, "str(value)")),
-		SerializerAdapter(pd.Interval, lambda value: _unsupported(value, "str(value)")),
 		SerializerAdapter(
-			np.complexfloating,
-			lambda value: _unsupported(value, "a real component or a formatted string"),
+			type=pd.Period,
+			serialize=lambda value: _unsupported(value, "str(value)"),
+		),
+		SerializerAdapter(
+			type=pd.Interval,
+			serialize=lambda value: _unsupported(value, "str(value)"),
+		),
+		SerializerAdapter(
+			type=np.complexfloating,
+			serialize=lambda value: _unsupported(
+				value, "a real component or a formatted string"
+			),
 		),
 	]

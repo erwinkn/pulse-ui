@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pulse._serializer.types import SerializerAdapter
 from pulse.middleware import PulseMiddleware
 from pulse.routing import Layout, Route
+from pulse.serializer import SerializerAdapter
 
 if TYPE_CHECKING:
 	from pulse.app import App

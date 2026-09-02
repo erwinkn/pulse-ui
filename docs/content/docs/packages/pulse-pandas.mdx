@@ -56,14 +56,42 @@ Both formats preserve order and omit the DataFrame index. Use `series.to_dict()`
 when the index matters. Column names must be unique strings.
 
 `Series`, `Index`, `ndarray`, and Pandas extension arrays become lists.
-`DatetimeIndex` and `MultiIndex` are supported. NumPy scalars become Python
-scalars, timestamps follow Pulse's temporal convention, and `None`, `NaN`,
-`pd.NA`, and `NaT` become `null`. Infinity remains invalid.
+`DatetimeIndex`, `MultiIndex`, and typed `datetime64` arrays are supported.
+NumPy scalars become Python scalars, timestamps follow Pulse's temporal
+convention, and `None`, `NaN`, `pd.NA`, and `NaT` become `null`. Infinity
+remains invalid.
+
+## Supported values
+
+| Value | Wire projection |
+|---|---|
+| `pd.DataFrame` | Records by default, or `columns` format |
+| `pd.Series` | List of values; index dropped |
+| `pd.Index` | `tolist()`; includes `DatetimeIndex` and `MultiIndex` |
+| `np.ndarray` | Lists, including nested and `datetime64` arrays |
+| `ExtensionArray` | `tolist()`; includes categoricals and nullable arrays |
+| `pd.Timestamp` | Timezone-aware timestamp with millisecond precision |
+| `np.datetime64` | Timezone-aware Pandas timestamp projection |
+| NumPy scalar | Python scalar via `.item()` |
+| `pd.NaT`, `pd.NA`, `NaN` | `null` |
+
+Temporal values must be timezone-aware and use exact millisecond precision.
 
 `pd.Timedelta`, `np.timedelta64`, `pd.Period`, `pd.Interval`, and NumPy complex
-scalars are rejected with suggested conversions. The projection is one-way:
-the browser receives JavaScript values, never a DataFrame or other Pandas
-object.
+scalars are rejected with suggested conversions. Naive timestamps must be
+localized explicitly with `.tz_localize("UTC")`, or
+`.dt.tz_localize("UTC")` for a Series column. The projection is one-way: the
+browser receives JavaScript values, never a DataFrame or other Pandas object.
+
+## Rejected values
+
+| Value | Suggested conversion |
+|---|---|
+| `pd.Timedelta`, `np.timedelta64` | `.total_seconds()` or a formatted string |
+| `pd.Period` | `str(period)` |
+| `pd.Interval` | `str(interval)` |
+| NumPy complex scalar | A real component or a formatted string |
+| Naive Pandas timestamps | `.tz_localize("UTC")` or `.dt.tz_localize("UTC")` |
 
 ## See also
 

@@ -54,10 +54,10 @@ Column names must be unique strings, checked with exact `str` type semantics.
 | `pd.DataFrame` | Records by default, or `columns` format |
 | `pd.Series` | List of values; index dropped |
 | `pd.Index` | `tolist()`; includes `DatetimeIndex` and `MultiIndex` |
-| `np.ndarray` | `tolist()`; nested arrays become nested lists |
+| `np.ndarray` | Lists, including nested and `datetime64` arrays |
 | `ExtensionArray` | `tolist()`; includes categoricals and nullable arrays |
-| `pd.Timestamp` | Pulse timestamp after millisecond-precision validation |
-| `np.datetime64` | Pandas timestamp projection |
+| `pd.Timestamp` | Timezone-aware Pulse timestamp after millisecond validation |
+| `np.datetime64` | Timezone-aware Pandas timestamp projection |
 | NumPy scalar | Python scalar via `.item()` |
 | `pd.NaT`, `pd.NA`, `NaN` | `null` |
 
@@ -75,3 +75,4 @@ the Pulse wire:
 | `pd.Period` | `str(period)` |
 | `pd.Interval` | `str(interval)` |
 | NumPy complex scalar | A real component or a formatted string |
+| Naive Pandas timestamps | `.tz_localize("UTC")` or `.dt.tz_localize("UTC")` |

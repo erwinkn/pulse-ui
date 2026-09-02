@@ -411,23 +411,21 @@ async def test_scheduler_cancel_timers_cancels_and_clears():
 
 
 @pytest.mark.asyncio
-async def test_scheduler_cancel_all_cancels_timers_before_tasks():
+async def test_scheduler_cancel_all_cancels_timers_and_tasks():
 	scheduler = Scheduler(name="test")
 	timer_fired = False
-
-	async def work():
-		await asyncio.sleep(10)
 
 	def callback():
 		nonlocal timer_fired
 		timer_fired = True
-		scheduler.create_task(work())
 
 	scheduler.later(0.01, callback)
-	scheduler.create_task(work())
+	task = scheduler.create_task(asyncio.sleep(10))
 	scheduler.cancel_all()
+	await asyncio.sleep(0.1)
 
 	assert timer_fired is False
+	assert task.cancelled()
 	assert len(scheduler._timers) == 0  # pyright: ignore[reportPrivateUsage]
 	assert len(scheduler._tasks) == 0  # pyright: ignore[reportPrivateUsage]
 

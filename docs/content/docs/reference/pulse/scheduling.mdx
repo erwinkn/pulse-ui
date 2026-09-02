@@ -243,7 +243,7 @@ def create_task(
 
 ### Returns
 
-`asyncio.Task[T]` that's tracked by the current registry.
+`asyncio.Task[T]` that's tracked by the current scheduler.
 
 ### Example
 
@@ -266,9 +266,9 @@ class BackgroundWorkState(ps.State):
 
 Unlike `asyncio.create_task()`, tasks created with `create_task` are:
 
-- **Tracked** by the render session or app registry
+- **Tracked** by the render session's scheduler or `App.scheduler`
 - **Cancelled automatically** when the session closes or app shuts down
-- **Cleaned up** from the registry when they complete
+- **Cleaned up** from the scheduler when they complete
 
 This prevents orphaned tasks and resource leaks.
 
@@ -276,7 +276,7 @@ This prevents orphaned tasks and resource leaks.
 
 ## Automatic cleanup
 
-All scheduling primitives are scoped to the current **render session** (if inside a component render) or the **app** (if outside). When the session closes or app shuts down:
+All scheduling primitives are scoped to the current **render session** (if inside a component render) or the **app** (if outside). The render session's scheduler and `App.scheduler` own the scheduled work. When the session closes or app shuts down:
 
 - Pending `later` callbacks are cancelled
 - `repeat` loops are stopped
@@ -299,12 +299,12 @@ def PollingComponent():
 
 ## Thread safety
 
-These functions run inline on the loop that owns the registry. Scheduling from
-another thread requires the owning loop to be running. An unbound registry
-binds itself to the first running loop that uses it, and the app registry is
-rebound to the serving loop during FastAPI lifespan startup. A thread with no
-running loop can schedule only after the registry has been used on its serving
-loop at least once. A thread running a different event loop raises a
+These functions run inline on the loop that owns the scheduler. Scheduling from
+another thread requires the owning loop to be running. A scheduler binds itself
+to the first running loop that uses it, and `App.scheduler` is rebound to the
+serving loop during FastAPI lifespan startup. A thread with no running loop can
+schedule only after the scheduler has been used on its serving loop at least
+once. A thread running a different event loop raises a
 `RuntimeError`.
 
 ```python

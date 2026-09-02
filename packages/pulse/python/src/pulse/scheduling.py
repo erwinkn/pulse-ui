@@ -30,21 +30,20 @@ def is_pytest() -> bool:
 	)
 
 
-def _resolve_registries() -> tuple["TaskRegistry", "TimerRegistry"]:
+def _current_scheduler() -> "Scheduler":
 	from pulse.context import PulseContext
 
 	ctx = PulseContext.get()
 	if ctx.render is not None:
-		return ctx.render._tasks, ctx.render._timers  # pyright: ignore[reportPrivateUsage]
-	return ctx.app._tasks, ctx.app._timers  # pyright: ignore[reportPrivateUsage]
+		return ctx.render.scheduler
+	return ctx.app.scheduler
 
 
 def call_soon(
 	fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
 ) -> TimerHandleLike:
 	"""Schedule a callback ASAP; supports calls from any thread."""
-	_, timer_registry = _resolve_registries()
-	return timer_registry.call_soon(fn, *args, **kwargs)
+	return _current_scheduler().call_soon(fn, *args, **kwargs)
 
 
 def create_task(
@@ -54,8 +53,7 @@ def create_task(
 	on_done: Callable[[asyncio.Task[T]], None] | None = None,
 ) -> asyncio.Task[T]:
 	"""Create a tracked task; supports calls from any thread."""
-	task_registry, _ = _resolve_registries()
-	return task_registry.create_task(coroutine, name=name, on_done=on_done)
+	return _current_scheduler().create_task(coroutine, name=name, on_done=on_done)
 
 
 def later(
@@ -70,8 +68,7 @@ def later(
 	PulseContext) are preserved normally.
 	"""
 
-	_, timer_registry = _resolve_registries()
-	return timer_registry.later(delay, fn, *args, **kwargs)
+	return _current_scheduler().later(delay, fn, *args, **kwargs)
 
 
 class RepeatHandle:
@@ -108,24 +105,25 @@ def repeat(interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwa
 	- immediate: bool = False  # run once immediately before the first interval
 	"""
 
-	_, timer_registry = _resolve_registries()
-	return timer_registry.repeat(interval, fn, *args, **kwargs)
+	return _current_scheduler().repeat(interval, fn, *args, **kwargs)
 
 
-class TaskRegistry:
+class Scheduler:
 	_tasks: set[asyncio.Task[Any]]
+	_timers: set[TimerHandleLike]
 	_loop: LoopRef
 
-	def __init__(
-		self,
-		name: str | None = None,
-	) -> None:
+	def __init__(self, name: str | None = None) -> None:
 		self._tasks = set()
+		self._timers = set()
 		self._loop = LoopRef(name)
 
 	@property
-	def loop(self) -> LoopRef:
-		return self._loop
+	def loop(self) -> asyncio.AbstractEventLoop | None:
+		return self._loop.loop
+
+	def bind(self, loop: asyncio.AbstractEventLoop) -> None:
+		self._loop.bind(loop)
 
 	def track(self, task: asyncio.Task[T]) -> asyncio.Task[T]:
 		self._tasks.add(task)
@@ -151,29 +149,16 @@ class TaskRegistry:
 
 		return self._loop.run(_make)
 
-	def cancel_all(self) -> None:
+	def cancel_tasks(self) -> None:
 		for task in list(self._tasks):
 			if not task.done():
 				task.cancel()
 		self._tasks.clear()
 
-
-class TimerRegistry:
-	_handles: set[TimerHandleLike]
-	_tasks: TaskRegistry
-
-	def __init__(self, *, tasks: TaskRegistry) -> None:
-		self._handles = set()
-		self._tasks = tasks
-
-	def track(self, handle: TimerHandleLike) -> TimerHandleLike:
-		self._handles.add(handle)
-		return handle
-
-	def discard(self, handle: TimerHandleLike | None) -> None:
+	def discard_timer(self, handle: TimerHandleLike | None) -> None:
 		if handle is None:
 			return
-		self._handles.discard(handle)
+		self._timers.discard(handle)
 
 	def later(
 		self,
@@ -182,14 +167,14 @@ class TimerRegistry:
 		*args: P.args,
 		**kwargs: P.kwargs,
 	) -> TimerHandleLike:
-		return self._tasks.loop.run(
+		return self._loop.run(
 			lambda loop: self._start(loop, delay, fn, args, dict(kwargs), untrack=True)
 		)
 
 	def call_soon(
 		self, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
 	) -> TimerHandleLike:
-		return self._tasks.loop.run(
+		return self._loop.run(
 			lambda loop: self._start(loop, None, fn, args, dict(kwargs), untrack=False)
 		)
 
@@ -231,17 +216,21 @@ class TimerRegistry:
 
 		coroutine = _runner()
 		try:
-			handle.task = self._tasks.create_task(coroutine)
+			handle.task = self.create_task(coroutine)
 		except BaseException:
 			coroutine.close()
 			raise
 		handle.loop = handle.task.get_loop()
 		return handle
 
-	def cancel_all(self) -> None:
-		for handle in list(self._handles):
+	def cancel_timers(self) -> None:
+		for handle in list(self._timers):
 			handle.cancel()
-		self._handles.clear()
+		self._timers.clear()
+
+	def cancel_all(self) -> None:
+		self.cancel_timers()
+		self.cancel_tasks()
 
 	def _start(
 		self,
@@ -270,7 +259,7 @@ class TimerRegistry:
 		else:
 			timer = loop.call_later(clamp_delay(delay), run)
 			tracked.attach(timer, timer.when())
-		self._handles.add(tracked)
+		self._timers.add(tracked)
 		return tracked
 
 	def _prepare_run(
@@ -295,7 +284,7 @@ class TimerRegistry:
 				else:
 					res = fn(*args, **kwargs)
 				if asyncio.iscoroutine(res):
-					task = self._tasks.create_task(res)
+					task = self.create_task(res)
 
 					def _log_task_exception(t: asyncio.Task[Any]):
 						try:
@@ -323,7 +312,7 @@ class TimerRegistry:
 					}
 				)
 			finally:
-				self.discard(tracked)
+				self.discard_timer(tracked)
 
 		return _run
 
@@ -331,25 +320,25 @@ class TimerRegistry:
 class _TrackedHandle:
 	__slots__: tuple[str, ...] = (
 		"_handle",
-		"_registry",
+		"_scheduler",
 		"_loop",
 		"_when",
 		"_cancelled",
 	)
 	_handle: asyncio.Handle | asyncio.TimerHandle | None
-	_registry: "TimerRegistry"
+	_scheduler: "Scheduler"
 	_loop: asyncio.AbstractEventLoop
 	_when: float
 	_cancelled: bool
 
 	def __init__(
 		self,
-		registry: "TimerRegistry",
+		scheduler: "Scheduler",
 		*,
 		loop: asyncio.AbstractEventLoop,
 	) -> None:
 		self._handle = None
-		self._registry = registry
+		self._scheduler = scheduler
 		self._loop = loop
 		self._when = 0.0
 		self._cancelled = False
@@ -367,7 +356,7 @@ class _TrackedHandle:
 	def _finish_cancel(self) -> None:
 		if self._handle is not None and not self._handle.cancelled():
 			self._handle.cancel()
-		self._registry.discard(self)
+		self._scheduler.discard_timer(self)
 
 	def cancelled(self) -> bool:
 		return self._cancelled or (

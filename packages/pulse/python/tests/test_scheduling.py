@@ -6,7 +6,7 @@ import pytest
 from anyio import to_thread
 from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteTree
-from pulse.scheduling import TaskRegistry, TimerRegistry, call_soon, create_task
+from pulse.scheduling import Scheduler, call_soon, create_task
 from pulse.test_helpers import wait_for
 from pulse.user_session import UserSession
 
@@ -17,8 +17,8 @@ def simple_component():
 
 
 @pytest.mark.asyncio
-async def test_task_registry_tracks_and_discards_on_done():
-	registry = TaskRegistry(name="test")
+async def test_scheduler_tracks_and_discards_tasks_on_done():
+	scheduler = Scheduler(name="test")
 	started = asyncio.Event()
 	finished = asyncio.Event()
 
@@ -28,21 +28,21 @@ async def test_task_registry_tracks_and_discards_on_done():
 		finished.set()
 		return 1
 
-	task = registry.create_task(work(), name="test.task")
-	assert task in registry._tasks  # pyright: ignore[reportPrivateUsage]
+	task = scheduler.create_task(work(), name="test.task")
+	assert task in scheduler._tasks  # pyright: ignore[reportPrivateUsage]
 
 	assert await wait_for(lambda: started.is_set(), timeout=0.2)
 	assert await wait_for(lambda: finished.is_set(), timeout=0.2)
 	assert await wait_for(
-		lambda: len(registry._tasks) == 0,  # pyright: ignore[reportPrivateUsage]
+		lambda: len(scheduler._tasks) == 0,  # pyright: ignore[reportPrivateUsage]
 		timeout=0.2,
 	)
 	assert task.done()
 
 
 @pytest.mark.asyncio
-async def test_task_registry_cancel_all_cancels_and_clears():
-	registry = TaskRegistry(name="test")
+async def test_scheduler_cancel_tasks_cancels_and_clears():
+	scheduler = Scheduler(name="test")
 	started = asyncio.Event()
 	cancelled = asyncio.Event()
 
@@ -54,77 +54,73 @@ async def test_task_registry_cancel_all_cancels_and_clears():
 			cancelled.set()
 			raise
 
-	task = registry.create_task(work(), name="test.cancel")
+	task = scheduler.create_task(work(), name="test.cancel")
 	assert await wait_for(lambda: started.is_set(), timeout=0.2)
 
-	registry.cancel_all()
+	scheduler.cancel_tasks()
 
-	assert len(registry._tasks) == 0  # pyright: ignore[reportPrivateUsage]
+	assert len(scheduler._tasks) == 0  # pyright: ignore[reportPrivateUsage]
 	assert await wait_for(lambda: cancelled.is_set(), timeout=0.2)
 	assert task.cancelled()
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_later_runs_sync_and_discards():
-	tasks = TaskRegistry(name="tasks")
-	registry = TimerRegistry(tasks=tasks)
+async def test_scheduler_later_runs_sync_and_discards():
+	scheduler = Scheduler(name="tasks")
 	fired = False
 
 	def callback():
 		nonlocal fired
 		fired = True
 
-	registry.later(0.01, callback)
+	scheduler.later(0.01, callback)
 
 	assert await wait_for(lambda: fired, timeout=0.2)
 	assert await wait_for(
-		lambda: len(registry._handles) == 0,  # pyright: ignore[reportPrivateUsage]
+		lambda: len(scheduler._timers) == 0,  # pyright: ignore[reportPrivateUsage]
 		timeout=0.2,
 	)
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_later_from_anyio_worker_thread_runs_on_loop():
-	tasks = TaskRegistry(name="tasks")
-	tasks.loop.bind(asyncio.get_running_loop())
-	registry = TimerRegistry(tasks=tasks)
+async def test_scheduler_later_from_anyio_worker_thread_runs_on_loop():
+	scheduler = Scheduler(name="tasks")
+	scheduler.bind(asyncio.get_running_loop())
 	fired = asyncio.Event()
 
 	def callback():
 		fired.set()
 
-	handle = await to_thread.run_sync(lambda: registry.later(0.01, callback))
+	handle = await to_thread.run_sync(lambda: scheduler.later(0.01, callback))
 
-	assert handle in registry._handles  # pyright: ignore[reportPrivateUsage]
+	assert handle in scheduler._timers  # pyright: ignore[reportPrivateUsage]
 	assert await wait_for(lambda: fired.is_set(), timeout=0.2)
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_later_from_anyio_worker_thread_can_cancel():
-	tasks = TaskRegistry(name="tasks")
-	tasks.loop.bind(asyncio.get_running_loop())
-	registry = TimerRegistry(tasks=tasks)
+async def test_scheduler_later_from_anyio_worker_thread_can_cancel():
+	scheduler = Scheduler(name="tasks")
+	scheduler.bind(asyncio.get_running_loop())
 	fired = False
 
 	def callback():
 		nonlocal fired
 		fired = True
 
-	handle = await to_thread.run_sync(lambda: registry.later(0.05, callback))
+	handle = await to_thread.run_sync(lambda: scheduler.later(0.05, callback))
 
-	assert handle in registry._handles  # pyright: ignore[reportPrivateUsage]
+	assert handle in scheduler._timers  # pyright: ignore[reportPrivateUsage]
 	handle.cancel()
 	await asyncio.sleep(0.1)
 
 	assert fired is False
-	assert len(registry._handles) == 0  # pyright: ignore[reportPrivateUsage]
+	assert len(scheduler._timers) == 0  # pyright: ignore[reportPrivateUsage]
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_later_from_anyio_worker_thread_can_cancel_in_worker():
-	tasks = TaskRegistry(name="tasks")
-	tasks.loop.bind(asyncio.get_running_loop())
-	registry = TimerRegistry(tasks=tasks)
+async def test_scheduler_later_from_anyio_worker_thread_can_cancel_in_worker():
+	scheduler = Scheduler(name="tasks")
+	scheduler.bind(asyncio.get_running_loop())
 	fired = False
 
 	def callback():
@@ -132,12 +128,12 @@ async def test_timer_registry_later_from_anyio_worker_thread_can_cancel_in_worke
 		fired = True
 
 	def schedule_and_cancel():
-		handle = registry.later(0.05, callback)
+		handle = scheduler.later(0.05, callback)
 		handle.cancel()
 
 	await to_thread.run_sync(schedule_and_cancel)
 	assert await wait_for(
-		lambda: len(registry._handles) == 0,  # pyright: ignore[reportPrivateUsage]
+		lambda: len(scheduler._timers) == 0,  # pyright: ignore[reportPrivateUsage]
 		timeout=0.2,
 	)
 	await asyncio.sleep(0.1)
@@ -146,10 +142,9 @@ async def test_timer_registry_later_from_anyio_worker_thread_can_cancel_in_worke
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_repeat_from_anyio_worker_thread_runs():
-	tasks = TaskRegistry(name="tasks")
-	tasks.loop.bind(asyncio.get_running_loop())
-	registry = TimerRegistry(tasks=tasks)
+async def test_scheduler_repeat_from_anyio_worker_thread_runs():
+	scheduler = Scheduler(name="tasks")
+	scheduler.bind(asyncio.get_running_loop())
 	fired = asyncio.Event()
 	count = 0
 
@@ -159,7 +154,7 @@ async def test_timer_registry_repeat_from_anyio_worker_thread_runs():
 		if count >= 2:
 			fired.set()
 
-	handle = await to_thread.run_sync(lambda: registry.repeat(0.01, callback))
+	handle = await to_thread.run_sync(lambda: scheduler.repeat(0.01, callback))
 
 	assert handle.task is not None
 	await wait_for(lambda: fired.is_set(), timeout=0.2)
@@ -171,9 +166,8 @@ async def test_timer_registry_repeat_from_anyio_worker_thread_runs():
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_repeat_can_cancel_from_anyio_worker_thread():
-	tasks = TaskRegistry(name="tasks")
-	registry = TimerRegistry(tasks=tasks)
+async def test_scheduler_repeat_can_cancel_from_anyio_worker_thread():
+	scheduler = Scheduler(name="tasks")
 	fired = asyncio.Event()
 	count = 0
 
@@ -183,7 +177,7 @@ async def test_timer_registry_repeat_can_cancel_from_anyio_worker_thread():
 		if count >= 2:
 			fired.set()
 
-	handle = registry.repeat(0.01, callback)
+	handle = scheduler.repeat(0.01, callback)
 
 	await wait_for(lambda: fired.is_set(), timeout=0.2)
 	await to_thread.run_sync(handle.cancel)
@@ -194,10 +188,9 @@ async def test_timer_registry_repeat_can_cancel_from_anyio_worker_thread():
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_later_and_repeat_from_bare_thread_run_on_loop():
-	tasks = TaskRegistry(name="tasks")
-	tasks.loop.bind(asyncio.get_running_loop())
-	registry = TimerRegistry(tasks=tasks)
+async def test_scheduler_later_and_repeat_from_bare_thread_run_on_loop():
+	scheduler = Scheduler(name="tasks")
+	scheduler.bind(asyncio.get_running_loop())
 	later_fired = asyncio.Event()
 	repeat_fired = asyncio.Event()
 	callback_thread_ids: list[int] = []
@@ -215,8 +208,8 @@ async def test_timer_registry_later_and_repeat_from_bare_thread_run_on_loop():
 			repeat_fired.set()
 
 	def schedule():
-		handles.append(registry.later(0.01, later_callback))
-		handles.append(registry.repeat(0.01, repeat_callback))
+		handles.append(scheduler.later(0.01, later_callback))
+		handles.append(scheduler.repeat(0.01, repeat_callback))
 
 	thread = threading.Thread(target=schedule)
 	thread.start()
@@ -233,10 +226,9 @@ async def test_timer_registry_later_and_repeat_from_bare_thread_run_on_loop():
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_later_and_repeat_from_asyncio_worker_thread_run_on_loop():
-	tasks = TaskRegistry(name="tasks")
-	tasks.loop.bind(asyncio.get_running_loop())
-	registry = TimerRegistry(tasks=tasks)
+async def test_scheduler_later_and_repeat_from_asyncio_worker_thread_run_on_loop():
+	scheduler = Scheduler(name="tasks")
+	scheduler.bind(asyncio.get_running_loop())
 	later_fired = asyncio.Event()
 	repeat_fired = asyncio.Event()
 	repeat_count = 0
@@ -252,8 +244,8 @@ async def test_timer_registry_later_and_repeat_from_asyncio_worker_thread_run_on
 
 	def schedule():
 		return (
-			registry.later(0.01, later_callback),
-			registry.repeat(0.01, repeat_callback),
+			scheduler.later(0.01, later_callback),
+			scheduler.repeat(0.01, repeat_callback),
 		)
 
 	later_handle, repeat_handle = await asyncio.to_thread(schedule)
@@ -268,10 +260,9 @@ async def test_timer_registry_later_and_repeat_from_asyncio_worker_thread_run_on
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_worker_with_idle_loop_runs_on_bound_loop():
-	tasks = TaskRegistry(name="tasks")
-	tasks.loop.bind(asyncio.get_running_loop())
-	registry = TimerRegistry(tasks=tasks)
+async def test_scheduler_worker_with_idle_loop_runs_on_bound_loop():
+	scheduler = Scheduler(name="tasks")
+	scheduler.bind(asyncio.get_running_loop())
 	fired = asyncio.Event()
 
 	def callback():
@@ -281,7 +272,7 @@ async def test_timer_registry_worker_with_idle_loop_runs_on_bound_loop():
 		worker_loop = asyncio.new_event_loop()
 		asyncio.set_event_loop(worker_loop)
 		try:
-			registry.later(0.01, callback)
+			scheduler.later(0.01, callback)
 		finally:
 			asyncio.set_event_loop(None)
 			worker_loop.close()
@@ -291,14 +282,13 @@ async def test_timer_registry_worker_with_idle_loop_runs_on_bound_loop():
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_different_running_loop_raises():
-	tasks = TaskRegistry(name="tasks")
-	tasks.loop.bind(asyncio.get_running_loop())
-	registry = TimerRegistry(tasks=tasks)
+async def test_scheduler_different_running_loop_raises():
+	scheduler = Scheduler(name="tasks")
+	scheduler.bind(asyncio.get_running_loop())
 
 	def schedule():
 		async def run():
-			registry.later(0.01, lambda: None)
+			scheduler.later(0.01, lambda: None)
 
 		asyncio.run(run())
 
@@ -310,11 +300,10 @@ async def test_timer_registry_different_running_loop_raises():
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_thread_scheduling_requires_bound_loop():
+async def test_scheduler_thread_scheduling_requires_bound_loop():
 	def schedule():
-		tasks = TaskRegistry(name="tasks")
-		registry = TimerRegistry(tasks=tasks)
-		registry.later(0.01, lambda: None)
+		scheduler = Scheduler(name="tasks")
+		scheduler.later(0.01, lambda: None)
 
 	with pytest.raises(RuntimeError, match="tasks has no bound event loop"):
 		await asyncio.to_thread(schedule)
@@ -335,7 +324,7 @@ async def test_render_session_scheduling_before_first_loop_use_raises_off_loop()
 
 
 @pytest.mark.asyncio
-async def test_render_session_binds_its_registry_on_first_scheduling():
+async def test_render_session_binds_its_scheduler_on_first_scheduling():
 	app = ps.App()
 	app.server_address = "http://testserver"
 	session = UserSession("test-session", {}, app)
@@ -344,38 +333,36 @@ async def test_render_session_binds_its_registry_on_first_scheduling():
 
 	async with app.fastapi.router.lifespan_context(app.fastapi):
 		render = app.create_render("test-render", session)
-		assert render._tasks.loop is not app._tasks.loop  # pyright: ignore[reportPrivateUsage]
-		assert render._tasks.loop.loop is None  # pyright: ignore[reportPrivateUsage]
+		assert render.scheduler is not app.scheduler
+		assert render.scheduler.loop is None
 		render.schedule_later(0.01, lambda: None)
-		assert render._tasks.loop.loop is asyncio.get_running_loop()  # pyright: ignore[reportPrivateUsage]
+		assert render.scheduler.loop is asyncio.get_running_loop()
 
 		await asyncio.to_thread(render.schedule_later, 0.01, fired.set)
 		assert await wait_for(lambda: fired.is_set(), timeout=0.2)
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_later_runs_async_and_discards():
-	tasks = TaskRegistry(name="tasks")
-	registry = TimerRegistry(tasks=tasks)
+async def test_scheduler_later_runs_async_and_discards():
+	scheduler = Scheduler(name="tasks")
 	fired = asyncio.Event()
 
 	async def callback():
 		await asyncio.sleep(0)
 		fired.set()
 
-	registry.later(0.01, callback)
+	scheduler.later(0.01, callback)
 
 	assert await wait_for(lambda: fired.is_set(), timeout=0.2)
 	assert await wait_for(
-		lambda: len(registry._handles) == 0,  # pyright: ignore[reportPrivateUsage]
+		lambda: len(scheduler._timers) == 0,  # pyright: ignore[reportPrivateUsage]
 		timeout=0.2,
 	)
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_later_runs_coroutine_return():
-	tasks = TaskRegistry(name="tasks")
-	registry = TimerRegistry(tasks=tasks)
+async def test_scheduler_later_runs_coroutine_return():
+	scheduler = Scheduler(name="tasks")
 	fired = asyncio.Event()
 
 	async def inner():
@@ -385,44 +372,64 @@ async def test_timer_registry_later_runs_coroutine_return():
 	def callback():
 		return inner()
 
-	registry.later(0.01, callback)
+	scheduler.later(0.01, callback)
 
 	assert await wait_for(lambda: fired.is_set(), timeout=0.2)
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_cancel_discards_handle():
-	tasks = TaskRegistry(name="tasks")
-	registry = TimerRegistry(tasks=tasks)
+async def test_scheduler_cancel_discards_timer_handle():
+	scheduler = Scheduler(name="tasks")
 
 	def callback():
 		return None
 
-	handle = registry.later(10, callback)
-	assert len(registry._handles) == 1  # pyright: ignore[reportPrivateUsage]
+	handle = scheduler.later(10, callback)
+	assert len(scheduler._timers) == 1  # pyright: ignore[reportPrivateUsage]
 
 	handle.cancel()
 
-	assert len(registry._handles) == 0  # pyright: ignore[reportPrivateUsage]
+	assert len(scheduler._timers) == 0  # pyright: ignore[reportPrivateUsage]
 
 
 @pytest.mark.asyncio
-async def test_timer_registry_cancel_all_cancels_and_clears():
-	tasks = TaskRegistry(name="tasks")
-	registry = TimerRegistry(tasks=tasks)
+async def test_scheduler_cancel_timers_cancels_and_clears():
+	scheduler = Scheduler(name="tasks")
 	fired = False
 
 	def callback():
 		nonlocal fired
 		fired = True
 
-	registry.later(0.05, callback)
-	registry.later(0.05, callback)
-	registry.cancel_all()
+	scheduler.later(0.05, callback)
+	scheduler.later(0.05, callback)
+	scheduler.cancel_timers()
 
-	assert len(registry._handles) == 0  # pyright: ignore[reportPrivateUsage]
+	assert len(scheduler._timers) == 0  # pyright: ignore[reportPrivateUsage]
 	await asyncio.sleep(0.1)
 	assert fired is False
+
+
+@pytest.mark.asyncio
+async def test_scheduler_cancel_all_cancels_timers_before_tasks():
+	scheduler = Scheduler(name="test")
+	timer_fired = False
+
+	async def work():
+		await asyncio.sleep(10)
+
+	def callback():
+		nonlocal timer_fired
+		timer_fired = True
+		scheduler.create_task(work())
+
+	scheduler.later(0.01, callback)
+	scheduler.create_task(work())
+	scheduler.cancel_all()
+
+	assert timer_fired is False
+	assert len(scheduler._timers) == 0  # pyright: ignore[reportPrivateUsage]
+	assert len(scheduler._tasks) == 0  # pyright: ignore[reportPrivateUsage]
 
 
 @pytest.mark.asyncio
@@ -473,7 +480,7 @@ async def test_create_task_tracks_render_task_and_cancels_on_close():
 	with ps.PulseContext.update(render=session):
 		task = create_task(work())
 
-	assert task in session._tasks._tasks  # pyright: ignore[reportPrivateUsage]
+	assert task in session.scheduler._tasks  # pyright: ignore[reportPrivateUsage]
 	assert await wait_for(lambda: started.is_set(), timeout=0.2)
 
 	session.close()
@@ -520,9 +527,7 @@ async def test_repeat_tracks_render_task_and_cancels_on_close():
 
 	task = handle.task
 	assert task is not None
-	assert (
-		task in session._tasks._tasks  # pyright: ignore[reportPrivateUsage]
-	)
+	assert task in session.scheduler._tasks  # pyright: ignore[reportPrivateUsage]
 
 	session.close()
 
@@ -530,7 +535,7 @@ async def test_repeat_tracks_render_task_and_cancels_on_close():
 
 
 @pytest.mark.asyncio
-async def test_later_uses_app_registry_without_render():
+async def test_later_uses_app_scheduler_without_render():
 	app = ps.PulseContext.get().app
 	started = asyncio.Event()
 	cancelled = asyncio.Event()

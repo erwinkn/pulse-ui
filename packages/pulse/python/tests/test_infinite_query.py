@@ -275,17 +275,17 @@ async def test_infinite_query_gc_uses_render_timers():
 		gc_time=0.05,
 	)
 
-	app_handles = len(app._timers._handles)  # pyright: ignore[reportPrivateUsage]
-	assert len(session._timers._handles) == 0  # pyright: ignore[reportPrivateUsage]
+	app_handles = len(app.scheduler._timers)  # pyright: ignore[reportPrivateUsage]
+	assert len(session.scheduler._timers) == 0  # pyright: ignore[reportPrivateUsage]
 
 	with ps.PulseContext.update(render=session):
 		query.schedule_gc()
 
-	assert len(session._timers._handles) == 1  # pyright: ignore[reportPrivateUsage]
-	assert len(app._timers._handles) == app_handles  # pyright: ignore[reportPrivateUsage]
+	assert len(session.scheduler._timers) == 1  # pyright: ignore[reportPrivateUsage]
+	assert len(app.scheduler._timers) == app_handles  # pyright: ignore[reportPrivateUsage]
 
 	query.cancel_gc()
-	session._timers.cancel_all()  # pyright: ignore[reportPrivateUsage]
+	session.scheduler.cancel_timers()
 
 
 @pytest.mark.asyncio

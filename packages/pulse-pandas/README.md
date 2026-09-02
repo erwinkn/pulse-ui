@@ -54,15 +54,17 @@ Column names must be unique strings, checked with exact `str` type semantics.
 | `pd.DataFrame` | Records by default, or `columns` format |
 | `pd.Series` | List of values; index dropped |
 | `pd.Index` | `tolist()`; includes `DatetimeIndex` and `MultiIndex` |
-| `np.ndarray` | Lists, including nested and `datetime64` arrays |
+| `np.ndarray` | Lists, including nested arrays and object arrays of tz-aware timestamps |
 | `ExtensionArray` | `tolist()`; includes categoricals and nullable arrays |
 | `pd.Timestamp` | Timezone-aware Pulse timestamp after millisecond validation |
-| `np.datetime64` | Timezone-aware Pandas timestamp projection |
 | NumPy scalar | Python scalar via `.item()` |
 | `pd.NaT`, `pd.NA`, `NaN` | `null` |
 
-Missing values become `null`. Timestamps must be timezone-aware and use exact
-millisecond precision. Infinity remains invalid under the core serializer.
+Missing values become `null`. Temporal values must be timezone-aware and use
+exact millisecond precision. This includes Pandas Series and indexes with
+`DatetimeTZDtype`, created with `tz_localize` or `tz_convert`, and object arrays
+containing timezone-aware `Timestamp` values. Infinity remains invalid under the
+core serializer.
 
 ## Rejected values
 
@@ -76,3 +78,4 @@ the Pulse wire:
 | `pd.Interval` | `str(interval)` |
 | NumPy complex scalar | A real component or a formatted string |
 | Naive Pandas timestamps | `.tz_localize("UTC")` or `.dt.tz_localize("UTC")` |
+| Bare `np.datetime64` values and arrays | `pd.to_datetime(...).tz_localize("UTC")` |

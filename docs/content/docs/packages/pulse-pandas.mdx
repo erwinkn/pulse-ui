@@ -56,10 +56,10 @@ Both formats preserve order and omit the DataFrame index. Use `series.to_dict()`
 when the index matters. Column names must be unique strings.
 
 `Series`, `Index`, `ndarray`, and Pandas extension arrays become lists.
-`DatetimeIndex`, `MultiIndex`, and typed `datetime64` arrays are supported.
-NumPy scalars become Python scalars, timestamps follow Pulse's temporal
-convention, and `None`, `NaN`, `pd.NA`, and `NaT` become `null`. Infinity
-remains invalid.
+`DatetimeIndex` with `DatetimeTZDtype`, `MultiIndex`, and object arrays of
+timezone-aware `Timestamp` values are supported. NumPy scalars become Python
+scalars, timestamps follow Pulse's temporal convention, and `None`, `NaN`,
+`pd.NA`, and `NaT` become `null`. Infinity remains invalid.
 
 ## Supported values
 
@@ -68,14 +68,17 @@ remains invalid.
 | `pd.DataFrame` | Records by default, or `columns` format |
 | `pd.Series` | List of values; index dropped |
 | `pd.Index` | `tolist()`; includes `DatetimeIndex` and `MultiIndex` |
-| `np.ndarray` | Lists, including nested and `datetime64` arrays |
+| `np.ndarray` | Lists, including nested arrays and object arrays of tz-aware timestamps |
 | `ExtensionArray` | `tolist()`; includes categoricals and nullable arrays |
 | `pd.Timestamp` | Timezone-aware timestamp with millisecond precision |
-| `np.datetime64` | Timezone-aware Pandas timestamp projection |
 | NumPy scalar | Python scalar via `.item()` |
 | `pd.NaT`, `pd.NA`, `NaN` | `null` |
 
 Temporal values must be timezone-aware and use exact millisecond precision.
+Pandas Series and indexes with `DatetimeTZDtype` are supported; localize or
+convert them with `tz_localize` or `tz_convert`. Bare NumPy `datetime64` values
+and arrays are rejected because they carry no timezone. Use
+`pd.to_datetime(...).tz_localize("UTC")` before serialization.
 
 `pd.Timedelta`, `np.timedelta64`, `pd.Period`, `pd.Interval`, and NumPy complex
 scalars are rejected with suggested conversions. Naive timestamps must be
@@ -92,6 +95,7 @@ browser receives JavaScript values, never a DataFrame or other Pandas object.
 | `pd.Interval` | `str(interval)` |
 | NumPy complex scalar | A real component or a formatted string |
 | Naive Pandas timestamps | `.tz_localize("UTC")` or `.dt.tz_localize("UTC")` |
+| Bare `np.datetime64` values and arrays | `pd.to_datetime(...).tz_localize("UTC")` |
 
 ## See also
 

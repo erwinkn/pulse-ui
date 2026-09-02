@@ -87,9 +87,7 @@ def _serialize_index(index: pd.Index[Any]) -> list[object]:
 def _serialize_array(array: np.ndarray[Any, Any]) -> object:
 	if array.ndim == 0:
 		return normalize_scalar(array[()])
-	if array.dtype.kind in "iub" or (
-		array.dtype.kind == "f" and not np.isnan(array).any()
-	):
+	if array.dtype.kind in "iufb":
 		return array.tolist()
 	return [
 		_serialize_array(item)

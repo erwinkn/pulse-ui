@@ -3,8 +3,8 @@ title: "Pulse Pandas"
 icon: Table
 ---
 
-`pulse-pandas` sends Pandas DataFrames to Pulse components as ordered columns
-and row arrays without adding Pandas to the core framework.
+`pulse-pandas` sends Pandas and NumPy values to Pulse components without adding
+those dependencies to the core framework.
 
 ## Installation
 
@@ -12,12 +12,12 @@ and row arrays without adding Pandas to the core framework.
 uv add pulse-pandas
 ```
 
-## Configure the adapter
+## Install the plugin
 
 ```python
 import pandas as pd
 import pulse as ps
-from pulse_pandas import dataframe_adapter
+from pulse_pandas import PulsePandas
 
 
 frame = pd.DataFrame(
@@ -27,13 +27,23 @@ frame = pd.DataFrame(
     }
 )
 
-serializer = ps.Serializer([dataframe_adapter])
-app = ps.App(serializer=serializer)
-
-data = serializer.deserialize(serializer.serialize(frame))
+app = ps.App(plugins=[PulsePandas()])
 ```
 
-`data`—and any component prop containing the DataFrame—becomes:
+DataFrames use records by default:
+
+```json
+[
+  {"product": "Keyboard", "revenue": 1200},
+  {"product": "Mouse", "revenue": 850}
+]
+```
+
+Use `dataframes="columns"` for the compact column-oriented format:
+
+```python
+app = ps.App(plugins=[PulsePandas(dataframes="columns")])
+```
 
 ```json
 {
@@ -42,17 +52,18 @@ data = serializer.deserialize(serializer.serialize(frame))
 }
 ```
 
-The index is intentionally omitted. The `columns` list preserves column order,
-and each inner `rows` array uses that same order. Row order is also preserved.
-Column names must be unique strings.
+Both formats preserve order and omit the DataFrame index. Use `series.to_dict()`
+when the index matters. Column names must be unique strings.
 
-`None`, `NaN`, `pd.NA`, and `NaT` become `null`. NumPy scalars become Python
-scalars before core serialization. Infinity is not missing and remains invalid.
-Dates follow Pulse's temporal convention: a calendar date becomes midnight UTC
-and arrives in the browser as a `Date`.
+`Series`, `Index`, `ndarray`, and Pandas extension arrays become lists.
+`DatetimeIndex` and `MultiIndex` are supported. NumPy scalars become Python
+scalars, timestamps follow Pulse's temporal convention, and `None`, `NaN`,
+`pd.NA`, and `NaT` become `null`. Infinity remains invalid.
 
-`Series` and indexes are not serialized implicitly. Convert them explicitly or
-define another app-owned adapter.
+`pd.Timedelta`, `np.timedelta64`, `pd.Period`, `pd.Interval`, and NumPy complex
+scalars are rejected with suggested conversions. The projection is one-way:
+the browser receives JavaScript values, never a DataFrame or other Pandas
+object.
 
 ## See also
 

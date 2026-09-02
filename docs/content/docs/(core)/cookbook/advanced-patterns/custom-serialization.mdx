@@ -73,6 +73,19 @@ Adapters can return nested values that use other configured adapters. Returning
 the input object unchanged fails. Unsupported values in a projection report the
 path where serialization failed.
 
+Plugins can provide serializer adapters for values shared across an application.
+Pulse merges the adapters returned by `Plugin.serializer_adapters()` into the
+app-owned serializer and applies the same validation as direct configuration:
+
+```python
+class PandasPlugin(ps.Plugin):
+    def serializer_adapters(self) -> list[ps.SerializerAdapter[Any]]:
+        return [pandas_adapter]
+
+
+app = ps.App(plugins=[PandasPlugin()])
+```
+
 ## See also
 
 - [Serializer reference](/docs/reference/pulse/serializer)

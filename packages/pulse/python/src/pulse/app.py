@@ -285,7 +285,6 @@ class App:
 		self.env = envvars.pulse_env
 		self.mode = mode
 		self.proxy = proxy or Proxy()
-		self.serializer = serializer if serializer is not None else Serializer()
 		self.status = AppStatus.created
 		# Persist the server address for use by sessions (API calls, etc.) in ci/prod.
 		self.server_address = server_address if self.env in ("ci", "prod") else None
@@ -302,6 +301,17 @@ class App:
 			self.plugins = sorted(
 				list(plugins), key=lambda p: getattr(p, "priority", 0), reverse=True
 			)
+		plugin_adapters = [
+			adapter
+			for plugin in self.plugins
+			for adapter in plugin.serializer_adapters()
+		]
+		base_serializer = serializer if serializer is not None else Serializer()
+		self.serializer = (
+			base_serializer.with_adapters(plugin_adapters)
+			if plugin_adapters
+			else base_serializer
+		)
 
 		# Build the complete route list from constructor args and plugins
 		all_routes: list[Route | Layout] = list(routes or [])

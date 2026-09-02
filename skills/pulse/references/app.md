@@ -223,7 +223,8 @@ See [middleware.md](./middleware.md) for full API.
 
 ## Plugin System
 
-Plugins extend app functionality with routes, middleware, and lifecycle hooks.
+Plugins extend app functionality with routes, middleware, serializer adapters,
+and lifecycle hooks.
 
 ```python
 class AuthPlugin(ps.Plugin):
@@ -234,6 +235,9 @@ class AuthPlugin(ps.Plugin):
 
     def middleware(self) -> list[ps.PulseMiddleware]:
         return [AuthMiddleware()]
+
+    def serializer_adapters(self) -> list[ps.SerializerAdapter[Any]]:
+        return []
 
     def on_startup(self, app: ps.App) -> None:
         print("Auth plugin started")
@@ -257,6 +261,7 @@ app = ps.App(
 - `on_setup(app)`: After FastAPI routes configured, before serving
 - `on_startup(app)`: When server starts accepting connections
 - `on_shutdown(app)`: When server is stopping
+- `serializer_adapters()`: Serializer adapters merged into the app serializer
 
 ## CORS Configuration
 

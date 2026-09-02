@@ -972,8 +972,6 @@ class App:
 		"""Cancel any pending cleanup task for a render session."""
 		cleanup_handle = self._render_cleanups.pop(rid, None)
 		if cleanup_handle:
-			if not cleanup_handle.cancelled():
-				cleanup_handle.cancel()
 			cleanup_handle.cancel()
 
 	def _schedule_render_cleanup(self, rid: str):

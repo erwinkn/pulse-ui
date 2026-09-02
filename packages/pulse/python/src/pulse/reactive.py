@@ -22,6 +22,7 @@ from pulse.scheduling import (
 	Task,
 	call_soon,
 	create_task,
+	current_scheduler,
 )
 
 T = TypeVar("T")
@@ -1006,13 +1007,7 @@ class GlobalBatch(Batch):
 	@override
 	def register_effect(self, effect: Effect):
 		if not self.is_scheduled:
-			from pulse.context import PulseContext
-
-			ctx = PulseContext.get()
-			scheduler = (
-				ctx.render.scheduler if ctx.render is not None else ctx.app.scheduler
-			)
-			if scheduler.running:
+			if current_scheduler().running:
 				call_soon(self.flush)
 				self.is_scheduled = True
 		return super().register_effect(effect)

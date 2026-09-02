@@ -80,8 +80,8 @@ class LoopRef:
 
 		if target is None:
 			if running is not None:
-				# Unbound (e.g. before the app lifespan, or a standalone registry):
-				# adopt the caller's loop without binding to it.
+				# An unbound ref adopts and binds the first running loop that uses it.
+				self._loop = running
 				return fn(running)
 			idle = _main_thread_idle_loop()
 			if idle is None:

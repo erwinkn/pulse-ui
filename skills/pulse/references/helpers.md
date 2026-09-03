@@ -220,6 +220,10 @@ app = ps.App(
 )
 ```
 
+Naive temporal values are interpreted as UTC by default. Pass
+`PulsePandas(naive_timestamps="reject")` to require explicit localization with
+`.tz_localize("UTC")` or `.dt.tz_localize("UTC")` for Series columns.
+
 ## Event Handler Types
 
 Type aliases for callbacks with varying argument counts. Useful for typing component props.

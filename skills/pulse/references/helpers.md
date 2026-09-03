@@ -208,17 +208,21 @@ Adapters are one-way projections. Decoding returns the projected value, not the
 original class. Classes that own their wire projection can subclass
 `ps.PulseSerializable` and implement `to_pulse()`.
 
-For Pandas data frames, install the optional `pulse-pandas` package and add its
-DataFrame adapter (emits a split `{"columns": [...], "rows": [...]}` shape):
+For Pandas and NumPy values, install the optional `pulse-pandas` package and add
+its plugin:
 
 ```python
-from pulse_pandas import dataframe_adapter
+from pulse_pandas import PulsePandas
 
 app = ps.App(
     routes=[...],
-    serializer=ps.Serializer([dataframe_adapter]),
+    plugins=[PulsePandas()],
 )
 ```
+
+Naive temporal values are interpreted as UTC by default. Pass
+`PulsePandas(naive_timestamps="reject")` to require explicit localization with
+`.tz_localize("UTC")` or `.dt.tz_localize("UTC")` for Series columns.
 
 ## Event Handler Types
 

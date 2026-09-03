@@ -17,6 +17,7 @@ from typing import Any, Callable, Literal, TypeVar, cast
 
 import socketio
 import uvicorn
+from anyio import TaskHandle
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -75,7 +76,7 @@ from pulse.proxy import Proxy, ReactProxy
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
-from pulse.scheduling import Scheduler, Task
+from pulse.scheduling import Scheduler
 from pulse.serializer import Serialized, deserialize, serialize
 from pulse.user_session import (
 	CookieSessionStore,
@@ -246,7 +247,7 @@ class App:
 	_render_connect_attempts: dict[str, object]
 	_connecting_sockets: set[str]
 	_pending_socket_messages: dict[str, list[Serialized]]
-	_render_cleanups: dict[str, Task[None]]
+	_render_cleanups: dict[str, TaskHandle[None]]
 	_render_message_locks: dict[str, asyncio.Lock]
 	scheduler: Scheduler
 	_proxy: ReactProxy | None
@@ -905,9 +906,7 @@ class App:
 
 					def on_message(message: ServerMessage):
 						payload = list(serialize(message))
-						self.scheduler.create_task(
-							self.sio.emit("message", payload, to=sid)
-						)
+						self.scheduler.spawn(self.sio.emit("message", payload, to=sid))
 
 					old_sid = self._render_to_socket.get(rid)
 					if old_sid is not None and old_sid != sid:
@@ -1354,7 +1353,7 @@ class App:
 			return  # no active render for this user session
 
 		# We don't want to wait for this to resolve
-		render.create_task(
+		render.spawn(
 			render.call_api(f"{self.api_prefix}/set-cookies", method="GET"),
 			name="cookies.refresh",
 		)

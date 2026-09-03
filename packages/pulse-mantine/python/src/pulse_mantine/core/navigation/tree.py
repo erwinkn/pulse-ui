@@ -2,7 +2,7 @@ from typing import Any, Unpack, cast
 
 import pulse as ps
 from pulse.helpers import call_flexible, maybe_await
-from pulse.scheduling import create_task
+from pulse.scheduling import spawn
 
 ExpandedState = dict[str, bool]
 
@@ -173,7 +173,7 @@ class TreeState(ps.State):
 			self._expanded[value] = True
 			listener = self._on_node_expand_listener
 			if listener is not None:
-				create_task(maybe_await(call_flexible(listener, value)))
+				spawn(maybe_await(call_flexible(listener, value)))
 
 	def _on_node_collapse(self, payload: dict[str, Any]) -> None:
 		if not isinstance(payload, dict):
@@ -183,7 +183,7 @@ class TreeState(ps.State):
 			self._expanded[value] = False
 			listener = self._on_node_collapse_listener
 			if listener is not None:
-				create_task(maybe_await(call_flexible(listener, value)))
+				spawn(maybe_await(call_flexible(listener, value)))
 
 	# Render the React wrapper component
 	def render(

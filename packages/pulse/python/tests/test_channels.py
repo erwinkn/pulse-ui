@@ -6,6 +6,7 @@ import pulse as ps
 import pytest
 from pulse.channel import ChannelClosed
 from pulse.messages import ClientChannelResponseMessage
+from pulse.test_helpers import wait_for
 from pulse.user_session import UserSession
 
 
@@ -137,8 +138,7 @@ async def test_channel_event_dispatch():
 			},
 		)
 
-	await asyncio.sleep(0)
-	assert received == [{"value": 42}]
+	assert await wait_for(lambda: received == [{"value": 42}], timeout=0.2)
 
 
 @pytest.mark.asyncio

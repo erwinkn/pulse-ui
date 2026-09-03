@@ -5,6 +5,7 @@ from typing import Any, cast
 import pulse as ps
 import pytest
 from pulse.messages import ClientChannelResponseMessage
+from pulse.test_helpers import wait_for
 from pulse.user_session import UserSession
 from pulse_mantine.core.combobox.combobox import Combobox, ComboboxStore
 
@@ -173,10 +174,14 @@ async def test_combobox_store_callbacks():
 			},
 		)
 
-	await asyncio.sleep(0)
-	assert opened == [True]
-	assert opened_sources == ["mouse"]
-	assert closed_sources == ["keyboard"]
+	assert await wait_for(
+		lambda: (
+			opened == [True]
+			and opened_sources == ["mouse"]
+			and closed_sources == ["keyboard"]
+		),
+		timeout=0.2,
+	)
 
 
 def test_combobox_requires_store():

@@ -1428,7 +1428,7 @@ async def test_session_close_cancels_tracked_tasks():
 			cancelled.set()
 			raise
 
-	session.create_task(work(), name="test.task")
+	session.spawn(work(), name="test.task")
 	assert await wait_for(lambda: started.is_set(), timeout=0.2)
 
 	await session.close()

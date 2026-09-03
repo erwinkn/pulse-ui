@@ -6,6 +6,7 @@ from typing import Any, ParamSpec, TypeVar, cast, final
 import pulse as ps
 import pytest
 import pytest_asyncio
+from anyio import TaskCancelled
 from pulse.helpers import MISSING
 from pulse.queries.protocol import QueryResult
 from pulse.queries.query import (
@@ -891,6 +892,7 @@ async def test_query_override_uses_defining_member_identity():
 	base = super(Child, state).item
 
 	assert child is not base
+	assert await wait_for(lambda: child.data == 2, timeout=0.2)
 	assert child.data == 2
 	assert base.data == 1
 
@@ -922,9 +924,6 @@ async def test_state_query_success():
 	# Initial state is loading until first fetch completes
 	assert q.is_loading
 
-	# Wait for query to start
-	await asyncio.sleep(0)
-	assert query_running
 	# Wait for query to complete
 	await q.wait()
 	assert not query_running
@@ -1854,6 +1853,8 @@ async def test_unkeyed_query_on_error_handler_reads_are_untracked():
 @pytest.mark.asyncio
 @with_render_session
 async def test_state_query_gc_time_0_disposes_immediately():
+	gate = asyncio.Event()
+
 	class S(ps.State):
 		uid: int = 1
 		started: bool = False
@@ -1863,7 +1864,7 @@ async def test_state_query_gc_time_0_disposes_immediately():
 		async def user(self) -> dict[str, Any]:
 			self.started = True
 			# simulate in-flight
-			await asyncio.sleep(0)
+			await gate.wait()
 			self.finished = True
 			return {"id": self.uid}
 
@@ -1875,8 +1876,7 @@ async def test_state_query_gc_time_0_disposes_immediately():
 	_ = s.user
 
 	# Start the task but dispose before it completes
-	await asyncio.sleep(0)
-	assert s.started is True
+	assert await wait_for(lambda: s.started, timeout=0.2)
 
 	s.dispose()
 
@@ -3292,7 +3292,7 @@ async def test_query_result_dispose_cancels_in_flight_fetch():
 	# The wait task should complete (either with error or cancelled)
 	try:
 		await asyncio.wait_for(wait_task, timeout=0.02)
-	except (asyncio.CancelledError, asyncio.TimeoutError):
+	except (asyncio.CancelledError, TaskCancelled, asyncio.TimeoutError):
 		pass  # Expected - task was cancelled
 
 
@@ -3499,7 +3499,7 @@ async def test_query_result_dispose_reschedules_fetch_from_other_observer():
 	# s1's wait task should have been cancelled
 	try:
 		await asyncio.wait_for(wait_task_s1, timeout=0.02)
-	except (asyncio.CancelledError, asyncio.TimeoutError):
+	except (asyncio.CancelledError, TaskCancelled, asyncio.TimeoutError):
 		pass  # Expected
 
 	# Clean up
@@ -3558,7 +3558,7 @@ async def test_query_result_dispose_no_reschedule_when_no_other_observers():
 	# The wait task should complete (cancelled)
 	try:
 		await asyncio.wait_for(wait_task, timeout=0.02)
-	except (asyncio.CancelledError, asyncio.TimeoutError):
+	except (asyncio.CancelledError, TaskCancelled, asyncio.TimeoutError):
 		pass  # Expected
 
 
@@ -3611,7 +3611,7 @@ async def test_key_change_cancels_in_flight_fetch():
 	# The wait task might error or complete - it's for the old key
 	try:
 		await asyncio.wait_for(wait_task, timeout=0.02)
-	except (asyncio.CancelledError, asyncio.TimeoutError):
+	except (asyncio.CancelledError, TaskCancelled, asyncio.TimeoutError):
 		pass  # Expected
 
 	# Clean up

@@ -11,7 +11,7 @@ from typing import (
 import pulse as ps
 from pulse.helpers import call_flexible, maybe_await
 from pulse.reactive_extensions import ReactiveDict
-from pulse.scheduling import create_task
+from pulse.scheduling import spawn
 
 from .internal import FormInternal, FormMode
 from .validators import (
@@ -276,7 +276,7 @@ class MantineForm(ps.State, Generic[TForm]):
 		# Trigger client-side validation
 		self._channel.emit("validate")
 		# Also run all server-side validators in the background for current values
-		create_task(self._validate_all_server_specs())
+		spawn(self._validate_all_server_specs())
 
 	async def _validate_all_server_specs(self) -> None:
 		try:
@@ -370,9 +370,7 @@ class MantineForm(ps.State, Generic[TForm]):
 		values = cast(dict[str, Any], values)
 		self._replace_synced_values(values)
 		if self._on_sync_values_handler is not None:
-			create_task(
-				maybe_await(call_flexible(self._on_sync_values_handler, values))
-			)
+			spawn(maybe_await(call_flexible(self._on_sync_values_handler, values)))
 
 	# Channel handler for server validation (single entrypoint)
 	async def _on_server_validate(self, payload: dict[str, Any]) -> None:

@@ -599,12 +599,20 @@ async def test_connect_middleware_exception_is_surfaced_after_bind(
 	render = app.render_sessions["render-1"]
 	assert render.connected
 
-	# Give the emit task a tick to run
-	await asyncio.sleep(0)
-
 	# A server_error for the connect phase reached the (bound) client, and it
 	# carries the real traceback (not the "NoneType: None" that format_exc()
 	# yields when report_error runs outside the except block).
+	def has_connect_error() -> bool:
+		return any(
+			args
+			for args in sent
+			if args
+			and args[0] == "message"
+			and "server_error" in str(args)
+			and "connect" in str(args)
+		)
+
+	assert await wait_for(has_connect_error, timeout=0.2), sent
 	connect_errors = [
 		args
 		for args in sent
@@ -613,7 +621,6 @@ async def test_connect_middleware_exception_is_surfaced_after_bind(
 		and "server_error" in str(args)
 		and "connect" in str(args)
 	]
-	assert connect_errors, sent
 	payload_text = str(connect_errors[0])
 	assert "boom in connect middleware" in payload_text
 	assert "NoneType: None" not in payload_text

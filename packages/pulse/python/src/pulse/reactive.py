@@ -13,16 +13,18 @@ from typing import (
 	override,
 )
 
+from anyio import TaskCancelled, TaskHandle
+
 from pulse.helpers import (
 	Disposable,
 	maybe_await,
 	values_equal,
 )
 from pulse.scheduling import (
-	Task,
-	call_soon,
-	create_task,
 	current_scheduler,
+	is_pending,
+	post,
+	spawn,
 )
 
 T = TypeVar("T")
@@ -396,7 +398,7 @@ class Effect(Disposable):
 	immediate: bool
 	_lazy: bool
 	_interval: float | None
-	_interval_handle: Task[None] | None
+	_interval_handle: TaskHandle[None] | None
 	update_deps: bool
 	batch: "Batch | None"
 	paused: bool
@@ -725,7 +727,7 @@ class AsyncEffect(Effect):
 
 	fn: AsyncEffectFn  # pyright: ignore[reportIncompatibleMethodOverride]
 	batch: None  # pyright: ignore[reportIncompatibleVariableOverride]
-	_task: Task[None] | None
+	_task: TaskHandle[None] | None
 	_task_started: bool
 
 	def __init__(
@@ -758,7 +760,7 @@ class AsyncEffect(Effect):
 		# This avoids cancelling and recreating tasks multiple times when reached
 		# through multiple dependency paths before the event loop runs.
 		# Once the task starts running, new push_change calls will cancel and restart.
-		if self._task is not None and not self._task.done() and not self._task_started:
+		if self._task is not None and is_pending(self._task) and not self._task_started:
 			return
 		self.schedule()
 
@@ -769,7 +771,12 @@ class AsyncEffect(Effect):
 		go through batches, they cancel the previous run and create a new task
 		immediately..
 		"""
-		self.run()
+		scheduler = current_scheduler()
+		if scheduler.owns_current_thread:
+			self.run()
+		else:
+			# Off the loop we can only ask for the run; its handle belongs to the loop.
+			scheduler.post(self.run)
 
 	@property
 	def is_scheduled(self) -> bool:
@@ -782,7 +789,7 @@ class AsyncEffect(Effect):
 		return kwargs
 
 	@override
-	def run(self) -> Task[Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+	def run(self) -> TaskHandle[Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
 		"""Start the async effect, cancelling any previous run.
 
 		Returns:
@@ -792,7 +799,7 @@ class AsyncEffect(Effect):
 
 		# Cancel any previous run still in flight, but preserve the interval
 		self.cancel(cancel_interval=False)
-		this_task: Task[None] | None = None
+		this_task: TaskHandle[None] | None = None
 
 		async def _runner():
 			nonlocal execution_epoch, this_task
@@ -833,7 +840,7 @@ class AsyncEffect(Effect):
 					self._task = None
 					self._task_started = False
 
-		this_task = create_task(_runner(), name=f"effect:{self.name or 'unnamed'}")
+		this_task = spawn(_runner(), name=f"effect:{self.name or 'unnamed'}")
 		self._task = this_task
 		return this_task
 
@@ -852,8 +859,7 @@ class AsyncEffect(Effect):
 		if self._task:
 			t = self._task
 			self._task = None
-			if not t.cancelled():
-				t.cancel()
+			t.cancel()
 		if cancel_interval:
 			self._cancel_interval()
 
@@ -864,19 +870,13 @@ class AsyncEffect(Effect):
 		while waiting, waits for a new task if one is started.
 		"""
 		while True:
-			if self._task is None or self._task.done():
+			if self._task is None or not is_pending(self._task):
 				# No task running, return immediately
 				return
 			try:
 				await self._task
 				return
-			except asyncio.CancelledError:
-				# If wait() itself is cancelled, propagate it
-				current_task = asyncio.current_task()
-				if current_task is not None and (
-					current_task.cancelling() > 0 or current_task.cancelled()
-				):
-					raise
+			except TaskCancelled:
 				# Effect task was cancelled, check if a new task was started
 				# and continue waiting if so
 				continue
@@ -1008,7 +1008,7 @@ class GlobalBatch(Batch):
 	def register_effect(self, effect: Effect):
 		if not self.is_scheduled:
 			if current_scheduler().running:
-				call_soon(self.flush)
+				post(self.flush)
 				self.is_scheduled = True
 		return super().register_effect(effect)
 

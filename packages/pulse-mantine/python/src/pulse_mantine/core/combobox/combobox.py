@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 import pulse as ps
 from pulse.helpers import call_flexible, maybe_await
-from pulse.scheduling import create_task
+from pulse.scheduling import spawn
 
 DropdownEventSource = Literal["keyboard", "mouse", "unknown"]
 SelectedOptionTarget = Literal["active", "selected"]
@@ -159,7 +159,7 @@ class ComboboxStore(ps.State):
 		listener = self._on_opened_change
 		if listener is None:
 			return
-		create_task(maybe_await(call_flexible(listener, opened)))
+		spawn(maybe_await(call_flexible(listener, opened)))
 
 	async def _handle_dropdown_open(self, payload: dict[str, Any]) -> None:
 		source = payload["eventSource"]
@@ -168,7 +168,7 @@ class ComboboxStore(ps.State):
 		listener = self._on_dropdown_open
 		if listener is None:
 			return
-		create_task(maybe_await(call_flexible(listener, source)))
+		spawn(maybe_await(call_flexible(listener, source)))
 
 	async def _handle_dropdown_close(self, payload: dict[str, Any]) -> None:
 		source = payload["eventSource"]
@@ -177,7 +177,7 @@ class ComboboxStore(ps.State):
 		listener = self._on_dropdown_close
 		if listener is None:
 			return
-		create_task(maybe_await(call_flexible(listener, source)))
+		spawn(maybe_await(call_flexible(listener, source)))
 
 
 def _ComboboxWrapper(

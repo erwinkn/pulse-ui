@@ -6,6 +6,8 @@ from asyncio import iscoroutine
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, TypeVar, cast, overload
 
+from anyio import TaskHandle
+
 from pulse.channel import Channel
 from pulse.context import PulseContext
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
@@ -30,7 +32,7 @@ from pulse.routing import (
 	RouteTree,
 	ensure_absolute_path,
 )
-from pulse.scheduling import Scheduler, Task, create_future
+from pulse.scheduling import Scheduler
 from pulse.state.query_param import QueryParamSync
 from pulse.state.state import State
 from pulse.transpiler.id import next_id
@@ -110,7 +112,7 @@ class RouteMount:
 	ever_active: bool
 	dispose_on_timeout: bool
 	queue: list[ServerMessage] | None
-	queue_timeout: Task[None] | None
+	queue_timeout: TaskHandle[None] | None
 	mount_id: str
 	render_batch_id: int
 	render_batch_renders: int
@@ -774,21 +776,24 @@ class RenderSession:
 		with PulseContext.update(render=self):
 			flush_effects()
 
-	def create_task(
+	def spawn(
 		self,
 		coroutine: Callable[[], Any] | Awaitable[Any],
 		*,
 		name: str | None = None,
-		on_done: Callable[[Task[Any]], None] | None = None,
-	) -> Task[Any]:
+	) -> TaskHandle[None]:
 		"""Create a tracked task tied to this render session."""
 		if callable(coroutine):
-			return self.scheduler.create_task(coroutine(), name=name, on_done=on_done)
-		return self.scheduler.create_task(coroutine, name=name, on_done=on_done)
+			return self.scheduler.spawn(coroutine(), name=name)
+
+		async def _await_coroutine():
+			await coroutine
+
+		return self.scheduler.spawn(_await_coroutine(), name=name)
 
 	def schedule_later(
 		self, delay: float, fn: Callable[..., Any], *args: Any, **kwargs: Any
-	) -> Task[None]:
+	) -> TaskHandle[None]:
 		"""Schedule a tracked timer tied to this render session."""
 		return self.scheduler.later(delay, fn, *args, **kwargs)
 
@@ -821,14 +826,13 @@ class RenderSession:
 				res = cb.fn(*(args if cb.accepts_varargs else args[: cb.n_args]))
 				if iscoroutine(res):
 
-					def _on_done(t: Task[Any]) -> None:
-						if t.cancelled():
-							return
-						exc = t.exception
-						if exc:
+					async def _run_callback():
+						try:
+							await res
+						except Exception as exc:
 							report(exc, True)
 
-					self.create_task(res, name=f"callback:{key}", on_done=_on_done)
+					self.spawn(_run_callback(), name=f"callback:{key}")
 		except Exception as e:
 			report(e)
 
@@ -856,7 +860,7 @@ class RenderSession:
 			api_path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
 			url = f"{base}{api_path}"
 		corr_id = uuid.uuid4().hex
-		fut = create_future()
+		fut = asyncio.get_running_loop().create_future()
 		self._pending_api[corr_id] = fut
 		headers = headers or {}
 		headers["x-pulse-render-id"] = self.id

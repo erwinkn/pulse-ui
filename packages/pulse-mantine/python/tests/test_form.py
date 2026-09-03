@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from pulse.messages import ClientChannelRequestMessage
 from pulse.routing import Route, RouteInfo, RouteTree
 from pulse.serializer import serialize
+from pulse.test_helpers import wait_for
 from pulse.user_session import UserSession
 from pulse_mantine import MantineForm
 from starlette.datastructures import FormData as StarletteFormData
@@ -148,9 +149,8 @@ async def test_form_sync_handler_survives_channel_recreation():
 				},
 			),
 		)
-		await asyncio.sleep(0)
 
-	assert form.values["query"] == "xrd"
+	assert await wait_for(lambda: form.values["query"] == "xrd", timeout=0.2)
 
 
 @pytest.mark.asyncio

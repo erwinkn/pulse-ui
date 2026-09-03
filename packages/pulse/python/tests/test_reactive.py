@@ -6,6 +6,7 @@ from typing import Any, ClassVar, NamedTuple, cast
 import pulse as ps
 import pytest
 import pytest_asyncio
+from anyio import TaskHandle
 from pulse import (
 	AsyncEffect,
 	Computed,
@@ -586,8 +587,7 @@ async def test_sync_writes_are_batched():
 	assert e.runs == 0
 
 	# Give the async loop time to run the effect
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
+	assert await wait_for(lambda: e.runs == 1, timeout=0.2)
 	assert e.runs == 1
 
 	a.write(2)
@@ -596,14 +596,12 @@ async def test_sync_writes_are_batched():
 	assert e.runs == 1
 
 	# Give the async loop time to process queued tasks
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
+	assert await wait_for(lambda: e.runs == 2, timeout=0.2)
 	assert e.runs == 2
 
 	a.write(3)
 	assert e.runs == 2
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
+	assert await wait_for(lambda: e.runs == 3, timeout=0.2)
 	assert e.runs == 3
 	b.write(6)
 	assert e.runs == 3
@@ -1068,24 +1066,19 @@ async def test_async_effect_tracks_dependencies_across_await():
 
 	# Initial run
 	flush_effects()
-	await asyncio.sleep(0)  # start task
-	await asyncio.sleep(0)  # finish task
+	assert await wait_for(lambda: e.runs == 1, timeout=0.2)
 	assert e.runs == 1
 	assert seen == [("s1", 1), ("s2", 2)]
 
 	# Change dep observed before await -> reruns
 	s1.write(10)
-	await asyncio.sleep(0)  # schedule/flush
-	await asyncio.sleep(0)  # task to first await
-	await asyncio.sleep(0)  # task completes
+	assert await wait_for(lambda: e.runs == 2, timeout=0.2)
 	assert e.runs == 2
 	assert seen[-2:] == [("s1", 10), ("s2", 2)]
 
 	# Change dep observed after await -> reruns
 	s2.write(20)
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
+	assert await wait_for(lambda: e.runs == 3, timeout=0.2)
 	assert e.runs == 3
 	assert seen[-2:] == [("s1", 10), ("s2", 20)]
 
@@ -1158,16 +1151,13 @@ async def test_async_effect_cleanup_on_rerun():
 
 	# complete first run
 	flush_effects()
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
+	assert await wait_for(lambda: e.runs == 1, timeout=0.2)
 	assert e.runs == 1
 	assert cleanup_runs == 0
 
 	# trigger rerun -> previous cleanup should run once
 	s.write(1)
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
+	assert await wait_for(lambda: e.runs == 2, timeout=0.2)
 	assert e.runs == 2
 	assert cleanup_runs == 1
 
@@ -1186,8 +1176,7 @@ async def test_async_effect_seeded_deps_update_after_first_run():
 		await asyncio.sleep(0)
 
 	a.write(1)
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
+	assert await wait_for(lambda: runs == 1, timeout=0.2)
 	assert runs == 1
 	assert e in b.obs
 	assert e not in a.obs
@@ -1229,8 +1218,7 @@ async def test_async_effect_cancels_inflight_on_rerun():
 	assert not finished, "Effect should not have finished after first run"
 
 	# Let the task actually start running (blocked at gate)
-	await asyncio.sleep(0)
-	assert len(gates) == 1, "First run should have created a gate"
+	assert await wait_for(lambda: len(gates) == 1, timeout=0.2)
 
 	# Trigger rerun -> should cancel in-flight task
 	s.write(1)
@@ -1238,17 +1226,21 @@ async def test_async_effect_cancels_inflight_on_rerun():
 	assert e._task is not None  # pyright: ignore[reportPrivateUsage]
 	assert e._task is not initial_task  # pyright: ignore[reportPrivateUsage]
 	assert not finished, "Effect should not have finished after signal write"
-	await asyncio.sleep(0)
-	assert initial_task.cancelled(), (
+	await wait_for(
+		lambda: initial_task.status is TaskHandle.Status.CANCELLED, timeout=0.2
+	)
+	assert initial_task.status is TaskHandle.Status.CANCELLED, (
 		"Initial task should be cancelled after signal write"
 	)
 	assert e._task is not None, "Effect's task should be set after rescheduling"  # pyright: ignore[reportPrivateUsage]
-	assert len(gates) == 2, "Second run should have created another gate"
+	assert await wait_for(lambda: len(gates) == 2, timeout=0.2)
 
 	# Let the effect finish
 	gates[1].set_result(None)
-	await asyncio.sleep(0)
-	assert e._task is None, "Effect's task should be cleared after run"  # pyright: ignore[reportPrivateUsage]
+	assert await wait_for(
+		lambda: e._task is None,  # pyright: ignore[reportPrivateUsage]
+		timeout=0.2,  # pyright: ignore[reportPrivateUsage]
+	)
 	assert finished, "Effect should have finished after rerun"
 
 
@@ -1285,13 +1277,14 @@ async def test_async_effect_skips_restart_when_task_not_started():
 	assert e._task is initial_task  # pyright: ignore[reportPrivateUsage]
 
 	# Let it run
-	await asyncio.sleep(0)
-	assert len(gates) == 1, "Should only have created one gate (one run)"
+	assert await wait_for(lambda: len(gates) == 1, timeout=0.2)
 	assert run_count == 1
 
 	gates[0].set_result(None)
-	await asyncio.sleep(0)
-	assert e._task is None  # pyright: ignore[reportPrivateUsage]
+	assert await wait_for(
+		lambda: e._task is None,  # pyright: ignore[reportPrivateUsage]
+		timeout=0.2,  # pyright: ignore[reportPrivateUsage]
+	)
 
 
 @pytest.mark.asyncio
@@ -1308,14 +1301,7 @@ async def test_async_effect_self_reschedules_on_write():
 
 	# First run completes and writes -> schedules rerun
 	flush_effects()
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
-	# Force process scheduled rerun and allow task to complete
-	flush_effects()
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
-	assert e.runs == 2
+	assert await wait_for(lambda: e.runs >= 2, timeout=0.2)
 	assert s() == 1
 
 
@@ -1337,38 +1323,33 @@ async def test_async_effect_dynamic_dependency_after_await():
 
 	# Initial run (toggle False -> depend on s2)
 	flush_effects()
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
+	assert await wait_for(lambda: e.runs == 1, timeout=0.2)
 	assert e.runs == 1
 	assert reads[-1] == 2
 
 	# Changing s1 should not rerun (not a dep yet)
 	s1.write(10)
 	await asyncio.sleep(0)
-	await asyncio.sleep(0)
 	assert e.runs == 1
 
 	# Changing s2 should rerun
 	s2.write(20)
 	flush_effects()
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
+	assert await wait_for(lambda: e.runs == 2, timeout=0.2)
 	assert e.runs == 2
 	assert reads[-1] == 20
 
 	# Flip toggle -> after rerun, effect should depend on s1
 	toggle.write(True)
 	flush_effects()
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
+	assert await wait_for(lambda: e.runs == 3, timeout=0.2)
 	assert e.runs == 3
 	assert reads[-1] == 10
 
 	# Now s1 changes should rerun
 	s1.write(11)
 	flush_effects()
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
+	assert await wait_for(lambda: e.runs == 4, timeout=0.2)
 	assert e.runs == 4
 	assert reads[-1] == 11
 
@@ -1397,9 +1378,7 @@ async def test_async_effect_retains_dependency_across_cancellations():
 
 	# Establish initial dependency by letting first run finish
 	flush_effects()
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
-	await asyncio.sleep(0)
+	assert await wait_for(lambda: e.runs == 1, timeout=0.2)
 	assert e.runs == 1
 	assert runs[-1] == 1
 
@@ -1413,11 +1392,7 @@ async def test_async_effect_retains_dependency_across_cancellations():
 
 	# Change the dependency signal -> effect should eventually rerun and read it
 	id_sig.write(2)
-	await asyncio.sleep(0)  # schedule rerun
-	await asyncio.sleep(0)  # run to first await
-	await asyncio.sleep(0)  # run to completion
-	await asyncio.sleep(0)  # just to be sure
-	assert runs[-1] == 2
+	assert await wait_for(lambda: runs[-1] == 2, timeout=0.2)
 
 
 def test_reactive_dict_basic_reads_and_writes():
@@ -2725,6 +2700,22 @@ async def test_async_effect_await_call():
 
 
 @pytest.mark.asyncio
+async def test_async_effect_runs_after_worker_thread_signal_write():
+	signal = Signal(0)
+	finished = asyncio.Event()
+
+	async def fn():
+		signal()
+		finished.set()
+
+	e = AsyncEffect(fn, lazy=True, deps=[signal])
+	await asyncio.to_thread(signal.write, 1)
+	assert await wait_for(lambda: e.runs == 1, timeout=0.2)
+	assert finished.is_set()
+	e.dispose()
+
+
+@pytest.mark.asyncio
 async def test_async_effect_copy_and_deepcopy():
 	s = Signal(0)
 
@@ -2824,7 +2815,7 @@ async def test_async_effect_wait_handles_cancellation():
 	# Start first run. Won't finish until we execute two awaits.
 	e.run()
 	assert e.is_scheduled is True
-	await asyncio.sleep(0)  # Let effect start
+	assert await wait_for(lambda: started == 1, timeout=0.2)
 	assert started == 1
 	assert finished == 0
 
@@ -2835,7 +2826,7 @@ async def test_async_effect_wait_handles_cancellation():
 	assert finished == 0
 
 	e.run()
-	await asyncio.sleep(0)
+	assert await wait_for(lambda: started == 2, timeout=0.2)
 
 	assert started == 2
 	assert finished == 0
@@ -2866,7 +2857,7 @@ async def test_async_effect_wait_handles_multiple_cancellations():
 
 	# Start first run
 	e.run()
-	await asyncio.sleep(0)  # Let effect start
+	assert await wait_for(lambda: started == 1, timeout=0.2)
 	assert started == 1
 	assert finished == 0
 
@@ -2875,14 +2866,16 @@ async def test_async_effect_wait_handles_multiple_cancellations():
 	await asyncio.sleep(0)
 
 	# Cancel and restart multiple times
-	for _ in range(2):
+	for iteration in range(2):
 		e.run()
-		await asyncio.sleep(0)
+		assert await wait_for(
+			lambda iteration=iteration: started >= 2 + iteration, timeout=0.2
+		)
 
 	# Final run should complete
 	await wait_task
 
-	assert started == 3
+	assert await wait_for(lambda: started == 3, timeout=0.2)
 	assert finished == 1
 	assert e.runs == 1  # Only the final run completes
 	assert e.is_scheduled is False

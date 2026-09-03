@@ -723,9 +723,9 @@ class RefHandle(Disposable, Generic[T]):
 				raise
 			if inspect.isawaitable(result):
 
-				async def _run_handler(result: Awaitable[Any] = result):
+				async def _run_handler(awaited: Awaitable[Any]):
 					try:
-						await result
+						await awaited
 					except Exception as exc:
 						asyncio.get_running_loop().call_exception_handler(
 							{
@@ -735,7 +735,7 @@ class RefHandle(Disposable, Generic[T]):
 							}
 						)
 
-				spawn(_run_handler(), name=f"ref:{self.id}:{label}")
+				spawn(_run_handler(result), name=f"ref:{self.id}:{label}")
 
 	@override
 	def dispose(self) -> None:

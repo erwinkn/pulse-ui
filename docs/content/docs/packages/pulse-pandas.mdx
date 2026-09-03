@@ -68,23 +68,23 @@ scalars, timestamps follow Pulse's temporal convention, and `None`, `NaN`,
 | `pd.DataFrame` | Records by default, or `columns` format |
 | `pd.Series` | List of values; index dropped |
 | `pd.Index` | `tolist()`; includes `DatetimeIndex` and `MultiIndex` |
-| `np.ndarray` | Lists, including nested arrays and object arrays of tz-aware timestamps |
+| `np.ndarray` | Lists, including nested arrays, `datetime64` arrays, and object arrays of timestamps |
 | `ExtensionArray` | `tolist()`; includes categoricals and nullable arrays |
-| `pd.Timestamp` | Timezone-aware timestamp with millisecond precision |
+| `pd.Timestamp` | UTC-localized when naive, then timezone-aware timestamp with millisecond precision |
+| `np.datetime64` | UTC-localized timestamp |
 | NumPy scalar | Python scalar via `.item()` |
 | `pd.NaT`, `pd.NA`, `NaN` | `null` |
 
-Temporal values must be timezone-aware and use exact millisecond precision.
-Pandas Series and indexes with `DatetimeTZDtype` are supported; localize or
-convert them with `tz_localize` or `tz_convert`. Bare NumPy `datetime64` values
-and arrays are rejected because they carry no timezone. Use
-`pd.to_datetime(...).tz_localize("UTC")` before serialization.
+Naive temporal values are interpreted as UTC by default. Temporal values use
+exact millisecond precision. Pandas Series and indexes with `DatetimeTZDtype`
+are supported; localize or convert them with `tz_localize` or `tz_convert`.
+Object arrays containing timezone-aware `Timestamp` values and NumPy
+`datetime64` values and arrays are supported.
 
 `pd.Timedelta`, `np.timedelta64`, `pd.Period`, `pd.Interval`, and NumPy complex
-scalars are rejected with suggested conversions. Naive timestamps must be
-localized explicitly with `.tz_localize("UTC")`, or
-`.dt.tz_localize("UTC")` for a Series column. The projection is one-way: the
-browser receives JavaScript values, never a DataFrame or other Pandas object.
+scalars are rejected with suggested conversions. The projection is one-way:
+the browser receives JavaScript values, never a DataFrame or other Pandas
+object.
 
 ## Rejected values
 
@@ -94,8 +94,10 @@ browser receives JavaScript values, never a DataFrame or other Pandas object.
 | `pd.Period` | `str(period)` |
 | `pd.Interval` | `str(interval)` |
 | NumPy complex scalar | A real component or a formatted string |
-| Naive Pandas timestamps | `.tz_localize("UTC")` or `.dt.tz_localize("UTC")` |
-| Bare `np.datetime64` values and arrays | `pd.to_datetime(...).tz_localize("UTC")` |
+
+Use `PulsePandas(naive_timestamps="reject")` to require explicit localization
+of naive temporal values. In strict mode, localize values with
+`.tz_localize("UTC")`, or use `.dt.tz_localize("UTC")` for a Series column.
 
 ## See also
 

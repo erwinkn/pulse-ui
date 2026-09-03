@@ -6,15 +6,27 @@ import pandas as pd
 import pytest
 from pulse.serializer import Serializer, SerializerAdapter
 from pulse_pandas import PulsePandas
-from pulse_pandas.adapters import DataFrameOrient
+from pulse_pandas.adapters import DataFrameOrient, NaiveTimestamps
 
 
-def serializer(orient: DataFrameOrient = "records") -> Serializer:
-	return Serializer(PulsePandas(dataframes=orient).serializer_adapters())
+def serializer(
+	orient: DataFrameOrient = "records",
+	naive_timestamps: NaiveTimestamps = "utc",
+) -> Serializer:
+	return Serializer(
+		PulsePandas(
+			dataframes=orient,
+			naive_timestamps=naive_timestamps,
+		).serializer_adapters()
+	)
 
 
-def roundtrip(value: object, orient: DataFrameOrient = "records") -> object:
-	serializer_instance = serializer(orient)
+def roundtrip(
+	value: object,
+	orient: DataFrameOrient = "records",
+	naive_timestamps: NaiveTimestamps = "utc",
+) -> object:
+	serializer_instance = serializer(orient, naive_timestamps)
 	return serializer_instance.deserialize(serializer_instance.serialize(value))
 
 
@@ -185,11 +197,15 @@ def test_float_ndarray_fast_path_normalizes_nan_in_core_encoder() -> None:
 
 
 @pytest.mark.parametrize("unit", ["ns", "us"])
-def test_datetime64_array_uses_timestamp_normalization(unit: str) -> None:
+@pytest.mark.parametrize("naive_timestamps", ["reject"])
+def test_datetime64_array_uses_timestamp_normalization(
+	unit: str,
+	naive_timestamps: NaiveTimestamps,
+) -> None:
 	array = np.array(["2026-01-01"], dtype=f"datetime64[{unit}]")
 
 	with pytest.raises(TypeError, match="tz_localize"):
-		roundtrip(array)
+		roundtrip(array, naive_timestamps=naive_timestamps)
 
 
 def test_tz_aware_datetime_object_array_roundtrips() -> None:
@@ -201,11 +217,14 @@ def test_tz_aware_datetime_object_array_roundtrips() -> None:
 	assert roundtrip(array) == [datetime(2026, 1, 1, tzinfo=timezone.utc)]
 
 
-def test_2d_datetime64_array_uses_timestamp_normalization() -> None:
+@pytest.mark.parametrize("naive_timestamps", ["reject"])
+def test_2d_datetime64_array_uses_timestamp_normalization(
+	naive_timestamps: NaiveTimestamps,
+) -> None:
 	array = np.array([["2026-01-01"]], dtype="datetime64[ns]")
 
 	with pytest.raises(TypeError, match="tz_localize"):
-		roundtrip(array)
+		roundtrip(array, naive_timestamps=naive_timestamps)
 
 
 def test_timedelta64_array_has_actionable_error() -> None:
@@ -246,14 +265,18 @@ def test_extension_arrays_preserve_missing_values(array: object) -> None:
 		pd.Timestamp("2026-01-01T00:00:00"),
 	],
 )
+@pytest.mark.parametrize("naive_timestamps", ["reject"])
 def test_timestamp_adapter_supports_tz_aware_and_rejects_naive(
 	value: pd.Timestamp,
+	naive_timestamps: NaiveTimestamps,
 ) -> None:
 	if value.tzinfo is None:
 		with pytest.raises(TypeError, match="tz_localize"):
-			roundtrip(value)
+			roundtrip(value, naive_timestamps=naive_timestamps)
 	else:
-		assert roundtrip(value) == datetime(2026, 1, 1, tzinfo=timezone.utc)
+		assert roundtrip(value, naive_timestamps=naive_timestamps) == datetime(
+			2026, 1, 1, tzinfo=timezone.utc
+		)
 
 
 @pytest.mark.parametrize(
@@ -264,21 +287,92 @@ def test_timestamp_adapter_supports_tz_aware_and_rejects_naive(
 		pd.DatetimeIndex(pd.date_range("2026-01-01", periods=1)),
 	],
 )
-def test_naive_timestamps_have_actionable_error(value: object) -> None:
+@pytest.mark.parametrize("naive_timestamps", ["reject"])
+def test_naive_timestamps_have_actionable_error(
+	value: object,
+	naive_timestamps: NaiveTimestamps,
+) -> None:
 	with pytest.raises(TypeError, match="tz_localize"):
-		roundtrip(value)
+		roundtrip(value, naive_timestamps=naive_timestamps)
 
 
-def test_naive_dataframe_timestamps_have_actionable_error() -> None:
+@pytest.mark.parametrize("orient", ["records", "columns"])
+@pytest.mark.parametrize("naive_timestamps", ["reject"])
+def test_naive_dataframe_timestamps_have_actionable_error(
+	orient: DataFrameOrient,
+	naive_timestamps: NaiveTimestamps,
+) -> None:
 	frame = pd.DataFrame({"at": pd.date_range("2026-01-01", periods=1)})
 
 	with pytest.raises(TypeError, match="tz_localize"):
-		roundtrip(frame)
+		roundtrip(frame, orient, naive_timestamps)
 
 
-def test_numpy_datetime64_uses_timestamp_conversion() -> None:
+def test_naive_timestamp_defaults_to_utc() -> None:
+	assert roundtrip(pd.Timestamp("2026-01-01")) == datetime(
+		2026, 1, 1, tzinfo=timezone.utc
+	)
+
+
+def test_numpy_datetime64_defaults_to_utc() -> None:
+	assert roundtrip(np.datetime64("2026-01-01")) == datetime(
+		2026, 1, 1, tzinfo=timezone.utc
+	)
+
+
+def test_numpy_datetime64_reject_mode_has_actionable_error() -> None:
 	with pytest.raises(TypeError, match="tz_localize"):
-		roundtrip(np.datetime64("2026-01-01T00:00:00.000000000"))
+		roundtrip(np.datetime64("2026-01-01"), naive_timestamps="reject")
+
+
+def test_naive_series_defaults_to_utc() -> None:
+	series = pd.Series(pd.date_range("2026-01-01", periods=1))
+
+	assert roundtrip(series) == [datetime(2026, 1, 1, tzinfo=timezone.utc)]
+
+
+def test_naive_index_defaults_to_utc() -> None:
+	index = pd.DatetimeIndex(pd.date_range("2026-01-01", periods=1))
+
+	assert roundtrip(index) == [datetime(2026, 1, 1, tzinfo=timezone.utc)]
+
+
+@pytest.mark.parametrize("orient", ["records", "columns"])
+def test_naive_dataframe_defaults_to_utc(orient: DataFrameOrient) -> None:
+	frame = pd.DataFrame({"at": pd.date_range("2026-01-01", periods=1)})
+
+	if orient == "records":
+		expected: object = [{"at": datetime(2026, 1, 1, tzinfo=timezone.utc)}]
+	else:
+		expected = {
+			"columns": ["at"],
+			"rows": [[datetime(2026, 1, 1, tzinfo=timezone.utc)]],
+		}
+
+	assert roundtrip(frame, orient) == expected
+
+
+@pytest.mark.parametrize("unit", ["ns", "us"])
+def test_naive_datetime64_array_defaults_to_utc(unit: str) -> None:
+	array = np.array(["2026-01-01"], dtype=f"datetime64[{unit}]")
+
+	assert roundtrip(array) == [datetime(2026, 1, 1, tzinfo=timezone.utc)]
+
+
+@pytest.mark.parametrize(
+	"array",
+	[
+		np.array([["2026-01-01"]], dtype="datetime64[ns]"),
+		np.array([["2026-01-01"]], dtype="datetime64[us]"),
+	],
+)
+def test_naive_2d_datetime64_array_defaults_to_utc(array: np.ndarray) -> None:
+	assert roundtrip(array) == [[datetime(2026, 1, 1, tzinfo=timezone.utc)]]
+
+
+def test_naive_sub_millisecond_timestamp_still_rejects_precision() -> None:
+	with pytest.raises(ValueError, match="millisecond"):
+		roundtrip(pd.Timestamp("2026-01-01T00:00:00.000000001"))
 
 
 @pytest.mark.parametrize(

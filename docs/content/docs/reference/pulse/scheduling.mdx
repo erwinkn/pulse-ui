@@ -158,13 +158,12 @@ Scheduled callbacks run with an untracked reactive context, so reading a
 signal inside a timer does not create a reactive dependency:
 
 ```python
-@ps.component
-def PollingComponent():
-    with ps.init():
-        state = PollingState()
-        ps.repeat(5.0, state.refresh)
+class State(ps.State):
+    count: int = 0
 
-    return ps.div(f"Data: {state.data}")
+    @ps.effect
+    def setup_timer(self):
+        ps.later(1.0, lambda: print(f"Count is {self.count}"))
 ```
 
 ## See also

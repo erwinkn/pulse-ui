@@ -15,7 +15,7 @@ handle = ps.later(delay, fn, *args, **kwargs)
 - `fn` - Sync or async function
 - `*args, **kwargs` - Arguments passed to fn
 
-**Returns:** `TaskHandle[None]` with `.cancel()` and await support
+**Returns:** `ps.Task` with `.cancel()`, `.wait()`, and await support
 
 `ps.later()` callbacks are not canceled by route unmounting. They run unless you
 cancel the returned handle or the render session/app closes. If a later callback
@@ -58,7 +58,7 @@ post(refresh)
 
 `post()` runs the synchronous callback on the scheduler's event loop and
 returns no handle. Use `ps.later()`, `ps.repeat()`, or `spawn()` on the owning
-loop when you need a cancellable `TaskHandle`.
+loop when you need a cancellable `ps.Task`.
 
 ## ps.repeat()
 
@@ -73,7 +73,7 @@ handle = ps.repeat(interval, fn, *args, **kwargs)
 - `fn` - Sync or async function
 - `*args, **kwargs` - Arguments passed to fn
 
-**Returns:** `TaskHandle[None]` with `.cancel()` and await support
+**Returns:** `ps.Task` with `.cancel()`, `.wait()`, and await support
 
 ```python
 class DashboardState(ps.State):
@@ -240,15 +240,18 @@ lambda name, idx: ... # 2 args
 
 These are used internally but available if needed:
 
-### TaskHandle
+### ps.Task
 
 ```python
-class TaskHandle[T]:
+class Task:
     def cancel(self) -> None: ...
+    def done(self) -> bool: ...
+    def cancelled(self) -> bool: ...
+    async def wait(self) -> None: ...
 ```
 
-Handles returned by `later()`, `repeat()`, and `spawn()` can be awaited and
-cancelled. Their status is available through `handle.status`.
+Tasks returned by `later()`, `repeat()`, and `spawn()` can be awaited and
+cancelled. Awaiting a cancelled task raises `asyncio.CancelledError`.
 
 ### Disposable
 

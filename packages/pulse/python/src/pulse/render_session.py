@@ -6,8 +6,6 @@ from asyncio import iscoroutine
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, TypeVar, cast, overload
 
-from anyio import TaskHandle
-
 from pulse.channel import Channel
 from pulse.context import PulseContext
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
@@ -32,7 +30,7 @@ from pulse.routing import (
 	RouteTree,
 	ensure_absolute_path,
 )
-from pulse.scheduling import Scheduler
+from pulse.scheduling import Scheduler, Task
 from pulse.state.query_param import QueryParamSync
 from pulse.state.state import State
 from pulse.transpiler.id import next_id
@@ -112,7 +110,7 @@ class RouteMount:
 	ever_active: bool
 	dispose_on_timeout: bool
 	queue: list[ServerMessage] | None
-	queue_timeout: TaskHandle[None] | None
+	queue_timeout: Task | None
 	mount_id: str
 	render_batch_id: int
 	render_batch_renders: int
@@ -781,7 +779,7 @@ class RenderSession:
 		coroutine: Callable[[], Any] | Awaitable[Any],
 		*,
 		name: str | None = None,
-	) -> TaskHandle[None]:
+	) -> Task:
 		"""Create a tracked task tied to this render session."""
 		if callable(coroutine):
 			return self.scheduler.spawn(coroutine(), name=name)
@@ -793,7 +791,7 @@ class RenderSession:
 
 	def schedule_later(
 		self, delay: float, fn: Callable[..., Any], *args: Any, **kwargs: Any
-	) -> TaskHandle[None]:
+	) -> Task:
 		"""Schedule a tracked timer tied to this render session."""
 		return self.scheduler.later(delay, fn, *args, **kwargs)
 

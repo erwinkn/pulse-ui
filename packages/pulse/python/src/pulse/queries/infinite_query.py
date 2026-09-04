@@ -15,8 +15,6 @@ from typing import (
 	override,
 )
 
-from anyio import TaskCancelled, TaskHandle
-
 from pulse.context import PulseContext
 from pulse.helpers import (
 	MISSING,
@@ -45,7 +43,7 @@ from pulse.queries.query import (
 )
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.reactive_extensions import ReactiveList, unwrap
-from pulse.scheduling import is_pending, later, spawn
+from pulse.scheduling import Task, later, spawn
 from pulse.state.property import InitializableProperty, StateMemberDescriptor
 from pulse.state.state import State
 
@@ -253,7 +251,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
 		"""Whether an action is queued or a fetch task is in flight."""
 		if self._queue:
 			return True
-		return self._queue_task is not None and is_pending(self._queue_task)
+		return self._queue_task is not None and not self._queue_task.done()
 
 	# Reactive state
 	pages: ReactiveList[Page[T, TParam]]
@@ -270,10 +268,10 @@ class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
 
 	# Task queue
 	_queue: deque[Action[T, TParam]]
-	_queue_task: TaskHandle[None] | None
+	_queue_task: Task | None
 
 	_observers: "list[InfiniteQueryResult[T, TParam]]"
-	_gc_handle: TaskHandle[None] | None
+	_gc_handle: Task | None
 	_interval_effect: Effect | None
 	_interval: float | None
 	_interval_observer: "InfiniteQueryResult[T, TParam] | None"
@@ -446,11 +444,8 @@ class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
 	) -> ActionResult[list[Page[T, TParam]]]:
 		"""Wait for any in-flight queue processing to complete."""
 		# Wait for any in-progress queue processing
-		if self._queue_task and is_pending(self._queue_task):
-			try:
-				await self._queue_task
-			except TaskCancelled:
-				pass
+		if self._queue_task and not self._queue_task.done():
+			await self._queue_task.wait()
 		# Return result based on current state
 		if self.status() == "error":
 			return ActionError(cast(Exception, self.error()))
@@ -463,7 +458,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
 	) -> ActionResult[list[Page[T, TParam]]]:
 		"""Ensure an initial fetch has started, then wait for completion."""
 		if len(self.pages) == 0 and self.status() == "loading":
-			if self._queue_task is None or not is_pending(self._queue_task):
+			if self._queue_task is None or self._queue_task.done():
 				fn = fetch_fn if fetch_fn is not None else self.fn
 				self._enqueue(Refetch(fetch_fn=fn, observer=observer))
 		return await self.wait()
@@ -585,7 +580,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
 		if current is not None and not current.future.done():
 			current.future.cancel()
 
-		if self._queue_task and is_pending(self._queue_task):
+		if self._queue_task and not self._queue_task.done():
 			self._queue_task.cancel()
 			self._queue_task = None
 
@@ -625,7 +620,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
 
 	def _ensure_processor(self):
 		"""Ensure the queue processor task is running."""
-		if self._queue_task is None or not is_pending(self._queue_task):
+		if self._queue_task is None or self._queue_task.done():
 			# Create task with no reactive scope to avoid inheriting deps from caller
 			with Untrack():
 				self._queue_task = spawn(self._process_queue())
@@ -872,7 +867,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
 	def dispose(self):
 		self.cancel_gc()
 		self._cancel_queue()
-		if self._queue_task and is_pending(self._queue_task):
+		if self._queue_task and not self._queue_task.done():
 			self._queue_task.cancel()
 		self._dispose_interval_effect()
 		if self.cfg.on_dispose:

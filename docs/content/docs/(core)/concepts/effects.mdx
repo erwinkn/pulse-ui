@@ -34,12 +34,10 @@ Pulse tracks what the effect reads. When `self.enabled` changes, the effect runs
 Effects can return a cleanup function. This is useful for timers, subscriptions, or anything that needs to be torn down:
 
 ```python
-from anyio import TaskHandle
-
 class TimerState(ps.State):
     count: int = 0
     running: bool = False
-    _handle: TaskHandle[None] | None = None
+    _handle: ps.Task | None = None
 
     @ps.effect
     def start_timer(self):

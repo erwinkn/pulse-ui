@@ -4,11 +4,10 @@ import warnings
 
 import pulse as ps
 import pytest
-from anyio import TaskHandle, to_thread
 from pulse.reactive import Scope, Signal
 from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteTree
-from pulse.scheduling import Scheduler, is_pending
+from pulse.scheduling import Scheduler, Task
 from pulse.test_helpers import wait_for
 
 
@@ -26,10 +25,11 @@ async def test_scheduler_spawns_and_tracks_tasks():
 			started.set()
 
 		task = scheduler.spawn(work(), name="test.task")
-		assert isinstance(task, TaskHandle)
+		assert isinstance(task, Task)
 		assert await task is None
 		assert started.is_set()
-		assert task.status is TaskHandle.Status.FINISHED
+		assert task.done()
+		assert not task.cancelled()
 
 
 @pytest.mark.asyncio
@@ -53,7 +53,7 @@ async def test_scheduler_later_and_repeat():
 		await asyncio.sleep(0)
 		assert "later" in events
 		assert "repeat" in events
-		assert repeat.status is TaskHandle.Status.CANCELLED
+		assert repeat.cancelled()
 
 
 @pytest.mark.asyncio
@@ -119,12 +119,12 @@ async def test_scheduler_post_runs_on_owning_loop_from_threads():
 
 		thread = threading.Thread(target=lambda: scheduler.post(callback))
 		thread.start()
-		await to_thread.run_sync(thread.join)
+		await asyncio.to_thread(thread.join)
 		await finished.wait()
 		assert events == [loop]
 
 		finished.clear()
-		await to_thread.run_sync(lambda: scheduler.post(callback))
+		await asyncio.to_thread(lambda: scheduler.post(callback))
 		await finished.wait()
 		assert events == [loop, loop]
 
@@ -170,7 +170,7 @@ async def test_scheduler_post_callback_failures_are_reported_and_isolated():
 
 		thread = threading.Thread(target=lambda: scheduler.post(callback))
 		thread.start()
-		await to_thread.run_sync(thread.join)
+		await asyncio.to_thread(thread.join)
 		scheduler.post(survivor)
 		await finished.wait()
 		assert await wait_for(lambda: len(contexts) == 1, timeout=0.2)
@@ -236,7 +236,7 @@ async def test_scheduler_cancel_before_first_tick():
 		task.cancel()
 		await asyncio.sleep(0.05)
 		assert not fired
-		assert task.status is TaskHandle.Status.CANCELLED
+		assert task.cancelled()
 
 
 @pytest.mark.asyncio
@@ -253,10 +253,11 @@ async def test_scheduler_cancelled_task_has_no_unawaited_warning():
 			task = scheduler.spawn(work())
 			await started.wait()
 			task.cancel()
-			await wait_for(
-				lambda: task.status is TaskHandle.Status.CANCELLED, timeout=0.2
-			)
-		assert task.status is TaskHandle.Status.CANCELLED
+			await wait_for(task.cancelled, timeout=0.2)
+		await task.wait()
+		with pytest.raises(asyncio.CancelledError):
+			await task
+		assert task.cancelled()
 		assert not any("never awaited" in str(w.message) for w in caught)
 
 
@@ -277,7 +278,7 @@ async def test_scheduler_close_drains_cancelled_tasks():
 	await asyncio.sleep(0)
 	await scheduler.close()
 	assert cancelled.is_set()
-	assert task.status is TaskHandle.Status.CANCELLED
+	assert task.cancelled()
 
 
 @pytest.mark.asyncio
@@ -363,8 +364,8 @@ async def test_render_session_scheduler_closes_without_lingering_tasks():
 		task = session.spawn(work())
 	await wait_for(lambda: started.is_set(), timeout=0.2)
 	await session.close()
-	assert task.status is TaskHandle.Status.CANCELLED
-	assert not is_pending(task)
+	assert task.cancelled()
+	assert task.done()
 
 
 async def _raise(exception: Exception) -> None:

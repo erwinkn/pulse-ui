@@ -6,8 +6,8 @@ import asyncio
 import inspect
 import os
 import time
-from collections.abc import Callable, Coroutine
-from typing import Any, ParamSpec
+from collections.abc import Callable, Coroutine, Generator
+from typing import Any, ParamSpec, final
 
 from anyio import Event, TaskHandle, create_task_group, sleep
 from anyio.abc import TaskGroup
@@ -16,12 +16,6 @@ from anyio.lowlevel import checkpoint
 P = ParamSpec("P")
 
 CLOCK_RESOLUTION = time.get_clock_info("monotonic").resolution
-
-_FINISHED = (
-	TaskHandle.Status.FINISHED,
-	TaskHandle.Status.CANCELLED,
-	TaskHandle.Status.FAILED,
-)
 
 
 def clamp_delay(delay: float) -> float:
@@ -36,9 +30,44 @@ def is_pytest() -> bool:
 	)
 
 
-def is_pending(handle: TaskHandle[Any]) -> bool:
-	"""True until the task has finished, including while it is being cancelled."""
-	return handle.status not in _FINISHED
+@final
+class Task:
+	"""A unit of work in a Scheduler. Not constructible outside one."""
+
+	__slots__ = ("_handle",)
+
+	def __init__(self, handle: TaskHandle[None]) -> None:
+		self._handle = handle
+
+	@property
+	def name(self) -> str:
+		return self._handle.name
+
+	def cancel(self) -> None:
+		self._handle.cancel()
+
+	def done(self) -> bool:
+		return self._handle.status in (
+			TaskHandle.Status.FINISHED,
+			TaskHandle.Status.CANCELLED,
+			TaskHandle.Status.FAILED,
+		)
+
+	def cancelled(self) -> bool:
+		return self._handle.status is TaskHandle.Status.CANCELLED
+
+	async def wait(self) -> None:
+		await self._handle.wait()
+
+	def __await__(self) -> Generator[Any, Any, None]:
+		yield from self._handle.wait().__await__()
+		if self.cancelled():
+			raise asyncio.CancelledError
+		if self._handle.status is TaskHandle.Status.FAILED:
+			exception = self._handle.exception
+			assert exception is not None
+			raise exception
+		return None
 
 
 async def _invoke(
@@ -123,15 +152,15 @@ class Scheduler:
 
 	def spawn(
 		self, coroutine: Coroutine[Any, Any, Any], *, name: str | None = None
-	) -> TaskHandle[None]:
+	) -> Task:
 		"""Run a coroutine in this scope. Its exceptions are reported, not propagated."""
 		tg = self._task_group()
 		name = name or coroutine.__qualname__
-		return tg.create_task(self._guard(coroutine, name), name=name)
+		return Task(tg.create_task(self._guard(coroutine, name), name=name))
 
 	def later(
 		self, delay: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
-	) -> TaskHandle[None]:
+	) -> Task:
 		"""Call `fn` once after `delay` seconds."""
 		return self.spawn(
 			self._delayed(delay, fn, args, dict(kwargs)),
@@ -145,7 +174,7 @@ class Scheduler:
 		*args: P.args,
 		immediate: bool = False,  # pyright: ignore[reportGeneralTypeIssues]
 		**kwargs: P.kwargs,
-	) -> TaskHandle[None]:
+	) -> Task:
 		"""Call `fn` every `interval` seconds, surviving its exceptions."""
 		return self.spawn(
 			self._repeated(interval, fn, args, dict(kwargs), immediate=immediate),
@@ -258,9 +287,7 @@ def current_scheduler() -> Scheduler:
 	return ctx.app.scheduler
 
 
-def spawn(
-	coroutine: Coroutine[Any, Any, Any], *, name: str | None = None
-) -> TaskHandle[None]:
+def spawn(coroutine: Coroutine[Any, Any, Any], *, name: str | None = None) -> Task:
 	"""Run a coroutine in the active scheduler."""
 	return current_scheduler().spawn(coroutine, name=name)
 
@@ -272,7 +299,7 @@ def post(fn: Callable[[], Any]) -> None:
 
 def later(
 	delay: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
-) -> TaskHandle[None]:
+) -> Task:
 	"""Schedule a callback after a delay on the active scheduler."""
 	return current_scheduler().later(delay, fn, *args, **kwargs)
 
@@ -283,7 +310,7 @@ def repeat(
 	*args: P.args,
 	immediate: bool = False,  # pyright: ignore[reportGeneralTypeIssues]
 	**kwargs: P.kwargs,
-) -> TaskHandle[None]:
+) -> Task:
 	"""Repeat a callback on the active scheduler."""
 	return current_scheduler().repeat(
 		interval, fn, *args, immediate=immediate, **kwargs

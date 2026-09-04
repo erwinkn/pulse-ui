@@ -17,7 +17,6 @@ from typing import Any, Callable, Literal, TypeVar, cast
 
 import socketio
 import uvicorn
-from anyio import TaskHandle
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -76,7 +75,7 @@ from pulse.proxy import Proxy, ReactProxy
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
-from pulse.scheduling import Scheduler
+from pulse.scheduling import Scheduler, Task
 from pulse.serializer import Serialized, deserialize, serialize
 from pulse.user_session import (
 	CookieSessionStore,
@@ -247,7 +246,7 @@ class App:
 	_render_connect_attempts: dict[str, object]
 	_connecting_sockets: set[str]
 	_pending_socket_messages: dict[str, list[Serialized]]
-	_render_cleanups: dict[str, TaskHandle[None]]
+	_render_cleanups: dict[str, Task]
 	_render_message_locks: dict[str, asyncio.Lock]
 	scheduler: Scheduler
 	_proxy: ReactProxy | None

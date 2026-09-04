@@ -5,7 +5,6 @@ from typing import Any, TypedDict, final
 import pulse as ps
 import pytest
 import pytest_asyncio
-from anyio import TaskCancelled
 from pulse.queries.common import ActionError
 from pulse.queries.infinite_query import (
 	InfiniteQuery,
@@ -1764,7 +1763,7 @@ async def test_infinite_query_result_dispose_cancels_in_flight_fetch():
 	# The wait task should complete (either with error or cancelled)
 	try:
 		await asyncio.wait_for(wait_task, timeout=0.5)
-	except (asyncio.CancelledError, TaskCancelled, asyncio.TimeoutError):
+	except (asyncio.CancelledError, asyncio.TimeoutError):
 		pass  # Expected - task was cancelled
 
 
@@ -1952,7 +1951,7 @@ async def test_infinite_query_key_change_cancels_pending_actions():
 	# Wait for or cancel the old wait task
 	try:
 		await asyncio.wait_for(wait_task, timeout=0.1)
-	except (asyncio.CancelledError, TaskCancelled, asyncio.TimeoutError):
+	except (asyncio.CancelledError, asyncio.TimeoutError):
 		pass  # Expected
 
 	# Clean up

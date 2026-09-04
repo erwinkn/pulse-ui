@@ -14,8 +14,6 @@ from typing import (
 	override,
 )
 
-from anyio import TaskCancelled, TaskHandle
-
 from pulse.context import PULSE_CONTEXT
 from pulse.helpers import (
 	MISSING,
@@ -39,8 +37,8 @@ from pulse.queries.common import (
 from pulse.queries.effect import AsyncQueryEffect
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.scheduling import (
+	Task,
 	clamp_delay,
-	is_pending,
 	is_pytest,
 	later,
 	spawn,
@@ -351,9 +349,9 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 	key: Key
 	state: QueryState[T]
 	observers: "list[KeyedQueryResult[T]]"
-	_task: TaskHandle[None] | None
+	_task: Task | None
 	_task_initiator: "KeyedQueryResult[T] | None"
-	_gc_handle: TaskHandle[None] | None
+	_gc_handle: Task | None
 	_interval_effect: Effect | None
 	_interval: float | None
 	_interval_observer: "KeyedQueryResult[T] | None"
@@ -446,7 +444,7 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 	@property
 	def is_scheduled(self) -> bool:
 		"""Check if a fetch is currently scheduled/running."""
-		return self._task is not None and is_pending(self._task)
+		return self._task is not None and not self._task.done()
 
 	async def _run_fetch(
 		self,
@@ -477,7 +475,7 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 		fetch_fn: Callable[[], Awaitable[T]],
 		cancel_previous: bool = True,
 		initiator: "KeyedQueryResult[T] | None" = None,
-	) -> TaskHandle[None]:
+	) -> Task:
 		"""
 		Start a fetch with the given fetch function.
 		Cancels any in-flight fetch if cancel_previous is True.
@@ -487,7 +485,7 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 			cancel_previous: If True, cancels any in-flight fetch before starting.
 			initiator: The KeyedQueryResult observer that initiated this fetch (for cancellation tracking).
 		"""
-		if cancel_previous and self._task and is_pending(self._task):
+		if cancel_previous and self._task and not self._task.done():
 			self._task.cancel()
 
 		self.state.is_fetching.write(True)
@@ -497,16 +495,17 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 
 	async def wait(self) -> ActionResult[T]:
 		"""Wait for the current fetch to complete."""
-		while self._task and is_pending(self._task):
-			try:
-				await self._task
-			except TaskCancelled:
+		while self._task and not self._task.done():
+			task = self._task
+			await task.wait()
+			if task.cancelled():
 				# Task was cancelled (probably by a new refetch).
 				# If there's a new task, wait for that one instead.
 				# If no new task, re-raise the cancellation.
 				# Note: self._task may have been reassigned by run_fetch() after await
-				if self._task is None or not is_pending(self._task):  # pyright: ignore[reportUnnecessaryComparison]
-					raise
+				replacement: Task | None = self._task
+				if replacement is None or replacement.done():  # pyright: ignore[reportUnnecessaryComparison]
+					raise asyncio.CancelledError
 				# Otherwise, loop and wait for the new task
 		# Return result based on current state
 		if self.state.status() == "error":
@@ -518,7 +517,7 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 
 	def cancel(self) -> None:
 		"""Cancel the current fetch if running."""
-		if self._task and is_pending(self._task):
+		if self._task and not self._task.done():
 			self._task.cancel()
 		self._task = None
 		self._task_initiator = None
@@ -658,7 +657,7 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 		self._update_interval()
 
 		# If the departing observer initiated the ongoing fetch, cancel it
-		if self._task_initiator is observer and self._task and is_pending(self._task):
+		if self._task_initiator is observer and self._task and not self._task.done():
 			self.cancel()
 			# Reschedule from another observer if any remain
 			if len(self.observers) > 0:

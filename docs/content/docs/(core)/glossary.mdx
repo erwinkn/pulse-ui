@@ -244,10 +244,12 @@ An attack where a malicious site tricks a user's browser into submitting forms t
 
 ## Scheduling
 
-**Task Handle**
-A `TaskHandle` returned by Pulse scheduling functions. Await it for completion
-or call `.cancel()` to stop the work. A handle belongs to the event loop that
-owns its scheduler; `post()` schedules without returning a handle.
+**Task**
+A `ps.Task` returned by Pulse scheduling functions. Await it for completion,
+or call `.cancel()` to stop the work. `.wait()` returns when the task ends
+without raising the task's own failure or cancellation; awaiting a cancelled
+task raises `asyncio.CancelledError`. A task belongs to the event loop that
+owns its scheduler; `post()` schedules without returning a task.
 
 **Scheduler**
 The scope owned by a render session or the app. It tracks scheduled tasks and

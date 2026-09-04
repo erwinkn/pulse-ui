@@ -13,16 +13,14 @@ from typing import (
 	override,
 )
 
-from anyio import TaskCancelled, TaskHandle
-
 from pulse.helpers import (
 	Disposable,
 	maybe_await,
 	values_equal,
 )
 from pulse.scheduling import (
+	Task,
 	current_scheduler,
-	is_pending,
 	post,
 	spawn,
 )
@@ -398,7 +396,7 @@ class Effect(Disposable):
 	immediate: bool
 	_lazy: bool
 	_interval: float | None
-	_interval_handle: TaskHandle[None] | None
+	_interval_handle: Task | None
 	update_deps: bool
 	batch: "Batch | None"
 	paused: bool
@@ -727,7 +725,7 @@ class AsyncEffect(Effect):
 
 	fn: AsyncEffectFn  # pyright: ignore[reportIncompatibleMethodOverride]
 	batch: None  # pyright: ignore[reportIncompatibleVariableOverride]
-	_task: TaskHandle[None] | None
+	_task: Task | None
 	_task_started: bool
 
 	def __init__(
@@ -760,7 +758,7 @@ class AsyncEffect(Effect):
 		# This avoids cancelling and recreating tasks multiple times when reached
 		# through multiple dependency paths before the event loop runs.
 		# Once the task starts running, new push_change calls will cancel and restart.
-		if self._task is not None and is_pending(self._task) and not self._task_started:
+		if self._task is not None and not self._task.done() and not self._task_started:
 			return
 		self.schedule()
 
@@ -789,17 +787,17 @@ class AsyncEffect(Effect):
 		return kwargs
 
 	@override
-	def run(self) -> TaskHandle[Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+	def run(self) -> Task:  # pyright: ignore[reportIncompatibleMethodOverride]
 		"""Start the async effect, cancelling any previous run.
 
 		Returns:
-			The asyncio.Task running the effect.
+			The Pulse task running the effect.
 		"""
 		execution_epoch = epoch()
 
 		# Cancel any previous run still in flight, but preserve the interval
 		self.cancel(cancel_interval=False)
-		this_task: TaskHandle[None] | None = None
+		this_task: Task | None = None
 
 		async def _runner():
 			nonlocal execution_epoch, this_task
@@ -870,16 +868,13 @@ class AsyncEffect(Effect):
 		while waiting, waits for a new task if one is started.
 		"""
 		while True:
-			if self._task is None or not is_pending(self._task):
+			task = self._task
+			if task is None or task.done():
 				# No task running, return immediately
 				return
-			try:
-				await self._task
+			await task.wait()
+			if not task.cancelled():
 				return
-			except TaskCancelled:
-				# Effect task was cancelled, check if a new task was started
-				# and continue waiting if so
-				continue
 
 	@override
 	def dispose(self):

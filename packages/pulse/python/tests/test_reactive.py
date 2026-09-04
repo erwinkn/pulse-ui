@@ -6,7 +6,6 @@ from typing import Any, ClassVar, NamedTuple, cast
 import pulse as ps
 import pytest
 import pytest_asyncio
-from anyio import TaskHandle
 from pulse import (
 	AsyncEffect,
 	Computed,
@@ -1226,10 +1225,8 @@ async def test_async_effect_cancels_inflight_on_rerun():
 	assert e._task is not None  # pyright: ignore[reportPrivateUsage]
 	assert e._task is not initial_task  # pyright: ignore[reportPrivateUsage]
 	assert not finished, "Effect should not have finished after signal write"
-	await wait_for(
-		lambda: initial_task.status is TaskHandle.Status.CANCELLED, timeout=0.2
-	)
-	assert initial_task.status is TaskHandle.Status.CANCELLED, (
+	await wait_for(lambda: initial_task.cancelled(), timeout=0.2)
+	assert initial_task.cancelled(), (
 		"Initial task should be cancelled after signal write"
 	)
 	assert e._task is not None, "Effect's task should be set after rescheduling"  # pyright: ignore[reportPrivateUsage]

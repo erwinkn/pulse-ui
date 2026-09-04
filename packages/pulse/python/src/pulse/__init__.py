@@ -1443,6 +1443,7 @@ from pulse.routing import Layout as Layout
 from pulse.routing import Route as Route
 from pulse.routing import RouteInfo as RouteInfo
 from pulse.scheduling import Scheduler as Scheduler
+from pulse.scheduling import Task as Task
 from pulse.scheduling import (
 	later as later,
 )

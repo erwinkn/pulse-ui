@@ -6,10 +6,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Generic, ParamSpec, TypeVar
 
-from anyio import TaskHandle
-
 from pulse.context import PULSE_CONTEXT
 from pulse.scheduling import (
+	Task,
 	clamp_delay,
 	later,
 )
@@ -22,7 +21,7 @@ R = TypeVar("R")
 class Debounced(Generic[P, R]):
 	fn: Callable[P, R]
 	delay_ms: float
-	_handle: TaskHandle[None] | asyncio.Handle | None = field(
+	_handle: Task | asyncio.Handle | None = field(
 		default=None, init=False, repr=False, compare=False
 	)
 

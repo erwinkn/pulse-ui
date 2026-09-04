@@ -6,10 +6,9 @@ from typing import (
 	override,
 )
 
-from anyio import TaskHandle
-
 from pulse.helpers import MISSING
 from pulse.reactive import AsyncEffect, Computed, Signal
+from pulse.scheduling import Task
 
 
 class Fetcher(Protocol):
@@ -44,7 +43,7 @@ class AsyncQueryEffect(AsyncEffect):
 		super().__init__(fn, name=name, lazy=lazy, deps=deps)
 
 	@override
-	def run(self) -> TaskHandle[Any]:
+	def run(self) -> Task:
 		# Immediately set loading state before running the effect
 		self.fetcher.is_fetching.write(True)
 

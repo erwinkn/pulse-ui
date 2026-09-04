@@ -29,15 +29,16 @@ def later(
     fn: Callable[P, Any],
     *args: P.args,
     **kwargs: P.kwargs,
-) -> TaskHandle[None]
+) -> ps.Task
 ```
 
 `fn` can be synchronous or asynchronous. If it returns an awaitable, Pulse
 waits for it before the scheduled task finishes.
 
-The returned anyio `TaskHandle` supports `.cancel()`, `.status`, and awaiting.
-Route unmounting does not cancel `later()` callbacks. Cancel the handle when a
-route-local callback should not run after unmount.
+The returned `ps.Task` supports `.cancel()`, `.done()`, `.cancelled()`,
+`.wait()`, and awaiting. Awaiting a cancelled task raises
+`asyncio.CancelledError`. Route unmounting does not cancel `later()` callbacks.
+Cancel the handle when a route-local callback should not run after unmount.
 
 ```python
 class NotificationState(ps.State):
@@ -62,7 +63,7 @@ def repeat(
     *args: P.args,
     immediate: bool = False,
     **kwargs: P.kwargs,
-) -> TaskHandle[None]
+) -> ps.Task
 ```
 
 The first callback runs after the interval unless `immediate=True`. For async
@@ -93,7 +94,7 @@ def spawn(
     coroutine: Coroutine[Any, Any, Any],
     *,
     name: str | None = None,
-) -> TaskHandle[None]
+) -> ps.Task
 ```
 
 The coroutine's exceptions are reported through the event loop's exception
@@ -147,10 +148,10 @@ from pulse.scheduling import post
 post(refresh)
 ```
 
-`post()` returns no handle. A `TaskHandle` belongs to the loop that owns it,
-so use `spawn()`, `later()`, or `repeat()` on that loop when you need to
-cancel or await the returned handle. For other thread integrations,
-`anyio.from_thread` can marshal work to the owning loop before scheduling.
+`post()` returns no handle. A `ps.Task` belongs to the loop that owns it, so
+use `spawn()`, `later()`, or `repeat()` on that loop when you need to cancel or
+await the returned handle. The callback must be synchronous; use one of the
+handle-returning functions from the owning loop for asynchronous work.
 
 ## Untracking
 

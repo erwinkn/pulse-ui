@@ -6,7 +6,6 @@ from typing import Any, ParamSpec, TypeVar, cast, final
 import pulse as ps
 import pytest
 import pytest_asyncio
-from anyio import TaskCancelled
 from pulse.helpers import MISSING
 from pulse.queries.protocol import QueryResult
 from pulse.queries.query import (
@@ -3292,7 +3291,7 @@ async def test_query_result_dispose_cancels_in_flight_fetch():
 	# The wait task should complete (either with error or cancelled)
 	try:
 		await asyncio.wait_for(wait_task, timeout=0.02)
-	except (asyncio.CancelledError, TaskCancelled, asyncio.TimeoutError):
+	except (asyncio.CancelledError, asyncio.TimeoutError):
 		pass  # Expected - task was cancelled
 
 
@@ -3499,7 +3498,7 @@ async def test_query_result_dispose_reschedules_fetch_from_other_observer():
 	# s1's wait task should have been cancelled
 	try:
 		await asyncio.wait_for(wait_task_s1, timeout=0.02)
-	except (asyncio.CancelledError, TaskCancelled, asyncio.TimeoutError):
+	except (asyncio.CancelledError, asyncio.TimeoutError):
 		pass  # Expected
 
 	# Clean up
@@ -3558,7 +3557,7 @@ async def test_query_result_dispose_no_reschedule_when_no_other_observers():
 	# The wait task should complete (cancelled)
 	try:
 		await asyncio.wait_for(wait_task, timeout=0.02)
-	except (asyncio.CancelledError, TaskCancelled, asyncio.TimeoutError):
+	except (asyncio.CancelledError, asyncio.TimeoutError):
 		pass  # Expected
 
 
@@ -3611,7 +3610,7 @@ async def test_key_change_cancels_in_flight_fetch():
 	# The wait task might error or complete - it's for the old key
 	try:
 		await asyncio.wait_for(wait_task, timeout=0.02)
-	except (asyncio.CancelledError, TaskCancelled, asyncio.TimeoutError):
+	except (asyncio.CancelledError, asyncio.TimeoutError):
 		pass  # Expected
 
 	# Clean up

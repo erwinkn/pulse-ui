@@ -37,7 +37,7 @@ Effects can return a cleanup function. This is useful for timers, subscriptions,
 class TimerState(ps.State):
     count: int = 0
     running: bool = False
-    _handle: ps.RepeatHandle | None = None
+    _handle: ps.Task | None = None
 
     @ps.effect
     def start_timer(self):

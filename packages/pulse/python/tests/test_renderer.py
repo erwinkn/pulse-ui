@@ -1232,7 +1232,8 @@ def test_ref_handles_share_session_channel():
 	assert handle_a.channel_id == handle_b.channel_id
 
 
-def test_ref_handles_use_route_channels():
+@pytest.mark.asyncio
+async def test_ref_handles_use_route_channels():
 	handle_root_a: RefHandle[Any] | None = None
 	handle_root_b: RefHandle[Any] | None = None
 	handle_other: RefHandle[Any] | None = None
@@ -1252,6 +1253,7 @@ def test_ref_handles_use_route_channels():
 
 	app = ps.App([ps.Route("/", Root), ps.Route("/other", Other)])
 	render = ps.RenderSession("render-ref-route-channels", app.routes)
+	await render.scheduler.start()
 	session: Any = SimpleNamespace(sid="session-ref-route-channels")
 	with ps.PulseContext(app=app, session=session, render=render):
 		render.prerender(["/", "/other"])
@@ -1261,6 +1263,7 @@ def test_ref_handles_use_route_channels():
 	assert handle_other is not None
 	assert handle_root_a.channel_id == handle_root_b.channel_id
 	assert handle_root_a.channel_id != handle_other.channel_id
+	await render.close()
 
 
 @pytest.mark.asyncio
@@ -1281,6 +1284,7 @@ async def test_ref_on_mount_uses_route_context():
 
 	app = ps.App([ps.Route("/", WithRef)])
 	render = ps.RenderSession("render-ref-route-context", app.routes)
+	await render.scheduler.start()
 	session: Any = SimpleNamespace(sid="session-ref-route-context")
 	with ps.PulseContext(app=app, session=session, render=render):
 		render.prerender(["/"])
@@ -1297,6 +1301,7 @@ async def test_ref_on_mount_uses_route_context():
 	)
 	await asyncio.wait_for(mounted.wait(), timeout=1)
 	assert seen.get("path") == "/"
+	await render.close()
 
 
 def test_ref_hook_handlers_register():
@@ -1352,6 +1357,7 @@ async def test_ref_async_handlers_run():
 
 	app = ps.App()
 	render = ps.RenderSession("render-ref-async-handlers", app.routes)
+	await render.scheduler.start()
 	session: Any = SimpleNamespace(sid="session-ref-async-handlers")
 	with ps.PulseContext(app=app, session=session, render=render):
 		tree = RenderTree(WithRef())
@@ -1362,6 +1368,7 @@ async def test_ref_async_handlers_run():
 		handle._on_unmounted({"refId": handle.id})
 		await asyncio.wait_for(unmounted.wait(), timeout=1)
 	assert events == ["mount", "unmount"]
+	await render.close()
 
 
 def test_ref_prop_rejects_non_ref_key():

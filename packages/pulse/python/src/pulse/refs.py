@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import re
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any, Generic, Literal, TypeVar, cast, overload, override
 
 from pulse.channel import Channel
@@ -12,7 +12,7 @@ from pulse.context import PulseContext
 from pulse.helpers import Disposable
 from pulse.hooks.core import HookMetadata, HookState, hooks
 from pulse.hooks.state import collect_component_identity
-from pulse.scheduling import create_future, create_task
+from pulse.scheduling import spawn
 
 T = TypeVar("T")
 Number = int | float
@@ -184,7 +184,7 @@ class RefHandle(Disposable, Generic[T]):
 	async def wait_mounted(self, timeout: float | None = None) -> None:
 		if self._mounted:
 			return
-		fut = create_future()
+		fut = asyncio.get_running_loop().create_future()
 		self._mount_waiters.append(fut)
 		try:
 			if timeout is None:
@@ -722,18 +722,12 @@ class RefHandle(Disposable, Generic[T]):
 				# Fail early: propagate on next render via error log if desired
 				raise
 			if inspect.isawaitable(result):
-				task = create_task(result, name=f"ref:{self.id}:{label}")
 
-				def _on_done(done_task: asyncio.Future[Any]) -> None:
-					if done_task.cancelled():
-						return
+				async def _run_handler(awaited: Awaitable[Any]):
 					try:
-						done_task.result()
-					except asyncio.CancelledError:
-						return
+						await awaited
 					except Exception as exc:
-						loop = done_task.get_loop()
-						loop.call_exception_handler(
+						asyncio.get_running_loop().call_exception_handler(
 							{
 								"message": f"Unhandled exception in ref {label} handler",
 								"exception": exc,
@@ -741,7 +735,7 @@ class RefHandle(Disposable, Generic[T]):
 							}
 						)
 
-				task.add_done_callback(_on_done)
+				spawn(_run_handler(result), name=f"ref:{self.id}:{label}")
 
 	@override
 	def dispose(self) -> None:

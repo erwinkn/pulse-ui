@@ -6,6 +6,7 @@ import pulse as ps
 import pytest
 from pulse.channel import ChannelClosed
 from pulse.messages import ClientChannelResponseMessage
+from pulse.test_helpers import wait_for
 from pulse.user_session import UserSession
 
 
@@ -27,6 +28,7 @@ async def test_channel_emit_sends_message():
 	session = SimpleNamespace(sid="session-1")
 
 	real_render = ps.RenderSession(render.id, app.routes)
+	await real_render.scheduler.start()
 	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
 
 	app.render_sessions[render.id] = real_render
@@ -56,6 +58,7 @@ async def test_channel_request_resolves_on_response():
 	session = SimpleNamespace(sid="session-2")
 
 	real_render = ps.RenderSession(render.id, app.routes)
+	await real_render.scheduler.start()
 	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
 
 	app.render_sessions[render.id] = real_render
@@ -102,6 +105,7 @@ async def test_channel_event_dispatch():
 	session = SimpleNamespace(sid="session-3")
 
 	real_render = ps.RenderSession(render.id, app.routes)
+	await real_render.scheduler.start()
 	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
 
 	app.render_sessions[render.id] = real_render
@@ -134,8 +138,7 @@ async def test_channel_event_dispatch():
 			},
 		)
 
-	await asyncio.sleep(0)
-	assert received == [{"value": 42}]
+	assert await wait_for(lambda: received == [{"value": 42}], timeout=0.2)
 
 
 @pytest.mark.asyncio
@@ -145,6 +148,7 @@ async def test_channel_pending_cancelled_on_render_close():
 	session = SimpleNamespace(sid="session-4")
 
 	real_render = ps.RenderSession(render.id, app.routes)
+	await real_render.scheduler.start()
 	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
 
 	app.render_sessions[render.id] = real_render
@@ -159,6 +163,6 @@ async def test_channel_pending_cancelled_on_render_close():
 		channel = real_render.channels.create("close-channel")
 		pending = asyncio.create_task(channel.request("get", None))
 
-	real_render.close()
+	await real_render.close()
 	with pytest.raises(ChannelClosed):
 		await pending

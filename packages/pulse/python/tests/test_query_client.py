@@ -5,6 +5,7 @@ from typing import ParamSpec, TypeVar
 
 import pulse as ps
 import pytest
+import pytest_asyncio
 from pulse.queries.infinite_query import InfiniteQuery, Page
 from pulse.render_session import RenderSession
 from pulse.routing import RouteTree
@@ -13,13 +14,15 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
-@pytest.fixture(autouse=True)
-def pulse_context():
+@pytest_asyncio.fixture(autouse=True)
+async def pulse_context():
 	"""Set up a PulseContext with an App for all tests."""
 	app = ps.App()
+	await app.scheduler.start()
 	ctx = ps.PulseContext(app=app)
 	with ctx:
 		yield
+	await app.scheduler.close()
 
 
 def with_render_session(fn: Callable[P, Awaitable[R]]):
@@ -28,8 +31,12 @@ def with_render_session(fn: Callable[P, Awaitable[R]]):
 	async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
 		routes = RouteTree([])
 		session = RenderSession("test-session", routes)
+		await session.scheduler.start()
 		with ps.PulseContext.update(render=session):
-			return await fn(*args, **kwargs)
+			try:
+				return await fn(*args, **kwargs)
+			finally:
+				await session.close()
 
 	return wrapper
 

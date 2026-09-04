@@ -1,12 +1,18 @@
+"""Task scopes: an asyncio-hosted anyio task group with a lifetime."""
+
+from __future__ import annotations
+
 import asyncio
+import inspect
 import os
 import time
-from collections.abc import Awaitable, Callable
-from typing import Any, ParamSpec, Protocol, TypeVar, override
+from collections.abc import Callable, Coroutine, Generator
+from typing import Any, ParamSpec, final
 
-from anyio import from_thread
+from anyio import Event, TaskHandle, create_task_group, sleep
+from anyio.abc import TaskGroup
+from anyio.lowlevel import checkpoint
 
-T = TypeVar("T")
 P = ParamSpec("P")
 
 CLOCK_RESOLUTION = time.get_clock_info("monotonic").resolution
@@ -17,12 +23,6 @@ def clamp_delay(delay: float) -> float:
 	return max(delay, CLOCK_RESOLUTION) if delay > 0 else delay
 
 
-class TimerHandleLike(Protocol):
-	def cancel(self) -> None: ...
-	def cancelled(self) -> bool: ...
-	def when(self) -> float: ...
-
-
 def is_pytest() -> bool:
 	"""Detect if running inside pytest using environment variables."""
 	return bool(os.environ.get("PYTEST_CURRENT_TEST")) or (
@@ -30,427 +30,288 @@ def is_pytest() -> bool:
 	)
 
 
-def _resolve_registries() -> tuple["TaskRegistry", "TimerRegistry"]:
+@final
+class Task:
+	"""A unit of work in a Scheduler. Not constructible outside one."""
+
+	__slots__ = ("_handle",)
+
+	def __init__(self, handle: TaskHandle[None]) -> None:
+		self._handle = handle
+
+	@property
+	def name(self) -> str:
+		return self._handle.name
+
+	def cancel(self) -> None:
+		self._handle.cancel()
+
+	def done(self) -> bool:
+		return self._handle.status in (
+			TaskHandle.Status.FINISHED,
+			TaskHandle.Status.CANCELLED,
+			TaskHandle.Status.FAILED,
+		)
+
+	def cancelled(self) -> bool:
+		return self._handle.status is TaskHandle.Status.CANCELLED
+
+	async def wait(self) -> None:
+		await self._handle.wait()
+
+	def __await__(self) -> Generator[Any, Any, None]:
+		yield from self._handle.wait().__await__()
+		if self.cancelled():
+			raise asyncio.CancelledError
+		if self._handle.status is TaskHandle.Status.FAILED:
+			exception = self._handle.exception
+			assert exception is not None
+			raise exception
+		return None
+
+
+async def _invoke(
+	fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> None:
+	from pulse.reactive import Untrack
+
+	with Untrack():
+		result = fn(*args, **kwargs)
+	if inspect.isawaitable(result):
+		await result
+
+
+class Scheduler:
+	"""A task lifetime: everything spawned here is cancelled and drained on close."""
+
+	_name: str
+	_loop: asyncio.AbstractEventLoop | None
+	_tg: TaskGroup | None
+	_host: asyncio.Task[None] | None
+	_close_requested: Event | None
+
+	def __init__(self, name: str) -> None:
+		self._name = name
+		self._loop = None
+		self._tg = None
+		self._host = None
+		self._close_requested = None
+
+	@property
+	def name(self) -> str:
+		return self._name
+
+	@property
+	def running(self) -> bool:
+		return self._tg is not None
+
+	@property
+	def owns_current_thread(self) -> bool:
+		"""True when the caller runs on this scope's loop, so handles are usable."""
+		return self._loop is not None and _running_loop() is self._loop
+
+	async def start(self) -> None:
+		if self.running:
+			raise RuntimeError(f"scheduler {self._name} is already running")
+
+		loop = asyncio.get_running_loop()
+		self._loop = loop
+		self._close_requested = Event()
+		ready = asyncio.Event()
+		self._host = loop.create_task(self._run(ready), name=f"scheduler:{self._name}")
+		await ready.wait()
+
+	async def _run(self, ready: asyncio.Event) -> None:
+		async with create_task_group() as tg:
+			self._tg = tg
+			ready.set()
+			assert self._close_requested is not None
+			await self._close_requested.wait()
+			tg.cancel_scope.cancel()
+
+	async def close(self) -> None:
+		"""Cancel every task in this scope and wait for them to finish."""
+		if not self.running:
+			return
+		assert self._close_requested is not None
+		assert self._host is not None
+		self._close_requested.set()
+		try:
+			await self._host
+		finally:
+			self._tg = None
+			self._host = None
+			self._close_requested = None
+
+	async def __aenter__(self) -> Scheduler:
+		await self.start()
+		return self
+
+	async def __aexit__(self, *exc: object) -> None:
+		await self.close()
+
+	def spawn(
+		self, coroutine: Coroutine[Any, Any, Any], *, name: str | None = None
+	) -> Task:
+		"""Run a coroutine in this scope. Its exceptions are reported, not propagated."""
+		tg = self._task_group()
+		name = name or coroutine.__qualname__
+		return Task(tg.create_task(self._guard(coroutine, name), name=name))
+
+	def later(
+		self, delay: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
+	) -> Task:
+		"""Call `fn` once after `delay` seconds."""
+		return self.spawn(
+			self._delayed(delay, fn, args, dict(kwargs)),
+			name=f"later:{_callable_name(fn)}",
+		)
+
+	def repeat(
+		self,
+		interval: float,
+		fn: Callable[P, Any],
+		*args: P.args,
+		immediate: bool = False,  # pyright: ignore[reportGeneralTypeIssues]
+		**kwargs: P.kwargs,
+	) -> Task:
+		"""Call `fn` every `interval` seconds, surviving its exceptions."""
+		return self.spawn(
+			self._repeated(interval, fn, args, dict(kwargs), immediate=immediate),
+			name=f"repeat:{_callable_name(fn)}",
+		)
+
+	def post(self, fn: Callable[[], Any]) -> None:
+		"""Call `fn` on this scope's loop soon, from any thread.
+
+		Returns no handle: one is only usable from the loop that owns it. `fn` must be
+		synchronous; use `spawn` for coroutines.
+		"""
+		loop = self._loop
+		if loop is None:
+			raise RuntimeError(f"cannot schedule on {self._name}: it has never run")
+		loop.call_soon_threadsafe(self._post, fn)
+
+	def _post(self, fn: Callable[[], Any]) -> None:
+		from pulse.reactive import Untrack
+
+		# The scope may have closed between post() and this callback.
+		if self._tg is None:
+			return
+		try:
+			with Untrack():
+				fn()
+		except Exception as exc:
+			self._report(f"Unhandled exception in post({_callable_name(fn)})", exc, fn)
+
+	def _task_group(self) -> TaskGroup:
+		tg = self._tg
+		if tg is None:
+			raise RuntimeError(f"cannot schedule on {self._name}: it is not running")
+		if _running_loop() is not self._loop:
+			raise RuntimeError(
+				f"cannot schedule on {self._name} from outside its event loop"
+			)
+		return tg
+
+	async def _guard(self, coroutine: Coroutine[Any, Any, Any], name: str) -> None:
+		# Honour a cancel() issued before this task first ran.
+		try:
+			await checkpoint()
+		except BaseException:
+			coroutine.close()
+			raise
+		try:
+			await coroutine
+		except Exception as exc:
+			self._report(f"Unhandled exception in task {name}", exc, name)
+
+	async def _delayed(
+		self,
+		delay: float,
+		fn: Callable[..., Any],
+		args: tuple[Any, ...],
+		kwargs: dict[str, Any],
+	) -> None:
+		await sleep(clamp_delay(delay))
+		await _invoke(fn, args, kwargs)
+
+	async def _repeated(
+		self,
+		interval: float,
+		fn: Callable[..., Any],
+		args: tuple[Any, ...],
+		kwargs: dict[str, Any],
+		*,
+		immediate: bool,
+	) -> None:
+		if not immediate:
+			await sleep(clamp_delay(interval))
+		while True:
+			try:
+				await _invoke(fn, args, kwargs)
+			except Exception as exc:
+				self._report(
+					f"Unhandled exception in repeat({_callable_name(fn)})", exc, fn
+				)
+			await sleep(clamp_delay(interval))
+
+	def _report(self, message: str, exception: Exception, callback: Any) -> None:
+		assert self._loop is not None
+		self._loop.call_exception_handler(
+			{
+				"message": message,
+				"exception": exception,
+				"context": {"callback": callback},
+			}
+		)
+
+
+def _callable_name(fn: Callable[..., Any]) -> str:
+	return getattr(fn, "__qualname__", repr(fn))
+
+
+def _running_loop() -> asyncio.AbstractEventLoop | None:
+	try:
+		return asyncio.get_running_loop()
+	except RuntimeError:
+		return None
+
+
+def current_scheduler() -> Scheduler:
 	from pulse.context import PulseContext
 
 	ctx = PulseContext.get()
 	if ctx.render is not None:
-		return ctx.render._tasks, ctx.render._timers  # pyright: ignore[reportPrivateUsage]
-	return ctx.app._tasks, ctx.app._timers  # pyright: ignore[reportPrivateUsage]
+		return ctx.render.scheduler
+	return ctx.app.scheduler
 
 
-def call_soon(
-	fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
-) -> TimerHandleLike | None:
-	"""Schedule a callback to run ASAP on the main event loop from any thread."""
-	_, timer_registry = _resolve_registries()
-	return timer_registry.call_soon(fn, *args, **kwargs)
+def spawn(coroutine: Coroutine[Any, Any, Any], *, name: str | None = None) -> Task:
+	"""Run a coroutine in the active scheduler."""
+	return current_scheduler().spawn(coroutine, name=name)
 
 
-def create_task(
-	coroutine: Awaitable[T],
-	*,
-	name: str | None = None,
-	on_done: Callable[[asyncio.Task[T]], None] | None = None,
-) -> asyncio.Task[T]:
-	"""Create a tracked task on the active session/app registry."""
-	task_registry, _ = _resolve_registries()
-	return task_registry.create_task(coroutine, name=name, on_done=on_done)
-
-
-def create_future() -> asyncio.Future[Any]:
-	"""Create an asyncio Future on the main event loop from any thread."""
-	task_registry, _ = _resolve_registries()
-	return task_registry.create_future()
+def post(fn: Callable[[], Any]) -> None:
+	"""Run a callback in the active scheduler from any thread."""
+	current_scheduler().post(fn)
 
 
 def later(
 	delay: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
-) -> TimerHandleLike:
-	"""
-	Schedule `fn(*args, **kwargs)` to run after `delay` seconds.
-	Works with sync or async functions. Returns a handle; call .cancel() to cancel.
-
-	The callback runs with no reactive scope to avoid accidentally capturing
-	reactive dependencies from the calling context. Other context vars (like
-	PulseContext) are preserved normally.
-	"""
-
-	_, timer_registry = _resolve_registries()
-	return timer_registry.later(delay, fn, *args, **kwargs)
-
-
-class RepeatHandle:
-	task: asyncio.Task[None] | None
-	cancelled: bool
-
-	def __init__(self) -> None:
-		self.task = None
-		self.cancelled = False
-
-	def cancel(self):
-		if self.cancelled:
-			return
-		self.cancelled = True
-		if self.task is not None and not self.task.done():
-			self.task.cancel()
-
-
-def repeat(interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs):
-	"""
-	Repeatedly run `fn(*args, **kwargs)` every `interval` seconds.
-	Works with sync or async functions.
-	For async functions, waits for completion before starting the next delay.
-	Returns a handle with .cancel() to stop future runs.
-
-	The callback runs with no reactive scope to avoid accidentally capturing
-	reactive dependencies from the calling context. Other context vars (like
-	PulseContext) are preserved normally.
-
-	Optional kwargs:
-	- immediate: bool = False  # run once immediately before the first interval
-	"""
-
-	_, timer_registry = _resolve_registries()
-	return timer_registry.repeat(interval, fn, *args, **kwargs)
-
-
-class TaskRegistry:
-	_tasks: set[asyncio.Task[Any]]
-	name: str | None
-
-	def __init__(self, name: str | None = None) -> None:
-		self._tasks = set()
-		self.name = name
-
-	def track(self, task: asyncio.Task[T]) -> asyncio.Task[T]:
-		self._tasks.add(task)
-		task.add_done_callback(self._tasks.discard)
-		return task
-
-	def create_task(
-		self,
-		coroutine: Awaitable[T],
-		*,
-		name: str | None = None,
-		on_done: Callable[[asyncio.Task[T]], None] | None = None,
-	) -> asyncio.Task[T]:
-		"""Create and schedule a coroutine task on the main loop from any thread."""
-		try:
-			asyncio.get_running_loop()
-			task = asyncio.ensure_future(coroutine)
-			if name is not None:
-				task.set_name(name)
-			if on_done:
-				task.add_done_callback(on_done)
-		except RuntimeError:
-
-			async def _runner():
-				asyncio.get_running_loop()
-				task = asyncio.ensure_future(coroutine)
-				if name is not None:
-					task.set_name(name)
-				if on_done:
-					task.add_done_callback(on_done)
-				return task
-
-			task = from_thread.run(_runner)
-
-		return self.track(task)
-
-	def create_future(self) -> asyncio.Future[Any]:
-		"""Create an asyncio Future on the main event loop from any thread."""
-		try:
-			return asyncio.get_running_loop().create_future()
-		except RuntimeError:
-
-			async def _create():
-				return asyncio.get_running_loop().create_future()
-
-			return from_thread.run(_create)
-
-	def cancel_all(self) -> None:
-		for task in list(self._tasks):
-			if not task.done():
-				task.cancel()
-		self._tasks.clear()
-
-
-class TimerRegistry:
-	_handles: set[TimerHandleLike]
-	_tasks: TaskRegistry
-	name: str | None
-
-	def __init__(self, *, tasks: TaskRegistry, name: str | None = None) -> None:
-		self._handles = set()
-		self._tasks = tasks
-		self.name = name
-
-	def track(self, handle: TimerHandleLike) -> TimerHandleLike:
-		self._handles.add(handle)
-		return handle
-
-	def discard(self, handle: TimerHandleLike | None) -> None:
-		if handle is None:
-			return
-		self._handles.discard(handle)
-
-	def later(
-		self,
-		delay: float,
-		fn: Callable[P, Any],
-		*args: P.args,
-		**kwargs: P.kwargs,
-	) -> TimerHandleLike:
-		return self._schedule(delay, fn, args, dict(kwargs), untrack=True)
-
-	def call_soon(
-		self, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
-	) -> TimerHandleLike | None:
-		def _schedule():
-			return self._schedule_soon(fn, args, dict(kwargs))
-
-		try:
-			asyncio.get_running_loop()
-			return _schedule()
-		except RuntimeError:
-
-			async def _runner():
-				return _schedule()
-
-			try:
-				return from_thread.run(_runner)
-			except RuntimeError:
-				if not is_pytest():
-					raise
-				return None
-
-	def repeat(
-		self, interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
-	) -> RepeatHandle:
-		from pulse.reactive import Untrack
-
-		loop = asyncio.get_running_loop()
-		handle = RepeatHandle()
-
-		async def _runner():
-			nonlocal handle
-			try:
-				while not handle.cancelled:
-					# Start counting the next interval AFTER the previous execution completes
-					await asyncio.sleep(clamp_delay(interval))
-					if handle.cancelled:
-						break
-					try:
-						with Untrack():
-							result = fn(*args, **kwargs)
-							if asyncio.iscoroutine(result):
-								await result
-					except asyncio.CancelledError:
-						# Propagate to outer handler to finish cleanly
-						raise
-					except Exception as exc:
-						# Surface exceptions via the loop's exception handler and continue
-						loop.call_exception_handler(
-							{
-								"message": "Unhandled exception in repeat() callback",
-								"exception": exc,
-								"context": {"callback": fn},
-							}
-						)
-			except asyncio.CancelledError:
-				# Swallow task cancellation to avoid noisy "exception was never retrieved"
-				pass
-
-		handle.task = self._tasks.create_task(_runner())
-		return handle
-
-	def cancel_all(self) -> None:
-		for handle in list(self._handles):
-			handle.cancel()
-		self._handles.clear()
-
-	def _schedule(
-		self,
-		delay: float,
-		fn: Callable[..., Any],
-		args: tuple[Any, ...],
-		kwargs: dict[str, Any],
-		*,
-		untrack: bool,
-	) -> TimerHandleLike:
-		"""
-		Schedule `fn(*args, **kwargs)` to run after `delay` seconds.
-		Works with sync or async functions. Returns a TimerHandle; call .cancel() to cancel.
-
-		The callback can run without a reactive scope to avoid accidentally capturing
-		reactive dependencies from the calling context. Other context vars (like
-		PulseContext) are preserved normally.
-		"""
-		try:
-			loop = asyncio.get_running_loop()
-		except RuntimeError:
-			try:
-				loop = asyncio.get_event_loop()
-			except RuntimeError as exc:
-				raise RuntimeError("later() requires an event loop") from exc
-
-		tracked_box: list[TimerHandleLike] = []
-		_run = self._prepare_run(loop, tracked_box, fn, args, kwargs, untrack=untrack)
-
-		handle = loop.call_later(clamp_delay(delay), _run)
-		tracked = _TrackedTimerHandle(handle, self)
-		tracked_box.append(tracked)
-		self._handles.add(tracked)
-		return tracked
-
-	def _schedule_soon(
-		self,
-		fn: Callable[..., Any],
-		args: tuple[Any, ...],
-		kwargs: dict[str, Any],
-	) -> TimerHandleLike:
-		try:
-			loop = asyncio.get_running_loop()
-		except RuntimeError:
-			try:
-				loop = asyncio.get_event_loop()
-			except RuntimeError as exc:
-				raise RuntimeError("call_soon() requires an event loop") from exc
-
-		tracked_box: list[TimerHandleLike] = []
-		_run = self._prepare_run(loop, tracked_box, fn, args, kwargs, untrack=False)
-
-		handle = loop.call_soon(_run)
-		tracked = _TrackedHandle(handle, self, when=loop.time())
-		tracked_box.append(tracked)
-		self._handles.add(tracked)
-		return tracked
-
-	def _prepare_run(
-		self,
-		loop: asyncio.AbstractEventLoop,
-		tracked_box: list[TimerHandleLike],
-		fn: Callable[..., Any],
-		args: tuple[Any, ...],
-		kwargs: dict[str, Any],
-		*,
-		untrack: bool,
-	) -> Callable[[], None]:
-		def _run():
-			from pulse.reactive import Untrack
-
-			try:
-				if untrack:
-					with Untrack():
-						res = fn(*args, **kwargs)
-				else:
-					res = fn(*args, **kwargs)
-				if asyncio.iscoroutine(res):
-					task = self._tasks.create_task(res)
-
-					def _log_task_exception(t: asyncio.Task[Any]):
-						try:
-							t.result()
-						except asyncio.CancelledError:
-							# Normal cancellation path
-							pass
-						except Exception as exc:
-							loop.call_exception_handler(
-								{
-									"message": "Unhandled exception in later() task",
-									"exception": exc,
-									"context": {"callback": fn},
-								}
-							)
-
-					task.add_done_callback(_log_task_exception)
-			except Exception as exc:
-				# Surface exceptions via the loop's exception handler and continue
-				loop.call_exception_handler(
-					{
-						"message": "Unhandled exception in later() callback",
-						"exception": exc,
-						"context": {"callback": fn},
-					}
-				)
-			finally:
-				self.discard(tracked_box[0] if tracked_box else None)
-
-		return _run
-
-
-class _TrackedTimerHandle:
-	__slots__: tuple[str, ...] = ("_handle", "_registry")
-	_handle: asyncio.TimerHandle
-	_registry: "TimerRegistry"
-
-	def __init__(self, handle: asyncio.TimerHandle, registry: "TimerRegistry") -> None:
-		self._handle = handle
-		self._registry = registry
-
-	def cancel(self) -> None:
-		if not self._handle.cancelled():
-			self._handle.cancel()
-		self._registry.discard(self)
-
-	def cancelled(self) -> bool:
-		return self._handle.cancelled()
-
-	def when(self) -> float:
-		return self._handle.when()
-
-	def __getattr__(self, name: str):
-		return getattr(self._handle, name)
-
-	@override
-	def __hash__(self) -> int:
-		return hash(self._handle)
-
-	@override
-	def __eq__(self, other: object) -> bool:
-		if isinstance(other, _TrackedTimerHandle):
-			return self._handle is other._handle
-		return self._handle is other
-
-
-class _TrackedHandle:
-	__slots__: tuple[str, ...] = ("_handle", "_registry", "_when")
-	_handle: asyncio.Handle
-	_registry: "TimerRegistry"
-	_when: float
-
-	def __init__(
-		self,
-		handle: asyncio.Handle,
-		registry: "TimerRegistry",
-		*,
-		when: float,
-	) -> None:
-		self._handle = handle
-		self._registry = registry
-		self._when = when
-
-	def cancel(self) -> None:
-		if not self._handle.cancelled():
-			self._handle.cancel()
-		self._registry.discard(self)
-
-	def cancelled(self) -> bool:
-		return self._handle.cancelled()
-
-	def when(self) -> float:
-		return self._when
-
-	def __getattr__(self, name: str):
-		return getattr(self._handle, name)
-
-	@override
-	def __hash__(self) -> int:
-		return hash(self._handle)
-
-	@override
-	def __eq__(self, other: object) -> bool:
-		if isinstance(other, _TrackedHandle):
-			return self._handle is other._handle
-		return self._handle is other
+) -> Task:
+	"""Schedule a callback after a delay on the active scheduler."""
+	return current_scheduler().later(delay, fn, *args, **kwargs)
+
+
+def repeat(
+	interval: float,
+	fn: Callable[P, Any],
+	*args: P.args,
+	immediate: bool = False,  # pyright: ignore[reportGeneralTypeIssues]
+	**kwargs: P.kwargs,
+) -> Task:
+	"""Repeat a callback on the active scheduler."""
+	return current_scheduler().repeat(
+		interval, fn, *args, immediate=immediate, **kwargs
+	)

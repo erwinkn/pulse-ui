@@ -43,7 +43,7 @@ from pulse.queries.query import (
 )
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.reactive_extensions import ReactiveList, unwrap
-from pulse.scheduling import TimerHandleLike, create_task, later
+from pulse.scheduling import Task, later, spawn
 from pulse.state.property import InitializableProperty, StateMemberDescriptor
 from pulse.state.state import State
 
@@ -268,10 +268,10 @@ class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
 
 	# Task queue
 	_queue: deque[Action[T, TParam]]
-	_queue_task: asyncio.Task[None] | None
+	_queue_task: Task | None
 
 	_observers: "list[InfiniteQueryResult[T, TParam]]"
-	_gc_handle: TimerHandleLike | None
+	_gc_handle: Task | None
 	_interval_effect: Effect | None
 	_interval: float | None
 	_interval_observer: "InfiniteQueryResult[T, TParam] | None"
@@ -445,7 +445,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
 		"""Wait for any in-flight queue processing to complete."""
 		# Wait for any in-progress queue processing
 		if self._queue_task and not self._queue_task.done():
-			await self._queue_task
+			await self._queue_task.wait()
 		# Return result based on current state
 		if self.status() == "error":
 			return ActionError(cast(Exception, self.error()))
@@ -623,7 +623,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
 		if self._queue_task is None or self._queue_task.done():
 			# Create task with no reactive scope to avoid inheriting deps from caller
 			with Untrack():
-				self._queue_task = create_task(self._process_queue())
+				self._queue_task = spawn(self._process_queue())
 		return self._queue_task
 
 	async def _process_queue(self):

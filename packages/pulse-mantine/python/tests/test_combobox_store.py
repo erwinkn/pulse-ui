@@ -5,6 +5,7 @@ from typing import Any, cast
 import pulse as ps
 import pytest
 from pulse.messages import ClientChannelResponseMessage
+from pulse.test_helpers import wait_for
 from pulse.user_session import UserSession
 from pulse_mantine.core.combobox.combobox import Combobox, ComboboxStore
 
@@ -20,12 +21,14 @@ class DummyRender:
 		self.sent.append(message)
 
 
-def build_context():
+async def build_context():
 	app = ps.App()
+	await app.scheduler.start()
 	render = DummyRender()
 	session = SimpleNamespace(sid="session-1")
 
 	real_render = ps.RenderSession(render.id, app.routes)
+	await real_render.scheduler.start()
 	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
 
 	app.render_sessions[render.id] = real_render
@@ -36,7 +39,7 @@ def build_context():
 
 @pytest.mark.asyncio
 async def test_combobox_store_emits_actions():
-	app, render, session, real_render = build_context()
+	app, render, session, real_render = await build_context()
 
 	with ps.PulseContext(
 		app=app,
@@ -59,7 +62,7 @@ async def test_combobox_store_emits_actions():
 
 @pytest.mark.asyncio
 async def test_combobox_store_optional_payloads():
-	app, render, session, real_render = build_context()
+	app, render, session, real_render = await build_context()
 
 	with ps.PulseContext(
 		app=app,
@@ -82,7 +85,7 @@ async def test_combobox_store_optional_payloads():
 
 @pytest.mark.asyncio
 async def test_combobox_store_request_roundtrip():
-	app, render, session, real_render = build_context()
+	app, render, session, real_render = await build_context()
 
 	with ps.PulseContext(
 		app=app,
@@ -119,7 +122,7 @@ async def test_combobox_store_request_roundtrip():
 
 @pytest.mark.asyncio
 async def test_combobox_store_callbacks():
-	app, render, session, real_render = build_context()
+	app, render, session, real_render = await build_context()
 	opened: list[bool] = []
 	opened_sources: list[str] = []
 	closed_sources: list[str] = []
@@ -171,10 +174,14 @@ async def test_combobox_store_callbacks():
 			},
 		)
 
-	await asyncio.sleep(0)
-	assert opened == [True]
-	assert opened_sources == ["mouse"]
-	assert closed_sources == ["keyboard"]
+	assert await wait_for(
+		lambda: (
+			opened == [True]
+			and opened_sources == ["mouse"]
+			and closed_sources == ["keyboard"]
+		),
+		timeout=0.2,
+	)
 
 
 def test_combobox_requires_store():

@@ -54,6 +54,7 @@ async def test_server_session_save_blocks_http_response_until_persisted(
 		return RedirectResponse("/destination")
 
 	app.setup("http://example.com")
+	await app.scheduler.start()
 
 	with PulseContext(app=app):
 		transport = httpx.ASGITransport(app=app.fastapi)
@@ -73,6 +74,7 @@ async def test_server_session_save_blocks_http_response_until_persisted(
 
 	assert response.status_code == 307
 	assert any(session.get("auth") == "ok" for session in store.data.values())
+	await app.close()
 
 
 @pytest.mark.asyncio
@@ -83,6 +85,7 @@ async def test_server_session_response_wait_survives_superseded_save(
 	store = BlockingSessionStore()
 	app = ps.App(routes=[], session_store=store)
 	app.setup("http://example.com")
+	await app.scheduler.start()
 
 	session = await app.get_or_create_session(None)
 	await session.handle_response(Response())
@@ -111,6 +114,7 @@ async def test_server_session_response_wait_survives_superseded_save(
 	assert any(
 		session_data.get("auth") == "second" for session_data in store.data.values()
 	)
+	await app.close()
 
 
 @pytest.mark.asyncio
@@ -121,6 +125,7 @@ async def test_http_request_without_render_does_not_retain_user_session(
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[])
 	app.setup("http://example.com")
+	await app.scheduler.start()
 
 	transport = httpx.ASGITransport(app=app.fastapi)
 	async with httpx.AsyncClient(
@@ -131,6 +136,7 @@ async def test_http_request_without_render_does_not_retain_user_session(
 			assert resp.status_code == 200
 
 	assert app.user_sessions == {}
+	await app.close()
 
 
 @pytest.mark.asyncio
@@ -146,6 +152,7 @@ async def test_prerender_request_retains_user_session(
 
 	app = ps.App(routes=[ps.Route("a", home)])
 	app.setup("http://example.com")
+	await app.scheduler.start()
 
 	transport = httpx.ASGITransport(app=app.fastapi)
 	async with httpx.AsyncClient(

@@ -37,11 +37,11 @@ from pulse.queries.common import (
 from pulse.queries.effect import AsyncQueryEffect
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.scheduling import (
-	TimerHandleLike,
+	Task,
 	clamp_delay,
-	create_task,
 	is_pytest,
 	later,
+	spawn,
 )
 from pulse.state.property import InitializableProperty, StateMemberDescriptor
 from pulse.state.state import State
@@ -349,9 +349,9 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 	key: Key
 	state: QueryState[T]
 	observers: "list[KeyedQueryResult[T]]"
-	_task: asyncio.Task[None] | None
+	_task: Task | None
 	_task_initiator: "KeyedQueryResult[T] | None"
-	_gc_handle: TimerHandleLike | None
+	_gc_handle: Task | None
 	_interval_effect: Effect | None
 	_interval: float | None
 	_interval_observer: "KeyedQueryResult[T] | None"
@@ -475,7 +475,7 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 		fetch_fn: Callable[[], Awaitable[T]],
 		cancel_previous: bool = True,
 		initiator: "KeyedQueryResult[T] | None" = None,
-	) -> asyncio.Task[None]:
+	) -> Task:
 		"""
 		Start a fetch with the given fetch function.
 		Cancels any in-flight fetch if cancel_previous is True.
@@ -489,22 +489,23 @@ class KeyedQuery(Generic[T], Disposable, SuspendableQuery):
 			self._task.cancel()
 
 		self.state.is_fetching.write(True)
-		self._task = create_task(self._run_fetch(fetch_fn))
+		self._task = spawn(self._run_fetch(fetch_fn))
 		self._task_initiator = initiator
 		return self._task
 
 	async def wait(self) -> ActionResult[T]:
 		"""Wait for the current fetch to complete."""
 		while self._task and not self._task.done():
-			try:
-				await self._task
-			except asyncio.CancelledError:
+			task = self._task
+			await task.wait()
+			if task.cancelled():
 				# Task was cancelled (probably by a new refetch).
 				# If there's a new task, wait for that one instead.
 				# If no new task, re-raise the cancellation.
 				# Note: self._task may have been reassigned by run_fetch() after await
-				if self._task is None or self._task.done():  # pyright: ignore[reportUnnecessaryComparison]
-					raise
+				replacement: Task | None = self._task
+				if replacement is None or replacement.done():  # pyright: ignore[reportUnnecessaryComparison]
+					raise asyncio.CancelledError
 				# Otherwise, loop and wait for the new task
 		# Return result based on current state
 		if self.state.status() == "error":

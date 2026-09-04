@@ -1,4 +1,3 @@
-import asyncio
 from collections.abc import Awaitable, Callable
 from typing import (
 	Any,
@@ -9,6 +8,7 @@ from typing import (
 
 from pulse.helpers import MISSING
 from pulse.reactive import AsyncEffect, Computed, Signal
+from pulse.scheduling import Task
 
 
 class Fetcher(Protocol):
@@ -43,7 +43,7 @@ class AsyncQueryEffect(AsyncEffect):
 		super().__init__(fn, name=name, lazy=lazy, deps=deps)
 
 	@override
-	def run(self) -> asyncio.Task[Any]:
+	def run(self) -> Task:
 		# Immediately set loading state before running the effect
 		self.fetcher.is_fetching.write(True)
 

@@ -178,6 +178,7 @@ async def test_user_docs_route_reaches_react_app_on_cold_request(
 		session_store=ps.CookieSessionStore(secret="test-secret"),
 	)
 	app.setup("http://testserver")
+	await app.scheduler.start()
 	transport = httpx.ASGITransport(app=app.fastapi)
 
 	try:

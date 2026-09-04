@@ -15,7 +15,7 @@ handle = ps.later(delay, fn, *args, **kwargs)
 - `fn` - Sync or async function
 - `*args, **kwargs` - Arguments passed to fn
 
-**Returns:** `asyncio.TimerHandle` with `.cancel()` method
+**Returns:** `ps.Task` with `.cancel()`, `.wait()`, and await support
 
 `ps.later()` callbacks are not canceled by route unmounting. They run unless you
 cancel the returned handle or the render session/app closes. If a later callback
@@ -45,6 +45,21 @@ ps.later(2.0, save_draft)  # Runs as task after 2s
 
 **Note:** Callbacks run outside reactive scope (via `Untrack()`), so they won't create dependencies.
 
+## Thread-safe posting
+
+Use `post()` when synchronous code may run from a worker thread and needs to
+request work on the active scheduler:
+
+```python
+from pulse.scheduling import post
+
+post(refresh)
+```
+
+`post()` runs the synchronous callback on the scheduler's event loop and
+returns no handle. Use `ps.later()`, `ps.repeat()`, or `spawn()` on the owning
+loop when you need a cancellable `ps.Task`.
+
 ## ps.repeat()
 
 Run a function repeatedly at an interval.
@@ -58,7 +73,7 @@ handle = ps.repeat(interval, fn, *args, **kwargs)
 - `fn` - Sync or async function
 - `*args, **kwargs` - Arguments passed to fn
 
-**Returns:** `RepeatHandle` with `.cancel()` method
+**Returns:** `ps.Task` with `.cancel()`, `.wait()`, and await support
 
 ```python
 class DashboardState(ps.State):
@@ -225,15 +240,18 @@ lambda name, idx: ... # 2 args
 
 These are used internally but available if needed:
 
-### RepeatHandle
+### ps.Task
 
 ```python
-class RepeatHandle:
-    task: asyncio.Task | None
-    cancelled: bool
-
+class Task:
     def cancel(self) -> None: ...
+    def done(self) -> bool: ...
+    def cancelled(self) -> bool: ...
+    async def wait(self) -> None: ...
 ```
+
+Tasks returned by `later()`, `repeat()`, and `spawn()` can be awaited and
+cancelled. Awaiting a cancelled task raises `asyncio.CancelledError`.
 
 ### Disposable
 

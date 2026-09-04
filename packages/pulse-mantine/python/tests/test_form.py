@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from pulse.messages import ClientChannelRequestMessage
 from pulse.routing import Route, RouteInfo, RouteTree
 from pulse.serializer import serialize
+from pulse.test_helpers import wait_for
 from pulse.user_session import UserSession
 from pulse_mantine import MantineForm
 from starlette.datastructures import FormData as StarletteFormData
@@ -35,19 +36,21 @@ class DummyFormRequest:
 		return self.data
 
 
-def build_context():
+async def build_context():
 	def page():
 		return ps.div()
 
 	route = Route("/", ps.component(page))
 	routes = RouteTree([route])
 	app = ps.App(routes=[route])
+	await app.scheduler.start()
 	dummy_render = DummyRender()
 	session = SimpleNamespace(sid="session-1")
 
 	real_render = ps.RenderSession(
 		dummy_render.id, routes, server_address="http://localhost"
 	)
+	await real_render.scheduler.start()
 	real_render.send = dummy_render.send  # pyright: ignore[reportAttributeAccessIssue]
 	with ps.PulseContext(app=app):
 		real_render.prerender(
@@ -79,8 +82,9 @@ def client_channel_request(message: object) -> ClientChannelRequestMessage:
 	return cast(ClientChannelRequestMessage, message)
 
 
-def test_form_recreates_channel_after_client_release():
-	app, render, session, real_render, route_ctx = build_context()
+@pytest.mark.asyncio
+async def test_form_recreates_channel_after_client_release():
+	app, render, session, real_render, route_ctx = await build_context()
 
 	with ps.PulseContext(
 		app=app,
@@ -113,7 +117,7 @@ def test_form_recreates_channel_after_client_release():
 
 @pytest.mark.asyncio
 async def test_form_sync_handler_survives_channel_recreation():
-	app, _render, session, real_render, route_ctx = build_context()
+	app, _render, session, real_render, route_ctx = await build_context()
 
 	with ps.PulseContext(
 		app=app,
@@ -145,13 +149,13 @@ async def test_form_sync_handler_survives_channel_recreation():
 				},
 			),
 		)
-		await asyncio.sleep(0)
 
-	assert form.values["query"] == "xrd"
+	assert await wait_for(lambda: form.values["query"] == "xrd", timeout=0.2)
 
 
-def test_form_exposes_submit_state():
-	app, _render, session, real_render, route_ctx = build_context()
+@pytest.mark.asyncio
+async def test_form_exposes_submit_state():
+	app, _render, session, real_render, route_ctx = await build_context()
 
 	with ps.PulseContext(
 		app=app,
@@ -170,7 +174,7 @@ def test_form_exposes_submit_state():
 
 @pytest.mark.asyncio
 async def test_submit_state_resets_after_successful_submit():
-	app, _render, session, real_render, route_ctx = build_context()
+	app, _render, session, real_render, route_ctx = await build_context()
 	started = asyncio.Event()
 	release = asyncio.Event()
 	received: list[dict[str, Any]] = []
@@ -208,7 +212,7 @@ async def test_submit_state_resets_after_successful_submit():
 
 @pytest.mark.asyncio
 async def test_form_registry_deserializes_before_mantine_submit():
-	app, _render, session, real_render, route_ctx = build_context()
+	app, _render, session, real_render, route_ctx = await build_context()
 	received: list[dict[str, Any]] = []
 
 	async def handle_submit(values: dict[str, Any]):
@@ -244,7 +248,7 @@ async def test_form_registry_deserializes_before_mantine_submit():
 
 @pytest.mark.asyncio
 async def test_submit_accepts_registry_deserialized_data():
-	app, _render, session, real_render, route_ctx = build_context()
+	app, _render, session, real_render, route_ctx = await build_context()
 	received: list[dict[str, Any]] = []
 
 	async def handle_submit(values: dict[str, Any]):
@@ -269,7 +273,7 @@ async def test_submit_accepts_registry_deserialized_data():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reserved", ["__pulse_data__", "__pulse_files__"])
 async def test_form_registry_rejects_reserved_form_values(reserved: str):
-	app, _render, session, real_render, route_ctx = build_context()
+	app, _render, session, real_render, route_ctx = await build_context()
 
 	with ps.PulseContext(
 		app=app,
@@ -300,7 +304,7 @@ async def test_form_registry_rejects_reserved_form_values(reserved: str):
 
 @pytest.mark.asyncio
 async def test_form_registry_rejects_non_object_serialized_payload():
-	app, _render, session, real_render, route_ctx = build_context()
+	app, _render, session, real_render, route_ctx = await build_context()
 
 	with ps.PulseContext(
 		app=app,
@@ -364,7 +368,7 @@ async def test_form_registry_rejects_non_object_serialized_payload():
 async def test_form_registry_preserves_list_values_for_mantine_submit(
 	samples: list[dict[str, Any]],
 ):
-	app, _render, session, real_render, route_ctx = build_context()
+	app, _render, session, real_render, route_ctx = await build_context()
 	received: list[dict[str, Any]] = []
 
 	async def handle_submit(values: dict[str, Any]):
@@ -405,7 +409,7 @@ async def test_form_registry_preserves_list_values_for_mantine_submit(
 
 @pytest.mark.asyncio
 async def test_form_registry_hydrates_files_before_mantine_submit():
-	app, _render, session, real_render, route_ctx = build_context()
+	app, _render, session, real_render, route_ctx = await build_context()
 	received: list[dict[str, Any]] = []
 	first = ps.UploadFile(BytesIO(b"first"), filename="first.txt")
 	second = ps.UploadFile(BytesIO(b"second"), filename="second.txt")
@@ -453,8 +457,9 @@ async def test_form_registry_hydrates_files_before_mantine_submit():
 	assert received == [{"samples": [{"attachments": [first, second]}]}]
 
 
-def test_set_field_value_replaces_existing_list_value():
-	app, _render, session, real_render, route_ctx = build_context()
+@pytest.mark.asyncio
+async def test_set_field_value_replaces_existing_list_value():
+	app, _render, session, real_render, route_ctx = await build_context()
 
 	with ps.PulseContext(
 		app=app,
@@ -473,7 +478,7 @@ def test_set_field_value_replaces_existing_list_value():
 
 @pytest.mark.asyncio
 async def test_submit_state_resets_after_failed_submit():
-	app, _render, session, real_render, route_ctx = build_context()
+	app, _render, session, real_render, route_ctx = await build_context()
 	started = asyncio.Event()
 	release = asyncio.Event()
 

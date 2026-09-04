@@ -5,6 +5,7 @@ from typing import Any, ParamSpec, TypeVar, cast, final
 
 import pulse as ps
 import pytest
+import pytest_asyncio
 from pulse.helpers import MISSING
 from pulse.queries.protocol import QueryResult
 from pulse.queries.query import (
@@ -66,19 +67,18 @@ async def test_query_gc_uses_render_timers():
 	app = ps.PulseContext.get().app
 	routes = RouteTree([])
 	session = RenderSession("test-session", routes)
+	await session.scheduler.start()
 	query = session.query_store.ensure(("gc", "timers"), gc_time=0.05, retries=0)
 
-	app_handles = len(app._timers._handles)  # pyright: ignore[reportPrivateUsage]
-	assert len(session._timers._handles) == 0  # pyright: ignore[reportPrivateUsage]
+	assert app.scheduler.running
 
 	with ps.PulseContext.update(render=session):
 		query.schedule_gc()
 
-	assert len(session._timers._handles) == 1  # pyright: ignore[reportPrivateUsage]
-	assert len(app._timers._handles) == app_handles  # pyright: ignore[reportPrivateUsage]
+	assert session.scheduler.running
 
 	query.cancel_gc()
-	session._timers.cancel_all()  # pyright: ignore[reportPrivateUsage]
+	await session.scheduler.close()
 
 
 @pytest.mark.asyncio
@@ -736,13 +736,15 @@ async def test_query_retry_cancellation():
 	assert attempts == 1  # Only first attempt ran
 
 
-@pytest.fixture(autouse=True)
-def _pulse_context():  # pyright: ignore[reportUnusedFunction]
+@pytest_asyncio.fixture(autouse=True)
+async def _pulse_context():  # pyright: ignore[reportUnusedFunction]
 	"""Set up a PulseContext with an App for all tests."""
 	app = ps.App()
+	await app.scheduler.start()
 	ctx = ps.PulseContext(app=app)
 	with ctx:
 		yield
+	await app.scheduler.close()
 
 
 def with_render_session(fn: Callable[P, Awaitable[R]]):
@@ -752,8 +754,12 @@ def with_render_session(fn: Callable[P, Awaitable[R]]):
 		# Create a minimal RouteTree for the session (not needed for query tests)
 		routes = RouteTree([])
 		session = RenderSession("test-session", routes)
-		with ps.PulseContext.update(render=session):
-			return await fn(*args, **kwargs)
+		await session.scheduler.start()
+		try:
+			with ps.PulseContext.update(render=session):
+				return await fn(*args, **kwargs)
+		finally:
+			await session.close()
 
 	return wrapper
 
@@ -885,6 +891,7 @@ async def test_query_override_uses_defining_member_identity():
 	base = super(Child, state).item
 
 	assert child is not base
+	assert await wait_for(lambda: child.data == 2, timeout=0.2)
 	assert child.data == 2
 	assert base.data == 1
 
@@ -916,9 +923,6 @@ async def test_state_query_success():
 	# Initial state is loading until first fetch completes
 	assert q.is_loading
 
-	# Wait for query to start
-	await asyncio.sleep(0)
-	assert query_running
 	# Wait for query to complete
 	await q.wait()
 	assert not query_running
@@ -1848,6 +1852,8 @@ async def test_unkeyed_query_on_error_handler_reads_are_untracked():
 @pytest.mark.asyncio
 @with_render_session
 async def test_state_query_gc_time_0_disposes_immediately():
+	gate = asyncio.Event()
+
 	class S(ps.State):
 		uid: int = 1
 		started: bool = False
@@ -1857,7 +1863,7 @@ async def test_state_query_gc_time_0_disposes_immediately():
 		async def user(self) -> dict[str, Any]:
 			self.started = True
 			# simulate in-flight
-			await asyncio.sleep(0)
+			await gate.wait()
 			self.finished = True
 			return {"id": self.uid}
 
@@ -1869,8 +1875,7 @@ async def test_state_query_gc_time_0_disposes_immediately():
 	_ = s.user
 
 	# Start the task but dispose before it completes
-	await asyncio.sleep(0)
-	assert s.started is True
+	assert await wait_for(lambda: s.started, timeout=0.2)
 
 	s.dispose()
 

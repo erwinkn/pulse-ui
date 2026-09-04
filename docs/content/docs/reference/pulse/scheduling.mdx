@@ -38,7 +38,7 @@ waits for it before the scheduled task finishes.
 The returned `ps.Task` supports `.cancel()`, `.done()`, `.cancelled()`,
 `.wait()`, and awaiting. Awaiting a cancelled task raises
 `asyncio.CancelledError`. Route unmounting does not cancel `later()` callbacks.
-Cancel the handle when a route-local callback should not run after unmount.
+Cancel the task when a route-local callback should not run after unmount.
 
 ```python
 class NotificationState(ps.State):
@@ -148,10 +148,10 @@ from pulse.scheduling import post
 post(refresh)
 ```
 
-`post()` returns no handle. A `ps.Task` belongs to the loop that owns it, so
-use `spawn()`, `later()`, or `repeat()` on that loop when you need to cancel or
-await the returned handle. The callback must be synchronous; use one of the
-handle-returning functions from the owning loop for asynchronous work.
+`post()` returns nothing. A `ps.Task` belongs to the loop that owns it, so use
+`spawn()`, `later()`, or `repeat()` on that loop when you need to cancel or
+await the returned task. The callback must be synchronous; use one of the
+task-returning functions from the owning loop for asynchronous work.
 
 ## Untracking
 

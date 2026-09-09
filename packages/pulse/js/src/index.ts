@@ -14,6 +14,8 @@ export { FormSubmissionError, PulseForm, submitForm } from "./form";
 export type { RouteInfo } from "./helpers";
 // Server helpers
 export { extractServerRouteInfo } from "./helpers";
+// Pre-hydration input capture (SSR HTML embeds the script; PulseProvider replays)
+export { preHydrationInputCaptureScript, replayPreHydrationInputs } from "./hydration";
 // Messages (types only)
 export type {
 	ClientApiResultMessage,

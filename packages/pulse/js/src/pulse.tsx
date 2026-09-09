@@ -12,6 +12,7 @@ import {
 import { useLocation, useNavigate, useParams } from "react-router";
 import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
 import type { RouteInfo } from "./helpers";
+import { preHydrationInputCaptureScript, replayPreHydrationInputs } from "./hydration";
 import type { ServerError } from "./messages";
 import { VDOMRenderer } from "./renderer";
 import type { VDOM } from "./vdom";
@@ -127,6 +128,12 @@ export function PulseProvider({ children, config, prerender }: PulseProviderProp
 		};
 	}, [client]);
 
+	// Replay inputs the user typed before hydration (recorded by the inline
+	// capture script in the SSR HTML) once the hydration commit is done.
+	useIsomorphicLayoutEffect(() => {
+		replayPreHydrationInputs();
+	}, []);
+
 	useEffect(() => {
 		if (!inBrowser) return;
 
@@ -165,6 +172,10 @@ export function PulseProvider({ children, config, prerender }: PulseProviderProp
 		<PulseClientContext.Provider value={client}>
 			<PulseDirectivesContext.Provider value={directivesRef}>
 				<PulsePrerenderContext.Provider value={prerender}>
+					<script
+						// biome-ignore lint/security/noDangerouslySetInnerHtml: own capture bootstrap
+						dangerouslySetInnerHTML={{ __html: preHydrationInputCaptureScript }}
+					/>
 					{statusMessage && (
 						<div
 							style={{

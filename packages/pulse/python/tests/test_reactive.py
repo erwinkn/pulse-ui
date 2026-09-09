@@ -784,6 +784,53 @@ def test_effect_unregister_from_batch_on_disposal():
 		assert batch.effects == []
 
 
+def test_batch_discard_is_noop_if_already_removed():
+	with Batch() as batch:
+		e = Effect(lambda: None, lazy=True)
+		batch.register_effect(e)
+		assert batch.effects == [e]
+		batch.discard(e)
+		assert batch.effects == []
+		batch.discard(e)
+		assert batch.effects == []
+
+
+def test_flush_does_not_run_effect_disposed_by_earlier_snapshot_effect():
+	"""One effect disposing another in the same Batch snapshot must not raise.
+
+	Batch.flush() snapshots effects then replaces self.effects with []. If the
+	first run disposes a later snapshot effect, cancel() used to list.remove()
+	against that empty list (ValueError) and the victim could still run.
+	"""
+	sites = Signal(["a"])
+	child = None
+
+	with Batch():
+
+		@effect
+		def page_render():
+			_ = sites()
+			if child is not None and sites() == []:
+				child.dispose()
+
+		@effect
+		def default_residence_time():
+			_ = sites()
+
+		child = default_residence_time
+
+	assert page_render.runs == 1
+	assert default_residence_time.runs == 1
+
+	with Batch():
+		sites.write([])
+
+	assert child is not None
+	assert child.__disposed__
+	assert default_residence_time.runs == 1
+	assert page_render.runs == 2
+
+
 def test_effect_unset_batch_after_run():
 	with Batch() as batch:
 

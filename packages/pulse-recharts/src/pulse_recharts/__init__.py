@@ -423,11 +423,12 @@ from .shapes import (
 from .shapes import (
 	TrapezoidProps as TrapezoidProps,
 )
-from .version import __version__
+from .version import __version__ as __version__
 
+# Unlike pulse-mantine, this package has no JS counterpart: every component
+# imports straight from the recharts npm package.
 ps.require(
 	{
-		"pulse-recharts": __version__,
 		"recharts": ">=3.7.0",
 	}
 )

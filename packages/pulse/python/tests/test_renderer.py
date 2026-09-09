@@ -10,7 +10,7 @@ from pulse.component import component
 from pulse.dom.tags import button, div, li, span, ul
 from pulse.hooks.core import HookContext
 from pulse.refs import RefHandle
-from pulse.renderer import RenderTree
+from pulse.renderer import RenderTree, snapshot_render
 from pulse.transpiler.nodes import Element, PulseNode, Value
 from pulse.transpiler.vdom import VDOMElement, VDOMExpr
 
@@ -1379,3 +1379,40 @@ def test_ref_prop_rejects_non_ref_key():
 			TypeError, match="RefHandle can only be used as the 'ref' prop"
 		):
 			tree.render()
+
+
+def test_snapshot_render_disposes_inline_effects():
+	"""Snapshot-rendering a renderable must not leak effects created during
+	the one-shot render."""
+	from pulse.reactive import Signal, flush_effects
+
+	sig = Signal(0)
+	runs: list[int] = []
+
+	@ps.component
+	def Toast():
+		@ps.effect(immediate=True)
+		def track():  # pyright: ignore[reportUnusedFunction]
+			runs.append(sig())
+
+		return ps.div(f"value: {sig()}")
+
+	snapshot_render(Toast())
+	flush_effects()
+	assert runs == [0]
+
+	sig.write(1)
+	flush_effects()
+	assert runs == [0]
+
+
+def test_snapshot_render_does_not_mutate_original():
+	@ps.component
+	def Label():
+		return ps.span("Saved")
+
+	node = Label()
+	snapshot_render(node)
+
+	assert node.hooks is None
+	assert node.contents is None

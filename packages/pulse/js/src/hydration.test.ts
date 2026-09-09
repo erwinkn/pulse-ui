@@ -129,20 +129,46 @@ describe("pre-hydration input capture", () => {
 		expect(select.value).toBe("two");
 	});
 
-	test("ignores file inputs, disconnected elements, and a missing script", () => {
+	test("ignores file inputs and is a no-op without the script", () => {
 		installCaptureScript();
 		const file = document.createElement("input");
 		file.type = "file";
-		const input = document.createElement("input");
-		document.body.append(file, input);
+		document.body.append(file);
 		file.dispatchEvent(new Event("input", { bubbles: true }));
+
+		replayPreHydrationInputs();
+		expect(window.__PULSE_INPUT_CAPTURE__).toBeUndefined();
+		replayPreHydrationInputs();
+	});
+
+	test("drops disconnected elements that have no remounted match", () => {
+		installCaptureScript();
+		const input = document.createElement("input");
+		input.placeholder = "gone";
+		document.body.appendChild(input);
 		type(input, "gone");
 		input.remove();
 
 		replayPreHydrationInputs();
 		expect(window.__PULSE_INPUT_CAPTURE__).toBeUndefined();
-		// Second call without capture installed: must not throw.
+	});
+
+	test("replays onto a remounted input with the same fingerprint", () => {
+		installCaptureScript();
+		const input = document.createElement("input");
+		input.placeholder = "name";
+		document.body.appendChild(input);
+		type(input, "Avery Smith");
+		input.remove();
+
+		const replacement = document.createElement("input");
+		replacement.placeholder = "name";
+		replacement.value = "Avery";
+		document.body.appendChild(replacement);
+
 		replayPreHydrationInputs();
+		expect(replacement.value).toBe("Avery Smith");
+		expect(window.__PULSE_INPUT_CAPTURE__).toBeUndefined();
 	});
 });
 

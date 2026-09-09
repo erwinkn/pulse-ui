@@ -53,46 +53,75 @@ export const preHydrationInputCaptureScript = `(function () {
 })();`;
 
 /**
- * Replay inputs recorded before hydration. Called once after the hydration
- * commit; a no-op when the capture script is absent (client-only renders)
- * or nothing was typed.
+ * Replay inputs recorded before hydration. Safe to call more than once:
+ * records are dropped as they are applied. A no-op when the capture script
+ * is absent (client-only renders) or nothing was typed.
+ *
+ * Must run after Pulse views `attach`, otherwise `invokeCallback` drops the
+ * synthetic events. React may also replace the SSR node during hydrate —
+ * resolve a live match by tag/type/name/id/placeholder when that happens.
  */
 export function replayPreHydrationInputs(): void {
 	if (typeof window === "undefined") return;
 	const capture = window.__PULSE_INPUT_CAPTURE__;
 	if (!capture) return;
 	capture.stop();
-	delete window.__PULSE_INPUT_CAPTURE__;
 
 	// Always dispatch, even when the DOM value still matches: hydration may
 	// not have reset the input yet, and only the event makes the framework's
 	// state adopt the value (otherwise the next controlled render reverts it).
-	for (const [element, entry] of capture.records) {
-		if (!element.isConnected) continue;
+	for (const [element, entry] of [...capture.records]) {
+		const target = resolveReplayTarget(element);
+		if (!target) {
+			capture.records.delete(element);
+			continue;
+		}
 
 		if ("checked" in entry) {
-			const input = element as HTMLInputElement;
+			const input = target as HTMLInputElement;
 			// Force the opposite state through React's tracked instance setter
 			// (hydration initialized the tracker with the user's state, so a
 			// click alone would be deduped as a no-op), then click() to toggle
 			// back through React's event system.
 			setDesyncingReactTracker(input, "checked", !entry.checked);
 			input.click();
+			capture.records.delete(element);
 			continue;
 		}
 
-		const target = element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-		if (!setDesyncingReactTracker(target, "value", entry.value)) continue;
-		target.dispatchEvent(new Event("input", { bubbles: true }));
-		target.dispatchEvent(new Event("change", { bubbles: true }));
-		if (document.activeElement === target && "setSelectionRange" in target) {
+		const control = target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+		if (!setDesyncingReactTracker(control, "value", entry.value)) continue;
+		control.dispatchEvent(new Event("input", { bubbles: true }));
+		control.dispatchEvent(new Event("change", { bubbles: true }));
+		if (document.activeElement === control && "setSelectionRange" in control) {
 			try {
-				target.setSelectionRange(entry.value.length, entry.value.length);
+				control.setSelectionRange(entry.value.length, entry.value.length);
 			} catch {
 				// Some input types (email, number) don't support selection.
 			}
 		}
+		capture.records.delete(element);
 	}
+
+	if (capture.records.size === 0) {
+		delete window.__PULSE_INPUT_CAPTURE__;
+	}
+}
+
+function controlFingerprint(element: Element): string {
+	const input = element as HTMLInputElement;
+	return [element.tagName, input.type ?? "", input.name ?? "", input.id ?? "", input.placeholder ?? ""].join(
+		"\0",
+	);
+}
+
+function resolveReplayTarget(element: Element): Element | null {
+	if (element.isConnected) return element;
+	const fingerprint = controlFingerprint(element);
+	const matches = [...document.querySelectorAll(element.tagName)].filter(
+		(el) => controlFingerprint(el) === fingerprint,
+	);
+	return matches.length === 1 ? matches[0] : (matches[0] ?? null);
 }
 
 /**

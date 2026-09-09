@@ -128,10 +128,13 @@ export function PulseProvider({ children, config, prerender }: PulseProviderProp
 		};
 	}, [client]);
 
-	// Replay inputs the user typed before hydration (recorded by the inline
-	// capture script in the SSR HTML) once the hydration commit is done.
-	useIsomorphicLayoutEffect(() => {
-		replayPreHydrationInputs();
+	// After child PulseViews attach (same commit's useEffects). Layout-phase
+	// replay would fire before attach and invokeCallback would drop the events.
+	useEffect(() => {
+		const replay = () => replayPreHydrationInputs();
+		queueMicrotask(replay);
+		const frame = requestAnimationFrame(replay);
+		return () => cancelAnimationFrame(frame);
 	}, []);
 
 	useEffect(() => {
@@ -249,6 +252,7 @@ export function PulseView({ path, registry }: PulseViewProps) {
 				onInit: (view) => {
 					setTree(renderer.init(view));
 					setServerError(null);
+					queueMicrotask(() => replayPreHydrationInputs());
 				},
 				onUpdate: (ops) => {
 					setTree((prev) => (prev == null ? prev : renderer.applyUpdates(prev, ops)));

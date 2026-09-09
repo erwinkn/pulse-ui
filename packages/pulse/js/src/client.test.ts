@@ -508,6 +508,7 @@ describe("PulseProvider connection handling", () => {
 			),
 		);
 
+		await waitForEffects();
 		expect(input.value).toBe("hello");
 		input.remove();
 	});

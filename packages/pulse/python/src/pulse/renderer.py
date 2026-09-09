@@ -4,7 +4,8 @@ import inspect
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from types import NoneType
-from typing import Any, Literal as TypingLiteral, NamedTuple, TypeAlias, cast
+from typing import Any, NamedTuple, TypeAlias, cast
+from typing import Literal as TypingLiteral
 
 from pulse.debounce import Debounced
 from pulse.helpers import values_equal

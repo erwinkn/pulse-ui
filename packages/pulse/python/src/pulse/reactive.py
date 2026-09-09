@@ -894,10 +894,8 @@ class AsyncEffect(Effect):
 			child.dispose()
 		if self.cleanup_fn:
 			self.cleanup_fn()
-			self.cleanup_fn = None
 		for dep in self.deps:
 			dep.obs.remove(self)
-		self.deps = {}
 		if self.parent and self in self.parent.children:
 			self.parent.children.remove(self)
 

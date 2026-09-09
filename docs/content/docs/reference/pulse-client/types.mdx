@@ -711,6 +711,17 @@ Wire format for serialized data.
 type Serialized = [5, WireValue];
 ```
 
+### DeserializeOptions
+
+Optional client reconstitution for `$v` (snapshot-rendered Pulse UI) markers.
+
+```ts
+type DeserializeOptions = {
+  registry?: ComponentRegistry;
+  renderer?: Pick<VDOMRenderer, "renderNode">;
+};
+```
+
 ### WireValue
 
 JSON-compatible value.

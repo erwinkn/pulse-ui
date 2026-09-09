@@ -24,9 +24,11 @@ from pulse._serializer.common import (
 	validate_portable_string,
 	validate_safe_integer,
 )
+from pulse._serializer.renderable import project_renderable
 from pulse._serializer.types import (
 	Primitive,
 	PulseSerializable,
+	PulseVDOM,
 	Serialized,
 	SerializerAdapter,
 	WireMap,
@@ -57,6 +59,9 @@ class Encoder:
 				f"Cannot serialize {format_path(self.path)}: nesting exceeds "
 				+ f"the maximum depth of {MAX_DEPTH}."
 			)
+		existing = self.seen.get(id(value))
+		if existing is not None:
+			return ["$", existing[1]]
 		terminal, aliases = self._resolve_custom(value)
 		return self._encode_terminal(terminal, aliases)
 
@@ -100,6 +105,7 @@ class Encoder:
 				set,
 				frozenset,
 				WireMap,
+				PulseVDOM,
 			}:
 				return current, tuple(aliases)
 			if steps >= MAX_PROJECTION_STEPS:
@@ -111,6 +117,8 @@ class Encoder:
 			adapter = self._find_adapter(current_type)
 			if adapter is not None:
 				projected = adapter.serialize(current)
+			elif (renderable := project_renderable(current)) is not None:
+				projected = renderable
 			elif isinstance(current, PulseSerializable):
 				projected = current.to_pulse()
 			elif is_dataclass(current) and not isinstance(current, type):
@@ -187,6 +195,8 @@ class Encoder:
 			if seen:
 				return ["$", identity]
 
+		if value_type is PulseVDOM:
+			return ["$", "v", self._encode_vdom_payload(cast(PulseVDOM, value).node)]
 		if value_type is dt.datetime:
 			return ["$", "t", datetime_to_wire(cast(dt.datetime, value), self.path)]
 		if value_type is dt.date:
@@ -227,6 +237,13 @@ class Encoder:
 		for item in values:
 			self.seen[id(item)] = (item, identity)
 		return identity, False
+
+	def _encode_vdom_payload(self, node: object) -> WireValue:
+		# The PulseVDOM wrapper already claimed the identity slot. Encode the
+		# root record in place so a nested children array is the next id.
+		if type(node) is dict:
+			return self._encode_record(cast(dict[object, object], node))
+		return self.encode(node)
 
 	def _encode_array(self, value: object) -> list[WireValue]:
 		if isinstance(value, list):

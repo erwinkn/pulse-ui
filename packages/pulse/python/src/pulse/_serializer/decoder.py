@@ -144,13 +144,33 @@ class Decoder:
 			return self._decode_map(marker)
 		if tag == "s":
 			return self._decode_set(marker)
+		if tag == "v":
+			return self._decode_vdom(marker)
 		raise ValueError(
 			f"Unknown wire marker tag at {format_path(self.path)}: {tag!r}"
 		)
 
-	def _decode_record(self, entries: dict[Any, Any]) -> dict[str, Any]:
+	def _decode_vdom(self, marker: list[Any]) -> Any:
+		if len(marker) != 3:
+			raise ValueError(f"Malformed VDOM marker at {format_path(self.path)}.")
+		# Reserve the wrapper identity before decoding the payload so nested
+		# children arrays line up with the encoder's id assignment.
+		slot = len(self.identities)
+		self.identities.append(None)
+		payload = marker[2]
+		if type(payload) is dict:
+			node = self._decode_record(payload, register=False)
+		else:
+			node = self.decode(payload)
+		self.identities[slot] = node
+		return node
+
+	def _decode_record(
+		self, entries: dict[Any, Any], *, register: bool = True
+	) -> dict[str, Any]:
 		result: dict[str, Any] = {}
-		self.identities.append(result)
+		if register:
+			self.identities.append(result)
 		requires_ordering = False
 		for key in dict.__iter__(entries):
 			if type(key) is not str:

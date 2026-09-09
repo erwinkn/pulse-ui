@@ -12,6 +12,7 @@ from pulse._serializer.decoder import Decoder
 from pulse._serializer.encoder import Encoder
 from pulse._serializer.types import (
 	PulseSerializable,
+	PulseVDOM,
 	Serialized,
 	SerializerAdapter,
 	WireMap,
@@ -31,6 +32,7 @@ _CORE_ADAPTER_TARGETS = frozenset(
 		set,
 		dt.date,
 		dt.datetime,
+		PulseVDOM,
 		WireMap,
 	}
 )

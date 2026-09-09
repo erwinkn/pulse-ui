@@ -105,52 +105,54 @@ def test_init_reruns_when_key_changes():
 	assert fourth_key == "b"
 
 
+class DisposableBox(State):
+	_dispose_calls: int
+
+	def __init__(self) -> None:
+		self._dispose_calls = 0
+		super().__init__()
+
+	@override
+	def on_dispose(self) -> None:
+		self._dispose_calls += 1
+
+	@property
+	def dispose_calls(self) -> int:
+		return self._dispose_calls
+
+
 def test_init_disposes_state_on_unmount():
-	class Box(State):
-		_dispose_calls: int = 0
-
-		@override
-		def on_dispose(self) -> None:
-			self._dispose_calls += 1
-
 	@ps.component
-	def Example() -> Box:
+	def Example() -> DisposableBox:
 		with ps.init():
-			box = Box()
+			box = DisposableBox()
 		return box
 
 	ctx = HookContext()
 	with ctx:
-		held = cast(Box, cast(object, Example.fn()))
-	assert held._dispose_calls == 0
+		held = cast(DisposableBox, cast(object, Example.fn()))
+	assert held.dispose_calls == 0
 	ctx.unmount()
-	assert held._dispose_calls == 1
+	assert held.dispose_calls == 1
 
 
 def test_init_disposes_state_when_key_changes():
-	class Box(State):
-		_dispose_calls: int = 0
-
-		@override
-		def on_dispose(self) -> None:
-			self._dispose_calls += 1
-
 	@ps.component
-	def Example(key: str) -> Box:
+	def Example(key: str) -> DisposableBox:
 		with ps.init(key=key):
-			box = Box()
+			box = DisposableBox()
 		return box
 
 	ctx = HookContext()
 	with ctx:
-		first = cast(Box, cast(object, Example.fn("a")))
+		first = cast(DisposableBox, cast(object, Example.fn("a")))
 	with ctx:
-		second = cast(Box, cast(object, Example.fn("b")))
+		second = cast(DisposableBox, cast(object, Example.fn("b")))
 	assert first is not second
-	assert first._dispose_calls == 1
-	assert second._dispose_calls == 0
+	assert first.dispose_calls == 1
+	assert second.dispose_calls == 0
 	ctx.unmount()
-	assert second._dispose_calls == 1
+	assert second.dispose_calls == 1
 
 
 def test_init_restores_functions_and_classes():

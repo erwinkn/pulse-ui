@@ -1779,6 +1779,37 @@ async def test_re_prerender_returns_fresh_vdom():
 
 
 @pytest.mark.asyncio
+async def test_re_prerender_clears_stale_pending_queue():
+	"""Re-prerender of a pending mount drops queued updates from the old tree."""
+	routes = RouteTree([Route("a", StatefulCounter)])
+	session = RenderSession("test-id", routes)
+
+	with ps.PulseContext.update(render=session):
+		session.prerender(["/a"], make_route_info("/a"))
+
+	mount = session.route_mounts["/a"]
+	assert mount.state == "pending"
+	assert mount.queue == []
+
+	# Write a signal the render effect depends on so a vdom_update is queued
+	# against the current tree while still pending.
+	session.execute_callback("/a", "1.onClick", [])
+	session.flush()
+
+	assert mount.queue is not None
+	assert any(m["type"] == "vdom_update" for m in mount.queue)
+
+	with ps.PulseContext.update(render=session):
+		result = session.prerender(["/a"], make_route_info("/a"))["/a"]
+
+	assert result["type"] == "vdom_init"
+	assert mount.state == "pending"
+	assert mount.queue == []
+
+	session.close()
+
+
+@pytest.mark.asyncio
 async def test_detach_immediate_removes_mount_and_disposes_effect():
 	"""Test that detach immediately removes the mount and disposes its effect."""
 	routes = RouteTree([Route("a", simple_component)])

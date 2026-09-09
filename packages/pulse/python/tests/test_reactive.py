@@ -784,6 +784,17 @@ def test_effect_unregister_from_batch_on_disposal():
 		assert batch.effects == []
 
 
+def test_batch_discard_is_noop_if_already_removed():
+	with Batch() as batch:
+		e = Effect(lambda: None, lazy=True)
+		batch.register_effect(e)
+		assert batch.effects == [e]
+		batch.discard(e)
+		assert batch.effects == []
+		batch.discard(e)
+		assert batch.effects == []
+
+
 def test_flush_does_not_run_effect_disposed_by_earlier_snapshot_effect():
 	"""One effect disposing another in the same Batch snapshot must not raise.
 

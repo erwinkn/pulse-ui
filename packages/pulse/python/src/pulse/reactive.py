@@ -524,8 +524,7 @@ class Effect(Disposable):
 			cancel_interval: If True (default), also cancels the interval timer.
 		"""
 		if self.batch is not None:
-			if self in self.batch.effects:
-				self.batch.effects.remove(self)
+			self.batch.discard(self)
 			self.batch = None
 		if cancel_interval:
 			self._cancel_interval()
@@ -558,8 +557,7 @@ class Effect(Disposable):
 	def flush(self):
 		"""If scheduled in a batch, remove and run immediately."""
 		if self.batch is not None:
-			if self in self.batch.effects:
-				self.batch.effects.remove(self)
+			self.batch.discard(self)
 			self.batch = None
 			# Run now (respects IS_PRERENDERING and error handling)
 			self.run()
@@ -942,6 +940,15 @@ class Batch:
 		"""
 		if effect not in self.effects:
 			self.effects.append(effect)
+
+	def discard(self, effect: Effect):
+		"""Remove an effect from this batch. No-op if already gone.
+
+		Args:
+			effect: The effect to unschedule.
+		"""
+		if effect in self.effects:
+			self.effects.remove(effect)
 
 	def flush(self):
 		"""Run all scheduled effects."""

@@ -439,6 +439,9 @@ def test_decode_rejects_unknown_tags_and_malformed_markers():
 	with pytest.raises(ValueError, match="Unknown wire marker tag"):
 		deserialize([5, ["$", "x", 1]])
 
+	with pytest.raises(ValueError, match="Malformed VDOM marker"):
+		deserialize([5, ["$", "v"]])
+
 	with pytest.raises(ValueError, match="Dangling reference"):
 		deserialize([5, ["$", 1]])
 

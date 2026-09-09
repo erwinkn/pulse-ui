@@ -80,12 +80,26 @@ Set containing both `undefined` and `null`, or both `NaN` and `null`, fails.
 ```ts
 import { deserialize } from "pulse-ui-client";
 
-function deserialize(payload: unknown): unknown;
+function deserialize(payload: unknown, options?: DeserializeOptions): unknown;
+
+type DeserializeOptions = {
+  registry?: ComponentRegistry;
+  renderer?: Pick<VDOMRenderer, "renderNode">;
+};
 ```
 
 `null` always remains `null`; there is no null-to-undefined option. Timestamp
 markers become native `Date` values. Map and Set markers become their native
 JavaScript types. Shared references and cycles are restored.
+
+A `$v` marker is snapshot-rendered Pulse UI. Pass `registry` or `renderer` so
+the decoder can turn that VDOM into React nodes after nested dates, sets, and
+refs inside the node are restored. Missing both when a `$v` marker is present
+throws. A plain `{ tag: "span" }` object without a marker stays a plain object.
+
+```ts
+const tree = deserialize(wire, { registry: { Badge } });
+```
 
 The decoder accepts JSON/Socket.IO-materialized values and still validates every
 scalar, marker, reference, Map, Set, and record key. `__proto__` is assigned as
@@ -100,6 +114,7 @@ an own data property without changing the output object's prototype.
 | Double beyond 2^53 | `["$", "f", value]` |
 | Map | `["$", "m", entries]` |
 | Set | `["$", "s", items]` |
+| Snapshot-rendered Pulse UI | `["$", "v", vdom]` |
 | Back reference | `["$", id]` |
 
 References point only to an earlier identity and use non-negative safe integer

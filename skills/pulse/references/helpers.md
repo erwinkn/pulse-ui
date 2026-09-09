@@ -144,8 +144,11 @@ serialized = ps.serialize(data)
 ```
 
 Supported values include `None`, booleans, strings, finite floats, safe integers, lists,
-tuples, string-keyed dictionaries, `ps.WireMap`, sets, dataclasses, dates, and
-aware datetimes. Arbitrary objects require an adapter.
+tuples, string-keyed dictionaries, `ps.WireMap`, sets, dataclasses, dates,
+aware datetimes, and Pulse UI trees (`Element`, `PulseNode`, `Expr`). Renderable
+trees are snapshot-rendered into a `$v` marker; callbacks and refs inside the
+tree are stripped, and the snapshot clone is unmounted. Arbitrary objects
+require an adapter.
 
 ```python
 from datetime import datetime, timezone

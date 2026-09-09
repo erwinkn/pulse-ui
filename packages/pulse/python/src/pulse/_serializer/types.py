@@ -12,6 +12,13 @@ class WireMap(dict[str, Any]):
 	"""Dict subclass that round-trips as a JavaScript Map."""
 
 
+@dataclass(frozen=True, slots=True)
+class PulseVDOM:
+	"""Snapshot-rendered Pulse UI. Encodes as the v5 `$v` marker."""
+
+	node: object
+
+
 class PulseSerializable(ABC):
 	"""A value that projects itself into Pulse's portable domain."""
 

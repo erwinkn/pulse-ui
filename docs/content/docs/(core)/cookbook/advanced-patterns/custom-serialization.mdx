@@ -73,6 +73,26 @@ Adapters can return nested values that use other configured adapters. Returning
 the input object unchanged fails. Unsupported values in a projection report the
 path where serialization failed.
 
+## Put Pulse UI in a payload
+
+`ps.serialize` snapshot-renders `Element`, `PulseNode`, and `Expr` values. Use
+that for a rich notification body or a cell that is itself a Pulse tree:
+
+```python
+ps.serialize({
+    "title": "New comment",
+    "body": ps.div(ps.strong("Ada"), " left a note"),
+})
+```
+
+Callbacks and refs inside that tree are stripped. The clone used for the
+snapshot is unmounted, so inline `@ps.effect` hooks do not stay subscribed.
+Python deserializes the VDOM dict; the browser needs a `registry` or `renderer`
+to turn `$v` markers back into React nodes.
+
+A user dict that looks like VDOM is not a renderable. Only real Pulse nodes
+get the marker.
+
 ## See also
 
 - [Serializer reference](/docs/reference/pulse/serializer)

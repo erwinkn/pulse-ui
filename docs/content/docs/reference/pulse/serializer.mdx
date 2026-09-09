@@ -49,6 +49,7 @@ serializer is created.
 | `set` | `Set` | Canonically ordered; cross-runtime equality collisions fail |
 | `date`, aware `datetime` | `Date` | Normalized to UTC with exact millisecond precision |
 | dataclass instance | plain object | Field order is preserved |
+| `Element`, `PulseNode`, `Expr` | VDOM marker | Snapshot-rendered; callbacks and refs stripped |
 
 Arbitrary objects, callables, classes, modules, naive datetimes, sub-millisecond
 datetimes, infinity, unsafe integers, and invalid Unicode are rejected.
@@ -104,9 +105,10 @@ Resolution order is:
 
 1. Exact core wire type
 2. Nearest registered adapter in the value's MRO
-3. `PulseSerializable`
-4. Dataclass
-5. Supported container subclass
+3. Pulse renderable (`Element`, `PulseNode`, `Expr`)
+4. `PulseSerializable`
+5. Dataclass
+6. Supported container subclass
 
 Configured adapters override `PulseSerializable` and dataclass behavior.
 Duplicate targets and adapters for `object` or core wire types are rejected.
@@ -118,6 +120,30 @@ source object directly is an error.
 See [Custom serialization](/docs/cookbook/advanced-patterns/custom-serialization)
 for a complete example.
 
+## Renderable values
+
+Put a Pulse UI tree in a payload the same way you put a string or a date:
+
+```python
+payload = ps.serialize({
+    "title": "Saved",
+    "body": ps.span("Your changes landed."),
+})
+# [5, {"title": "Saved", "body": ["$", "v", {"tag": "span", "children": [...]}]}]
+```
+
+The encoder snapshot-renders `Element`, `PulseNode`, and `Expr` values, strips
+callbacks and refs, then wraps the VDOM in a `$v` marker. A throwaway clone is
+unmounted after the snapshot so `@ps.effect` subscriptions do not leak.
+
+Python `deserialize` returns the VDOM dict, not a live element. The browser
+reconstitutes React nodes when you pass a `registry` or `renderer` to
+`deserialize`. A dict that merely looks like VDOM (`{"tag": "span"}`) stays
+plain data.
+
+A callable sitting next to a renderable still fails. Snapshot rendering only
+strips handlers that live *inside* the UI tree.
+
 ## Wire markers
 
 | Value | Marker |
@@ -126,6 +152,7 @@ for a complete example.
 | UTC timestamp | `["$", "t", iso_timestamp]` |
 | Map | `["$", "m", entries]` |
 | Set | `["$", "s", items]` |
+| Snapshot-rendered Pulse UI | `["$", "v", vdom]` |
 | Back reference | `["$", id]` |
 
 Reference IDs are backward-only non-negative safe integers. The decoder rejects

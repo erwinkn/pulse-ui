@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, ParamSpec, TypeVar, cast, override
 
+from pulse.helpers import dispose_if_disposable
 from pulse.hooks.core import HookMetadata, HookState, hooks
 from pulse.reactive import Effect, Scope, Signal
 
@@ -63,6 +64,7 @@ class SetupState(HookState):
 		key: str | None,
 	) -> Any:
 		self.dispose_effects()
+		dispose_if_disposable(self.value)
 		with Scope() as scope:
 			self.value = init_func(*args, **kwargs)
 			self.effects = list(scope.effects)
@@ -111,6 +113,7 @@ class SetupState(HookState):
 	@override
 	def dispose(self) -> None:
 		self.dispose_effects()
+		dispose_if_disposable(self.value)
 		self.args = []
 		self.kwargs = {}
 		self.value = None

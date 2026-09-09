@@ -95,12 +95,13 @@ def my_component():
 - Cannot use `as` binding (`with ps.init() as ctx:` not allowed)
 - Variables are restored from first render on subsequent renders
 - Key must be a non-empty string if provided
+- `State` instances and other `Disposable` values captured in the block are disposed when the component unmounts, and when `key` changes
 
 ### How It Works
 
 `ps.init()` uses **AST rewriting** to transform your code at decoration time. When you use the `@ps.component` decorator, Pulse parses your function's source code and rewrites `with ps.init():` blocks into conditional logic.
 
-On first render, the code inside the block runs normally and variables are captured. On subsequent renders with the same key, the block is skipped entirely and variables are restored from storage. When the key changes, the block runs again and replaces the captured variables.
+On first render, the code inside the block runs normally and variables are captured. On subsequent renders with the same key, the block is skipped entirely and variables are restored from storage. When the key changes, captured `Disposable` values (including `State`) are disposed, then the block runs again and replaces the captured variables.
 
 ### Dynamic key
 

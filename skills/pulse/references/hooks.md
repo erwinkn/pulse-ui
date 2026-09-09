@@ -33,6 +33,7 @@ def UserProfile(user_id: str):
 - No `as` binding (`with ps.init() as ctx:` not allowed)
 - Only once per component
 - `key` must be a non-empty string if provided
+- `State` / other `Disposable` values captured in the block are disposed on unmount and when `key` changes
 
 **Inside vs Outside:**
 ```python
@@ -109,11 +110,13 @@ Arguments are tracked via reactive signals. Changes update the signals but don't
 def init_with_cleanup():
     ws = WebSocket("ws://server")
     ws.connect()
-    # Cleanup happens when component unmounts
+    # Cleanup happens when component unmounts, and when setup_key changes
     return ws  # If ws has dispose(), it's called
 
 state = ps.setup(init_with_cleanup)
 ```
+
+A tuple/list return disposes any `Disposable` items in it. `ps.init()` does the same for captured locals.
 
 **ps.setup_key() for re-initialization:**
 ```python

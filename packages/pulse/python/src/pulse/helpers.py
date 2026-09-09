@@ -163,6 +163,23 @@ class Disposable(ABC):
 			cls.dispose = wrapped_dispose
 
 
+def dispose_if_disposable(value: Any) -> None:
+	"""Dispose `value` if it is Disposable, or Disposable items in a tuple/list.
+
+	`ps.init()` / `ps.setup()` use this so component-owned States (and other
+	Disposables) are released on unmount or key change. Already-disposed
+	values are skipped.
+	"""
+	if isinstance(value, Disposable):
+		if not value.__disposed__:
+			value.dispose()
+		return
+	if isinstance(value, (tuple, list)):
+		for item in value:
+			if isinstance(item, Disposable) and not item.__disposed__:
+				item.dispose()
+
+
 def get_client_address(request: Request) -> str | None:
 	"""Best-effort client origin/address from an HTTP request.
 

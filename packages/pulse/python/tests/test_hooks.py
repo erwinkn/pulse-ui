@@ -91,6 +91,45 @@ def test_setup_reinitializes_when_key_changes():
 	assert second["label"] == "beta"
 
 
+def test_setup_disposes_value_on_unmount():
+	ctx = HookContext()
+
+	with ctx:
+		held = setup(DummyState)
+
+	assert held.dispose_calls == 0
+	ctx.unmount()
+	assert held.dispose_calls == 1
+
+
+def test_setup_disposes_value_when_key_changes():
+	ctx = HookContext()
+
+	with ctx:
+		setup_key("alpha")
+		first = setup(DummyState)
+
+	with ctx:
+		setup_key("beta")
+		second = setup(DummyState)
+
+	assert first is not second
+	assert first.dispose_calls == 1
+	assert second.dispose_calls == 0
+	ctx.unmount()
+	assert second.dispose_calls == 1
+
+
+def test_setup_disposes_tuple_items_on_unmount():
+	ctx = HookContext()
+
+	with ctx:
+		state, _n = setup(lambda: (DummyState(), 1))
+
+	ctx.unmount()
+	assert state.dispose_calls == 1
+
+
 def test_setup_enforces_single_call_per_render():
 	ctx = HookContext()
 

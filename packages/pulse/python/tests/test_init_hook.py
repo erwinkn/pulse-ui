@@ -3,11 +3,12 @@ import inspect
 import re
 import sys
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, Callable, cast, override
 
 import pulse as ps
 import pytest
 from pulse import Component, HookContext
+from pulse.state.state import State
 from pulse.transpiler import TranspileError
 
 
@@ -102,6 +103,54 @@ def test_init_reruns_when_key_changes():
 	assert second_key == "a"
 	assert third_key == "b"
 	assert fourth_key == "b"
+
+
+def test_init_disposes_state_on_unmount():
+	class Box(State):
+		_dispose_calls: int = 0
+
+		@override
+		def on_dispose(self) -> None:
+			self._dispose_calls += 1
+
+	@ps.component
+	def Example() -> Box:
+		with ps.init():
+			box = Box()
+		return box
+
+	ctx = HookContext()
+	with ctx:
+		held = cast(Box, cast(object, Example.fn()))
+	assert held._dispose_calls == 0
+	ctx.unmount()
+	assert held._dispose_calls == 1
+
+
+def test_init_disposes_state_when_key_changes():
+	class Box(State):
+		_dispose_calls: int = 0
+
+		@override
+		def on_dispose(self) -> None:
+			self._dispose_calls += 1
+
+	@ps.component
+	def Example(key: str) -> Box:
+		with ps.init(key=key):
+			box = Box()
+		return box
+
+	ctx = HookContext()
+	with ctx:
+		first = cast(Box, cast(object, Example.fn("a")))
+	with ctx:
+		second = cast(Box, cast(object, Example.fn("b")))
+	assert first is not second
+	assert first._dispose_calls == 1
+	assert second._dispose_calls == 0
+	ctx.unmount()
+	assert second._dispose_calls == 1
 
 
 def test_init_restores_functions_and_classes():

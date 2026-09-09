@@ -151,7 +151,7 @@ This happens automatically - you don't need to add tokens or extra validation.
 
 ## Tips
 
-**Use controlled inputs for validation**: If you need to validate input as the user types, combine `ps.Form` with state-controlled inputs:
+**Use controlled inputs for validation**: If you need to validate input as the user types, combine `ps.Form` with state-controlled inputs. Pulse restores keystrokes typed before hydration so the server sees the edit (lazy/suspended subtrees that hydrate later can still miss those edits):
 
 ```python
 class FormState(ps.State):

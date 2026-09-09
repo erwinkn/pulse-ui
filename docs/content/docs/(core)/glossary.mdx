@@ -23,7 +23,7 @@ When state changes, affected components re-execute to produce new VDOM. Pulse co
 The algorithm that compares old and new VDOM to find minimal changes. This is why reactive frameworks are efficient—they update only what actually changed.
 
 **Hydration**
-The process of making a server-rendered page interactive. The browser receives HTML/VDOM and React "hydrates" it by attaching event listeners and making it respond to user input.
+The process of making a server-rendered page interactive. The browser receives HTML/VDOM and React "hydrates" it by attaching event listeners and making it respond to user input. Pulse records keystrokes on controlled inputs during the parse → hydrate window and replays them after the hydration commit so React/Python state catch up.
 
 **Server-side Rendering (SSR)**
 Generating HTML on the server rather than in the browser. Pulse takes this further—not just initial render, but all UI updates happen server-side.

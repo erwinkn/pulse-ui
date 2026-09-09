@@ -5,9 +5,11 @@ from urllib.parse import parse_qs, urlparse
 
 import pulse as ps
 import pytest
+from pulse.hooks.core import HookContext
 from pulse.messages import ServerMessage, ServerNavigateToMessage
 from pulse.reactive import flush_effects
 from pulse.render_session import RenderSession
+from pulse.renderer import RenderTree
 from pulse.routing import Route, RouteInfo, RouteTree
 
 
@@ -309,6 +311,106 @@ class TestQueryParam:
 			_first = First()
 			with pytest.raises(ValueError, match="'q' is already bound"):
 				_second = Second()
+
+	def test_init_state_releases_binding_on_unmount(self):
+		class TabState(ps.State):
+			filter_status: ps.QueryParam[str] = "unreviewed"
+
+		@ps.component
+		def Tab():
+			with ps.init():
+				state = TabState()
+			return ps.div(state.filter_status)
+
+		app, session, route_ctx = make_context(make_route_info("/"))
+		session.connect(lambda _msg: None)
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			ctx = HookContext()
+			with ctx:
+				Tab.fn()
+			assert "filter_status" in session.query_param_sync._bindings  # pyright: ignore[reportPrivateUsage]
+			ctx.unmount()
+			assert "filter_status" not in session.query_param_sync._bindings  # pyright: ignore[reportPrivateUsage]
+			with ctx:
+				Tab.fn()
+			assert "filter_status" in session.query_param_sync._bindings  # pyright: ignore[reportPrivateUsage]
+
+	def test_setup_state_releases_binding_on_unmount(self):
+		class TabState(ps.State):
+			filter_status: ps.QueryParam[str] = "unreviewed"
+
+		@ps.component
+		def Tab():
+			state = ps.setup(TabState)
+			return ps.div(state.filter_status)
+
+		app, session, route_ctx = make_context(make_route_info("/"))
+		session.connect(lambda _msg: None)
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			ctx = HookContext()
+			with ctx:
+				Tab.fn()
+			assert "filter_status" in session.query_param_sync._bindings  # pyright: ignore[reportPrivateUsage]
+			ctx.unmount()
+			assert "filter_status" not in session.query_param_sync._bindings  # pyright: ignore[reportPrivateUsage]
+			with ctx:
+				Tab.fn()
+			assert "filter_status" in session.query_param_sync._bindings  # pyright: ignore[reportPrivateUsage]
+
+	def test_init_state_releases_binding_when_key_changes(self):
+		class TabState(ps.State):
+			filter_status: ps.QueryParam[str] = "unreviewed"
+
+		@ps.component
+		def Tab(key: str):
+			with ps.init(key=key):
+				state = TabState()
+			return ps.div(state.filter_status)
+
+		app, session, route_ctx = make_context(make_route_info("/"))
+		session.connect(lambda _msg: None)
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			ctx = HookContext()
+			with ctx:
+				Tab.fn("one")
+			with ctx:
+				Tab.fn("two")
+			assert "filter_status" in session.query_param_sync._bindings  # pyright: ignore[reportPrivateUsage]
+			assert (
+				len(session.query_param_sync._bindings["filter_status"]) == 1  # pyright: ignore[reportPrivateUsage]
+			)
+
+	def test_query_param_init_tab_can_remount(self):
+		"""Issue #170: TabState created in ps.init() must release its binding
+		when the tab unmounts, or remount raises 'already bound in this route'.
+		"""
+
+		class TabState(ps.State):
+			filter_status: ps.QueryParam[str] = "unreviewed"
+
+		@ps.component
+		def Tab():
+			with ps.init():
+				state = TabState()
+			return ps.div(state.filter_status)
+
+		@ps.component
+		def Page(tab: str):
+			if tab == "tab-b":
+				return Tab()
+			return ps.div()
+
+		app, session, route_ctx = make_context(make_route_info("/"))
+		session.connect(lambda _msg: None)
+		with ps.PulseContext(app=app, render=session, route=route_ctx):
+			tree = RenderTree(Page("tab-a"))
+			tree.render()
+			tree.rerender(Page("tab-b"))
+			assert "filter_status" in session.query_param_sync._bindings  # pyright: ignore[reportPrivateUsage]
+			tree.rerender(Page("tab-a"))
+			assert "filter_status" not in session.query_param_sync._bindings  # pyright: ignore[reportPrivateUsage]
+			tree.rerender(Page("tab-b"))
+			assert "filter_status" in session.query_param_sync._bindings  # pyright: ignore[reportPrivateUsage]
 
 
 def make_two_route_session():

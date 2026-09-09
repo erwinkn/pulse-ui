@@ -9,7 +9,7 @@ import types
 from collections.abc import Callable, Sequence
 from typing import Any, Literal, cast, override
 
-from pulse.helpers import getsourcecode
+from pulse.helpers import dispose_if_disposable, getsourcecode
 from pulse.hooks.core import HookState, hooks
 from pulse.transpiler.errors import TranspileError
 
@@ -93,7 +93,11 @@ class InitContext:
 
 		storage = _init_hook().storage
 		entry = storage.get(self.callsite)
-		if entry is None or entry.get("key") != self.key:
+		if entry is None:
+			self.first_render = True
+			self.saved = {}
+		elif entry.get("key") != self.key:
+			_dispose_init_vars(entry.get("vars"))
 			self.first_render = True
 			self.saved = {}
 		else:
@@ -704,10 +708,19 @@ def _resolve_init_bindings(func: Callable[..., Any]) -> tuple[set[str], set[str]
 	return init_names, init_modules
 
 
+def _dispose_init_vars(captured: Any) -> None:
+	if not isinstance(captured, dict):
+		return
+	for value in captured.values():
+		dispose_if_disposable(value)
+
+
 class InitState(HookState):
 	def __init__(self) -> None:
 		self.storage: dict[tuple[Any, int], dict[str, Any]] = {}
 
 	@override
 	def dispose(self) -> None:
+		for entry in self.storage.values():
+			_dispose_init_vars(entry.get("vars"))
 		self.storage.clear()

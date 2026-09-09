@@ -278,3 +278,9 @@ Converting data structures to a format that can be transmitted (like JSON). Puls
 
 **Serializer adapter**
 An app-owned, one-way projection from a custom Python value into values supported by Pulse's wire serializer.
+
+**Renderable prop**
+A Pulse UI tree (`Element`, `PulseNode`, or `Expr`) stored as a value in a serialized payload. The v5 encoder snapshot-renders it, strips callbacks and refs, and wraps the VDOM in a `$v` marker. The browser reconstitutes React nodes with a supplied registry or renderer.
+
+**Snapshot render**
+A one-shot render of a cloned Pulse tree used when serializing a renderable prop. The clone is unmounted afterward so `@ps.effect` subscriptions created during that render do not leak.

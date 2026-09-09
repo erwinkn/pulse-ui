@@ -5,6 +5,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from types import NoneType
 from typing import Any, NamedTuple, TypeAlias, cast
+from typing import Literal as TypingLiteral
 
 from pulse.debounce import Debounced
 from pulse.helpers import values_equal
@@ -21,6 +22,7 @@ from pulse.transpiler.nodes import (
 	Node,
 	PulseNode,
 	Value,
+	clone_renderable,
 )
 from pulse.transpiler.vdom import (
 	VDOM,
@@ -120,11 +122,18 @@ class Renderer:
 	# Serialize already-rendered components from their contents instead of
 	# re-invoking them (which would mint fresh hook state for children).
 	reuse_contents: bool
+	mode: TypingLiteral["persistent", "snapshot"]
 
-	def __init__(self, *, reuse_contents: bool = False) -> None:
+	def __init__(
+		self,
+		*,
+		reuse_contents: bool = False,
+		mode: TypingLiteral["persistent", "snapshot"] = "persistent",
+	) -> None:
 		self.callbacks: Callbacks = {}
 		self.operations: list[VDOMOperation] = []
 		self.reuse_contents = reuse_contents
+		self.mode = mode
 
 	# ------------------------------------------------------------------
 	# Rendering helpers
@@ -435,6 +444,11 @@ class Renderer:
 				continue
 
 			if isinstance(value, RefHandle):
+				if self.mode == "snapshot":
+					if normalized is None:
+						normalized = current.copy()
+					normalized.pop(key, None)
+					continue
 				if key != "ref":
 					raise TypeError("RefHandle can only be used as the 'ref' prop")
 				eval_keys.add(key)
@@ -454,6 +468,11 @@ class Renderer:
 					}
 				continue
 			if isinstance(value, Debounced):
+				if self.mode == "snapshot":
+					if normalized is None:
+						normalized = current.copy()
+					normalized.pop(key, None)
+					continue
 				eval_keys.add(key)
 				if isinstance(old_value, (Element, PulseNode)):
 					unmount_element(old_value)
@@ -469,6 +488,11 @@ class Renderer:
 				continue
 
 			if callable(value):
+				if self.mode == "snapshot":
+					if normalized is None:
+						normalized = current.copy()
+					normalized.pop(key, None)
+					continue
 				eval_keys.add(key)
 				if isinstance(old_value, (Element, PulseNode)):
 					unmount_element(old_value)
@@ -647,6 +671,20 @@ def key_value(node: Node | Node) -> str | None:
 			raise TypeError("Element key must be a string")
 		return key.value
 	return cast(str | None, key)
+
+
+def snapshot_render(value: Node) -> Any:
+	"""Render a throwaway clone to VDOM and unmount it.
+
+	One-shot serialization of Element / PulseNode trees must not leave
+	`@ps.effect` subscriptions attached to the clone.
+	"""
+	clone = clone_renderable(value)
+	try:
+		vdom, _normalized = Renderer(mode="snapshot").render_tree(clone)
+		return vdom
+	finally:
+		unmount_element(clone)
 
 
 def unmount_element(element: Node) -> None:

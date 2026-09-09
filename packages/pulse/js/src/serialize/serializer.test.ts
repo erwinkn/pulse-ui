@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import React from "react";
 import { deserialize, serialize, type Serialized } from "./serializer";
 
 function crossJSON<Data>(value: Data): Data {
@@ -423,5 +424,107 @@ describe("maximum nesting depth", () => {
 	it("rejects decoding past the shared depth ceiling", () => {
 		const wire = JSON.parse(`[5,${"[".repeat(300)}${"]".repeat(300)}]`);
 		expect(() => deserialize(wire)).toThrow("maximum nesting depth");
+	});
+});
+
+describe("VDOM markers", () => {
+	it("leaves user VDOM-looking dictionaries alone without a marker", () => {
+		const payload: Serialized = [5, { tag: "span", children: ["Feedback"] }];
+		expect(deserialize(payload)).toEqual({ tag: "span", children: ["Feedback"] });
+	});
+
+	it("throws when a VDOM marker is present without a renderer or registry", () => {
+		const payload: Serialized = [
+			5,
+			{ title: ["$", "v", { tag: "span", children: ["Feedback"] }] },
+		];
+		expect(() => deserialize(payload)).toThrow(
+			"Payload contains VDOM nodes but no renderer or registry was provided",
+		);
+	});
+
+	it("renders a VDOM marker with a one-shot renderer from a registry", () => {
+		const Badge = (props: { label: string }) =>
+			React.createElement("strong", props, props.label);
+		const payload: Serialized = [
+			5,
+			{ title: ["$", "v", { tag: "$$Badge", props: { label: "Feedback" } }] },
+		];
+		const parsed = deserialize(payload, { registry: { Badge } }) as {
+			title: React.ReactElement<{ label: string }>;
+		};
+		expect(React.isValidElement(parsed.title)).toBe(true);
+		expect(parsed.title.type).toBe(Badge);
+		expect(parsed.title.props.label).toBe("Feedback");
+	});
+
+	it("reconstructs VDOM props before rendering", () => {
+		const Badge = (_props: { when: Date; tags: Set<string> }) => null;
+		const payload: Serialized = [
+			5,
+			{
+				title: [
+					"$",
+					"v",
+					{
+						tag: "$$Badge",
+						props: {
+							when: ["$", "t", "2024-04-05T06:07:08.000Z"],
+							tags: ["$", "s", ["saved"]],
+						},
+					},
+				],
+			},
+		];
+		const parsed = deserialize(payload, { registry: { Badge } }) as {
+			title: React.ReactElement<{ when: Date; tags: Set<string> }>;
+		};
+		expect(parsed.title.type).toBe(Badge);
+		expect(parsed.title.props.when).toBeInstanceOf(Date);
+		expect(parsed.title.props.when.toISOString()).toBe("2024-04-05T06:07:08.000Z");
+		expect(parsed.title.props.tags).toBeInstanceOf(Set);
+		expect(Array.from(parsed.title.props.tags)).toEqual(["saved"]);
+	});
+
+	it("renders VDOM markers next to dates without stealing identities", () => {
+		const payload: Serialized = [
+			5,
+			[
+				["$", "v", { tag: "span", children: ["x"] }],
+				["$", "t", "2024-01-02T00:00:00.000Z"],
+			],
+		];
+		const parsed = deserialize(payload, { registry: {} }) as [
+			React.ReactElement<{ children: string }>,
+			Date,
+		];
+		expect(React.isValidElement(parsed[0])).toBe(true);
+		expect(parsed[0].props.children).toBe("x");
+		expect(parsed[1]).toBeInstanceOf(Date);
+		expect(parsed[1].toISOString()).toBe("2024-01-02T00:00:00.000Z");
+	});
+
+	it("preserves repeated VDOM marker references", () => {
+		const payload: Serialized = [
+			5,
+			[["$", "v", { tag: "span", children: ["x"] }], ["$", 1]],
+		];
+		const parsed = deserialize(payload, { registry: {} }) as [
+			React.ReactElement<{ children: string }>,
+			React.ReactElement<{ children: string }>,
+		];
+		expect(React.isValidElement(parsed[0])).toBe(true);
+		expect(parsed[0].props.children).toBe("x");
+		expect(parsed[1]).toBe(parsed[0]);
+	});
+
+	it("requires the route-local registry for imported component nodes", () => {
+		const payload: Serialized = [
+			5,
+			{ title: ["$", "v", { tag: "$$RouteOnly", props: { value: 1 } }] },
+		];
+		expect(() => deserialize(payload, { registry: {} })).toThrow(
+			"Missing component 'RouteOnly'",
+		);
 	});
 });

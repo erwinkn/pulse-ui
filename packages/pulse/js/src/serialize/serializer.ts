@@ -1,7 +1,15 @@
+import { VDOMRenderer } from "../renderer";
+import type { ComponentRegistry, VDOMNode } from "../vdom";
+
 export type Primitive = number | string | boolean | null;
 
 export type WireValue = Primitive | WireValue[] | { [key: string]: WireValue };
 export type Serialized = [5, WireValue];
+
+export type DeserializeOptions = {
+	registry?: ComponentRegistry;
+	renderer?: Pick<VDOMRenderer, "renderNode">;
+};
 
 const VERSION = 5;
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
@@ -151,7 +159,7 @@ export function serialize(data: unknown): Serialized {
 	return [VERSION, encode(data)];
 }
 
-export function deserialize(payload: unknown): unknown {
+export function deserialize(payload: unknown, options?: DeserializeOptions): unknown {
 	if (!Array.isArray(payload) || payload.length !== 2) {
 		throw new TypeError("Wire payload must be [5, value]");
 	}
@@ -159,6 +167,8 @@ export function deserialize(payload: unknown): unknown {
 		throw new Error(`Unknown serialization version: ${String(payload[0])}`);
 	}
 
+	const pulseRenderer = options?.renderer
+		?? (options?.registry !== undefined ? VDOMRenderer.snapshot(options.registry) : undefined);
 	const identities: any[] = [];
 	const path: PathSegment[] = [];
 
@@ -200,22 +210,7 @@ export function deserialize(payload: unknown): unknown {
 				`Cannot deserialize wire value of type ${typeof value} at ${formatPath(path)}`,
 			);
 		}
-
-		const prototype = Object.getPrototypeOf(value);
-		if (prototype !== Object.prototype && prototype !== null) {
-			throw new TypeError(`Malformed wire object at ${formatPath(path)}`);
-		}
-		const result = register({} as Record<string, any>);
-		const keys = Object.keys(value);
-		for (let index = 0; index < keys.length; index += 1) {
-			const key = keys[index];
-			validateString(key, "deserialize", path);
-			path.push(key);
-			const entry = decode((value as Record<string, unknown>)[key]);
-			path.pop();
-			defineRecordValue(result, key, entry);
-		}
-		return result;
+		return decodeRecord(value as Record<string, unknown>, true);
 	}
 
 	function decodeMarker(marker: unknown[]): any {
@@ -339,7 +334,44 @@ export function deserialize(payload: unknown): unknown {
 			return result;
 		}
 
+		if (tag === "v") {
+			assertMarkerLength(marker, 3, path);
+			if (pulseRenderer === undefined) {
+				throw new Error(
+					"[Pulse] Payload contains VDOM nodes but no renderer or registry was provided",
+				);
+			}
+			const slot = identities.length;
+			identities.push(undefined);
+			const raw = marker[2];
+			const node =
+				raw !== null && typeof raw === "object" && !Array.isArray(raw)
+					? decodeRecord(raw as Record<string, unknown>, false)
+					: decode(raw);
+			const rendered = pulseRenderer.renderNode(node as VDOMNode);
+			identities[slot] = rendered;
+			return rendered;
+		}
+
 		throw new Error(`Unknown marker tag ${JSON.stringify(tag)} at ${formatPath(path)}`);
+	}
+
+	function decodeRecord(value: Record<string, unknown>, shouldRegister: boolean): Record<string, any> {
+		const prototype = Object.getPrototypeOf(value);
+		if (prototype !== Object.prototype && prototype !== null) {
+			throw new TypeError(`Malformed wire object at ${formatPath(path)}`);
+		}
+		const result = shouldRegister ? register({} as Record<string, any>) : ({} as Record<string, any>);
+		const keys = Object.keys(value);
+		for (let index = 0; index < keys.length; index += 1) {
+			const key = keys[index];
+			validateString(key, "deserialize", path);
+			path.push(key);
+			const entry = decode(value[key]);
+			path.pop();
+			defineRecordValue(result, key, entry);
+		}
+		return result;
 	}
 
 	return decode(payload[1]);

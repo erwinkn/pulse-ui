@@ -76,6 +76,16 @@ export class VDOMRenderer {
 		});
 	}
 
+	static snapshot(registry: ComponentRegistry): VDOMRenderer {
+		const client = {
+			invokeCallback() {},
+			_ensureChannelEntry() {
+				throw new Error("[Pulse] Snapshot renderer cannot bind refs");
+			},
+		};
+		return new VDOMRenderer(client as unknown as PulseSocketIOClient, "", registry);
+	}
+
 	getObject(key: string): unknown {
 		const obj = (this.#registry as any)[key];
 		if (obj === undefined) {

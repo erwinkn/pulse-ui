@@ -464,8 +464,10 @@ class Effect(Disposable):
 			child.dispose()
 		if self.cleanup_fn:
 			self.cleanup_fn()
+			self.cleanup_fn = None
 		for dep in self.deps:
 			dep.obs.remove(self)
+		self.deps = {}
 		if self.parent and self in self.parent.children:
 			self.parent.children.remove(self)
 
@@ -522,7 +524,8 @@ class Effect(Disposable):
 			cancel_interval: If True (default), also cancels the interval timer.
 		"""
 		if self.batch is not None:
-			self.batch.effects.remove(self)
+			if self in self.batch.effects:
+				self.batch.effects.remove(self)
 			self.batch = None
 		if cancel_interval:
 			self._cancel_interval()
@@ -555,7 +558,8 @@ class Effect(Disposable):
 	def flush(self):
 		"""If scheduled in a batch, remove and run immediately."""
 		if self.batch is not None:
-			self.batch.effects.remove(self)
+			if self in self.batch.effects:
+				self.batch.effects.remove(self)
 			self.batch = None
 			# Run now (respects IS_PRERENDERING and error handling)
 			self.run()
@@ -637,6 +641,8 @@ class Effect(Disposable):
 
 	def run(self):
 		"""Execute the effect immediately."""
+		if self.__disposed__:
+			return
 		with Untrack():
 			try:
 				self._cleanup_before_run()
@@ -888,8 +894,10 @@ class AsyncEffect(Effect):
 			child.dispose()
 		if self.cleanup_fn:
 			self.cleanup_fn()
+			self.cleanup_fn = None
 		for dep in self.deps:
 			dep.obs.remove(self)
+		self.deps = {}
 		if self.parent and self in self.parent.children:
 			self.parent.children.remove(self)
 
@@ -960,9 +968,14 @@ class Batch:
 
 			current_effects = self.effects
 			self.effects = []
-
+			# Detach before running: a later snapshot effect may be disposed
+			# while self.effects is already the replacement empty list.
 			for effect in current_effects:
 				effect.batch = None
+
+			for effect in current_effects:
+				if effect.__disposed__ or effect.paused:
+					continue
 				if not effect.should_run():
 					continue
 				try:

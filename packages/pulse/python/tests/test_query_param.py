@@ -412,6 +412,37 @@ class TestQueryParam:
 			tree.rerender(Page("tab-b"))
 			assert "filter_status" in session.query_param_sync._bindings  # pyright: ignore[reportPrivateUsage]
 
+	def test_query_param_init_releases_binding_across_prerender(self):
+		"""Same leak on POST /_pulse/prerender: a new mount of the same route
+		must be able to bind a QueryParam that the previous mount created.
+		"""
+
+		class TabState(ps.State):
+			filter_status: ps.QueryParam[str] = "unreviewed"
+
+		@ps.component
+		def Tab():
+			with ps.init():
+				state = TabState()
+			return ps.div(state.filter_status)
+
+		route = Route("/", Tab)
+		routes = RouteTree([route])
+		session = RenderSession("test", routes)
+		app = ps.App(routes=[route])
+		session.connect(lambda _msg: None)
+		info = make_route_info("/")
+
+		with ps.PulseContext(app=app, render=session):
+			session.prerender(["/"], info)
+			assert "filter_status" in session.query_param_sync._bindings  # pyright: ignore[reportPrivateUsage]
+			session.detach("/")
+			assert "filter_status" not in session.query_param_sync._bindings  # pyright: ignore[reportPrivateUsage]
+			session.prerender(["/"], info)
+			assert "filter_status" in session.query_param_sync._bindings  # pyright: ignore[reportPrivateUsage]
+
+		session.close()
+
 
 def make_two_route_session():
 	"""A session with routes /a and /b, nothing mounted yet."""

@@ -250,7 +250,10 @@ class TestCodegen:
 			in layout_content
 		)
 		assert "preHydrationInputCaptureScript" in layout_content
-		assert "dangerouslySetInnerHTML={{ __html: preHydrationInputCaptureScript }}" in layout_content
+		assert (
+			"dangerouslySetInnerHTML={{ __html: preHydrationInputCaptureScript }}"
+			in layout_content
+		)
 		assert 'serverAddress: "http://localhost:8000"' in layout_content
 		assert "internalServerAddress:" not in layout_content
 		assert (

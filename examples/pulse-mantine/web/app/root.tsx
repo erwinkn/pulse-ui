@@ -7,7 +7,6 @@ import {
 	ScrollRestoration,
 } from "react-router";
 
-import { preHydrationInputCaptureScript } from "pulse-ui-client";
 import type { Route } from "./+types/root";
 
 import "@mantine/core/styles.css";
@@ -35,10 +34,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
 			<head>
 				<meta charSet="utf-8" />
 				<meta name="viewport" content="width=device-width, initial-scale=1" />
-				<script
-					id="pulse-prehydration-input-capture"
-					dangerouslySetInnerHTML={{ __html: preHydrationInputCaptureScript }}
-				/>
 				<ColorSchemeScript />
 				<Meta />
 				<Links />

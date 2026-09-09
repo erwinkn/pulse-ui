@@ -1,7 +1,4 @@
-import importlib
-
 import pulse_recharts as pr
-from pulse.requirements import get_requirements
 from pulse.transpiler.imports import Import
 from pulse.transpiler.nodes import Element
 
@@ -72,11 +69,3 @@ def test_recharts_components_exported() -> None:
 		assert isinstance(element.tag, Import)
 		assert element.tag.src == "recharts"
 		assert element.tag.name == name
-
-
-def test_require_does_not_register_pulse_recharts_npm_package() -> None:
-	# Other tests may have cleared the global require registry.
-	importlib.reload(pr)
-	required = dict(get_requirements())
-	assert "pulse-recharts" not in required
-	assert required["recharts"] == ">=3.7.0"

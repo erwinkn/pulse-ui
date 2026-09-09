@@ -515,6 +515,13 @@ class RenderSession:
 			if mount.state != "active" and mount.queue_timeout is None:
 				mount.start_pending(self.prerender_queue_timeout)
 			assert mount.effect is not None
+			# Full re-render supersedes queued updates computed against the
+			# previous tree. start_pending() only clears the queue when
+			# *entering* pending, so a second prerender of an already-pending
+			# mount (soft nav, double loader) would otherwise flush stale
+			# vdom_update ops onto the new init.
+			if mount.state == "pending":
+				mount.queue = []
 			with mount.effect.capture_deps(update_deps=True):
 				message = self.render(mount, path)
 

@@ -406,6 +406,74 @@ describe("PulseSocketIOClient attach ack", () => {
 			body: { ok: true },
 		});
 	});
+
+	it("delivers unmatched server_error to all active views", async () => {
+		const client = await makeClient();
+		const dashView = {
+			routeInfo: { ...routeInfo, pathname: "/dash" },
+			onInit: vi.fn(),
+			onUpdate: vi.fn(),
+			onJsExec: vi.fn(),
+			onServerError: vi.fn(),
+		};
+		const connected = client.connect();
+		client.attach("/dash", dashView);
+		socket.trigger("connect");
+		await connected;
+
+		socket.trigger(
+			"message",
+			serialize({
+				type: "server_error",
+				path: "/",
+				error: {
+					message: "tab boom",
+					phase: "channel",
+					details: {},
+				},
+			}),
+		);
+
+		expect(dashView.onServerError).toHaveBeenCalledWith(
+			expect.objectContaining({ message: "tab boom", phase: "channel" }),
+		);
+	});
+
+	it("delivers matching server_error only to that view", async () => {
+		const client = await makeClient();
+		const rootView = {
+			...view,
+			onServerError: vi.fn(),
+		};
+		const dashView = {
+			routeInfo: { ...routeInfo, pathname: "/dash" },
+			onInit: vi.fn(),
+			onUpdate: vi.fn(),
+			onJsExec: vi.fn(),
+			onServerError: vi.fn(),
+		};
+		const connected = client.connect();
+		client.attach("/", rootView);
+		client.attach("/dash", dashView);
+		socket.trigger("connect");
+		await connected;
+
+		socket.trigger(
+			"message",
+			serialize({
+				type: "server_error",
+				path: "/dash",
+				error: {
+					message: "route boom",
+					phase: "callback",
+					details: {},
+				},
+			}),
+		);
+
+		expect(dashView.onServerError).toHaveBeenCalledTimes(1);
+		expect(rootView.onServerError).not.toHaveBeenCalled();
+	});
 });
 
 describe("PulseProvider connection handling", () => {
@@ -452,5 +520,242 @@ describe("PulseProvider connection handling", () => {
 
 		expect(io).toHaveBeenCalledTimes(1);
 		consoleError.mockRestore();
+	});
+});
+
+describe("PulseSocketIOClient channels", () => {
+	beforeEach(() => {
+		io.mockClear();
+	});
+
+	it("fans events out to two attached handles", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		const a = client.acquireChannel("shared");
+		const b = client.acquireChannel("shared");
+		const seen: string[] = [];
+		a.on("ping", () => seen.push("a"));
+		b.on("ping", () => seen.push("b"));
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel",
+				action: "event",
+				channel: "shared",
+				event: "ping",
+			}),
+		);
+		expect(seen).toEqual(["a", "b"]);
+	});
+
+	it("NACKs requests with no handler", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		client.acquireChannel("empty");
+		const before = sentMessages().length;
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel",
+				action: "request",
+				channel: "empty",
+				event: "missing",
+				requestId: "req-1",
+			}),
+		);
+		expect(sentMessages().slice(before)).toEqual([
+			{
+				type: "channel",
+				action: "response",
+				channel: "empty",
+				responseTo: "req-1",
+				error: {
+					code: "no_handler",
+					message: "No handler for 'missing' on channel 'empty'",
+				},
+			},
+		]);
+	});
+
+	it("rejects pending RPC on transport drop and stays silent on reconnect", async () => {
+		const { PulseChannelDisconnectedError } = await import("./channel");
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		const firstSocket = socket;
+		const bridge = client.acquireChannel("rpc");
+		const pending = bridge.request("echo");
+		const channelTraffic = sentMessages().filter((message) => message.type === "channel");
+		expect(channelTraffic).toEqual([
+			expect.objectContaining({ action: "request", event: "echo" }),
+		]);
+		firstSocket.trigger("disconnect");
+		await expect(pending).rejects.toBeInstanceOf(PulseChannelDisconnectedError);
+
+		firstSocket.trigger("connect");
+		expect(sentMessages().filter((message) => message.type === "channel")).toEqual(
+			channelTraffic,
+		);
+	});
+
+	it("rejects only a detached handle's RPC and ignores its late response", async () => {
+		const { PulseChannelDetachedError } = await import("./channel");
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		const first = client.acquireChannel("rpc");
+		const second = client.acquireChannel("rpc");
+		const firstPending = first.request("echo");
+		const firstRequest = sentMessages().at(-1) as { requestId: string };
+		first.detach();
+		await Promise.resolve();
+		await expect(firstPending).rejects.toBeInstanceOf(PulseChannelDetachedError);
+
+		const secondPending = second.request("echo");
+		const secondRequest = sentMessages().at(-1) as { requestId: string };
+		expect(() =>
+			socket.trigger(
+				"message",
+				serialize({
+					type: "channel",
+					action: "response",
+					channel: "rpc",
+					responseTo: firstRequest.requestId,
+					payload: "late",
+				}),
+			),
+		).not.toThrow();
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel",
+				action: "response",
+				channel: "rpc",
+				responseTo: secondRequest.requestId,
+				payload: "live",
+			}),
+		);
+		await expect(secondPending).resolves.toBe("live");
+	});
+
+	it("keeps a pending RPC across an immediate detach and reattach", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		const bridge = client.acquireChannel("rpc");
+		const pending = bridge.request("echo");
+		const request = sentMessages().at(-1) as { requestId: string };
+		bridge.detach();
+		bridge.attach();
+		await Promise.resolve();
+		socket.trigger(
+			"message",
+			serialize({
+				type: "channel",
+				action: "response",
+				channel: "rpc",
+				responseTo: request.requestId,
+				payload: "live",
+			}),
+		);
+		await expect(pending).resolves.toBe("live");
+	});
+
+	it("queues emit while disconnected on the global client queue", async () => {
+		const client = await makeClient();
+		const bridge = client.acquireChannel("queued");
+		bridge.emit("ping", { n: 1 });
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		expect(sentMessages()).toContainEqual({
+			type: "channel",
+			action: "event",
+			channel: "queued",
+			event: "ping",
+			payload: { n: 1 },
+		});
+	});
+
+	it("caps queued channel events by dropping the oldest event", async () => {
+		const client = await makeClient();
+		const bridge = client.acquireChannel("queued");
+		for (let n = 0; n < 101; n++) {
+			bridge.emit("ping", { n });
+		}
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		const events = sentMessages().filter(
+			(message) => message.type === "channel" && message.action === "event",
+		);
+		expect(events).toHaveLength(100);
+		expect(events[0]).toMatchObject({ payload: { n: 1 } });
+		expect(events.at(-1)).toMatchObject({ payload: { n: 100 } });
+	});
+
+	it("caps queued events independently per channel", async () => {
+		const client = await makeClient();
+		const chatty = client.acquireChannel("chatty");
+		const quiet = client.acquireChannel("quiet");
+		for (let n = 0; n < 101; n++) {
+			chatty.emit("ping", { n });
+		}
+		quiet.emit("ping", { n: 1 });
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		const events = sentMessages().filter(
+			(message) => message.type === "channel" && message.action === "event",
+		);
+		const chattyEvents = events.filter((message) => message.channel === "chatty");
+		expect(chattyEvents).toHaveLength(100);
+		expect(chattyEvents[0]).toMatchObject({ payload: { n: 1 } });
+		expect(events).toContainEqual(
+			expect.objectContaining({
+				channel: "quiet",
+				payload: { n: 1 },
+			}),
+		);
+	});
+
+	it("does not flush RPC after a disconnected request", async () => {
+		const { PulseChannelDisconnectedError } = await import("./channel");
+		const client = await makeClient();
+		const bridge = client.acquireChannel("rpc");
+		bridge.emit("ping", { n: 1 });
+		await expect(bridge.request("echo")).rejects.toBeInstanceOf(PulseChannelDisconnectedError);
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		expect(sentMessages().filter((message) => message.type === "channel")).toEqual([
+			{
+				type: "channel",
+				action: "event",
+				channel: "rpc",
+				event: "ping",
+				payload: { n: 1 },
+			},
+		]);
+	});
+
+	it("attach and detach send no wire messages", async () => {
+		const client = await makeClient();
+		const connected = client.connect();
+		socket.trigger("connect");
+		await connected;
+		const before = sentMessages().length;
+		const bridge = client.channel("silent");
+		bridge.attach();
+		bridge.detach();
+		bridge.attach();
+		expect(sentMessages().slice(before)).toEqual([]);
 	});
 });

@@ -12,7 +12,7 @@ Scope
 Plan
 1. JS combobox
    - Make `channelId: string` required in `PulseComboboxProps`.
-   - Call `usePulseChannel(channelId)` unconditionally; remove conditional hook.
+   - Call `useChannel(channelId)` unconditionally; remove conditional hook.
    - Make channel handlers require payload shapes (no `?` types, no guards).
 2. Python combobox API
    - Make `Combobox` require `store: ComboboxStore` (no `store=None` path).

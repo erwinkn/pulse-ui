@@ -197,16 +197,19 @@ In Pulse, an isolated execution context per browser tab. Each tab has its own co
 A persistent, bidirectional connection between browser and server. Unlike HTTP request/response, either side can send messages anytime. Pulse uses WebSockets for all UI updates.
 
 **Channel**
-A named communication pathway for real-time features. Components can emit events to channels and listen for events from them.
+A string id scoped to a render session. Messages route by that name. The name is not created or destroyed on the wire — handles only attach and detach local listeners.
+
+**Handle**
+A local object (`Channel` on the server, `ChannelBridge` on the client) with its own `on()` set. Two handles can share one channel id; events fan out.
 
 **Emit**
-Sending a message/event through a channel (fire-and-forget). The sender doesn't wait for a response.
+Sending a fire-and-forget event to a channel. The sender doesn't wait for a response.
 
-**Subscribe / Listen**
-Registering to receive messages on a channel. When events arrive, your handler function runs.
+**Listen**
+Registering a handler on a handle. When an event arrives on that channel, every attached handle with a matching listener runs.
 
-**Broadcast**
-Sending a message to all connected clients, not just one. Used for features like live notifications or collaborative editing.
+**Detach**
+Drop this handle's listeners. The channel name still accepts `emit` / `request`.
 
 ## JavaScript Interop
 

@@ -1,6 +1,6 @@
 import { Combobox as MantineCombobox, useCombobox } from "@mantine/core";
-import { usePulseClient, type ChannelBridge } from "pulse-ui-client";
-import { type ComponentPropsWithoutRef, useEffect, useRef } from "react";
+import { useChannel } from "pulse-ui-client";
+import { type ComponentPropsWithoutRef, useEffect, useLayoutEffect, useRef } from "react";
 
 type DropdownEventSource = "keyboard" | "mouse" | "unknown";
 
@@ -38,8 +38,11 @@ export function Combobox({
 	scrollBehavior,
 	...rest
 }: PulseComboboxProps) {
-	const client = usePulseClient();
-	const channelRef = useRef<ChannelBridge | null>(null);
+	const channel = useChannel(channelId);
+	const channelRef = useRef(channel);
+	useLayoutEffect(() => {
+		channelRef.current = channel;
+	}, [channel]);
 
 	const combobox = useCombobox({
 		defaultOpened,
@@ -59,61 +62,58 @@ export function Combobox({
 		loop,
 		scrollBehavior,
 	});
+	const comboboxRef = useRef(combobox);
+	const listIdRef = useRef<string | undefined>(undefined);
+	useLayoutEffect(() => {
+		comboboxRef.current = combobox;
+	});
 
 	useEffect(() => {
-		const channel = client.acquireChannel(channelId);
-		channelRef.current = channel;
 		const cleanups = [
 			channel.on("openDropdown", (payload: OptionalEventSourcePayload) => {
-				combobox.openDropdown(payload?.eventSource);
+				comboboxRef.current.openDropdown(payload?.eventSource);
 			}),
 			channel.on("closeDropdown", (payload: OptionalEventSourcePayload) => {
-				combobox.closeDropdown(payload?.eventSource);
+				comboboxRef.current.closeDropdown(payload?.eventSource);
 			}),
 			channel.on("toggleDropdown", (payload: OptionalEventSourcePayload) => {
-				combobox.toggleDropdown(payload?.eventSource);
+				comboboxRef.current.toggleDropdown(payload?.eventSource);
 			}),
 			channel.on("selectOption", (payload: { index: number }) => {
-				combobox.selectOption(payload.index);
+				comboboxRef.current.selectOption(payload.index);
 			}),
-			channel.on("selectActiveOption", () => combobox.selectActiveOption()),
-			channel.on("selectFirstOption", () => combobox.selectFirstOption()),
-			channel.on("selectNextOption", () => combobox.selectNextOption()),
-			channel.on("selectPreviousOption", () => combobox.selectPreviousOption()),
+			channel.on("selectActiveOption", () => comboboxRef.current.selectActiveOption()),
+			channel.on("selectFirstOption", () => comboboxRef.current.selectFirstOption()),
+			channel.on("selectNextOption", () => comboboxRef.current.selectNextOption()),
+			channel.on("selectPreviousOption", () => comboboxRef.current.selectPreviousOption()),
 			channel.on("resetSelectedOption", () => {
-				combobox.resetSelectedOption();
+				comboboxRef.current.resetSelectedOption();
 			}),
 			channel.on("clickSelectedOption", () => {
-				combobox.clickSelectedOption();
+				comboboxRef.current.clickSelectedOption();
 			}),
 			channel.on(
 				"updateSelectedOptionIndex",
 				(payload: OptionalTargetPayload) => {
-					combobox.updateSelectedOptionIndex(payload?.target);
+					comboboxRef.current.updateSelectedOptionIndex(payload?.target);
 				},
 			),
-			channel.on("focusSearchInput", () => {
-				combobox.focusSearchInput();
-			}),
-			channel.on("focusTarget", () => {
-				combobox.focusTarget();
-			}),
+			channel.on("focusSearchInput", () => comboboxRef.current.focusSearchInput()),
+			channel.on("focusTarget", () => comboboxRef.current.focusTarget()),
 			channel.on("setListId", (payload: { listId: string }) => {
-				combobox.setListId(payload.listId);
+				listIdRef.current = payload.listId;
+				comboboxRef.current.setListId(payload.listId);
 			}),
-			channel.on("getDropdownOpened", () => combobox.dropdownOpened),
-			channel.on("getSelectedOptionIndex", () => combobox.selectedOptionIndex),
-			channel.on("getListId", () => combobox.listId),
+			channel.on("getDropdownOpened", () => comboboxRef.current.dropdownOpened),
+			channel.on("getSelectedOptionIndex", () => comboboxRef.current.getSelectedOptionIndex()),
+			// Mantine has no getListId(); setListId mutates a ref without rerender.
+			channel.on("getListId", () => listIdRef.current ?? comboboxRef.current.listId),
 		];
 
 		return () => {
 			for (const dispose of cleanups) dispose();
-			if (channelRef.current === channel) {
-				channelRef.current = null;
-			}
-			client.releaseChannel(channelId);
 		};
-	}, [client, channelId, combobox]);
+	}, [channel]);
 
 	return <MantineCombobox {...(rest as any)} store={combobox} />;
 }

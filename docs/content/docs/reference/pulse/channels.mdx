@@ -3,37 +3,40 @@ title: "Channels"
 description: "Realtime channels"
 ---
 
-Bidirectional communication channels for real-time messaging between server and client.
+A channel id is a session-scoped name. Messages route by id. The only lifecycle is local listener attach/detach — the name is not created or destroyed on the wire.
 
 ## Functions
 
 ### channel
 
 ```python
-def channel(identifier: str | None = None) -> Channel
+def channel(
+    identifier: str | None = None,
+    *,
+    lifetime: Literal["route", "tab"] = "route",
+) -> Channel
 ```
 
-Create a channel bound to the current render session.
+Return a handle on a channel name.
 
 **Parameters:**
-- `identifier` - Optional channel ID. Auto-generated UUID if not provided.
+- `identifier` — Channel name. `None` generates a UUID. Empty string raises `ValueError`.
+- `lifetime` — When this handle auto-detaches. `"route"` (default) detaches on that route's real unmount and requires a route context. `"tab"` lives until the render session ends or you call `detach()`.
 
-**Returns:** `Channel` instance.
+**Returns:** `Channel` handle.
 
-**Raises:** `RuntimeError` if called outside an active render session.
+**Raises:** `RuntimeError` if called outside an active render session, or if `lifetime="route"` has no route context. `ValueError` if `identifier` is empty.
+
+During a live route mount, `ps.channel("foo")` returns the same handle. `on(event, handler)` is idempotent for that triple. After that handle auto-detaches, the next `ps.channel("foo")` is a new handle on the same name.
 
 ```python
 import pulse as ps
 
 @ps.component
 def ChatRoom():
-    ch = ps.channel("chat")
-
-    @ch.on("message")
-    def handle_message(payload):
-        # Handle incoming message from client
-        ch.emit("broadcast", payload)
-
+    with ps.init():
+        ch = ps.channel("chat")
+        ch.on("message", lambda payload: ch.emit("echo", payload))
     return ps.div("Chat room")
 ```
 
@@ -41,17 +44,14 @@ def ChatRoom():
 
 ### Channel
 
-Bidirectional communication channel bound to a render session.
+A local handle on a channel name. Messages still route by `id` after detach.
 
 #### Attributes
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `id` | `str` | Channel identifier |
-| `render_id` | `str` | Associated render session ID |
-| `session_id` | `str` | Associated user session ID |
-| `route_path` | `str \| None` | Route path this channel is bound to |
-| `closed` | `bool` | Whether the channel is closed |
+| `id` | `str` | Channel name |
+| `lifetime` | `Literal["route", "tab"]` | Handle auto-detach policy |
 
 #### Methods
 
@@ -61,24 +61,13 @@ Bidirectional communication channel bound to a render session.
 def on(self, event: str, handler: ChannelHandler) -> Callable[[], None]
 ```
 
-Register a handler for an incoming event.
+Register a handler on this handle. Idempotent for the same `(event, handler)`.
 
-**Parameters:**
-- `event` - Event name to listen for.
-- `handler` - Callback function `(payload: Any) -> Any | Awaitable[Any]`.
+Events run serially per handle, in arrival order: an event's handlers are awaited before the next event starts. An event handler must therefore never block indefinitely — `await channel.request(...)` without a `timeout` inside an event handler stalls every later event on that handle. The guarantee covers events only: inbound requests run as independent tasks (so a request handler may itself call `request()`) and can overtake queued events. The backlog is capped at 500 events per handle, oldest dropped, with one warning.
 
-**Returns:** Callable that removes the handler when invoked.
+All live handles on the same name receive every event (fan-out, including a tab handle and a route handle together). A request goes to the first attached handle that has a handler for the event — registration order decides the single winner.
 
-**Raises:** `ChannelClosed` if channel is closed.
-
-```python
-ch = ps.channel()
-
-def cleanup():
-    remove_handler()
-
-remove_handler = ch.on("data", lambda payload: print(payload))
-```
+**Raises:** `ChannelDetached` if this handle has been detached.
 
 ##### emit
 
@@ -86,17 +75,9 @@ remove_handler = ch.on("data", lambda payload: print(payload))
 def emit(self, event: str, payload: Any = None) -> None
 ```
 
-Send a fire-and-forget event to the client.
+Send a fire-and-forget event to the channel. No-op after detach. If the WebSocket is down, the message uses the session's global queue: channel messages get their own 500-message budget (oldest dropped first, so they can never evict control-plane messages like `reload` or `navigate_to`) inside an overall 1000-message bound. Events emitted before the `useChannel` effect runs can be dropped.
 
-**Parameters:**
-- `event` - Event name.
-- `payload` - Data to send (optional).
-
-**Raises:** `ChannelClosed` if channel is closed.
-
-```python
-ch.emit("notification", {"message": "Hello"})
-```
+**Raises:** `TypeError` if the payload cannot be serialized.
 
 ##### request
 
@@ -110,48 +91,47 @@ async def request(
 ) -> Any
 ```
 
-Send a request to the client and await the response.
-
-**Parameters:**
-- `event` - Event name.
-- `payload` - Data to send (optional).
-- `timeout` - Timeout in seconds (optional).
-
-**Returns:** Response payload from client.
+Send a request and await the peer's response.
 
 **Raises:**
-- `ChannelClosed` if channel is closed.
-- `ChannelTimeout` if request times out.
+- `ChannelDetached` if this handle has been detached
+- `ChannelDisconnected` if there is no socket, or it dies mid-flight
+- `ChannelRemoteError` if the peer responds with `no_handler`, `denied`, or `handler_error`
+- `ChannelTimeout` if `timeout` elapses
+
+A request with no handler NACKs immediately (`no_handler`). Requests are never queued while the socket is down.
+
+##### detach
 
 ```python
-result = await ch.request("get_value", timeout=5.0)
+def detach(self) -> None
 ```
 
-##### close
-
-```python
-def close(self) -> None
-```
-
-Close the channel and clean up resources.
+Detach this handle's listeners. Idempotent. Does not destroy the channel name. After detach, `on()` and `request()` raise `ChannelDetached` and `emit()` is a debug-logged no-op. The handle's event pump is cancelled, so queued and in-flight handlers do not run.
 
 ## Exceptions
 
-### ChannelClosed
+### ChannelDetached
+
+Raised when `on()` or `request()` is called on a detached handle.
+
+### ChannelDisconnected
+
+Raised when a request cannot complete because the socket is down or died.
+
+### ChannelRemoteError
 
 ```python
-class ChannelClosed(RuntimeError)
+class ChannelRemoteError(Exception):
+    code: Literal["no_handler", "denied", "handler_error"]
+    message: str
 ```
 
-Raised when interacting with a channel that has been closed.
+Raised when the peer responds with an error.
 
 ### ChannelTimeout
 
-```python
-class ChannelTimeout(asyncio.TimeoutError)
-```
-
-Raised when a channel request times out waiting for a response.
+Raised when a request exceeds `timeout`.
 
 ## Type Aliases
 
@@ -160,5 +140,3 @@ Raised when a channel request times out waiting for a response.
 ```python
 ChannelHandler = Callable[[Any], Any | Awaitable[Any]]
 ```
-
-Handler function for channel events. Can be sync or async.

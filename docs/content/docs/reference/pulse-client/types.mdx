@@ -427,31 +427,41 @@ interface ClientApiResultMessage {
 }
 ```
 
-#### ClientChannelRequestMessage
-
-Channel event sent to server.
+#### ClientChannelEventMessage
 
 ```ts
-interface ClientChannelRequestMessage {
-  type: "channel_message";
+interface ClientChannelEventMessage {
+  type: "channel";
+  action: "event";
   channel: string;
   event: string;
   payload?: any;
-  requestId?: string;
+}
+```
+
+#### ClientChannelRequestMessage
+
+```ts
+interface ClientChannelRequestMessage {
+  type: "channel";
+  action: "request";
+  channel: string;
+  event: string;
+  requestId: string;
+  payload?: any;
 }
 ```
 
 #### ClientChannelResponseMessage
 
-Response to a server channel request.
-
 ```ts
 interface ClientChannelResponseMessage {
-  type: "channel_message";
+  type: "channel";
+  action: "response";
   channel: string;
   responseTo: string;
   payload?: any;
-  error?: any;
+  error?: { code: "no_handler" | "denied" | "handler_error"; message: string };
 }
 ```
 
@@ -542,31 +552,41 @@ interface ServerNavigateToMessage {
 }
 ```
 
-#### ServerChannelRequestMessage
-
-Channel event from server.
+#### ServerChannelEventMessage
 
 ```ts
-interface ServerChannelRequestMessage {
-  type: "channel_message";
+interface ServerChannelEventMessage {
+  type: "channel";
+  action: "event";
   channel: string;
   event: string;
   payload?: any;
-  requestId?: string;
+}
+```
+
+#### ServerChannelRequestMessage
+
+```ts
+interface ServerChannelRequestMessage {
+  type: "channel";
+  action: "request";
+  channel: string;
+  event: string;
+  requestId: string;
+  payload?: any;
 }
 ```
 
 #### ServerChannelResponseMessage
 
-Response to a client channel request.
-
 ```ts
 interface ServerChannelResponseMessage {
-  type: "channel_message";
+  type: "channel";
+  action: "response";
   channel: string;
   responseTo: string;
   payload?: any;
-  error?: any;
+  error?: { code: "no_handler" | "denied" | "handler_error"; message: string };
 }
 ```
 

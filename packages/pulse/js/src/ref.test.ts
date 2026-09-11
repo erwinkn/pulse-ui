@@ -28,6 +28,8 @@ class FakeBridge {
 		this.emitted.push({ event, payload });
 	}
 
+	detach(): void {}
+
 	trigger(event: string, payload: any): any {
 		const handlers = this.handlers.get(event);
 		let result: any;

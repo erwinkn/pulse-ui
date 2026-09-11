@@ -114,10 +114,6 @@ class MantineForm(ps.State, Generic[TForm]):
 		# Listen for server-side validation requests from the client.
 		self._channel.on("serverValidate", self._on_server_validate)
 
-	def _ensure_channel_open(self) -> None:
-		if self._channel.closed:
-			self._create_channel()
-
 	async def _handle_form_data(self, data: ps.FormData):
 		result = cast(dict[str, Any], data)
 
@@ -138,7 +134,6 @@ class MantineForm(ps.State, Generic[TForm]):
 		onSubmit: ps.EventHandler1[TForm] | None = None,
 		**props: Unpack[ps.HTMLFormProps],  # pyright: ignore[reportGeneralTypeIssues]
 	):
-		self._ensure_channel_open()
 		self._on_submit = onSubmit
 		merged: dict[str, Any] = {**props, **self._mantine_props, **self._form.props()}
 		return FormInternal(
@@ -150,11 +145,9 @@ class MantineForm(ps.State, Generic[TForm]):
 
 	# Public API mapping to Mantine useForm actions
 	async def get_form_values(self):
-		self._ensure_channel_open()
 		return await self._channel.request("getFormValues")
 
 	def set_values(self, values: dict[str, Any]):
-		self._ensure_channel_open()
 		# Optimistically update server state if sync is enabled
 		if self._sync_mode != "none" and isinstance(values, dict):
 			incoming_keys = set(values.keys())
@@ -165,7 +158,6 @@ class MantineForm(ps.State, Generic[TForm]):
 		self._channel.emit("setValues", {"values": values})
 
 	def set_field_value(self, path: str, value: Any):
-		self._ensure_channel_open()
 		# Optimistically update server state if sync is enabled
 		if self._sync_mode != "none" and isinstance(path, str):
 			try:
@@ -176,7 +168,6 @@ class MantineForm(ps.State, Generic[TForm]):
 		self._channel.emit("setFieldValue", {"path": path, "value": value})
 
 	def insert_list_item(self, path: str, item: Any, index: int | None = None):
-		self._ensure_channel_open()
 		msg: dict[str, Any] = {"path": path, "item": item}
 		if index is not None:
 			msg["index"] = index
@@ -209,7 +200,6 @@ class MantineForm(ps.State, Generic[TForm]):
 		self._channel.emit("insertListItem", msg)
 
 	def remove_list_item(self, path: str, index: int):
-		self._ensure_channel_open()
 		# Optimistically update server state if sync is enabled
 		if self._sync_mode != "none" and isinstance(path, str):
 			try:
@@ -229,7 +219,6 @@ class MantineForm(ps.State, Generic[TForm]):
 		self._channel.emit("removeListItem", {"path": path, "index": index})
 
 	def reorder_list_item(self, path: str, frm: int, to: int):
-		self._ensure_channel_open()
 		# Optimistically update server state if sync is enabled
 		if self._sync_mode != "none" and isinstance(path, str):
 			try:
@@ -253,26 +242,21 @@ class MantineForm(ps.State, Generic[TForm]):
 		)
 
 	def set_errors(self, errors: dict[str, Any]):
-		self._ensure_channel_open()
 		self._channel.emit("setErrors", {"errors": errors})
 
 	def set_field_error(self, path: str, error: Any):
-		self._ensure_channel_open()
 		self._channel.emit("setFieldError", {"path": path, "error": error})
 
 	def clear_errors(self, *paths: str):
-		self._ensure_channel_open()
 		if paths:
 			self._channel.emit("clearErrors", {"paths": list(paths)})
 		else:
 			self._channel.emit("clearErrors")
 
 	def set_touched(self, touched: dict[str, bool]):
-		self._ensure_channel_open()
 		self._channel.emit("setTouched", {"touched": touched})
 
 	def validate(self):
-		self._ensure_channel_open()
 		# Trigger client-side validation
 		self._channel.emit("validate")
 		# Also run all server-side validators in the background for current values
@@ -327,7 +311,6 @@ class MantineForm(ps.State, Generic[TForm]):
 			return
 
 	def reset(self, initial_values: dict[str, Any] | None = None):
-		self._ensure_channel_open()
 		if self._sync_mode != "none":
 			values: dict[str, Any]
 			if initial_values is not None:

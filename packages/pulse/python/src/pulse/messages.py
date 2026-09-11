@@ -20,7 +20,15 @@ class ServerUpdateMessage(TypedDict):
 
 
 ServerErrorPhase = Literal[
-	"render", "callback", "mount", "unmount", "navigate", "server", "effect", "connect"
+	"render",
+	"callback",
+	"mount",
+	"unmount",
+	"navigate",
+	"server",
+	"effect",
+	"connect",
+	"channel",
 ]
 
 
@@ -74,22 +82,38 @@ class ServerApiCallMessage(TypedDict):
 	credentials: Literal["include", "omit"]
 
 
-class ServerChannelRequestMessage(TypedDict):
-	type: Literal["channel_message"]
+ChannelErrorCode = Literal["no_handler", "denied", "handler_error"]
+
+
+class ChannelError(TypedDict):
+	code: ChannelErrorCode
+	message: str
+
+
+class ServerChannelEventMessage(TypedDict):
+	type: Literal["channel"]
+	action: Literal["event"]
 	channel: str
 	event: str
-	payload: Any
-	requestId: NotRequired[str]
-	error: NotRequired[Any]
+	payload: NotRequired[Any]
+
+
+class ServerChannelRequestMessage(TypedDict):
+	type: Literal["channel"]
+	action: Literal["request"]
+	channel: str
+	event: str
+	requestId: str
+	payload: NotRequired[Any]
 
 
 class ServerChannelResponseMessage(TypedDict):
-	type: Literal["channel_message"]
+	type: Literal["channel"]
+	action: Literal["response"]
 	channel: str
-	event: None
 	responseTo: str
-	payload: Any
-	error: NotRequired[Any]
+	payload: NotRequired[Any]
+	error: NotRequired[ChannelError]
 
 
 class ServerJsExecMessage(TypedDict):
@@ -138,22 +162,30 @@ class ClientApiResultMessage(TypedDict):
 	body: Any | None
 
 
-class ClientChannelRequestMessage(TypedDict):
-	type: Literal["channel_message"]
+class ClientChannelEventMessage(TypedDict):
+	type: Literal["channel"]
+	action: Literal["event"]
 	channel: str
 	event: str
-	payload: Any
-	requestId: NotRequired[str]
-	error: NotRequired[Any]
+	payload: NotRequired[Any]
+
+
+class ClientChannelRequestMessage(TypedDict):
+	type: Literal["channel"]
+	action: Literal["request"]
+	channel: str
+	event: str
+	requestId: str
+	payload: NotRequired[Any]
 
 
 class ClientChannelResponseMessage(TypedDict):
-	type: Literal["channel_message"]
+	type: Literal["channel"]
+	action: Literal["response"]
 	channel: str
-	event: None
 	responseTo: str
-	payload: Any
-	error: NotRequired[Any]
+	payload: NotRequired[Any]
+	error: NotRequired[ChannelError]
 
 
 class ClientJsResultMessage(TypedDict):
@@ -165,7 +197,11 @@ class ClientJsResultMessage(TypedDict):
 	error: str | None
 
 
-ServerChannelMessage = ServerChannelRequestMessage | ServerChannelResponseMessage
+ServerChannelMessage = (
+	ServerChannelEventMessage
+	| ServerChannelRequestMessage
+	| ServerChannelResponseMessage
+)
 ServerMessage = (
 	ServerInitMessage
 	| ServerUpdateMessage
@@ -187,7 +223,11 @@ ClientPulseMessage = (
 	| ClientApiResultMessage
 	| ClientJsResultMessage
 )
-ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage
+ClientChannelMessage = (
+	ClientChannelEventMessage
+	| ClientChannelRequestMessage
+	| ClientChannelResponseMessage
+)
 ClientMessage = ClientPulseMessage | ClientChannelMessage
 
 

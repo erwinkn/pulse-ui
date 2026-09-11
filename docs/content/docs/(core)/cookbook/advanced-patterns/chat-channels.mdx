@@ -10,7 +10,7 @@ You need server-initiated updates that go beyond the normal render cycle - live 
 
 ## Solution
 
-Create a channel on the server and use `usePulseChannel` on the client to send and receive messages.
+Create a channel on the server and use `useChannel` on the client to send and receive messages.
 
 ### Server side
 
@@ -61,14 +61,14 @@ def ChatRoom():
 ### Client side
 
 ```python
-from pulse.js.pulse import usePulseChannel
+from pulse.js.pulse import useChannel
 
 useState = ps.Import("useState", "react")
 useEffect = ps.Import("useEffect", "react")
 
 @ps.javascript(jsx=True)
 def ChatClient(*, channelId: str):
-    bridge = usePulseChannel(channelId)
+    bridge = useChannel(channelId)
     messages, setMessages = useState([])
     inputText, setInputText = useState("")
 
@@ -108,11 +108,11 @@ def ChatClient(*, channelId: str):
 
 ## How it works
 
-- `ps.channel()` creates a bidirectional channel scoped to the current user session
+- `ps.channel(name)` returns an attached handle for a session-scoped channel name — the name is just an address, nothing is created on the wire
 - `channel.on(event, handler)` registers a handler for client events
 - `channel.emit(event, payload)` sends fire-and-forget messages to the client
-- `usePulseChannel(id)` connects the client to the channel
-- Channels are automatically cleaned up when the component unmounts
+- `useChannel(id)` returns a client handle for the same name and attaches it while the component is mounted
+- Handles detach automatically: server handles when their route unmounts, client handles when the component unmounts
 
 ## Request-response pattern
 

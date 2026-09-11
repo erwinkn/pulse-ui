@@ -231,6 +231,7 @@ export class RefRegistry {
 		for (const fn of this.#cleanup) fn();
 		this.#cleanup = [];
 		this.#entries.clear();
+		this.#bridge?.detach();
 		this.#bridge = null;
 		this.#channelId = null;
 	}

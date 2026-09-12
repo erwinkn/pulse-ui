@@ -117,9 +117,9 @@ function App() {
 
 ### Pre-hydration input capture
 
-PulseProvider (and the generated Pulse layout) embed a tiny inline script that records `input`/`change` from document parse. After the hydration commit, PulseProvider replays those values through React so Python-controlled inputs (`value={state.x}`) keep what the user typed before JS loaded.
+PulseProvider embeds a tiny inline script that records `input`/`change` from document parse. After the hydration commit, PulseProvider replays those values through React so Python-controlled inputs (`value={state.x}`) keep what the user typed before JS loaded.
 
-If you write a custom document or skip the generated layout, put the script in `<head>` — the bootstrap is idempotent:
+If you write a custom document, put the script in `<head>` — the bootstrap is idempotent:
 
 ```tsx
 import { preHydrationInputCaptureScript } from "pulse-ui-client";
@@ -127,7 +127,7 @@ import { preHydrationInputCaptureScript } from "pulse-ui-client";
 <script dangerouslySetInnerHTML={{ __html: preHydrationInputCaptureScript }} />
 ```
 
-Inputs inside lazy/suspended subtrees that hydrate after the root commit can still lose pre-hydration edits.
+Replayed events are synthetic, so handlers see `isTrusted: false`. Inputs inside lazy/suspended subtrees that hydrate after the root commit can still lose pre-hydration edits.
 
 ### Connection Status UI
 

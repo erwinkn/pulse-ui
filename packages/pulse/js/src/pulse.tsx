@@ -130,11 +130,9 @@ export function PulseProvider({ children, config, prerender }: PulseProviderProp
 
 	// After child PulseViews attach (same commit's useEffects). Layout-phase
 	// replay would fire before attach and invokeCallback would drop the events.
+	// Replay consumes the whole buffer, so a single pass suffices.
 	useEffect(() => {
-		const replay = () => replayPreHydrationInputs();
-		queueMicrotask(replay);
-		const frame = requestAnimationFrame(replay);
-		return () => cancelAnimationFrame(frame);
+		queueMicrotask(replayPreHydrationInputs);
 	}, []);
 
 	useEffect(() => {
@@ -252,7 +250,6 @@ export function PulseView({ path, registry }: PulseViewProps) {
 				onInit: (view) => {
 					setTree(renderer.init(view));
 					setServerError(null);
-					queueMicrotask(() => replayPreHydrationInputs());
 				},
 				onUpdate: (ops) => {
 					setTree((prev) => (prev == null ? prev : renderer.applyUpdates(prev, ops)));

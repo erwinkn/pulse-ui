@@ -170,6 +170,46 @@ describe("pre-hydration input capture", () => {
 		expect(replacement.value).toBe("Avery Smith");
 		expect(window.__PULSE_INPUT_CAPTURE__).toBeUndefined();
 	});
+
+	test("retargets by ordinal among identical inputs on remount", () => {
+		installCaptureScript();
+		const first = document.createElement("input");
+		const second = document.createElement("input");
+		document.body.append(first, second);
+		type(second, "Avery Smith");
+		first.remove();
+		second.remove();
+
+		const r1 = document.createElement("input");
+		const r2 = document.createElement("input");
+		document.body.append(r1, r2);
+
+		replayPreHydrationInputs();
+		expect(r1.value).toBe("");
+		expect(r2.value).toBe("Avery Smith");
+	});
+
+	test("replays a radio group in last-interaction order", () => {
+		installCaptureScript();
+		const a = document.createElement("input");
+		a.type = "radio";
+		a.name = "g";
+		const b = document.createElement("input");
+		b.type = "radio";
+		b.name = "g";
+		document.body.append(a, b);
+
+		a.click();
+		b.click();
+		a.click();
+
+		a.checked = false;
+		b.checked = false;
+		replayPreHydrationInputs();
+
+		expect(a.checked).toBe(true);
+		expect(b.checked).toBe(false);
+	});
 });
 
 describe("replay through a hydrated React controlled input", () => {
@@ -221,5 +261,87 @@ describe("replay through a hydrated React controlled input", () => {
 
 		expect(input.value).toBe("Avery Smith");
 		expect(seen).toEqual(["Avery Smith"]);
+	});
+
+	test("desyncs React's checked tracker so onChange fires after hydrate", async () => {
+		const html = renderToString(
+			createElement("input", { type: "checkbox", checked: false, onChange() {} }),
+		);
+		const container = document.createElement("div");
+		container.innerHTML = html;
+		document.body.appendChild(container);
+		const input = container.querySelector("input");
+		if (!input) throw new Error("expected SSR input");
+
+		installCaptureScript();
+		input.click(); // user checks the box pre-hydration
+
+		const seen: boolean[] = [];
+		function Hydrated() {
+			const [checked, setChecked] = useState(false);
+			return createElement("input", {
+				type: "checkbox",
+				checked,
+				onChange: (event: ChangeEvent<HTMLInputElement>) => {
+					seen.push(event.target.checked);
+					setChecked(event.target.checked);
+				},
+			});
+		}
+
+		await act(async () => {
+			hydrateRoot(container, createElement(Hydrated));
+		});
+
+		await act(async () => {
+			replayPreHydrationInputs();
+		});
+
+		expect(input.checked).toBe(true);
+		expect(seen).toEqual([true]);
+	});
+
+	test("desyncs React's checked tracker for radios after hydrate", async () => {
+		const html = renderToString(
+			createElement("input", {
+				type: "radio",
+				name: "g",
+				checked: false,
+				onChange() {},
+			}),
+		);
+		const container = document.createElement("div");
+		container.innerHTML = html;
+		document.body.appendChild(container);
+		const input = container.querySelector("input");
+		if (!input) throw new Error("expected SSR input");
+
+		installCaptureScript();
+		input.click();
+
+		const seen: boolean[] = [];
+		function Hydrated() {
+			const [checked, setChecked] = useState(false);
+			return createElement("input", {
+				type: "radio",
+				name: "g",
+				checked,
+				onChange: (event: ChangeEvent<HTMLInputElement>) => {
+					seen.push(event.target.checked);
+					setChecked(event.target.checked);
+				},
+			});
+		}
+
+		await act(async () => {
+			hydrateRoot(container, createElement(Hydrated));
+		});
+
+		await act(async () => {
+			replayPreHydrationInputs();
+		});
+
+		expect(input.checked).toBe(true);
+		expect(seen).toEqual([true]);
 	});
 });

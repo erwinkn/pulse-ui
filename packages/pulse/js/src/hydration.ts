@@ -8,7 +8,7 @@
  * commit through native setters so React's onChange observes the edit.
  */
 
-type CapturedEntry = { value: string } | { checked: boolean };
+type CapturedEntry = { ord: number } & ({ value: string } | { checked: boolean });
 
 type CaptureHandle = {
 	records: Map<Element, CapturedEntry>;
@@ -29,17 +29,36 @@ declare global {
 export const preHydrationInputCaptureScript = `(function () {
 	if (window.__PULSE_INPUT_CAPTURE__) return;
 	var records = new Map();
+	function fingerprint(el) {
+		return [el.tagName, el.type || "", el.name || "", el.id || "", el.placeholder || ""].join("\\0");
+	}
 	function record(event) {
 		var t = event.target;
 		if (!t || !t.tagName) return;
 		var tag = t.tagName;
 		if (tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT") return;
 		if (t.type === "file") return;
-		if (t.type === "checkbox" || t.type === "radio") {
-			records.set(t, { checked: t.checked });
-		} else {
-			records.set(t, { value: t.value });
+		var entry = records.get(t);
+		if (!entry) {
+			// Position among identical controls, for retargeting if React
+			// remounts the node during hydration.
+			var fp = fingerprint(t);
+			var ord = 0;
+			var all = document.getElementsByTagName(tag);
+			for (var i = 0; i < all.length; i++) {
+				if (all[i] === t) break;
+				if (fingerprint(all[i]) === fp) ord++;
+			}
+			entry = { ord: ord };
 		}
+		if (t.type === "checkbox" || t.type === "radio") {
+			entry.checked = t.checked;
+		} else {
+			entry.value = t.value;
+		}
+		// Re-insert so replay order follows last interaction (radio groups).
+		records.delete(t);
+		records.set(t, entry);
 	}
 	document.addEventListener("input", record, true);
 	document.addEventListener("change", record, true);
@@ -59,7 +78,7 @@ export const preHydrationInputCaptureScript = `(function () {
  *
  * Must run after Pulse views `attach`, otherwise `invokeCallback` drops the
  * synthetic events. React may also replace the SSR node during hydrate —
- * resolve a live match by tag/type/name/id/placeholder when that happens.
+ * resolve the live match by fingerprint + ordinal when that happens.
  */
 export function replayPreHydrationInputs(): void {
 	if (typeof window === "undefined") return;
@@ -71,7 +90,7 @@ export function replayPreHydrationInputs(): void {
 	// not have reset the input yet, and only the event makes the framework's
 	// state adopt the value (otherwise the next controlled render reverts it).
 	for (const [element, entry] of [...capture.records]) {
-		const target = resolveReplayTarget(element);
+		const target = resolveReplayTarget(element, entry);
 		if (!target) {
 			capture.records.delete(element);
 			continue;
@@ -79,18 +98,22 @@ export function replayPreHydrationInputs(): void {
 
 		if ("checked" in entry) {
 			const input = target as HTMLInputElement;
-			// Force the opposite state through React's tracked instance setter
-			// (hydration initialized the tracker with the user's state, so a
-			// click alone would be deduped as a no-op), then click() to toggle
-			// back through React's event system.
-			setDesyncingReactTracker(input, "checked", !entry.checked);
+			// Write the pre-click state through React's tracked instance setter
+			// (falling back to the prototype setter when there is no tracker):
+			// tracker and DOM both hold !entry.checked, then click() toggles the
+			// DOM to entry.checked — tracker lags, so the change registers.
+			const setChecked =
+				Object.getOwnPropertyDescriptor(input, "checked")?.set ??
+				Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "checked")?.set;
+			if (!setChecked) continue;
+			setChecked.call(input, !entry.checked);
 			input.click();
 			capture.records.delete(element);
 			continue;
 		}
 
 		const control = target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-		if (!setDesyncingReactTracker(control, "value", entry.value)) continue;
+		if (!setValueForcingChange(control, entry.value)) continue;
 		control.dispatchEvent(new Event("input", { bubbles: true }));
 		control.dispatchEvent(new Event("change", { bubbles: true }));
 		if (document.activeElement === control && "setSelectionRange" in control) {
@@ -115,36 +138,35 @@ function controlFingerprint(element: Element): string {
 	);
 }
 
-function resolveReplayTarget(element: Element): Element | null {
+function resolveReplayTarget(element: Element, entry: CapturedEntry): Element | null {
 	if (element.isConnected) return element;
 	const fingerprint = controlFingerprint(element);
 	const matches = [...document.querySelectorAll(element.tagName)].filter(
 		(el) => controlFingerprint(el) === fingerprint,
 	);
-	return matches.length === 1 ? matches[0] : (matches[0] ?? null);
+	// The recorded element's position among identical controls disambiguates
+	// same-fingerprint inputs (unattributed fields, radio groups sharing a
+	// name). Out of range = the DOM shifted structurally; drop rather than
+	// write a value into the wrong control.
+	return matches[entry.ord] ?? null;
 }
 
 /**
- * Set an input property so the next event registers as a change in React.
+ * Set an input's value so the next event registers as a change in React.
  *
- * React wraps `value`/`checked` with a tracker on the node instance and
- * dedupes events whose value matches the tracker — which is exactly the
- * pre-hydration state (the tracker initializes from the DOM). Move the
- * tracker to a different value through the instance setter, then write the
- * real value through the prototype setter the tracker can't observe.
+ * React wraps `value` with a tracker on the node instance and dedupes events
+ * whose value matches the tracker — which is exactly the pre-hydration state
+ * (the tracker initializes from the DOM). Move the tracker to a sentinel
+ * through the instance setter, then write the real value through the
+ * prototype setter the tracker can't observe.
  */
-function setDesyncingReactTracker(
-	element: Element,
-	prop: "value" | "checked",
-	next: string | boolean,
-): boolean {
-	const prototypeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), prop)
+function setValueForcingChange(element: Element, next: string): boolean {
+	const prototypeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")
 		?.set;
 	if (!prototypeSetter) return false;
-	const instanceSetter = Object.getOwnPropertyDescriptor(element, prop)?.set;
+	const instanceSetter = Object.getOwnPropertyDescriptor(element, "value")?.set;
 	if (instanceSetter && instanceSetter !== prototypeSetter) {
-		const sentinel = prop === "checked" ? !next : next === "" ? "\0" : "";
-		instanceSetter.call(element, sentinel);
+		instanceSetter.call(element, next === "" ? "\0" : "");
 	}
 	prototypeSetter.call(element, next);
 	return true;

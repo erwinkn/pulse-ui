@@ -367,7 +367,7 @@ def client_address() -> str:
 		)
 	if not ctx.render.client_address:
 		raise RuntimeError(
-			"Client address unavailable. It is set during prerender or socket connect."
+			"Client address unavailable. It is set when prerender mints the render."
 		)
 	return ctx.render.client_address
 

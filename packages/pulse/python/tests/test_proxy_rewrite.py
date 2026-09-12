@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import aiohttp
 import pytest
 from pulse.context import PULSE_CONTEXT, PulseContext
-from pulse.helpers import get_client_address, get_client_address_socketio
+from pulse.helpers import get_client_address
 from pulse.proxy import Proxy, ReactProxy
 from starlette.datastructures import URL, Headers
 from starlette.requests import Request
@@ -329,27 +329,6 @@ class TestGetClientAddressFallback:
 		request = Request(scope)
 		result = get_client_address(request)
 		assert result is None
-
-
-class TestGetClientAddressSocketioFallback:
-	def test_uses_origin_first(self):
-		environ = {
-			"HTTP_ORIGIN": "http://localhost:8000",
-			"HTTP_HOST": "localhost:9999",
-		}
-		assert get_client_address_socketio(environ) == "http://localhost:8000"
-
-	def test_falls_back_to_http_host(self):
-		environ = {"HTTP_HOST": "localhost:8000", "wsgi.url_scheme": "http"}
-		assert get_client_address_socketio(environ) == "http://localhost:8000"
-
-	def test_falls_back_to_http_host_with_https(self):
-		environ = {"HTTP_HOST": "example.com", "wsgi.url_scheme": "https"}
-		assert get_client_address_socketio(environ) == "https://example.com"
-
-	def test_returns_none_when_no_host(self):
-		environ = {"wsgi.url_scheme": "http"}
-		assert get_client_address_socketio(environ) is None
 
 
 class TestReactProxyHeaders:

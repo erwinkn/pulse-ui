@@ -717,7 +717,7 @@ async def test_connect_after_render_expires_is_refused(
 	"""A render reaped by its reconnect TTL is unknown on the next connect:
 	the stale tab is refused rather than silently revived."""
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
-	app = ps.App(routes=[], session_timeout=0.05)
+	app = ps.App(routes=[], session_timeout=0.05, pending_timeout=0.05)
 	app.setup("http://example.com")
 	cookie = make_cookie(app, "user-1")
 	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
@@ -734,5 +734,96 @@ async def test_connect_after_render_expires_is_refused(
 		await connect("socket-b", environ, auth)
 
 	assert exc_info.value.error_args["data"] == {"code": UNKNOWN_RENDER_CODE}
+
+	await app.close()
+
+
+@pytest.mark.asyncio
+async def test_connect_with_wrong_session_denied_without_leaking_ids(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	"""A render owned by another session is refused with a generic message;
+	the owner/session ids stay server-side in the logs."""
+	app = make_app(monkeypatch)
+	cookie = make_cookie(app, "user-1")
+	await seed_render(app, cookie, "render-1")
+
+	environ = make_environ(app, "user-2")
+	connect = connect_handler(app)
+
+	with pytest.raises(SocketIOConnectionRefusedError) as exc_info:
+		await connect("socket-a", environ, {"render_id": "render-1"})
+
+	assert exc_info.value.error_args == {"message": "Socket connection denied"}
+	assert "render-1" in app.render_sessions
+	assert "user-2" not in app.user_sessions
+
+	await app.close()
+
+
+@pytest.mark.asyncio
+async def test_disconnected_render_with_mounts_keeps_session_timeout(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	"""A disconnected render that still holds mounts keeps the full
+	session_timeout reconnect grace — suspended mounts preserve client state."""
+	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
+	app = ps.App(
+		routes=[ps.Route("a", Counter)],
+		session_timeout=60.0,
+		pending_timeout=0.05,
+	)
+	app.setup("http://example.com")
+	cookie = make_cookie(app, "user-1")
+	render = await seed_render(app, cookie, "render-1")
+	user_session = app.user_sessions["user-1"]
+	with ps.PulseContext.update(session=user_session, render=render):
+		render.prerender(["/a"], make_route_info("/a"))
+
+	assert render.route_mounts
+	app._schedule_render_cleanup("render-1")  # pyright: ignore[reportPrivateUsage]
+	remaining = (
+		app._render_cleanups["render-1"].when()  # pyright: ignore[reportPrivateUsage]
+		- asyncio.get_running_loop().time()
+	)
+	assert remaining > app.session_timeout / 2
+
+	await app.close()
+
+
+@pytest.mark.asyncio
+async def test_mountless_render_is_reaped_on_pending_timeout(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	"""A render whose never-claimed mounts all expire goes mount-less; the
+	last mount's disposal reschedules cleanup to pending_timeout instead of
+	leaving the husk on the previously armed session_timeout."""
+	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
+	app = ps.App(
+		routes=[ps.Route("a", Counter)],
+		session_timeout=60.0,
+		pending_timeout=0.05,
+	)
+	app.setup("http://example.com")
+	cookie = make_cookie(app, "user-1")
+	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
+	render = await seed_render(app, cookie, "render-1")
+	user_session = app.user_sessions["user-1"]
+	with ps.PulseContext.update(session=user_session, render=render):
+		render.prerender(["/a"], make_route_info("/a"))
+
+	# Connect then drop before the client attaches: disconnect arms the long
+	# reconnect TTL while the mounts are still pending.
+	connect = connect_handler(app)
+	disconnect = app.sio.handlers["/"]["disconnect"]
+	await connect("socket-a", environ, {"render_id": "render-1"})
+	disconnect("socket-a")
+	assert render.route_mounts
+	assert "render-1" in app._render_cleanups  # pyright: ignore[reportPrivateUsage]
+
+	# The pending mounts expire unclaimed; the last one's disposal reschedules
+	# the now-mount-less render onto pending_timeout.
+	assert await wait_for(lambda: not render.route_mounts)
+	assert await wait_for(lambda: "render-1" not in app.render_sessions)
 
 	await app.close()

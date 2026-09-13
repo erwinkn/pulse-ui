@@ -274,11 +274,7 @@ from pulse import run_js
 ### Signature
 
 ```python
-@overload
-def run_js(expr: Expr, *, result: Literal[True]) -> asyncio.Future[Any]: ...
-
-@overload
-def run_js(expr: Expr, *, result: Literal[False] = ...) -> None: ...
+def run_js(expr: Expr) -> None: ...
 ```
 
 ### Parameters
@@ -286,7 +282,6 @@ def run_js(expr: Expr, *, result: Literal[False] = ...) -> None: ...
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `expr` | `Expr` | required | Expression from calling a `@javascript` function |
-| `result` | `bool` | `False` | If `True`, returns Future with JS return value |
 
 ### Usage
 
@@ -298,25 +293,48 @@ from pulse.js import document
 def focus_input(selector: str):
     document.querySelector(selector).focus()
 
+def on_submit():
+    run_js(focus_input("#next-field"))
+```
+
+## eval_js
+
+Execute JavaScript on the client and await its result.
+
+```python
+from pulse import eval_js, javascript
+
 @javascript
 def get_value(selector: str):
     return document.querySelector(selector).value
 
-# Fire and forget
-def on_submit():
-    run_js(focus_input("#next-field"))
-
-# Await result
 async def on_check():
-    value = await run_js(get_value("#my-input"), result=True)
+    value = await eval_js(get_value("#my-input"))
     print(value)
 ```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `expr` | `Expr` | required | Expression from calling a `@javascript` function |
+| `timeout` | `float` | `10.0` | Maximum seconds to wait for the result |
+
+### Errors
+
+Raises `JsExecError` when client-side JavaScript throws an exception; see
+[`JsExecError`](#jsexecerror). Raises `asyncio.TimeoutError` when no result
+arrives before `timeout`.
+
+### Reply protocol
+
+A failed `eval_js(...)` arrives as `{type: "reply", error}` and rejects the future with `JsExecError`.
 
 ---
 
 ## JsExecError
 
-Exception raised when client-side JS execution fails.
+Raised when client-side JavaScript execution fails.
 
 ```python
 from pulse import JsExecError

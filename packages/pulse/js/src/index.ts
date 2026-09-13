@@ -18,19 +18,15 @@ export { extractServerRouteInfo } from "./helpers";
 export { preHydrationInputCaptureScript, replayPreHydrationInputs } from "./hydration";
 // Messages (types only)
 export type {
-	ClientApiResultMessage,
 	ClientAttachMessage,
 	ClientCallbackMessage,
-	ClientChannelMessage,
 	ClientChannelRequestMessage,
-	ClientChannelResponseMessage,
 	ClientDetachMessage,
 	ClientMessage,
 	ClientUpdateMessage,
+	ReplyMessage,
 	ServerApiCallMessage,
-	ServerChannelMessage,
 	ServerChannelRequestMessage,
-	ServerChannelResponseMessage,
 	ServerError,
 	ServerErrorMessage,
 	ServerInitMessage,

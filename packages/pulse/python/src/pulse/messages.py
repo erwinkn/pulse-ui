@@ -80,15 +80,14 @@ class ServerChannelRequestMessage(TypedDict):
 	event: str
 	payload: Any
 	requestId: NotRequired[str]
-	error: NotRequired[Any]
 
 
-class ServerChannelResponseMessage(TypedDict):
-	type: Literal["channel_message"]
-	channel: str
-	event: None
-	responseTo: str
-	payload: Any
+class ReplyMessage(TypedDict):
+	"""Client or server reply to a pending request (`PendingReplies`)."""
+
+	type: Literal["reply"]
+	id: str
+	payload: NotRequired[Any]
 	error: NotRequired[Any]
 
 
@@ -129,43 +128,14 @@ class ClientDetachMessage(TypedDict):
 	path: str
 
 
-class ClientApiResultMessage(TypedDict):
-	type: Literal["api_result"]
-	id: str
-	ok: bool
-	status: int
-	headers: dict[str, str]
-	body: Any | None
-
-
 class ClientChannelRequestMessage(TypedDict):
 	type: Literal["channel_message"]
 	channel: str
 	event: str
 	payload: Any
 	requestId: NotRequired[str]
-	error: NotRequired[Any]
 
 
-class ClientChannelResponseMessage(TypedDict):
-	type: Literal["channel_message"]
-	channel: str
-	event: None
-	responseTo: str
-	payload: Any
-	error: NotRequired[Any]
-
-
-class ClientJsResultMessage(TypedDict):
-	"""Result of client-side JS execution."""
-
-	type: Literal["js_result"]
-	id: str
-	result: Any
-	error: str | None
-
-
-ServerChannelMessage = ServerChannelRequestMessage | ServerChannelResponseMessage
 ServerMessage = (
 	ServerInitMessage
 	| ServerUpdateMessage
@@ -174,8 +144,9 @@ ServerMessage = (
 	| ServerNavigateToMessage
 	| ServerReloadMessage
 	| ServerAttachAckMessage
-	| ServerChannelMessage
+	| ServerChannelRequestMessage
 	| ServerJsExecMessage
+	| ReplyMessage
 )
 
 
@@ -184,11 +155,8 @@ ClientPulseMessage = (
 	| ClientAttachMessage
 	| ClientUpdateMessage
 	| ClientDetachMessage
-	| ClientApiResultMessage
-	| ClientJsResultMessage
 )
-ClientChannelMessage = ClientChannelRequestMessage | ClientChannelResponseMessage
-ClientMessage = ClientPulseMessage | ClientChannelMessage
+ClientMessage = ClientPulseMessage | ClientChannelRequestMessage | ReplyMessage
 
 
 class PrerenderPayload(TypedDict):

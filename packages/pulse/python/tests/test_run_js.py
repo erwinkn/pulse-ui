@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 from pulse.context import PULSE_CONTEXT, PulseContext
 from pulse.js import console
-from pulse.render_session import run_js
+from pulse.render_session import eval_js, run_js
 from pulse.transpiler.function import javascript
 from pulse.transpiler.id import next_id, reset_id_counter
 from pulse.transpiler.nodes import Expr
@@ -48,9 +48,7 @@ class MockRenderSession:
 				)
 			)
 
-	def run_js(
-		self, expr: Any, *, result: bool = False
-	) -> asyncio.Future[object] | None:
+	def run_js(self, expr: Any) -> None:
 		"""Mock implementation of RenderSession.run_js."""
 		if not isinstance(expr, Expr):
 			raise TypeError(
@@ -58,20 +56,28 @@ class MockRenderSession:
 			)
 		ctx = PulseContext.get()
 		exec_id = next_id()
+		path = ctx.route.pathname if ctx.route else "/"
+		self.send(
+			{"type": "js_exec", "path": path, "id": exec_id, "expr": expr.render()}
+		)
+
+	async def eval_js(self, expr: Any, *, timeout: float = 10.0) -> object:
+		"""Mock implementation of RenderSession.eval_js."""
+		if not isinstance(expr, Expr):
+			raise TypeError(
+				f"eval_js() requires an Expr (from @javascript function or pulse.js module), got {type(expr).__name__}"
+			)
+		ctx = PulseContext.get()
+		exec_id = next_id()
+		future = asyncio.get_running_loop().create_future()
+		self._pending_js_results[exec_id] = future
 
 		path = ctx.route.pathname if ctx.route else "/"
 
 		self.send(
 			{"type": "js_exec", "path": path, "id": exec_id, "expr": expr.render()}
 		)
-
-		if result:
-			loop = asyncio.get_running_loop()
-			future: asyncio.Future[object] = loop.create_future()
-			self._pending_js_results[exec_id] = future
-			return future
-
-		return None
+		return await asyncio.wait_for(future, timeout=timeout)
 
 
 @dataclass
@@ -124,6 +130,12 @@ class TestRunJs:
 		with pytest.raises(RuntimeError, match="can only be called during callback"):
 			run_js(log_message("test"))
 
+	@pytest.mark.asyncio
+	async def test_eval_js_requires_context(self) -> None:
+		"""eval_js should raise when called outside callback context."""
+		with pytest.raises(RuntimeError, match="can only be called during callback"):
+			await eval_js(get_value())
+
 	def test_run_js_rejects_non_expr(self) -> None:
 		"""run_js should reject non-Expr values with helpful error."""
 		mock = MockRenderSession()
@@ -135,8 +147,16 @@ class TestRunJs:
 			with pytest.raises(TypeError, match="requires an Expr"):
 				run_js(42)  # type: ignore
 
+	@pytest.mark.asyncio
+	async def test_eval_js_rejects_non_expr(self) -> None:
+		"""eval_js should reject non-Expr values with helpful error."""
+		mock = MockRenderSession()
+		with set_render_context(mock):
+			with pytest.raises(TypeError, match="requires an Expr"):
+				await eval_js("not an expr")  # type: ignore
+
 	def test_run_js_fire_and_forget(self) -> None:
-		"""run_js without result=True should return None."""
+		"""run_js should return None."""
 		mock = MockRenderSession()
 		with set_render_context(mock):
 			result = run_js(log_message("hello"))
@@ -150,16 +170,17 @@ class TestRunJs:
 			assert len(mock.pending_js_results) == 0
 
 	@pytest.mark.asyncio
-	async def test_run_js_with_result(self) -> None:
-		"""run_js with result=True should return a Future."""
+	async def test_eval_js_returns_result(self) -> None:
+		"""eval_js should await and return the JavaScript result."""
 		mock = MockRenderSession()
 		with set_render_context(mock):
-			future = run_js(get_value(), result=True)
-			assert isinstance(future, asyncio.Future)
+			task = asyncio.create_task(eval_js(get_value()))
+			await asyncio.sleep(0)
 			assert len(mock.sent_commands) == 1
-			# Future registered for result
+			exec_id = mock.sent_commands[0].id
 			assert len(mock.pending_js_results) == 1
-			assert mock.sent_commands[0].id in mock.pending_js_results
+			mock.pending_js_results[exec_id].set_result(42)
+			assert await task == 42
 
 	def test_run_js_with_js_function(self) -> None:
 		"""run_js with a @javascript function call should produce a CallExpr."""
@@ -196,16 +217,11 @@ class TestRunJs:
 			assert mock.sent_commands[0].path == "/dashboard"
 
 
-class TestRunJsWithResult:
+class TestEvalJs:
 	@pytest.mark.asyncio
-	async def test_result_future_can_be_resolved(self) -> None:
-		"""The returned future should be resolvable."""
+	async def test_eval_js_timeout(self) -> None:
+		"""eval_js should raise TimeoutError when no result arrives."""
 		mock = MockRenderSession()
 		with set_render_context(mock):
-			future = run_js(get_value(), result=True)
-			# Simulate the result coming back
-			exec_id = mock.sent_commands[0].id
-			mock.pending_js_results[exec_id].set_result(42)
-
-			result = await future
-			assert result == 42
+			with pytest.raises(asyncio.TimeoutError):
+				await eval_js(get_value(), timeout=0)

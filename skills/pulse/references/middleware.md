@@ -155,6 +155,10 @@ async def api(
 
 Called on WebSocket connection. Validate auth, set session data.
 
+Only runs when the socket's `render_id` names an existing render owned by the
+session. An unknown or expired render id is refused before middleware runs and
+the client reloads for fresh directives.
+
 ```python
 @override
 async def connect(

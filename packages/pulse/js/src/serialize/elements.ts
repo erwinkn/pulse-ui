@@ -466,7 +466,9 @@ const HTML_SELECT_KEYS = [
 	"validationMessage",
 	"willValidate",
 ] as const satisfies readonly (keyof HTMLSelectElement)[];
-const selectExtractor = withBase<HTMLSelectElement>(HTML_SELECT_KEYS);
+const selectExtractor = withBase<HTMLSelectElement>(HTML_SELECT_KEYS, {
+	selectedOptions: (e) => [...e.selectedOptions].map((o) => o.value),
+});
 
 const HTML_SLOT_KEYS = ["name"] as const satisfies readonly (keyof HTMLSlotElement)[];
 const slotExtractor = withBase<HTMLSlotElement>(HTML_SLOT_KEYS);

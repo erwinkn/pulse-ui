@@ -12,9 +12,11 @@ from typing import Any, cast, override
 
 import pulse as ps
 import pytest
+from pulse.app import UNKNOWN_RENDER_CODE
 from pulse.messages import ServerMessage
 from pulse.queries.query import KeyedQueryResult
 from pulse.reactive import Computed
+from pulse.render_session import RenderSession
 from pulse.serializer import Serialized, deserialize, serialize
 from pulse.test_helpers import wait_for
 from pulse.user_session import CookieSessionStore
@@ -33,11 +35,21 @@ async def make_app(monkeypatch: pytest.MonkeyPatch) -> ps.App:
 	return app
 
 
-def make_environ(app: ps.App, sid: str) -> dict[str, str]:
+def make_cookie(app: ps.App, sid: str) -> str:
 	store = app.session_store
 	assert isinstance(store, CookieSessionStore)
-	cookie = store.encode(sid, {})
-	return {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
+	return store.encode(sid, {})
+
+
+def make_environ(app: ps.App, sid: str) -> dict[str, str]:
+	return {"HTTP_COOKIE": f"{app.cookie.name}={make_cookie(app, sid)}"}
+
+
+async def seed_render(app: ps.App, cookie: str, rid: str) -> RenderSession:
+	"""Create a render the way /prerender does: a server-minted id owned by the
+	cookie's session. Socket connects may only reference such renders."""
+	session = await app.get_or_create_session(cookie)
+	return await app.create_render(rid, session)
 
 
 def connect_handler(app: ps.App) -> ConnectHandler:
@@ -74,17 +86,18 @@ async def test_stale_socket_disconnect_does_not_clobber_live_connection(
 	monkeypatch: pytest.MonkeyPatch,
 ):
 	app = await make_app(monkeypatch)
-	environ = make_environ(app, "user-1")
+	cookie = make_cookie(app, "user-1")
+	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	auth = {
 		"render_id": "render-1",
 		"__pulse_page_instance_id": "page-a",
 	}
+	render = await seed_render(app, cookie, "render-1")
 
 	connect = connect_handler(app)
 	disconnect = app.sio.handlers["/"]["disconnect"]
 
 	await connect("socket-a", environ, auth)
-	render = app.render_sessions["render-1"]
 	assert render.connected
 
 	# Client reconnects before the old socket's disconnect event fires
@@ -113,8 +126,8 @@ async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[ps.Route("/", Counter)])
 	app.setup("http://example.com")
-	await app.scheduler.start()
-	environ = make_environ(app, "user-1")
+	cookie = make_cookie(app, "user-1")
+	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	auth = {"render_id": "render-1"}
 	connect = app.sio.handlers["/"]["connect"]
 	messages: dict[str, list[ServerMessage]] = {}
@@ -126,8 +139,8 @@ async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 
 	monkeypatch.setattr(app.sio, "emit", fake_emit)
 
+	render = await seed_render(app, cookie, "render-1")
 	await connect("socket-a", environ, auth)
-	render = app.render_sessions["render-1"]
 	user_session = app.user_sessions["user-1"]
 	with ps.PulseContext.update(session=user_session, render=render):
 		render.prerender(["/"], make_route_info("/"))
@@ -227,15 +240,17 @@ async def test_legacy_client_reconnect_still_replaces_its_socket(
 	monkeypatch: pytest.MonkeyPatch,
 ):
 	app = await make_app(monkeypatch)
-	environ = make_environ(app, "user-1")
+	cookie = make_cookie(app, "user-1")
+	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	connect = connect_handler(app)
 	disconnect = app.sio.handlers["/"]["disconnect"]
+	render = await seed_render(app, cookie, "render-1")
 
 	await connect("socket-a", environ, {"render_id": "render-1"})
 	await connect("socket-b", environ, {"render_id": "render-1"})
 	disconnect("socket-a")
 
-	assert app.render_sessions["render-1"].connected
+	assert render.connected
 	assert app._socket_to_render == {"socket-b": "render-1"}  # pyright: ignore[reportPrivateUsage]
 	assert app._render_to_page_instance == {"render-1": None}  # pyright: ignore[reportPrivateUsage]
 
@@ -247,16 +262,17 @@ async def test_different_page_instance_cannot_evict_live_render(
 	monkeypatch: pytest.MonkeyPatch,
 ):
 	app = await make_app(monkeypatch)
-	environ = make_environ(app, "user-1")
+	cookie = make_cookie(app, "user-1")
+	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	connect = connect_handler(app)
 	disconnect = app.sio.handlers["/"]["disconnect"]
+	render = await seed_render(app, cookie, "render-1")
 
 	await connect(
 		"socket-a",
 		environ,
 		{"render_id": "render-1", "__pulse_page_instance_id": "page-a"},
 	)
-	render = app.render_sessions["render-1"]
 
 	with pytest.raises(SocketIOConnectionRefusedError) as exc_info:
 		await connect(
@@ -356,19 +372,21 @@ class OrderedConnectMiddleware(ps.PulseMiddleware):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("successor_page", ["page-a", "page-b"])
-async def test_reconnect_cannot_overwrite_render_recreated_during_middleware(
+async def test_render_closed_during_connect_refuses_in_flight_attempts(
 	monkeypatch: pytest.MonkeyPatch,
-	successor_page: str,
 ):
+	"""A render closed while a connect sits in middleware cannot be revived:
+	new connects for the id are refused as unknown, and the in-flight attempt
+	detects the close instead of rebinding a dead render."""
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	middleware = BlockingReconnectMiddleware()
 	app = ps.App(routes=[], middleware=middleware)
 	app.setup("http://example.com")
-	await app.scheduler.start()
-	environ = make_environ(app, "user-1")
+	cookie = make_cookie(app, "user-1")
+	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	connect = connect_handler(app)
 	disconnect = app.sio.handlers["/"]["disconnect"]
+	await seed_render(app, cookie, "render-1")
 
 	await connect(
 		"socket-a",
@@ -386,29 +404,22 @@ async def test_reconnect_cannot_overwrite_render_recreated_during_middleware(
 	await middleware.reconnect_started.wait()
 
 	await app.close_render("render-1")
-	successor = asyncio.create_task(
-		connect(
-			"socket-b",
-			environ,
-			{"render_id": "render-1", "__pulse_page_instance_id": successor_page},
-		)
-	)
-	await middleware.successor_started.wait()
-	new_render = app.render_sessions["render-1"]
-	middleware.release_reconnect.set()
 
 	with pytest.raises(SocketIOConnectionRefusedError) as exc_info:
+		await connect(
+			"socket-b",
+			environ,
+			{"render_id": "render-1", "__pulse_page_instance_id": "page-b"},
+		)
+	assert exc_info.value.error_args["data"] == {"code": UNKNOWN_RENDER_CODE}
+	assert app.render_sessions == {}
+
+	middleware.release_reconnect.set()
+	with pytest.raises(SocketIOConnectionRefusedError) as stale_info:
 		await stale_reconnect
-
-	assert exc_info.value.error_args["data"] == {"code": "render_id_collision"}
-	assert app._render_to_page_instance == {"render-1": successor_page}  # pyright: ignore[reportPrivateUsage]
-	middleware.release_successor.set()
-	await successor
-
-	assert new_render.connected
-	assert app._socket_to_render == {"socket-b": "render-1"}  # pyright: ignore[reportPrivateUsage]
-	assert app._render_to_socket == {"render-1": "socket-b"}  # pyright: ignore[reportPrivateUsage]
-	assert app._render_to_page_instance == {"render-1": successor_page}  # pyright: ignore[reportPrivateUsage]
+	assert stale_info.value.error_args["data"] == {"code": UNKNOWN_RENDER_CODE}
+	assert app._render_to_page_instance == {}  # pyright: ignore[reportPrivateUsage]
+	assert app._render_connect_attempts == {}  # pyright: ignore[reportPrivateUsage]
 
 	await app.close()
 
@@ -421,13 +432,14 @@ async def test_older_same_page_connect_cannot_evict_newer_socket(
 	middleware = BlockingReconnectMiddleware()
 	app = ps.App(routes=[], middleware=middleware)
 	app.setup("http://example.com")
-	await app.scheduler.start()
-	environ = make_environ(app, "user-1")
+	cookie = make_cookie(app, "user-1")
+	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	connect = connect_handler(app)
 	auth = {
 		"render_id": "render-1",
 		"__pulse_page_instance_id": "page-a",
 	}
+	await seed_render(app, cookie, "render-1")
 
 	await connect("socket-initial", environ, auth)
 	older_connect = asyncio.create_task(connect("socket-older", environ, auth))
@@ -457,13 +469,14 @@ async def test_older_denied_connect_cannot_close_newer_socket(
 	middleware = OrderedConnectMiddleware(deny_first=True)
 	app = ps.App(routes=[], middleware=middleware)
 	app.setup("http://example.com")
-	await app.scheduler.start()
-	environ = make_environ(app, "user-1")
+	cookie = make_cookie(app, "user-1")
+	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	connect = connect_handler(app)
 	auth = {
 		"render_id": "render-1",
 		"__pulse_page_instance_id": "page-a",
 	}
+	await seed_render(app, cookie, "render-1")
 
 	older_connect = asyncio.create_task(connect("socket-older", environ, auth))
 	await middleware.first_started.wait()
@@ -486,17 +499,18 @@ async def test_newer_denied_connect_leaves_stale_render_expirable(
 	middleware = OrderedConnectMiddleware(deny_first=False)
 	app = ps.App(routes=[], middleware=middleware)
 	app.setup("http://example.com")
-	await app.scheduler.start()
-	environ = make_environ(app, "user-1")
+	cookie = make_cookie(app, "user-1")
+	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	connect = connect_handler(app)
 	auth = {
 		"render_id": "render-1",
 		"__pulse_page_instance_id": "page-a",
 	}
+	await seed_render(app, cookie, "render-1")
 
 	older_connect = asyncio.create_task(connect("socket-older", environ, auth))
 	await middleware.first_started.wait()
-	with pytest.raises(ConnectionRefusedError):
+	with pytest.raises(SocketIOConnectionRefusedError):
 		await connect("socket-newer", environ, auth)
 	middleware.release_first.set()
 	with pytest.raises(SocketIOConnectionRefusedError):
@@ -517,20 +531,20 @@ async def test_denied_reconnect_does_not_destroy_existing_render(
 	mw = TogglableDenyMiddleware()
 	app = ps.App(routes=[], middleware=mw)
 	app.setup("http://example.com")
-	await app.scheduler.start()
-	environ = make_environ(app, "user-1")
+	cookie = make_cookie(app, "user-1")
+	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	auth = {"render_id": "render-1"}
 	connect = connect_handler(app)
+	render = await seed_render(app, cookie, "render-1")
 
 	# Initial connection is allowed
 	await connect("socket-a", environ, auth)
-	render = app.render_sessions["render-1"]
 	assert render.connected
 
 	# Client reconnects (e.g. flaky network) but is now denied. The denied
 	# reconnect must NOT tear down the live render the original socket uses.
 	mw.deny = True
-	with pytest.raises(ConnectionRefusedError):
+	with pytest.raises(SocketIOConnectionRefusedError):
 		await connect("socket-b", environ, auth)
 
 	assert "render-1" in app.render_sessions
@@ -543,22 +557,23 @@ async def test_denied_reconnect_does_not_destroy_existing_render(
 
 
 @pytest.mark.asyncio
-async def test_denied_fresh_connection_disposes_created_render(
+async def test_unknown_render_is_refused_before_middleware(
 	monkeypatch: pytest.MonkeyPatch,
 ):
+	"""An unknown render id short-circuits before connect middleware and never
+	mints a render, even when the middleware would deny."""
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	mw = TogglableDenyMiddleware()
 	mw.deny = True
 	app = ps.App(routes=[], middleware=mw)
 	app.setup("http://example.com")
-	await app.scheduler.start()
 	environ = make_environ(app, "user-1")
 	connect = connect_handler(app)
 
-	# A brand-new render created for this attempt is cleaned up on deny
-	with pytest.raises(ConnectionRefusedError):
+	with pytest.raises(SocketIOConnectionRefusedError) as exc_info:
 		await connect("socket-a", environ, {"render_id": "render-new"})
 
+	assert exc_info.value.error_args["data"] == {"code": UNKNOWN_RENDER_CODE}
 	assert app.render_sessions == {}
 	assert app._socket_to_render == {}  # pyright: ignore[reportPrivateUsage]
 	assert app._render_to_socket == {}  # pyright: ignore[reportPrivateUsage]
@@ -583,8 +598,8 @@ async def test_connect_middleware_exception_is_surfaced_after_bind(
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[], middleware=RaisingConnectMiddleware())
 	app.setup("http://example.com")
-	await app.scheduler.start()
-	environ = make_environ(app, "user-1")
+	cookie = make_cookie(app, "user-1")
+	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	connect = connect_handler(app)
 
 	sent: list[tuple[Any, ...]] = []
@@ -594,25 +609,17 @@ async def test_connect_middleware_exception_is_surfaced_after_bind(
 
 	monkeypatch.setattr(app.sio, "emit", fake_emit)
 
-	# Fresh render: connection is allowed despite the middleware raising
+	# An existing render: connection is allowed despite the middleware raising
+	render = await seed_render(app, cookie, "render-1")
 	await connect("socket-a", environ, {"render_id": "render-1"})
-	render = app.render_sessions["render-1"]
 	assert render.connected
+
+	# Give the emit task a tick to run
+	await asyncio.sleep(0)
 
 	# A server_error for the connect phase reached the (bound) client, and it
 	# carries the real traceback (not the "NoneType: None" that format_exc()
 	# yields when report_error runs outside the except block).
-	def has_connect_error() -> bool:
-		return any(
-			args
-			for args in sent
-			if args
-			and args[0] == "message"
-			and "server_error" in str(args)
-			and "connect" in str(args)
-		)
-
-	assert await wait_for(has_connect_error, timeout=0.2), sent
 	connect_errors = [
 		args
 		for args in sent
@@ -621,6 +628,7 @@ async def test_connect_middleware_exception_is_surfaced_after_bind(
 		and "server_error" in str(args)
 		and "connect" in str(args)
 	]
+	assert connect_errors, sent
 	payload_text = str(connect_errors[0])
 	assert "boom in connect middleware" in payload_text
 	assert "NoneType: None" not in payload_text
@@ -631,8 +639,10 @@ async def test_connect_middleware_exception_is_surfaced_after_bind(
 @pytest.mark.asyncio
 async def test_close_render_unmaps_socket(monkeypatch: pytest.MonkeyPatch):
 	app = await make_app(monkeypatch)
-	environ = make_environ(app, "user-1")
+	cookie = make_cookie(app, "user-1")
+	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	auth = {"render_id": "render-1"}
+	await seed_render(app, cookie, "render-1")
 
 	connect = connect_handler(app)
 	await connect("socket-a", environ, auth)
@@ -641,5 +651,180 @@ async def test_close_render_unmaps_socket(monkeypatch: pytest.MonkeyPatch):
 	assert app._socket_to_render == {}  # pyright: ignore[reportPrivateUsage]
 	assert app._render_to_socket == {}  # pyright: ignore[reportPrivateUsage]
 	assert app._render_to_page_instance == {}  # pyright: ignore[reportPrivateUsage]
+
+	await app.close()
+
+
+@pytest.mark.asyncio
+async def test_valid_render_connect_still_binds(monkeypatch: pytest.MonkeyPatch):
+	app = await make_app(monkeypatch)
+	cookie = make_cookie(app, "user-1")
+	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
+	render = await seed_render(app, cookie, "render-1")
+
+	connect = connect_handler(app)
+	await connect("socket-a", environ, {"render_id": "render-1"})
+
+	assert render.connected
+	assert app._socket_to_render == {"socket-a": "render-1"}  # pyright: ignore[reportPrivateUsage]
+	assert app._render_to_socket == {"render-1": "socket-a"}  # pyright: ignore[reportPrivateUsage]
+
+	await app.close()
+
+
+@pytest.mark.asyncio
+async def test_unknown_render_id_is_refused_without_creating_render(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	"""A render id the server never minted is refused with a typed reason and
+	leaves no render or in-memory session behind."""
+	app = await make_app(monkeypatch)
+	environ = make_environ(app, "user-1")
+	connect = connect_handler(app)
+
+	with pytest.raises(SocketIOConnectionRefusedError) as exc_info:
+		await connect("socket-a", environ, {"render_id": "never-minted"})
+
+	assert exc_info.value.error_args["data"] == {"code": UNKNOWN_RENDER_CODE}
+	assert app.render_sessions == {}
+	assert app.user_sessions == {}
+	assert app._socket_to_render == {}  # pyright: ignore[reportPrivateUsage]
+
+	await app.close()
+
+
+@pytest.mark.asyncio
+async def test_connect_to_closed_render_is_refused(monkeypatch: pytest.MonkeyPatch):
+	app = await make_app(monkeypatch)
+	cookie = make_cookie(app, "user-1")
+	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
+	await seed_render(app, cookie, "render-1")
+	await app.close_render("render-1")
+
+	connect = connect_handler(app)
+	with pytest.raises(SocketIOConnectionRefusedError) as exc_info:
+		await connect("socket-a", environ, {"render_id": "render-1"})
+
+	assert exc_info.value.error_args["data"] == {"code": UNKNOWN_RENDER_CODE}
+	assert app.render_sessions == {}
+
+	await app.close()
+
+
+@pytest.mark.asyncio
+async def test_connect_after_render_expires_is_refused(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	"""A render reaped by its reconnect TTL is unknown on the next connect:
+	the stale tab is refused rather than silently revived."""
+	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
+	app = ps.App(routes=[], session_timeout=0.05, pending_timeout=0.05)
+	app.setup("http://example.com")
+	cookie = make_cookie(app, "user-1")
+	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
+	auth = {"render_id": "render-1"}
+	await seed_render(app, cookie, "render-1")
+
+	connect = connect_handler(app)
+	disconnect = app.sio.handlers["/"]["disconnect"]
+	await connect("socket-a", environ, auth)
+	disconnect("socket-a")
+	await wait_for(lambda: "render-1" not in app.render_sessions)
+
+	with pytest.raises(SocketIOConnectionRefusedError) as exc_info:
+		await connect("socket-b", environ, auth)
+
+	assert exc_info.value.error_args["data"] == {"code": UNKNOWN_RENDER_CODE}
+
+	await app.close()
+
+
+@pytest.mark.asyncio
+async def test_connect_with_wrong_session_denied_without_leaking_ids(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	"""A render owned by another session is refused with a generic message;
+	the owner/session ids stay server-side in the logs."""
+	app = await make_app(monkeypatch)
+	cookie = make_cookie(app, "user-1")
+	await seed_render(app, cookie, "render-1")
+
+	environ = make_environ(app, "user-2")
+	connect = connect_handler(app)
+
+	with pytest.raises(SocketIOConnectionRefusedError) as exc_info:
+		await connect("socket-a", environ, {"render_id": "render-1"})
+
+	assert exc_info.value.error_args == {"message": "Socket connection denied"}
+	assert "render-1" in app.render_sessions
+	assert "user-2" not in app.user_sessions
+
+	await app.close()
+
+
+@pytest.mark.asyncio
+async def test_disconnected_render_with_mounts_keeps_session_timeout(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	"""A disconnected render that still holds mounts keeps the full
+	session_timeout reconnect grace — suspended mounts preserve client state."""
+	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
+	app = ps.App(
+		routes=[ps.Route("a", Counter)],
+		session_timeout=60.0,
+		pending_timeout=0.05,
+	)
+	app.setup("http://example.com")
+	cookie = make_cookie(app, "user-1")
+	render = await seed_render(app, cookie, "render-1")
+	user_session = app.user_sessions["user-1"]
+	with ps.PulseContext.update(session=user_session, render=render):
+		render.prerender(["/a"], make_route_info("/a"))
+
+	assert render.route_mounts
+	app._schedule_render_cleanup("render-1")  # pyright: ignore[reportPrivateUsage]
+	remaining = (
+		app._render_cleanups["render-1"].when()  # pyright: ignore[reportPrivateUsage]
+		- asyncio.get_running_loop().time()
+	)
+	assert remaining > app.session_timeout / 2
+
+	await app.close()
+
+
+@pytest.mark.asyncio
+async def test_mountless_render_is_reaped_on_pending_timeout(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	"""A render whose never-claimed mounts all expire goes mount-less; the
+	last mount's disposal reschedules cleanup to pending_timeout instead of
+	leaving the husk on the previously armed session_timeout."""
+	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
+	app = ps.App(
+		routes=[ps.Route("a", Counter)],
+		session_timeout=60.0,
+		pending_timeout=0.05,
+	)
+	app.setup("http://example.com")
+	cookie = make_cookie(app, "user-1")
+	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
+	render = await seed_render(app, cookie, "render-1")
+	user_session = app.user_sessions["user-1"]
+	with ps.PulseContext.update(session=user_session, render=render):
+		render.prerender(["/a"], make_route_info("/a"))
+
+	# Connect then drop before the client attaches: disconnect arms the long
+	# reconnect TTL while the mounts are still pending.
+	connect = connect_handler(app)
+	disconnect = app.sio.handlers["/"]["disconnect"]
+	await connect("socket-a", environ, {"render_id": "render-1"})
+	disconnect("socket-a")
+	assert render.route_mounts
+	assert "render-1" in app._render_cleanups  # pyright: ignore[reportPrivateUsage]
+
+	# The pending mounts expire unclaimed; the last one's disposal reschedules
+	# the now-mount-less render onto pending_timeout.
+	assert await wait_for(lambda: not render.route_mounts)
+	assert await wait_for(lambda: "render-1" not in app.render_sessions)
 
 	await app.close()

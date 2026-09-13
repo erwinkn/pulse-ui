@@ -254,6 +254,9 @@ WebSocket disconnection is handled automatically:
 - Messages queue during brief disconnects
 - Reconnection attempts with backoff
 - `RenderSession.connected` tracks connection state
+- If the server no longer knows the tab's render ID (the render session expired
+  or the server restarted), the reconnect is refused and the page reloads to
+  re-sync
 
 ### JS Execution Errors
 

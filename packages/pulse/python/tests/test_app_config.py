@@ -4,14 +4,14 @@ from pulse.user_session import UserSession
 
 
 @pytest.mark.asyncio
-async def test_app_prerender_queue_timeout_config():
+async def test_app_pending_timeout_config():
 	app = ps.App(
-		prerender_queue_timeout=12.5,
+		pending_timeout=12.5,
 		session_store=ps.CookieSessionStore(secret="test-secret"),
 	)
 	session = UserSession("test-session", {}, app)
 	render = await app.create_render("test-render", session)
-	assert render.prerender_queue_timeout == 12.5
+	assert render.pending_timeout == 12.5
 	await render.close()
 	session.dispose()
 

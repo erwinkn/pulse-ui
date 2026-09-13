@@ -231,6 +231,26 @@ describe("PulseSocketIOClient attach ack", () => {
 		consoleError.mockRestore();
 	});
 
+	it("reloads when the server refuses with an unknown render code", async () => {
+		const reload = vi.fn();
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+		Object.defineProperty(window.location, "reload", {
+			configurable: true,
+			value: reload,
+		});
+		const client = await makeClient();
+		const connected = client.connect();
+		const error = Object.assign(new Error("unknown"), {
+			data: { code: "unknown_render" },
+		});
+
+		socket.trigger("connect_error", error);
+		await expect(connected).rejects.toBe(error);
+
+		expect(reload).toHaveBeenCalledTimes(1);
+		consoleError.mockRestore();
+	});
+
 	it("does not reload visible active tabs when reconnect times out", async () => {
 		const reload = vi.fn();
 		Object.defineProperty(window.location, "reload", {
@@ -452,5 +472,73 @@ describe("PulseProvider connection handling", () => {
 
 		expect(io).toHaveBeenCalledTimes(1);
 		consoleError.mockRestore();
+	});
+
+	it("replays captured input values after the hydration commit", async () => {
+		const { preHydrationInputCaptureScript } = await import("./hydration");
+		// biome-ignore lint/security/noGlobalEval: evaluating our own inline script
+		(0, eval)(preHydrationInputCaptureScript);
+		const input = document.createElement("input");
+		document.body.appendChild(input);
+		input.value = "hello";
+		input.dispatchEvent(new Event("input", { bubbles: true }));
+		input.value = "";
+
+		const { PulseProvider } = await import("./pulse");
+		render(
+			React.createElement(
+				MemoryRouter,
+				null,
+				React.createElement(
+					PulseProvider,
+					{
+						config: {
+							serverAddress: "http://pulse.test",
+							apiPrefix: "/_pulse",
+							connectionStatus: {
+								initialConnectingDelay: 0,
+								initialErrorDelay: 0,
+								reconnectErrorDelay: 0,
+							},
+						},
+						prerender: { views: {}, directives: {} },
+						children: React.createElement("div", null, "child"),
+					},
+				),
+			),
+		);
+
+		await waitForEffects();
+		expect(input.value).toBe("hello");
+		input.remove();
+	});
+
+	it("embeds the pre-hydration capture script before inputs in SSR HTML", async () => {
+		const { renderToString } = await import("react-dom/server");
+		const { PulseProvider } = await import("./pulse");
+		const html = renderToString(
+			React.createElement(
+				MemoryRouter,
+				null,
+				React.createElement(
+					PulseProvider,
+					{
+						config: {
+							serverAddress: "http://pulse.test",
+							apiPrefix: "/_pulse",
+							connectionStatus: {
+								initialConnectingDelay: 0,
+								initialErrorDelay: 0,
+								reconnectErrorDelay: 0,
+							},
+						},
+						prerender: { views: {}, directives: {} },
+						children: React.createElement("input"),
+					},
+				),
+			),
+		);
+		expect(html).toContain("__PULSE_INPUT_CAPTURE__");
+		expect(html.indexOf("__PULSE_INPUT_CAPTURE__")).toBeLessThan(html.indexOf("<input"));
 	});
 });

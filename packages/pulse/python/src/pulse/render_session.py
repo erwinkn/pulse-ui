@@ -262,10 +262,11 @@ class RenderSession:
 	url: SessionUrl
 	query_param_sync: QueryParamSync
 	connected: bool
-	prerender_queue_timeout: float
+	pending_timeout: float
 	dev_strict_mode_detach_timeout: float
 	disconnect_queue_timeout: float
 	render_loop_limit: int
+	on_mounts_emptied: Callable[[], None] | None
 	_server_address: str | None
 	_client_address: str | None
 	_send_message: Callable[[ServerMessage], Any] | None
@@ -284,10 +285,11 @@ class RenderSession:
 		*,
 		server_address: str | None = None,
 		client_address: str | None = None,
-		prerender_queue_timeout: float = 60.0,
+		pending_timeout: float = 60.0,
 		dev_strict_mode_detach_timeout: float = 0.0,
 		disconnect_queue_timeout: float = 300.0,
 		render_loop_limit: int = 50,
+		on_mounts_emptied: Callable[[], None] | None = None,
 	) -> None:
 		from pulse.channel import ChannelsManager
 		from pulse.forms import FormRegistry
@@ -317,10 +319,11 @@ class RenderSession:
 		self._ref_channels_by_route = {}
 		self.scheduler = Scheduler(f"render:{id}")
 		self.query_store = QueryStore()
-		self.prerender_queue_timeout = prerender_queue_timeout
+		self.pending_timeout = pending_timeout
 		self.dev_strict_mode_detach_timeout = dev_strict_mode_detach_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
 		self.render_loop_limit = render_loop_limit
+		self.on_mounts_emptied = on_mounts_emptied
 
 	@property
 	def server_address(self) -> str:
@@ -502,18 +505,24 @@ class RenderSession:
 				if mount.effect is None:
 					mount.ensure_effect(lazy=True, flush=False)
 				if route_info is not None and mount.state == "active":
-					mount.start_pending(self.prerender_queue_timeout)
+					mount.start_pending(self.pending_timeout)
 
 			if mount.state != "active" and mount.queue_timeout is None:
-				mount.start_pending(self.prerender_queue_timeout)
+				mount.start_pending(self.pending_timeout)
 			assert mount.effect is not None
+			# Full re-render supersedes queued updates computed against the
+			# previous tree. start_pending() only clears the queue when
+			# *entering* pending, so a second prerender of an already-pending
+			# mount (soft nav, double loader) would otherwise flush stale
+			# vdom_update ops onto the new init.
+			if mount.state == "pending":
+				mount.queue = []
 			with mount.effect.capture_deps(update_deps=True):
 				message = self.render(mount, path)
 
 			results[path] = message
 			if message["type"] == "navigate_to":
-				mount.dispose()
-				del self.route_mounts[path]
+				self.dispose_mount(path, mount)
 				continue
 
 		return results
@@ -588,6 +597,8 @@ class RenderSession:
 			mount.dispose()
 		except Exception as e:
 			self.report_error(path, "unmount", e)
+		if not self.route_mounts and self.on_mounts_emptied is not None:
+			self.on_mounts_emptied()
 
 	def detach(self, path: str):
 		"""Client route unmounted. Dispose immediately outside dev StrictMode replay."""

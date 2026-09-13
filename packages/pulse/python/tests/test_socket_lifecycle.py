@@ -31,7 +31,7 @@ async def make_app(monkeypatch: pytest.MonkeyPatch) -> ps.App:
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[])
 	app.setup("http://example.com")
-	await app.scheduler.start()
+	await app.task_scope.start()
 	return app
 
 
@@ -126,6 +126,7 @@ async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[ps.Route("/", Counter)])
 	app.setup("http://example.com")
+	await app.task_scope.start()
 	cookie = make_cookie(app, "user-1")
 	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	auth = {"render_id": "render-1"}
@@ -143,7 +144,7 @@ async def test_reconnect_before_disconnect_resyncs_mount_and_stale_queries(
 	await connect("socket-a", environ, auth)
 	user_session = app.user_sessions["user-1"]
 	with ps.PulseContext.update(session=user_session, render=render):
-		render.prerender(["/"], make_route_info("/"))
+		await render.prerender(["/"], make_route_info("/"))
 
 	await app._handle_socket_message(  # pyright: ignore[reportPrivateUsage]
 		"socket-a",
@@ -382,6 +383,7 @@ async def test_render_closed_during_connect_refuses_in_flight_attempts(
 	middleware = BlockingReconnectMiddleware()
 	app = ps.App(routes=[], middleware=middleware)
 	app.setup("http://example.com")
+	await app.task_scope.start()
 	cookie = make_cookie(app, "user-1")
 	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	connect = connect_handler(app)
@@ -432,6 +434,7 @@ async def test_older_same_page_connect_cannot_evict_newer_socket(
 	middleware = BlockingReconnectMiddleware()
 	app = ps.App(routes=[], middleware=middleware)
 	app.setup("http://example.com")
+	await app.task_scope.start()
 	cookie = make_cookie(app, "user-1")
 	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	connect = connect_handler(app)
@@ -469,6 +472,7 @@ async def test_older_denied_connect_cannot_close_newer_socket(
 	middleware = OrderedConnectMiddleware(deny_first=True)
 	app = ps.App(routes=[], middleware=middleware)
 	app.setup("http://example.com")
+	await app.task_scope.start()
 	cookie = make_cookie(app, "user-1")
 	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	connect = connect_handler(app)
@@ -499,6 +503,7 @@ async def test_newer_denied_connect_leaves_stale_render_expirable(
 	middleware = OrderedConnectMiddleware(deny_first=False)
 	app = ps.App(routes=[], middleware=middleware)
 	app.setup("http://example.com")
+	await app.task_scope.start()
 	cookie = make_cookie(app, "user-1")
 	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	connect = connect_handler(app)
@@ -531,6 +536,7 @@ async def test_denied_reconnect_does_not_destroy_existing_render(
 	mw = TogglableDenyMiddleware()
 	app = ps.App(routes=[], middleware=mw)
 	app.setup("http://example.com")
+	await app.task_scope.start()
 	cookie = make_cookie(app, "user-1")
 	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	auth = {"render_id": "render-1"}
@@ -567,6 +573,7 @@ async def test_unknown_render_is_refused_before_middleware(
 	mw.deny = True
 	app = ps.App(routes=[], middleware=mw)
 	app.setup("http://example.com")
+	await app.task_scope.start()
 	environ = make_environ(app, "user-1")
 	connect = connect_handler(app)
 
@@ -598,6 +605,7 @@ async def test_connect_middleware_exception_is_surfaced_after_bind(
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[], middleware=RaisingConnectMiddleware())
 	app.setup("http://example.com")
+	await app.task_scope.start()
 	cookie = make_cookie(app, "user-1")
 	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	connect = connect_handler(app)
@@ -615,7 +623,7 @@ async def test_connect_middleware_exception_is_surfaced_after_bind(
 	assert render.connected
 
 	# Give the emit task a tick to run
-	await asyncio.sleep(0)
+	await wait_for(lambda: bool(sent), timeout=0.2)
 
 	# A server_error for the connect phase reached the (bound) client, and it
 	# carries the real traceback (not the "NoneType: None" that format_exc()
@@ -720,6 +728,7 @@ async def test_connect_after_render_expires_is_refused(
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[], session_timeout=0.05, pending_timeout=0.05)
 	app.setup("http://example.com")
+	await app.task_scope.start()
 	cookie = make_cookie(app, "user-1")
 	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	auth = {"render_id": "render-1"}
@@ -775,19 +784,20 @@ async def test_disconnected_render_with_mounts_keeps_session_timeout(
 		pending_timeout=0.05,
 	)
 	app.setup("http://example.com")
+	await app.task_scope.start()
 	cookie = make_cookie(app, "user-1")
 	render = await seed_render(app, cookie, "render-1")
 	user_session = app.user_sessions["user-1"]
 	with ps.PulseContext.update(session=user_session, render=render):
-		render.prerender(["/a"], make_route_info("/a"))
+		await render.prerender(["/a"], make_route_info("/a"))
 
 	assert render.route_mounts
 	app._schedule_render_cleanup("render-1")  # pyright: ignore[reportPrivateUsage]
-	remaining = (
-		app._render_cleanups["render-1"].when()  # pyright: ignore[reportPrivateUsage]
-		- asyncio.get_running_loop().time()
-	)
-	assert remaining > app.session_timeout / 2
+	assert "render-1" in app._render_cleanups  # pyright: ignore[reportPrivateUsage]
+	# A mount-less render would already be reaped on pending_timeout (0.05s);
+	# mounts keep the full session_timeout grace.
+	await asyncio.sleep(app.pending_timeout * 2)
+	assert "render-1" in app.render_sessions
 
 	await app.close()
 
@@ -806,12 +816,13 @@ async def test_mountless_render_is_reaped_on_pending_timeout(
 		pending_timeout=0.05,
 	)
 	app.setup("http://example.com")
+	await app.task_scope.start()
 	cookie = make_cookie(app, "user-1")
 	environ = {"HTTP_COOKIE": f"{app.cookie.name}={cookie}"}
 	render = await seed_render(app, cookie, "render-1")
 	user_session = app.user_sessions["user-1"]
 	with ps.PulseContext.update(session=user_session, render=render):
-		render.prerender(["/a"], make_route_info("/a"))
+		await render.prerender(["/a"], make_route_info("/a"))
 
 	# Connect then drop before the client attaches: disconnect arms the long
 	# reconnect TTL while the mounts are still pending.

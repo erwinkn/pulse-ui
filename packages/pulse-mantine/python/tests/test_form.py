@@ -43,17 +43,17 @@ async def build_context():
 	route = Route("/", ps.component(page))
 	routes = RouteTree([route])
 	app = ps.App(routes=[route])
-	await app.scheduler.start()
+	await app.task_scope.start()
 	dummy_render = DummyRender()
 	session = SimpleNamespace(sid="session-1")
 
 	real_render = ps.RenderSession(
 		dummy_render.id, routes, server_address="http://localhost"
 	)
-	await real_render.scheduler.start()
+	await real_render.task_scope.start()
 	real_render.send = dummy_render.send  # pyright: ignore[reportAttributeAccessIssue]
 	with ps.PulseContext(app=app):
-		real_render.prerender(
+		await real_render.prerender(
 			["/"],
 			cast(
 				RouteInfo,

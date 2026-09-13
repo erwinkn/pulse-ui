@@ -16,7 +16,7 @@ async def test_socket_messages_for_render_are_serialized(
 ):
 	app = ps.App()
 	render = RenderSession("render-1", app.routes)
-	await render.scheduler.start()
+	await render.task_scope.start()
 	session = SimpleNamespace(sid="session-1", data={})
 	app.render_sessions[render.id] = render
 	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]
@@ -100,7 +100,7 @@ async def test_attach_sends_ack_after_route_is_attached(
 ):
 	app = ps.App()
 	render = RenderSession("render-1", app.routes)
-	await render.scheduler.start()
+	await render.task_scope.start()
 	session = SimpleNamespace(sid="session-1", data={})
 	sent: list[dict[str, str]] = []
 
@@ -140,7 +140,7 @@ async def test_attach_does_not_ack_when_route_needs_reload(
 ):
 	app = ps.App()
 	render = RenderSession("render-1", app.routes)
-	await render.scheduler.start()
+	await render.task_scope.start()
 	session = SimpleNamespace(sid="session-1", data={})
 	sent: list[dict[str, str]] = []
 
@@ -222,7 +222,7 @@ async def test_socket_messages_wait_for_connect_to_finish(
 	assert events == []
 
 	render = RenderSession("render-1", app.routes)
-	await render.scheduler.start()
+	await render.task_scope.start()
 	session = SimpleNamespace(sid="session-1", data={})
 	app.render_sessions[render.id] = render
 	app._render_to_user[render.id] = session.sid  # pyright: ignore[reportPrivateUsage]

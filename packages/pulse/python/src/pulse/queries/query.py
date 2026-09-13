@@ -36,15 +36,15 @@ from pulse.queries.common import (
 )
 from pulse.queries.effect import AsyncQueryEffect
 from pulse.reactive import Computed, Effect, Signal, Untrack
-from pulse.scheduling import (
+from pulse.state.property import InitializableProperty, StateMemberDescriptor
+from pulse.state.state import State
+from pulse.tasks import (
 	Task,
 	clamp_delay,
 	is_pytest,
 	later,
 	spawn,
 )
-from pulse.state.property import InitializableProperty, StateMemberDescriptor
-from pulse.state.state import State
 
 if TYPE_CHECKING:
 	from pulse.queries.protocol import QueryResult

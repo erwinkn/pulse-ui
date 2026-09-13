@@ -32,11 +32,11 @@ class RefetchPage(TypedDict):
 async def _pulse_context():  # pyright: ignore[reportUnusedFunction]
 	"""Set up a PulseContext with an App for all tests."""
 	app = ps.App()
-	await app.scheduler.start()
+	await app.task_scope.start()
 	ctx = ps.PulseContext(app=app)
 	with ctx:
 		yield
-	await app.scheduler.close()
+	await app.task_scope.close()
 
 
 def with_render_session(fn: Callable[..., Awaitable[object]]):
@@ -45,7 +45,7 @@ def with_render_session(fn: Callable[..., Awaitable[object]]):
 	async def wrapper(*args: Any, **kwargs: Any) -> object:
 		routes = RouteTree([])
 		session = RenderSession("test-session", routes)
-		await session.scheduler.start()
+		await session.task_scope.start()
 		try:
 			with ps.PulseContext.update(render=session):
 				return await fn(*args, **kwargs)
@@ -275,7 +275,7 @@ async def test_infinite_query_gc_uses_render_timers():
 	app = ps.PulseContext.get().app
 	routes = RouteTree([])
 	session = RenderSession("test-session", routes)
-	await session.scheduler.start()
+	await session.task_scope.start()
 	query = session.query_store.ensure_infinite(
 		("inf", "gc-timers"),
 		initial_page_param=0,
@@ -283,15 +283,15 @@ async def test_infinite_query_gc_uses_render_timers():
 		gc_time=0.05,
 	)
 
-	assert app.scheduler.running
+	assert app.task_scope.running
 
 	with ps.PulseContext.update(render=session):
 		query.schedule_gc()
 
-	assert session.scheduler.running
+	assert session.task_scope.running
 
 	query.cancel_gc()
-	await session.scheduler.close()
+	await session.task_scope.close()
 
 
 @pytest.mark.asyncio

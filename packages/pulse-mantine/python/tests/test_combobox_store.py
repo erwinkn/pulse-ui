@@ -23,12 +23,12 @@ class DummyRender:
 
 async def build_context():
 	app = ps.App()
-	await app.scheduler.start()
+	await app.task_scope.start()
 	render = DummyRender()
 	session = SimpleNamespace(sid="session-1")
 
 	real_render = ps.RenderSession(render.id, app.routes)
-	await real_render.scheduler.start()
+	await real_render.task_scope.start()
 	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
 
 	app.render_sessions[render.id] = real_render

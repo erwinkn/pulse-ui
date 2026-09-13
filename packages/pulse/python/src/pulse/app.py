@@ -74,8 +74,8 @@ from pulse.proxy import Proxy, ReactProxy
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
-from pulse.scheduling import Scheduler, Task
 from pulse.serializer import Serialized, deserialize, serialize
+from pulse.tasks import Task, TaskScope
 from pulse.user_session import (
 	CookieSessionStore,
 	SessionStore,
@@ -248,7 +248,7 @@ class App:
 	_pending_socket_messages: dict[str, list[Serialized]]
 	_render_cleanups: dict[str, Task]
 	_render_message_locks: dict[str, asyncio.Lock]
-	scheduler: Scheduler
+	task_scope: TaskScope
 	_proxy: ReactProxy | None
 	proxy: Proxy
 	session_timeout: float
@@ -334,7 +334,7 @@ class App:
 		# Map render_id -> cleanup timer handle for timeout-based expiry
 		self._render_cleanups = {}
 		self._render_message_locks = {}
-		self.scheduler = Scheduler("app")
+		self.task_scope = TaskScope("app")
 		self._proxy = None
 		self.session_timeout = session_timeout
 		self.pending_timeout = pending_timeout
@@ -414,7 +414,7 @@ class App:
 
 	@asynccontextmanager
 	async def fastapi_lifespan(self, _: FastAPI):
-		await self.scheduler.start()
+		await self.task_scope.start()
 		try:
 			if isinstance(self.session_store, SessionStore):
 				await self.session_store.init()
@@ -706,7 +706,7 @@ class App:
 						},
 					}
 
-					captured = render.prerender(paths, route_info)
+					captured = await render.prerender(paths, route_info)
 
 					for p in paths:
 						res = _normalize_prerender_result(captured[p])
@@ -918,7 +918,7 @@ class App:
 
 					def on_message(message: ServerMessage):
 						payload = list(serialize(message))
-						self.scheduler.spawn(self.sio.emit("message", payload, to=sid))
+						self.task_scope.spawn(self.sio.emit("message", payload, to=sid))
 
 					old_sid = self._render_to_socket.get(rid)
 					if old_sid is not None and old_sid != sid:
@@ -1013,7 +1013,7 @@ class App:
 				logger.info(f"RenderSession {rid} expired after {delay}s timeout")
 				await self.close_render(rid)
 
-		handle = self.scheduler.later(delay, _cleanup)
+		handle = self.task_scope.later(delay, _cleanup)
 		self._render_cleanups[rid] = handle
 
 	async def _handle_socket_message(self, sid: str, data: Serialized) -> None:
@@ -1269,7 +1269,7 @@ class App:
 			render_loop_limit=self.render_loop_limit,
 			on_mounts_emptied=lambda: self._schedule_render_cleanup(rid),
 		)
-		await render.scheduler.start()
+		await render.task_scope.start()
 		self.render_sessions[rid] = render
 		self._render_to_user[rid] = session.sid
 		self._user_to_render[session.sid].append(rid)
@@ -1294,7 +1294,7 @@ class App:
 		self._user_to_render[session.sid].remove(rid)
 
 		if len(self._user_to_render[session.sid]) == 0:
-			self.scheduler.later(60, self.close_session_if_inactive, sid)
+			self.task_scope.later(60, self.close_session_if_inactive, sid)
 
 	def close_session(self, sid: str):
 		session = self.user_sessions.pop(sid, None)
@@ -1334,7 +1334,7 @@ class App:
 			self.close_session(sid)
 
 		# Cancel any remaining app-level tasks/timers
-		await self.scheduler.close()
+		await self.task_scope.close()
 		if self._proxy is not None:
 			try:
 				await self._proxy.close()

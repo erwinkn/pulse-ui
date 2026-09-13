@@ -6,12 +6,15 @@ import asyncio
 import inspect
 import os
 import time
-from collections.abc import Callable, Coroutine, Generator
+from collections.abc import Callable, Coroutine
+from enum import Enum, auto
 from typing import Any, ParamSpec, final
 
 from anyio import Event, TaskHandle, create_task_group, sleep
 from anyio.abc import TaskGroup
 from anyio.lowlevel import checkpoint
+
+from pulse.runtime import LoopBinding
 
 P = ParamSpec("P")
 
@@ -30,9 +33,21 @@ def is_pytest() -> bool:
 	)
 
 
+class TaskOutcome(Enum):
+	"""How a task settled. Reported by ``Task.wait``."""
+
+	COMPLETED = auto()
+	CANCELLED = auto()
+	FAILED = auto()
+
+
 @final
 class Task:
-	"""A unit of work in a Scheduler. Not constructible outside one."""
+	"""A unit of work in a TaskScope. Not constructible outside one.
+
+	Failures are reported through the loop's exception handler, not raised to a
+	waiter, so ``wait`` never raises for the task's own outcome.
+	"""
 
 	__slots__ = ("_handle",)
 
@@ -56,18 +71,16 @@ class Task:
 	def cancelled(self) -> bool:
 		return self._handle.status is TaskHandle.Status.CANCELLED
 
-	async def wait(self) -> None:
+	async def wait(self) -> TaskOutcome:
+		"""Wait for the task to settle, then report how it ended."""
 		await self._handle.wait()
-
-	def __await__(self) -> Generator[Any, Any, None]:
-		yield from self._handle.wait().__await__()
-		if self.cancelled():
-			raise asyncio.CancelledError
-		if self._handle.status is TaskHandle.Status.FAILED:
-			exception = self._handle.exception
-			assert exception is not None
-			raise exception
-		return None
+		match self._handle.status:
+			case TaskHandle.Status.FINISHED:
+				return TaskOutcome.COMPLETED
+			case TaskHandle.Status.CANCELLED:
+				return TaskOutcome.CANCELLED
+			case _:
+				return TaskOutcome.FAILED
 
 
 async def _invoke(
@@ -77,11 +90,11 @@ async def _invoke(
 
 	with Untrack():
 		result = fn(*args, **kwargs)
-	if inspect.isawaitable(result):
-		await result
+		if inspect.isawaitable(result):
+			await result
 
 
-class Scheduler:
+class TaskScope:
 	"""A task lifetime: everything spawned here is cancelled and drained on close."""
 
 	_name: str
@@ -89,6 +102,7 @@ class Scheduler:
 	_tg: TaskGroup | None
 	_host: asyncio.Task[None] | None
 	_close_requested: Event | None
+	_binding: LoopBinding | None
 
 	def __init__(self, name: str) -> None:
 		self._name = name
@@ -96,6 +110,7 @@ class Scheduler:
 		self._tg = None
 		self._host = None
 		self._close_requested = None
+		self._binding = None
 
 	@property
 	def name(self) -> str:
@@ -106,19 +121,24 @@ class Scheduler:
 		return self._tg is not None
 
 	@property
-	def owns_current_thread(self) -> bool:
-		"""True when the caller runs on this scope's loop, so handles are usable."""
-		return self._loop is not None and _running_loop() is self._loop
+	def loop(self) -> asyncio.AbstractEventLoop | None:
+		return self._loop
+
+	@property
+	def binding(self) -> LoopBinding | None:
+		"""The thread-safe bridge onto this scope's loop, once it has started."""
+		return self._binding
 
 	async def start(self) -> None:
 		if self.running:
-			raise RuntimeError(f"scheduler {self._name} is already running")
+			raise RuntimeError(f"task scope {self._name} is already running")
 
 		loop = asyncio.get_running_loop()
 		self._loop = loop
+		self._binding = LoopBinding(loop)
 		self._close_requested = Event()
 		ready = asyncio.Event()
-		self._host = loop.create_task(self._run(ready), name=f"scheduler:{self._name}")
+		self._host = loop.create_task(self._run(ready), name=f"task-scope:{self._name}")
 		await ready.wait()
 
 	async def _run(self, ready: asyncio.Event) -> None:
@@ -143,7 +163,7 @@ class Scheduler:
 			self._host = None
 			self._close_requested = None
 
-	async def __aenter__(self) -> Scheduler:
+	async def __aenter__(self) -> TaskScope:
 		await self.start()
 		return self
 
@@ -168,41 +188,22 @@ class Scheduler:
 		)
 
 	def repeat(
-		self,
-		interval: float,
-		fn: Callable[P, Any],
-		*args: P.args,
-		immediate: bool = False,  # pyright: ignore[reportGeneralTypeIssues]
-		**kwargs: P.kwargs,
+		self, interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
 	) -> Task:
-		"""Call `fn` every `interval` seconds, surviving its exceptions."""
+		"""Call `fn` every `interval` seconds, waiting one interval before the first run."""
 		return self.spawn(
-			self._repeated(interval, fn, args, dict(kwargs), immediate=immediate),
+			self._repeated(interval, fn, args, dict(kwargs), immediate=False),
 			name=f"repeat:{_callable_name(fn)}",
 		)
 
-	def post(self, fn: Callable[[], Any]) -> None:
-		"""Call `fn` on this scope's loop soon, from any thread.
-
-		Returns no handle: one is only usable from the loop that owns it. `fn` must be
-		synchronous; use `spawn` for coroutines.
-		"""
-		loop = self._loop
-		if loop is None:
-			raise RuntimeError(f"cannot schedule on {self._name}: it has never run")
-		loop.call_soon_threadsafe(self._post, fn)
-
-	def _post(self, fn: Callable[[], Any]) -> None:
-		from pulse.reactive import Untrack
-
-		# The scope may have closed between post() and this callback.
-		if self._tg is None:
-			return
-		try:
-			with Untrack():
-				fn()
-		except Exception as exc:
-			self._report(f"Unhandled exception in post({_callable_name(fn)})", exc, fn)
+	def every(
+		self, interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
+	) -> Task:
+		"""Call `fn` immediately, then every `interval` seconds."""
+		return self.spawn(
+			self._repeated(interval, fn, args, dict(kwargs), immediate=True),
+			name=f"every:{_callable_name(fn)}",
+		)
 
 	def _task_group(self) -> TaskGroup:
 		tg = self._tg
@@ -278,40 +279,36 @@ def _running_loop() -> asyncio.AbstractEventLoop | None:
 		return None
 
 
-def current_scheduler() -> Scheduler:
+def _active_scope() -> TaskScope:
 	from pulse.context import PulseContext
 
 	ctx = PulseContext.get()
 	if ctx.render is not None:
-		return ctx.render.scheduler
-	return ctx.app.scheduler
+		return ctx.render.task_scope
+	return ctx.app.task_scope
 
 
 def spawn(coroutine: Coroutine[Any, Any, Any], *, name: str | None = None) -> Task:
-	"""Run a coroutine in the active scheduler."""
-	return current_scheduler().spawn(coroutine, name=name)
-
-
-def post(fn: Callable[[], Any]) -> None:
-	"""Run a callback in the active scheduler from any thread."""
-	current_scheduler().post(fn)
+	"""Run a coroutine in the active task scope."""
+	return _active_scope().spawn(coroutine, name=name)
 
 
 def later(
 	delay: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
 ) -> Task:
-	"""Schedule a callback after a delay on the active scheduler."""
-	return current_scheduler().later(delay, fn, *args, **kwargs)
+	"""Schedule a callback after a delay on the active task scope."""
+	return _active_scope().later(delay, fn, *args, **kwargs)
 
 
 def repeat(
-	interval: float,
-	fn: Callable[P, Any],
-	*args: P.args,
-	immediate: bool = False,  # pyright: ignore[reportGeneralTypeIssues]
-	**kwargs: P.kwargs,
+	interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
 ) -> Task:
-	"""Repeat a callback on the active scheduler."""
-	return current_scheduler().repeat(
-		interval, fn, *args, immediate=immediate, **kwargs
-	)
+	"""Repeat a callback on the active task scope, first run after `interval`."""
+	return _active_scope().repeat(interval, fn, *args, **kwargs)
+
+
+def every(
+	interval: float, fn: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
+) -> Task:
+	"""Repeat a callback on the active task scope, first run immediately."""
+	return _active_scope().every(interval, fn, *args, **kwargs)

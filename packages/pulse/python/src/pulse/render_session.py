@@ -30,9 +30,9 @@ from pulse.routing import (
 	RouteTree,
 	ensure_absolute_path,
 )
-from pulse.scheduling import Scheduler, Task
 from pulse.state.query_param import QueryParamSync
 from pulse.state.state import State
+from pulse.tasks import Task, TaskScope
 from pulse.transpiler.id import next_id
 from pulse.transpiler.nodes import Expr
 
@@ -276,7 +276,7 @@ class RenderSession:
 	_ref_channels_by_route: dict[str, Channel]
 	_global_states: dict[str, State]
 	_global_queue: list[ServerMessage]
-	scheduler: Scheduler
+	task_scope: TaskScope
 
 	def __init__(
 		self,
@@ -317,7 +317,7 @@ class RenderSession:
 		self._pending_js_results = {}
 		self._ref_channel = None
 		self._ref_channels_by_route = {}
-		self.scheduler = Scheduler(f"render:{id}")
+		self.task_scope = TaskScope(f"render:{id}")
 		self.query_store = QueryStore()
 		self.pending_timeout = pending_timeout
 		self.dev_strict_mode_detach_timeout = dev_strict_mode_detach_timeout
@@ -480,12 +480,15 @@ class RenderSession:
 
 	# ---- Prerendering ----
 
-	def prerender(
+	async def prerender(
 		self, paths: list[str], route_info: RouteInfo | None = None
 	) -> dict[str, ServerInitMessage | ServerNavigateToMessage]:
 		"""
-		Synchronous render for SSR. Returns per-path init or navigate_to messages.
+		Render for SSR. Returns per-path init or navigate_to messages.
 		- Creates mounts in PENDING state and starts queue
+
+		Async so callers are provably on the scope's event loop before
+		scheduling the pending timeout.
 		"""
 		normalized = [ensure_absolute_path(path) for path in paths]
 
@@ -729,7 +732,7 @@ class RenderSession:
 		self._pending_js_results.clear()
 		self._ref_channel = None
 		self._ref_channels_by_route.clear()
-		await self.scheduler.close()
+		await self.task_scope.close()
 		self._global_queue = []
 		self._send_message = None
 		self.connected = False
@@ -793,18 +796,18 @@ class RenderSession:
 	) -> Task:
 		"""Create a tracked task tied to this render session."""
 		if callable(coroutine):
-			return self.scheduler.spawn(coroutine(), name=name)
+			return self.task_scope.spawn(coroutine(), name=name)
 
 		async def _await_coroutine():
 			await coroutine
 
-		return self.scheduler.spawn(_await_coroutine(), name=name)
+		return self.task_scope.spawn(_await_coroutine(), name=name)
 
 	def schedule_later(
 		self, delay: float, fn: Callable[..., Any], *args: Any, **kwargs: Any
 	) -> Task:
 		"""Schedule a tracked timer tied to this render session."""
-		return self.scheduler.later(delay, fn, *args, **kwargs)
+		return self.task_scope.later(delay, fn, *args, **kwargs)
 
 	def execute_callback(self, path: str, key: str, args: list[Any] | tuple[Any, ...]):
 		path = ensure_absolute_path(path)
@@ -987,7 +990,7 @@ class RenderSession:
 				if not future.done():
 					future.set_exception(asyncio.TimeoutError())
 
-			self.scheduler.later(timeout, _on_timeout)
+			self.task_scope.later(timeout, _on_timeout)
 
 			return future
 

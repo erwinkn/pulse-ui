@@ -1,7 +1,7 @@
 import asyncio
 import copy
 from dataclasses import InitVar, asdict, astuple, dataclass, field, replace
-from typing import Any, ClassVar, NamedTuple, cast
+from typing import Any, ClassVar, NamedTuple, cast, final
 
 import pulse as ps
 import pytest
@@ -36,11 +36,11 @@ async def _scheduler_context(request: pytest.FixtureRequest):  # pyright: ignore
 		yield
 		return
 	app = ps.App()
-	await app.scheduler.start()
+	await app.task_scope.start()
 	with ps.PulseContext(app=app):
 		yield
 	flush_effects()
-	await app.scheduler.close()
+	await app.task_scope.close()
 
 
 def test_signal_creation_and_access():
@@ -853,6 +853,46 @@ def test_effect_unset_batch_after_run():
 
 		assert e.batch == batch
 	assert e.batch is None
+
+
+@pytest.mark.asyncio
+async def test_global_batch_does_not_wedge_when_flush_post_is_dropped(
+	monkeypatch: pytest.MonkeyPatch,
+):
+	"""A dropped flush must leave is_scheduled False so later writes still flush."""
+	from pulse.reactive import GlobalBatch
+
+	app = ps.PulseContext.get().app
+	batch = GlobalBatch()
+
+	@final
+	class Binding:
+		drop: bool
+		calls: int
+
+		def __init__(self) -> None:
+			self.drop = True
+			self.calls = 0
+
+		@property
+		def current(self) -> bool:
+			return False
+
+		def post(self, fn: Any) -> bool:
+			self.calls += 1
+			return not self.drop
+
+	binding = Binding()
+	monkeypatch.setattr(app.task_scope, "_binding", binding)
+
+	batch.register_effect(Effect(lambda: None, lazy=True))
+	assert binding.calls == 1
+	assert not batch.is_scheduled
+
+	binding.drop = False
+	batch.register_effect(Effect(lambda: None, lazy=True))
+	assert binding.calls == 2
+	assert batch.is_scheduled
 
 
 def test_effect_rescheduling_itself():
@@ -2720,7 +2760,7 @@ async def test_async_effect_await_run():
 		finished = True
 
 	# Run and await
-	await e.run()
+	await e.run().wait()
 	assert finished
 	assert e.runs == 1
 
@@ -2941,7 +2981,7 @@ async def test_async_effect_wait_after_completion():
 		finished += 1
 
 	# Run and complete
-	await e.run()
+	await e.run().wait()
 	assert started == 1
 	assert finished == 1
 	assert e.is_scheduled is False
@@ -3220,7 +3260,7 @@ async def test_async_effect_interval_runs_periodically():
 		await asyncio.sleep(0)
 
 	# Start the effect
-	await e.run()
+	await e.run().wait()
 	assert len(runs) == 1
 
 	# Wait for interval to trigger
@@ -3246,7 +3286,7 @@ async def test_async_effect_cancel_with_cancel_interval_true():
 		runs.append(len(runs))
 		await asyncio.sleep(0)
 
-	await e.run()
+	await e.run().wait()
 	assert len(runs) == 1
 
 	# Cancel with interval cancellation (default)
@@ -3270,7 +3310,7 @@ async def test_async_effect_cancel_with_cancel_interval_false():
 		runs.append(len(runs))
 		await asyncio.sleep(0)
 
-	await e.run()
+	await e.run().wait()
 	assert len(runs) == 1
 	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 
@@ -3297,7 +3337,7 @@ async def test_async_effect_run_restarts_cancelled_interval():
 		runs.append(len(runs))
 		await asyncio.sleep(0)
 
-	await e.run()
+	await e.run().wait()
 	assert len(runs) == 1
 
 	# Cancel with interval cancellation
@@ -3305,7 +3345,7 @@ async def test_async_effect_run_restarts_cancelled_interval():
 	assert e._interval_handle is None  # pyright: ignore[reportPrivateUsage]
 
 	# Manually run the effect - should restart interval
-	await e.run()
+	await e.run().wait()
 	assert len(runs) == 2
 	assert e._interval_handle is not None  # pyright: ignore[reportPrivateUsage]
 

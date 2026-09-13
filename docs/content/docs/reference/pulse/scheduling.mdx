@@ -7,7 +7,7 @@ Pulse scheduling runs work in the current render session or app scheduler.
 Schedulers are scopes: closing the owner cancels and drains its scheduled work.
 
 ```python
-from pulse.scheduling import later, repeat, spawn
+from pulse.tasks import later, repeat, spawn
 ```
 
 For timers, use the helpers directly from `pulse`:
@@ -101,7 +101,7 @@ The coroutine's exceptions are reported through the event loop's exception
 handler with the task name. Cancellation propagates normally.
 
 ```python
-from pulse.scheduling import spawn
+from pulse.tasks import spawn
 
 class BackgroundWorkState(ps.State):
     status: str = "idle"
@@ -143,7 +143,7 @@ or event loop, before `start()`, or after `close()` raises `RuntimeError`.
 from any thread and runs it on the scheduler's owning loop:
 
 ```python
-from pulse.scheduling import post
+from pulse.tasks import post
 
 post(refresh)
 ```

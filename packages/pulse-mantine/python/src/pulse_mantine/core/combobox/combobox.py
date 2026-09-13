@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 import pulse as ps
 from pulse.helpers import call_flexible, maybe_await
-from pulse.scheduling import spawn
+from pulse.tasks import spawn
 
 DropdownEventSource = Literal["keyboard", "mouse", "unknown"]
 SelectedOptionTarget = Literal["active", "selected"]

@@ -3,11 +3,12 @@ title: "Scheduling"
 description: "Task and timer scheduling primitives"
 ---
 
-Pulse scheduling runs work in the current render session or app scheduler.
-Schedulers are scopes: closing the owner cancels and drains its scheduled work.
+Pulse scheduling runs work in the current render session's task scope, or the
+app's when there is no active render. A task scope is a lifetime: closing the
+owner cancels and drains everything scheduled in it.
 
 ```python
-from pulse.tasks import later, repeat, spawn
+from pulse.tasks import every, later, repeat, spawn
 ```
 
 For timers, use the helpers directly from `pulse`:
@@ -17,6 +18,7 @@ import pulse as ps
 
 ps.later(1.0, do_something)
 ps.repeat(5.0, poll_data)
+ps.every(5.0, poll_data)
 ```
 
 ## later
@@ -35,10 +37,11 @@ def later(
 `fn` can be synchronous or asynchronous. If it returns an awaitable, Pulse
 waits for it before the scheduled task finishes.
 
-The returned `ps.Task` supports `.cancel()`, `.done()`, `.cancelled()`,
-`.wait()`, and awaiting. Awaiting a cancelled task raises
-`asyncio.CancelledError`. Route unmounting does not cancel `later()` callbacks.
-Cancel the task when a route-local callback should not run after unmount.
+The returned `ps.Task` supports `.cancel()`, `.done()`, `.cancelled()`, and
+`await task.wait()`. `wait()` returns a `TaskOutcome` (`COMPLETED`, `CANCELLED`,
+or `FAILED`) so you can react to how the task ended. Route unmounting does not
+cancel `later()` callbacks; cancel the task when a route-local callback should
+not run after unmount.
 
 ```python
 class NotificationState(ps.State):
@@ -52,24 +55,22 @@ class NotificationState(ps.State):
         self.message = ""
 ```
 
-## repeat
+## repeat and every
 
 Run a callback repeatedly at a fixed interval.
 
 ```python
-def repeat(
-    interval: float,
-    fn: Callable[P, Any],
-    *args: P.args,
-    immediate: bool = False,
-    **kwargs: P.kwargs,
-) -> ps.Task
+def repeat(interval: float, fn: Callable[P, Any], ...) -> ps.Task
+def every(interval: float, fn: Callable[P, Any], ...) -> ps.Task
 ```
 
-The first callback runs after the interval unless `immediate=True`. For async
-callbacks, the next interval starts after the callback completes. Executions
-do not overlap. Callback exceptions are reported through the event loop's
-exception handler, and the repeat continues.
+`repeat` waits one interval before the first run. `every` runs `fn` once
+immediately, then every interval. Neither reserves an argument name, so
+`*args`/`**kwargs` always reach `fn`.
+
+For async callbacks, the next interval starts after the callback completes, so
+executions do not overlap. Callback exceptions are reported through the event
+loop's exception handler, and the loop continues.
 
 ```python
 class LiveDataState(ps.State):
@@ -87,7 +88,7 @@ class LiveDataState(ps.State):
 
 ## spawn
 
-Run a coroutine in the active scheduler.
+Run a coroutine in the active task scope.
 
 ```python
 def spawn(
@@ -115,43 +116,38 @@ class BackgroundWorkState(ps.State):
         self.status = "done"
 ```
 
-Use `Scheduler.spawn()` when you own a scheduler directly:
+`TaskScope` is the internal lifetime these helpers resolve to. Reach for it
+directly only when you own a scope:
 
 ```python
-async with Scheduler("worker") as scheduler:
-    scheduler.spawn(work(), name="worker-task")
+from pulse.tasks import TaskScope
+
+async with TaskScope("worker") as scope:
+    scope.spawn(work(), name="worker-task")
 ```
 
 ## Automatic cleanup
 
-Scheduling helpers use the current render session's scheduler when called
-during a render and the app scheduler otherwise. When the owner closes or
-shuts down:
+Scheduling helpers use the current render session's task scope when called
+during a render and the app's otherwise. When the owner closes or shuts down:
 
 - Pending `later` callbacks are cancelled.
-- `repeat` loops are stopped.
+- `repeat`/`every` loops are stopped.
 - Spawned coroutines are cancelled and drained.
 
 ## Event loop
 
-A scheduler binds to the event loop where `await scheduler.start()` runs.
-`App.scheduler` starts in the FastAPI lifespan, and a render-session scheduler
+A task scope binds to the event loop where `await scope.start()` runs.
+`App.task_scope` starts in the FastAPI lifespan, and a render session's scope
 starts in `App.create_render`. Handle-returning scheduling from another thread
-or event loop, before `start()`, or after `close()` raises `RuntimeError`.
+or event loop, before `start()`, or after `close()` raises `RuntimeError`
+rather than queueing work that could never run.
 
-`post(fn)` is the one thread-safe scheduling operation. It accepts a callback
-from any thread and runs it on the scheduler's owning loop:
-
-```python
-from pulse.tasks import post
-
-post(refresh)
-```
-
-`post()` returns nothing. A `ps.Task` belongs to the loop that owns it, so use
-`spawn()`, `later()`, or `repeat()` on that loop when you need to cancel or
-await the returned task. The callback must be synchronous; use one of the
-task-returning functions from the owning loop for asynchronous work.
+Scheduling is therefore loop-affine: `spawn`, `later`, `repeat`, and `every`
+must be called from the loop that owns the scope. Threads are handled inside
+the reactive runtime, which posts work back onto the serving loop when a
+synchronous FastAPI endpoint writes state from Starlette's threadpool. That
+bridge is not part of the public scheduling API.
 
 ## Untracking
 

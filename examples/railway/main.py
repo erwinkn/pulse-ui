@@ -147,11 +147,11 @@ def register_probe_routes(app: ps.App) -> None:
 		}
 
 	@app.fastapi.get("/api/railway-example/session")
-	def railway_example_session():  # pyright: ignore[reportUnusedFunction]
+	async def railway_example_session():  # pyright: ignore[reportUnusedFunction]
 		return session_state()
 
 	@app.fastapi.post("/api/railway-example/session/increment")
-	def railway_example_session_increment():  # pyright: ignore[reportUnusedFunction]
+	async def railway_example_session_increment():  # pyright: ignore[reportUnusedFunction]
 		return increment_session_counter()
 
 

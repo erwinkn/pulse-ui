@@ -102,6 +102,9 @@ export function replayPreHydrationInputs(): void {
 			// (falling back to the prototype setter when there is no tracker):
 			// tracker and DOM both hold !entry.checked, then click() toggles the
 			// DOM to entry.checked — tracker lags, so the change registers.
+			// click() is required: React detects checkable-input changes off the
+			// click top-level event; input/change dispatches are deduped away.
+			// The onClick that fires is faithful — the user's gesture was a click.
 			const setChecked =
 				Object.getOwnPropertyDescriptor(input, "checked")?.set ??
 				Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "checked")?.set;

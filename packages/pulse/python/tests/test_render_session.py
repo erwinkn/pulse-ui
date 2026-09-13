@@ -1988,11 +1988,11 @@ def test_execute_callback_stale_key_is_noop(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.mark.asyncio
-async def test_prerender_queue_timeout_disposes_mount():
+async def test_pending_timeout_disposes_mount():
 	"""Prerender without attach disposes the mount once the queue times out."""
 	routes = RouteTree([Route("a", simple_component)])
 	# Very short timeout for testing
-	session = RenderSession("test-id", routes, prerender_queue_timeout=0.01)
+	session = RenderSession("test-id", routes, pending_timeout=0.01)
 
 	with ps.PulseContext.update(render=session):
 		session.prerender(["/a"])

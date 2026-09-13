@@ -231,6 +231,26 @@ describe("PulseSocketIOClient attach ack", () => {
 		consoleError.mockRestore();
 	});
 
+	it("reloads when the server refuses with an unknown render code", async () => {
+		const reload = vi.fn();
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+		Object.defineProperty(window.location, "reload", {
+			configurable: true,
+			value: reload,
+		});
+		const client = await makeClient();
+		const connected = client.connect();
+		const error = Object.assign(new Error("unknown"), {
+			data: { code: "unknown_render" },
+		});
+
+		socket.trigger("connect_error", error);
+		await expect(connected).rejects.toBe(error);
+
+		expect(reload).toHaveBeenCalledTimes(1);
+		consoleError.mockRestore();
+	});
+
 	it("does not reload visible active tabs when reconnect times out", async () => {
 		const reload = vi.fn();
 		Object.defineProperty(window.location, "reload", {

@@ -44,7 +44,6 @@ from pulse.env import env as envvars
 from pulse.helpers import (
 	find_available_port,
 	get_client_address,
-	get_client_address_socketio,
 	local_server_url,
 )
 from pulse.hooks.core import hooks
@@ -89,6 +88,7 @@ T = TypeVar("T")
 FRAMEWORK_API_PREFIX = "/_pulse"
 PAGE_INSTANCE_AUTH_KEY = "__pulse_page_instance_id"
 RENDER_ID_COLLISION_CODE = "render_id_collision"
+UNKNOWN_RENDER_CODE = "unknown_render"
 MAX_PENDING_SOCKET_MESSAGES = 100
 
 
@@ -255,7 +255,7 @@ class App:
 	session_timeout: float
 	connection_status: ConnectionStatusConfig
 	render_loop_limit: int
-	prerender_queue_timeout: float
+	pending_timeout: float
 	disconnect_queue_timeout: float
 
 	def __init__(
@@ -276,7 +276,7 @@ class App:
 		cors: CORSOptions | None = None,
 		fastapi: FastAPIConfig | None = None,
 		session_timeout: float = 60.0,
-		prerender_queue_timeout: float = 60.0,
+		pending_timeout: float = 60.0,
 		disconnect_queue_timeout: float = 300.0,
 		connection_status: ConnectionStatusConfig | None = None,
 		render_loop_limit: int = 50,
@@ -339,7 +339,7 @@ class App:
 		self._timers = TimerRegistry(tasks=self._tasks, name="app")
 		self._proxy = None
 		self.session_timeout = session_timeout
-		self.prerender_queue_timeout = prerender_queue_timeout
+		self.pending_timeout = pending_timeout
 		self.disconnect_queue_timeout = disconnect_queue_timeout
 		self.connection_status = connection_status or ConnectionStatusConfig()
 		self.render_loop_limit = render_loop_limit
@@ -660,17 +660,21 @@ class App:
 			client_addr: str | None = get_client_address(request)
 			# Reuse render session from header (set by middleware) or create new one
 			render = PulseContext.get().render
+			if render is not None and self.render_sessions.get(render.id) is not render:
+				# The render was closed (e.g. its cleanup timer fired) between the
+				# HTTP middleware resolving it and this handler running. Mint a
+				# fresh one instead of prerendering on a dead render.
+				render = None
 			if render is not None:
 				render_id = render.id
+				# Hold the render alive while prerendering; rescheduled below.
+				self._cancel_render_cleanup(render_id)
 			else:
 				# Create new render session
 				render_id = new_sid()
 				render = self.create_render(
 					render_id, session, client_address=client_addr
 				)
-			# Schedule cleanup timeout (will cancel/reschedule on activity)
-			if not render.connected:
-				self._schedule_render_cleanup(render_id)
 
 			def _normalize_prerender_result(
 				captured: ServerInitMessage | ServerNavigateToMessage,
@@ -721,12 +725,17 @@ class App:
 
 					return Ok(result_data)
 
-				result = await self.middleware.prerender(
-					payload=payload,
-					request=PulseRequest.from_fastapi(request),
-					session=session.data,
-					next=_process_routes,
-				)
+				try:
+					result = await self.middleware.prerender(
+						payload=payload,
+						request=PulseRequest.from_fastapi(request),
+						session=session.data,
+						next=_process_routes,
+					)
+				finally:
+					# Reschedule now that the request is done; mount state is final.
+					if not render.connected:
+						self._schedule_render_cleanup(render_id)
 
 			# Handle redirect/notFound responses
 			if isinstance(result, Redirect):
@@ -822,33 +831,34 @@ class App:
 		):
 			cookie = self.cookie.get_from_socketio(environ)
 			if cookie is None:
-				raise ConnectionRefusedError("Socket connect missing cookie")
-			session = await self.get_or_create_session(cookie)
+				raise SocketIOConnectionRefusedError("Socket connect missing cookie")
 
+			# A render id is a server-issued capability minted by /prerender.
+			# Unknown ids are never materialized: the render was either never
+			# minted or is already closed (expired, server restart). Refuse before
+			# materializing a session and let the client reload with fresh directives.
 			if not rid:
-				self.close_session_if_inactive(session.sid)
-				raise ConnectionRefusedError(
-					f"Socket connect missing render_id session={session.sid}"
+				raise SocketIOConnectionRefusedError("Socket connect missing render_id")
+			render = self.render_sessions.get(rid)
+			if render is None:
+				raise SocketIOConnectionRefusedError(
+					f"Socket connect unknown render_id render={rid}",
+					{"code": UNKNOWN_RENDER_CODE},
 				)
+
+			session = await self.get_or_create_session(cookie)
+			owner = self._render_to_user.get(render.id)
+			if owner != session.sid:
+				self.close_session_if_inactive(session.sid)
+				logger.warning(
+					f"Socket connect session mismatch render={render.id} "
+					+ f"owner={owner} session={session.sid}"
+				)
+				raise SocketIOConnectionRefusedError("Socket connection denied")
 
 			page_instance_id = auth.get(PAGE_INSTANCE_AUTH_KEY) if auth else None
 			if not isinstance(page_instance_id, str) or not page_instance_id:
 				page_instance_id = None
-
-			render = self.render_sessions.get(rid)
-			created_render = render is None
-			if render is None:
-				render = self.create_render(
-					rid, session, client_address=get_client_address_socketio(environ)
-				)
-			else:
-				owner = self._render_to_user.get(render.id)
-				if owner != session.sid:
-					self.close_session_if_inactive(session.sid)
-					raise ConnectionRefusedError(
-						f"Socket connect session mismatch render={render.id} "
-						+ f"owner={owner} session={session.sid}"
-					)
 
 			# Claim synchronously before connect middleware can yield. A reconnect from
 			# the same page may replace its socket; another page must reload instead.
@@ -887,9 +897,15 @@ class App:
 						connect_error = exc
 						res = Ok(None)
 
+					if self.render_sessions.get(rid) is not render:
+						# The render was closed (expired) while this connect sat
+						# in middleware; it cannot be revived.
+						raise SocketIOConnectionRefusedError(
+							"Render session closed during socket connection",
+							{"code": UNKNOWN_RENDER_CODE},
+						)
 					if (
-						self.render_sessions.get(rid) is not render
-						or rid not in self._render_to_page_instance
+						rid not in self._render_to_page_instance
 						or self._render_to_page_instance[rid] != page_instance_id
 						or self._render_connect_attempts.get(rid) is not connect_attempt
 					):
@@ -898,11 +914,8 @@ class App:
 							{"code": RENDER_ID_COLLISION_CODE},
 						)
 					if isinstance(res, Deny):
-						if created_render:
-							self.close_render(rid)
-						else:
-							self.close_session_if_inactive(session.sid)
-						raise ConnectionRefusedError("Socket connection denied")
+						self.close_session_if_inactive(session.sid)
+						raise SocketIOConnectionRefusedError("Socket connection denied")
 
 					def on_message(message: ServerMessage):
 						payload = list(serialize(message))
@@ -989,6 +1002,12 @@ class App:
 		# Cancel any existing cleanup task for this render session
 		self._cancel_render_cleanup(rid)
 
+		# A render that still holds mounts keeps the full session_timeout grace
+		# (suspended mounts preserve resumable client state). A render with no
+		# mounts left has nothing a client could attach to, so it gets
+		# pending_timeout — a final window for prerender reuse before reaping.
+		delay = self.session_timeout if render.route_mounts else self.pending_timeout
+
 		# Schedule new cleanup task
 		def _cleanup():
 			render = self.render_sessions.get(rid)
@@ -996,12 +1015,10 @@ class App:
 				return
 			# Only cleanup if not connected (if connected, keep it alive)
 			if not render.connected:
-				logger.info(
-					f"RenderSession {rid} expired after {self.session_timeout}s timeout"
-				)
+				logger.info(f"RenderSession {rid} expired after {delay}s timeout")
 				self.close_render(rid)
 
-		handle = self._timers.later(self.session_timeout, _cleanup)
+		handle = self._timers.later(delay, _cleanup)
 		self._render_cleanups[rid] = handle
 
 	async def _handle_socket_message(self, sid: str, data: Serialized) -> None:
@@ -1248,13 +1265,14 @@ class App:
 			self.routes,
 			server_address=self.server_address,
 			client_address=client_address,
-			prerender_queue_timeout=self.prerender_queue_timeout,
+			pending_timeout=self.pending_timeout,
 			# Development React StrictMode replays PulseView effects as
 			# attach -> detach -> attach on first mount. Production should keep the
 			# normal immediate detach semantics; only dev gets a tiny grace window.
 			dev_strict_mode_detach_timeout=0.1 if self.env == "dev" else 0.0,
 			disconnect_queue_timeout=self.disconnect_queue_timeout,
 			render_loop_limit=self.render_loop_limit,
+			on_mounts_emptied=lambda: self._schedule_render_cleanup(rid),
 		)
 		self.render_sessions[rid] = render
 		self._render_to_user[rid] = session.sid

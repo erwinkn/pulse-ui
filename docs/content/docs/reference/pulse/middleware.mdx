@@ -142,7 +142,9 @@ client reloads for fresh directives.
 - `session` - Session data dictionary.
 - `next` - Callable to continue the middleware chain.
 
-**Returns:** `Ok[None]` to allow, `Deny` to reject.
+**Returns:** `Ok[None]` to allow, `Deny` to reject. Returning another value raises
+`MiddlewareDecisionError` and refuses the connection. Other connect middleware exceptions
+are reported to the client after it binds.
 
 ##### message
 
@@ -152,7 +154,7 @@ async def message(
     *,
     data: ClientMessage,
     session: dict[str, Any],
-    next: Callable[[], Awaitable[Ok[None]]],
+    next: Callable[[], Awaitable[Ok[None] | Deny]],
 ) -> Ok[None] | Deny
 ```
 
@@ -163,9 +165,9 @@ Commands targeting the same route path run in arrival order, even while this hoo
 **Parameters:**
 - `data` - Client message data.
 - `session` - Session data dictionary.
-- `next` - Callable to continue the middleware chain.
+- `next` - Callable to continue the middleware chain. Returns the downstream decision; a downstream `Deny` is sticky.
 
-**Returns:** `Ok[None]` to allow, `Deny` to block.
+**Returns:** `Ok[None]` to allow, `Deny` to block. A downstream `Deny` is sticky and an outer `Ok` cannot override it, but this does not guarantee the command did not run: middleware that denies after awaiting `next()` has already executed it, side effects included. Returning anything else raises `MiddlewareDecisionError` (fail closed).
 
 ##### channel
 
@@ -178,7 +180,7 @@ async def channel(
     payload: Any,
     request_id: str | None,
     session: dict[str, Any],
-    next: Callable[[], Awaitable[Ok[None]]],
+    next: Callable[[], Awaitable[Ok[None] | Deny]],
 ) -> Ok[None] | Deny
 ```
 
@@ -190,9 +192,9 @@ Handle channel message authorization.
 - `payload` - Event payload.
 - `request_id` - Request ID if awaiting response.
 - `session` - Session data dictionary.
-- `next` - Callable to continue the middleware chain.
+- `next` - Callable to continue the middleware chain. Returns the downstream decision; a downstream `Deny` is sticky.
 
-**Returns:** `Ok[None]` to allow, `Deny` to block.
+**Returns:** `Ok[None]` to allow, `Deny` to block. A downstream `Deny` is sticky and an outer `Ok` cannot override it, but this does not guarantee the command did not run: middleware that denies after awaiting `next()` has already executed it, side effects included. Returning anything else raises `MiddlewareDecisionError` (fail closed).
 
 ### MiddlewareStack
 

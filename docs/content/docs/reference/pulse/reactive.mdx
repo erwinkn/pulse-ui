@@ -258,6 +258,10 @@ class Batch:
 
 Add an effect to run when the batch flushes.
 
+#### `discard(effect: Effect) -> None`
+
+Remove an effect from this batch. Does nothing if it is not scheduled here.
+
 #### `flush() -> None`
 
 Run all scheduled effects.

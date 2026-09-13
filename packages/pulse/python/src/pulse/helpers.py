@@ -214,47 +214,6 @@ def get_client_address(request: Request) -> str | None:
 		return None
 
 
-def get_client_address_socketio(environ: dict[str, Any]) -> str | None:
-	"""Best-effort client origin/address from a WS environ mapping.
-
-	Preference order mirrors HTTP variant using environ keys.
-	"""
-	try:
-		origin = environ.get("HTTP_ORIGIN")
-		if origin:
-			return origin
-
-		fwd = environ.get("HTTP_FORWARDED")
-		proto = environ.get("HTTP_X_FORWARDED_PROTO") or (
-			[p.split("proto=")[-1] for p in str(fwd).split(";") if "proto=" in p][0]
-			.strip()
-			.strip('"')
-			if fwd and "proto=" in str(fwd)
-			else environ.get("wsgi.url_scheme", "http")
-		)
-		if fwd and "for=" in str(fwd):
-			part = [p for p in str(fwd).split(";") if "for=" in p]
-			hostport = part[0].split("for=")[-1].strip().strip('"') if part else ""
-			if hostport:
-				return f"{proto}://{hostport}"
-
-		xff = environ.get("HTTP_X_FORWARDED_FOR")
-		xfp = environ.get("HTTP_X_FORWARDED_PORT")
-		if xff:
-			host = str(xff).split(",")[0].strip()
-			if host in ("127.0.0.1", "::1"):
-				host = "localhost"
-			return f"{proto}://{host}:{xfp}" if xfp else f"{proto}://{host}"
-
-		# Fallback: use HTTP_HOST which contains the server address the client connected to
-		host_header = environ.get("HTTP_HOST")
-		if host_header:
-			return f"{proto}://{host_header}"
-		return None
-	except Exception:
-		return None
-
-
 # --- Runtime lock helpers moved to pulse.cli.web_lock ---
 # Use WebLock context manager for idempotent lock management
 

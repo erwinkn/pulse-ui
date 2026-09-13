@@ -133,6 +133,10 @@ async def connect(
 
 Handle WebSocket connection establishment.
 
+Only runs for a socket that names an existing render id owned by the request's
+session. An unknown or expired render id is refused before middleware runs; the
+client reloads for fresh directives.
+
 **Parameters:**
 - `request` - Normalized request object.
 - `session` - Session data dictionary.

@@ -602,6 +602,7 @@ class HTMLSelectElement(HTMLElementBase):
 	name: str
 	required: bool
 	selectedIndex: int
+	selectedOptions: list[str]  # Values of all selected options
 	size: int
 	type: Literal["select-one", "select-multiple"]  # Read-only
 	value: str  # Value of the first selected option, or ""

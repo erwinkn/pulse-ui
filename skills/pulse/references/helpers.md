@@ -51,7 +51,7 @@ Use `post()` when synchronous code may run from a worker thread and needs to
 request work on the active scheduler:
 
 ```python
-from pulse.scheduling import post
+from pulse.tasks import post
 
 post(refresh)
 ```

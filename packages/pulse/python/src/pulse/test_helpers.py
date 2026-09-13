@@ -2,7 +2,7 @@ import asyncio
 import time
 from collections.abc import Callable
 
-from pulse.scheduling import CLOCK_RESOLUTION, clamp_delay
+from pulse.tasks import CLOCK_RESOLUTION, clamp_delay
 
 
 def slow_delay(seconds: float = 0.01) -> float:

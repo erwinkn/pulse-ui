@@ -18,11 +18,11 @@ R = TypeVar("R")
 async def pulse_context():
 	"""Set up a PulseContext with an App for all tests."""
 	app = ps.App()
-	await app.scheduler.start()
+	await app.task_scope.start()
 	ctx = ps.PulseContext(app=app)
 	with ctx:
 		yield
-	await app.scheduler.close()
+	await app.task_scope.close()
 
 
 def with_render_session(fn: Callable[P, Awaitable[R]]):
@@ -31,7 +31,7 @@ def with_render_session(fn: Callable[P, Awaitable[R]]):
 	async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
 		routes = RouteTree([])
 		session = RenderSession("test-session", routes)
-		await session.scheduler.start()
+		await session.task_scope.start()
 		with ps.PulseContext.update(render=session):
 			try:
 				return await fn(*args, **kwargs)

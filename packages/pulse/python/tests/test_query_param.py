@@ -37,9 +37,9 @@ async def make_context(route_info: RouteInfo):
 	route = Route("/", ps.component(render))
 	routes = RouteTree([route])
 	session = RenderSession("test", routes)
-	await session.scheduler.start()
+	await session.task_scope.start()
 	app = ps.App(routes=[route])
-	session.prerender(["/"], route_info)
+	await session.prerender(["/"], route_info)
 	route_ctx = session.route_mounts["/"].route
 	return app, session, route_ctx
 
@@ -333,7 +333,7 @@ async def make_two_route_session():
 	routes = RouteTree([route_a, route_b])
 	app = ps.App(routes=[route_a, route_b])
 	session = RenderSession("test", routes)
-	await session.scheduler.start()
+	await session.task_scope.start()
 	return app, session
 
 
@@ -348,7 +348,7 @@ class TestQueryParamAcrossMounts:
 	prerendered while the outgoing one is still mounted, then /a detaches.
 	"""
 
-	def navigate(
+	async def navigate(
 		self,
 		session: RenderSession,
 		path: str,
@@ -357,7 +357,7 @@ class TestQueryParamAcrossMounts:
 		detach: str | None = None,
 	) -> None:
 		info = make_route_info(path, query_params=query_params)
-		session.prerender([path], info)
+		await session.prerender([path], info)
 		if detach is not None:
 			session.detach(detach)
 		session.attach(path, info)
@@ -373,7 +373,7 @@ class TestQueryParamAcrossMounts:
 		session.connect(messages.append)
 
 		start = make_route_info("/a", query_params={"q": "hello", "other": "1"})
-		session.prerender(["/a"], start)
+		await session.prerender(["/a"], start)
 		with ps.PulseContext(
 			app=app, render=session, route=session.route_mounts["/a"].route
 		):
@@ -381,7 +381,7 @@ class TestQueryParamAcrossMounts:
 			assert state.q == "hello"
 			flush_effects()
 
-		self.navigate(session, "/b", {"q": "hello", "other": "1"}, detach="/a")
+		await self.navigate(session, "/b", {"q": "hello", "other": "1"}, detach="/a")
 		assert "/a" not in session.route_mounts
 
 		# URL -> state still works after the mount that created the state is gone
@@ -416,7 +416,9 @@ class TestQueryParamAcrossMounts:
 
 		app, session = await make_two_route_session()
 		session.connect(lambda _msg: None)
-		session.prerender(["/a"], make_route_info("/a", query_params={"q": "hello"}))
+		await session.prerender(
+			["/a"], make_route_info("/a", query_params={"q": "hello"})
+		)
 		with ps.PulseContext(
 			app=app, render=session, route=session.route_mounts["/a"].route
 		):
@@ -425,7 +427,7 @@ class TestQueryParamAcrossMounts:
 			flush_effects()
 
 		# The URL stays the source of truth: a route without the param means default.
-		self.navigate(session, "/b", {}, detach="/a")
+		await self.navigate(session, "/b", {}, detach="/a")
 		flush_effects()
 		assert state.q == "fallback"
 
@@ -444,7 +446,9 @@ class TestQueryParamAcrossMounts:
 		messages: list[ServerMessage] = []
 		session.connect(messages.append)
 
-		session.prerender(["/a"], make_route_info("/a", query_params={"q": "hello"}))
+		await session.prerender(
+			["/a"], make_route_info("/a", query_params={"q": "hello"})
+		)
 		with ps.PulseContext(
 			app=app, render=session, route=session.route_mounts["/a"].route
 		):
@@ -453,7 +457,7 @@ class TestQueryParamAcrossMounts:
 
 		# The new route is prerendered while /a is still mounted: no error.
 		info_b = make_route_info("/b", query_params={"q": "hello"})
-		session.prerender(["/b"], info_b)
+		await session.prerender(["/b"], info_b)
 		with ps.PulseContext(
 			app=app, render=session, route=session.route_mounts["/b"].route
 		):
@@ -507,12 +511,14 @@ class TestQueryParamAcrossMounts:
 		routes = RouteTree([route_a, route_b, route_c])
 		app = ps.App(routes=[route_a, route_b, route_c])
 		session = RenderSession("test", routes)
-		await session.scheduler.start()
+		await session.task_scope.start()
 		messages: list[ServerMessage] = []
 		session.connect(messages.append)
 
 		# /a: the session-scoped state binds q.
-		session.prerender(["/a"], make_route_info("/a", query_params={"q": "hello"}))
+		await session.prerender(
+			["/a"], make_route_info("/a", query_params={"q": "hello"})
+		)
 		with ps.PulseContext(
 			app=app, render=session, route=session.route_mounts["/a"].route
 		):
@@ -521,7 +527,7 @@ class TestQueryParamAcrossMounts:
 
 		# /b: a route-local state takes over q.
 		info_b = make_route_info("/b", query_params={"q": "hello"})
-		session.prerender(["/b"], info_b)
+		await session.prerender(["/b"], info_b)
 		with ps.PulseContext(
 			app=app, render=session, route=session.route_mounts["/b"].route
 		):
@@ -532,7 +538,7 @@ class TestQueryParamAcrossMounts:
 
 		# /c: no local binding; /b unmounts and its state is disposed.
 		info_c = make_route_info("/c", query_params={"q": "hello"})
-		session.prerender(["/c"], info_c)
+		await session.prerender(["/c"], info_c)
 		session.detach("/b")
 		session.attach("/c", info_c)
 		b.dispose()

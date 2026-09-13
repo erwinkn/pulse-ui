@@ -8,7 +8,7 @@ from typing import (
 
 from pulse.helpers import MISSING
 from pulse.reactive import AsyncEffect, Computed, Signal
-from pulse.scheduling import Task
+from pulse.tasks import Task
 
 
 class Fetcher(Protocol):

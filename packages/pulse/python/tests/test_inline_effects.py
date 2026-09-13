@@ -15,10 +15,10 @@ async def _scheduler_context(request: pytest.FixtureRequest):  # pyright: ignore
 		yield
 		return
 	app = ps.App()
-	await app.scheduler.start()
+	await app.task_scope.start()
 	with ps.PulseContext(app=app):
 		yield
-	await app.scheduler.close()
+	await app.task_scope.close()
 
 
 class TestBasicCaching:

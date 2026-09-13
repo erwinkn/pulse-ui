@@ -24,11 +24,11 @@ from pulse.test_helpers import wait_for
 @pytest_asyncio.fixture(autouse=True)
 async def _pulse_context():  # pyright: ignore[reportUnusedFunction]
 	app = ps.App()
-	await app.scheduler.start()
+	await app.task_scope.start()
 	ctx = ps.PulseContext(app=app)
 	with ctx:
 		yield
-	await app.scheduler.close()
+	await app.task_scope.close()
 
 
 class FetchCounter:
@@ -319,7 +319,7 @@ async def test_infinite_interval_resume_does_not_stack_fetch_on_inflight():
 @pytest.mark.asyncio
 async def test_session_connection_drives_query_suspension():
 	session = RenderSession("test-id", RouteTree([]))
-	await session.scheduler.start()
+	await session.task_scope.start()
 	store = session.query_store
 	counter = FetchCounter()
 	result = observe(store, ("a",), counter, stale_time=0.0)
@@ -353,7 +353,7 @@ async def test_resume_fetch_runs_with_session_context():
 	layer wraps it), rather than taking it as a parameter."""
 	sentinel = object()
 	render = RenderSession("test-id", RouteTree([]))
-	await render.scheduler.start()
+	await render.task_scope.start()
 	store = render.query_store
 	seen: list[Any] = []
 

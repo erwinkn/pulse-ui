@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Generic, ParamSpec, TypeVar
 
 from pulse.context import PULSE_CONTEXT
-from pulse.scheduling import (
+from pulse.tasks import (
 	Task,
 	clamp_delay,
 	later,

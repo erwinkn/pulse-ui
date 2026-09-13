@@ -11,7 +11,7 @@ from typing import (
 import pulse as ps
 from pulse.helpers import call_flexible, maybe_await
 from pulse.reactive_extensions import ReactiveDict
-from pulse.scheduling import spawn
+from pulse.tasks import spawn
 
 from .internal import FormInternal, FormMode
 from .validators import (

@@ -1253,10 +1253,10 @@ async def test_ref_handles_use_route_channels():
 
 	app = ps.App([ps.Route("/", Root), ps.Route("/other", Other)])
 	render = ps.RenderSession("render-ref-route-channels", app.routes)
-	await render.scheduler.start()
+	await render.task_scope.start()
 	session: Any = SimpleNamespace(sid="session-ref-route-channels")
 	with ps.PulseContext(app=app, session=session, render=render):
-		render.prerender(["/", "/other"])
+		await render.prerender(["/", "/other"])
 
 	assert handle_root_a is not None
 	assert handle_root_b is not None
@@ -1284,10 +1284,10 @@ async def test_ref_on_mount_uses_route_context():
 
 	app = ps.App([ps.Route("/", WithRef)])
 	render = ps.RenderSession("render-ref-route-context", app.routes)
-	await render.scheduler.start()
+	await render.task_scope.start()
 	session: Any = SimpleNamespace(sid="session-ref-route-context")
 	with ps.PulseContext(app=app, session=session, render=render):
-		render.prerender(["/"])
+		await render.prerender(["/"])
 
 	assert handle is not None
 	render.channels.handle_client_event(
@@ -1357,7 +1357,7 @@ async def test_ref_async_handlers_run():
 
 	app = ps.App()
 	render = ps.RenderSession("render-ref-async-handlers", app.routes)
-	await render.scheduler.start()
+	await render.task_scope.start()
 	session: Any = SimpleNamespace(sid="session-ref-async-handlers")
 	with ps.PulseContext(app=app, session=session, render=render):
 		tree = RenderTree(WithRef())

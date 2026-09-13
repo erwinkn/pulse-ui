@@ -43,9 +43,9 @@ from pulse.queries.query import (
 )
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.reactive_extensions import ReactiveList, unwrap
-from pulse.scheduling import Task, later, spawn
 from pulse.state.property import InitializableProperty, StateMemberDescriptor
 from pulse.state.state import State
+from pulse.tasks import Task, later, spawn
 
 T = TypeVar("T")
 TParam = TypeVar("TParam")

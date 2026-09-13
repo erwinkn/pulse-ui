@@ -109,11 +109,11 @@ async def _client(
 	app: ps.App, *, raise_app_exceptions: bool = True
 ) -> AsyncIterator[httpx.AsyncClient]:
 	owns_setup = app.status < AppStatus.initialized
-	owns_scheduler = not app.scheduler.running
+	owns_scheduler = not app.task_scope.running
 	if owns_setup:
 		app.setup("http://testserver")
 	if owns_scheduler:
-		await app.scheduler.start()
+		await app.task_scope.start()
 	transport = httpx.ASGITransport(
 		app=app.fastapi, raise_app_exceptions=raise_app_exceptions
 	)
@@ -126,7 +126,7 @@ async def _client(
 		if owns_setup:
 			await app.close()
 		elif owns_scheduler:
-			await app.scheduler.close()
+			await app.task_scope.close()
 
 
 @pytest.mark.asyncio

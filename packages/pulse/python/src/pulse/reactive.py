@@ -18,12 +18,7 @@ from pulse.helpers import (
 	maybe_await,
 	values_equal,
 )
-from pulse.scheduling import (
-	Task,
-	current_scheduler,
-	post,
-	spawn,
-)
+from pulse.tasks import Task, TaskOutcome, spawn
 
 T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
@@ -475,7 +470,7 @@ class Effect(Disposable):
 	def _schedule_interval(self):
 		"""Schedule the next interval run if interval is set."""
 		if self._interval is not None and self._interval > 0:
-			from pulse.scheduling import later
+			from pulse.tasks import later
 
 			self._interval_handle = later(self._interval, self._on_interval)
 
@@ -773,12 +768,14 @@ class AsyncEffect(Effect):
 		go through batches, they cancel the previous run and create a new task
 		immediately..
 		"""
-		scheduler = current_scheduler()
-		if scheduler.owns_current_thread:
+		from pulse.context import PulseContext
+
+		binding = PulseContext.get().loop
+		if binding is None or binding.current:
 			self.run()
 		else:
 			# Off the loop we can only ask for the run; its handle belongs to the loop.
-			scheduler.post(self.run)
+			binding.post(self.run)
 
 	@property
 	def is_scheduled(self) -> bool:
@@ -847,8 +844,8 @@ class AsyncEffect(Effect):
 		return this_task
 
 	@override
-	async def __call__(self):  # pyright: ignore[reportIncompatibleMethodOverride]
-		await self.run()
+	async def __call__(self) -> TaskOutcome:  # pyright: ignore[reportIncompatibleMethodOverride]
+		return await self.run().wait()
 
 	@override
 	def cancel(self, cancel_interval: bool = True) -> None:
@@ -1020,8 +1017,10 @@ class GlobalBatch(Batch):
 	@override
 	def register_effect(self, effect: Effect):
 		if not self.is_scheduled:
-			if current_scheduler().running:
-				post(self.flush)
+			from pulse.context import PulseContext
+
+			binding = PulseContext.get().loop
+			if binding is not None and binding.post(self.flush):
 				self.is_scheduled = True
 		return super().register_effect(effect)
 

@@ -9,6 +9,7 @@ from pulse.routing import RouteContext
 if TYPE_CHECKING:
 	from pulse.app import App
 	from pulse.render_session import RenderSession
+	from pulse.runtime import LoopBinding
 	from pulse.user_session import UserSession
 
 _UNSET = object()
@@ -48,6 +49,18 @@ class PulseContext:
 	source_path: str | None = None
 	source_mount_id: str | None = None
 	_token: "Token[PulseContext | None] | None" = None
+
+	@property
+	def loop(self) -> "LoopBinding | None":
+		"""The thread-safe bridge onto the active scope's loop, if bound.
+
+		Read this from reactive code that may run on a worker thread; it is the
+		one thread-safe operation Pulse exposes internally.
+		"""
+		scope = (
+			self.render.task_scope if self.render is not None else self.app.task_scope
+		)
+		return scope.binding
 
 	@classmethod
 	def get(cls) -> "PulseContext":

@@ -12,7 +12,7 @@ from pulse.context import PulseContext
 from pulse.helpers import Disposable
 from pulse.hooks.core import HookMetadata, HookState, hooks
 from pulse.hooks.state import collect_component_identity
-from pulse.scheduling import spawn
+from pulse.tasks import spawn
 
 T = TypeVar("T")
 Number = int | float

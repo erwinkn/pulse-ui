@@ -2,7 +2,7 @@ from typing import Any, Unpack, cast
 
 import pulse as ps
 from pulse.helpers import call_flexible, maybe_await
-from pulse.scheduling import spawn
+from pulse.tasks import spawn
 
 ExpandedState = dict[str, bool]
 

@@ -7,7 +7,7 @@ import pytest
 from pulse.reactive import Scope, Signal
 from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteTree
-from pulse.scheduling import Scheduler, Task
+from pulse.tasks import Task, TaskOutcome, TaskScope
 from pulse.test_helpers import wait_for
 
 
@@ -18,7 +18,7 @@ def simple_component():
 
 @pytest.mark.asyncio
 async def test_scheduler_spawns_and_tracks_tasks():
-	async with Scheduler("test") as scheduler:
+	async with TaskScope("test") as scheduler:
 		started = asyncio.Event()
 
 		async def work():
@@ -26,7 +26,7 @@ async def test_scheduler_spawns_and_tracks_tasks():
 
 		task = scheduler.spawn(work(), name="test.task")
 		assert isinstance(task, Task)
-		assert await task is None
+		assert await task.wait() is TaskOutcome.COMPLETED
 		assert started.is_set()
 		assert task.done()
 		assert not task.cancelled()
@@ -34,7 +34,7 @@ async def test_scheduler_spawns_and_tracks_tasks():
 
 @pytest.mark.asyncio
 async def test_scheduler_later_and_repeat():
-	async with Scheduler("test") as scheduler:
+	async with TaskScope("test") as scheduler:
 		events: list[str] = []
 		repeated = asyncio.Event()
 
@@ -57,8 +57,22 @@ async def test_scheduler_later_and_repeat():
 
 
 @pytest.mark.asyncio
-async def test_scheduler_repeat_immediate_runs_before_first_interval():
-	async with Scheduler("test") as scheduler:
+async def test_scheduler_repeat_waits_before_first_run():
+	async with TaskScope("test") as scheduler:
+		fired = asyncio.Event()
+
+		def callback():
+			fired.set()
+
+		task = scheduler.repeat(10, callback)
+		await asyncio.sleep(0.02)
+		assert not fired.is_set()
+		task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_every_runs_before_first_interval():
+	async with TaskScope("test") as scheduler:
 		started = asyncio.Event()
 		loop = asyncio.get_running_loop()
 		start = loop.time()
@@ -66,15 +80,35 @@ async def test_scheduler_repeat_immediate_runs_before_first_interval():
 		def callback():
 			started.set()
 
-		task = scheduler.repeat(10, callback, immediate=True)
+		task = scheduler.every(10, callback)
 		await started.wait()
 		assert loop.time() - start < 10
 		task.cancel()
 
 
 @pytest.mark.asyncio
+async def test_scheduler_repeat_kwargs_reach_callback():
+	async def run(scope: TaskScope) -> None:
+		seen: list[int] = []
+		done = asyncio.Event()
+
+		def callback(value: int, *, flag: bool) -> None:
+			seen.append(value)
+			assert flag
+			done.set()
+
+		task = scope.every(0.01, callback, 7, flag=True)
+		await done.wait()
+		task.cancel()
+		assert seen[0] == 7
+
+	async with TaskScope("test") as scheduler:
+		await run(scheduler)
+
+
+@pytest.mark.asyncio
 async def test_scheduler_runs_async_callbacks():
-	async with Scheduler("test") as scheduler:
+	async with TaskScope("test") as scheduler:
 		fired = asyncio.Event()
 
 		async def callback():
@@ -82,13 +116,13 @@ async def test_scheduler_runs_async_callbacks():
 			fired.set()
 
 		task = scheduler.later(0.01, callback)
-		await task
+		assert await task.wait() is TaskOutcome.COMPLETED
 		assert fired.is_set()
 
 
 @pytest.mark.asyncio
 async def test_scheduler_rejects_scheduling_from_another_thread():
-	async with Scheduler("test") as scheduler:
+	async with TaskScope("test") as scheduler:
 		errors: list[BaseException] = []
 
 		def schedule():
@@ -107,98 +141,8 @@ async def test_scheduler_rejects_scheduling_from_another_thread():
 
 
 @pytest.mark.asyncio
-async def test_scheduler_post_runs_on_owning_loop_from_threads():
-	async with Scheduler("test") as scheduler:
-		loop = asyncio.get_running_loop()
-		events: list[asyncio.AbstractEventLoop] = []
-		finished = asyncio.Event()
-
-		def callback():
-			events.append(asyncio.get_running_loop())
-			finished.set()
-
-		thread = threading.Thread(target=lambda: scheduler.post(callback))
-		thread.start()
-		await asyncio.to_thread(thread.join)
-		await finished.wait()
-		assert events == [loop]
-
-		finished.clear()
-		await asyncio.to_thread(lambda: scheduler.post(callback))
-		await finished.wait()
-		assert events == [loop, loop]
-
-		finished.clear()
-		scheduler.post(callback)
-		assert events == [loop, loop]
-		await finished.wait()
-		assert events == [loop, loop, loop]
-
-
-@pytest.mark.asyncio
-async def test_scheduler_post_before_start_raises_and_after_close_is_noop():
-	scheduler = Scheduler("test")
-	with pytest.raises(RuntimeError, match="it has never run"):
-		scheduler.post(lambda: None)
-
-	await scheduler.start()
-	await scheduler.close()
-	fired = False
-
-	def callback():
-		nonlocal fired
-		fired = True
-
-	scheduler.post(callback)
-	await asyncio.sleep(0)
-	assert not fired
-
-
-@pytest.mark.asyncio
-async def test_scheduler_post_callback_failures_are_reported_and_isolated():
-	async with Scheduler("test") as scheduler:
-		loop = asyncio.get_running_loop()
-		contexts: list[dict[str, object]] = []
-		loop.set_exception_handler(lambda _, context: contexts.append(context))
-		finished = asyncio.Event()
-
-		def callback():
-			raise ValueError("post")
-
-		def survivor():
-			finished.set()
-
-		thread = threading.Thread(target=lambda: scheduler.post(callback))
-		thread.start()
-		await asyncio.to_thread(thread.join)
-		scheduler.post(survivor)
-		await finished.wait()
-		assert await wait_for(lambda: len(contexts) == 1, timeout=0.2)
-		assert contexts[0]["message"] == (
-			f"Unhandled exception in post({callback.__qualname__})"
-		)
-		assert isinstance(contexts[0]["exception"], ValueError)
-
-
-@pytest.mark.asyncio
-async def test_scheduler_post_callbacks_run_untracked():
-	async with Scheduler("test") as scheduler:
-		signal = Signal(1)
-		finished = asyncio.Event()
-
-		def callback():
-			signal()
-			finished.set()
-
-		with Scope() as scope:
-			scheduler.post(callback)
-			await finished.wait()
-		assert scope.deps == {}
-
-
-@pytest.mark.asyncio
 async def test_scheduler_rejects_before_start_and_after_close():
-	scheduler = Scheduler("test")
+	scheduler = TaskScope("test")
 	coroutine = asyncio.sleep(0)
 	with pytest.raises(RuntimeError, match="it is not running"):
 		scheduler.spawn(coroutine)
@@ -213,7 +157,7 @@ async def test_scheduler_rejects_before_start_and_after_close():
 
 @pytest.mark.asyncio
 async def test_scheduler_start_twice_and_close_twice():
-	scheduler = Scheduler("test")
+	scheduler = TaskScope("test")
 	await scheduler.start()
 	with pytest.raises(RuntimeError, match="already running"):
 		await scheduler.start()
@@ -224,7 +168,7 @@ async def test_scheduler_start_twice_and_close_twice():
 
 @pytest.mark.asyncio
 async def test_scheduler_cancel_before_first_tick():
-	async with Scheduler("test") as scheduler:
+	async with TaskScope("test") as scheduler:
 		fired = False
 
 		def callback():
@@ -241,7 +185,7 @@ async def test_scheduler_cancel_before_first_tick():
 
 @pytest.mark.asyncio
 async def test_scheduler_cancelled_task_has_no_unawaited_warning():
-	async with Scheduler("test") as scheduler:
+	async with TaskScope("test") as scheduler:
 		started = asyncio.Event()
 
 		async def work():
@@ -254,16 +198,14 @@ async def test_scheduler_cancelled_task_has_no_unawaited_warning():
 			await started.wait()
 			task.cancel()
 			await wait_for(task.cancelled, timeout=0.2)
-		await task.wait()
-		with pytest.raises(asyncio.CancelledError):
-			await task
+		assert await task.wait() is TaskOutcome.CANCELLED
 		assert task.cancelled()
 		assert not any("never awaited" in str(w.message) for w in caught)
 
 
 @pytest.mark.asyncio
 async def test_scheduler_close_drains_cancelled_tasks():
-	scheduler = Scheduler("test")
+	scheduler = TaskScope("test")
 	await scheduler.start()
 	cancelled = asyncio.Event()
 
@@ -283,14 +225,14 @@ async def test_scheduler_close_drains_cancelled_tasks():
 
 @pytest.mark.asyncio
 async def test_scheduler_isolates_task_exceptions():
-	async with Scheduler("test") as scheduler:
+	async with TaskScope("test") as scheduler:
 		loop = asyncio.get_running_loop()
 		contexts: list[dict[str, object]] = []
 		loop.set_exception_handler(lambda _, context: contexts.append(context))
 		task = scheduler.spawn(_raise(ValueError("task")), name="task")
 		survivor = scheduler.spawn(asyncio.sleep(0.02))
-		await task
-		await survivor
+		assert await task.wait() is TaskOutcome.COMPLETED
+		await survivor.wait()
 		await asyncio.sleep(0)
 		assert contexts
 		assert contexts[0]["message"] == "Unhandled exception in task task"
@@ -299,14 +241,14 @@ async def test_scheduler_isolates_task_exceptions():
 
 @pytest.mark.asyncio
 async def test_scheduler_reports_callback_exceptions_without_stopping():
-	async with Scheduler("test") as scheduler:
+	async with TaskScope("test") as scheduler:
 		loop = asyncio.get_running_loop()
 		contexts: list[dict[str, object]] = []
 		loop.set_exception_handler(lambda _, context: contexts.append(context))
 		task = scheduler.later(0, _raise_callback)
 		survivor = scheduler.spawn(asyncio.sleep(0.02))
-		await task
-		await survivor
+		await task.wait()
+		await survivor.wait()
 		assert contexts
 		assert contexts[0]["message"] == (
 			"Unhandled exception in task later:_raise_callback"
@@ -315,7 +257,7 @@ async def test_scheduler_reports_callback_exceptions_without_stopping():
 
 @pytest.mark.asyncio
 async def test_scheduler_repeat_survives_callback_exceptions():
-	async with Scheduler("test") as scheduler:
+	async with TaskScope("test") as scheduler:
 		loop = asyncio.get_running_loop()
 		contexts: list[dict[str, object]] = []
 		loop.set_exception_handler(lambda _, context: contexts.append(context))
@@ -342,18 +284,28 @@ async def test_scheduler_repeat_survives_callback_exceptions():
 
 @pytest.mark.asyncio
 async def test_scheduler_callbacks_run_untracked():
-	async with Scheduler("test") as scheduler:
+	async with TaskScope("test") as scheduler:
 		signal = Signal(1)
-		with Scope() as scope:
-			task = scheduler.later(0, signal)
-			await task
-		assert scope.deps == {}
+
+		def sync_reader():
+			_ = signal()
+
+		async def async_reader():
+			_ = signal()
+
+		with Scope() as sync_scope:
+			await scheduler.later(0, sync_reader).wait()
+		assert sync_scope.deps == {}
+
+		with Scope() as async_scope:
+			await scheduler.later(0, async_reader).wait()
+		assert async_scope.deps == {}
 
 
 @pytest.mark.asyncio
 async def test_render_session_scheduler_closes_without_lingering_tasks():
 	session = RenderSession("test-id", RouteTree([Route("a", simple_component)]))
-	await session.scheduler.start()
+	await session.task_scope.start()
 	started = asyncio.Event()
 
 	async def work():

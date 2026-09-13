@@ -42,6 +42,7 @@ async def test_prerender_normalizes_paths(monkeypatch: pytest.MonkeyPatch):
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[Route("a", prerender_home)])
 	app.setup("http://example.com")
+	await app.task_scope.start()
 
 	transport = httpx.ASGITransport(app=app.fastapi)
 	async with httpx.AsyncClient(
@@ -79,6 +80,7 @@ async def test_prerender_unknown_render_id_header_mints_fresh_render(
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[Route("a", prerender_home)])
 	app.setup("http://example.com")
+	await app.task_scope.start()
 
 	transport = httpx.ASGITransport(app=app.fastapi)
 	async with httpx.AsyncClient(
@@ -119,6 +121,7 @@ async def test_prerender_on_render_reaped_mid_request_mints_fresh_render(
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[Route("a", prerender_home)])
 	app.setup("http://example.com")
+	await app.task_scope.start()
 
 	transport = httpx.ASGITransport(app=app.fastapi)
 	async with httpx.AsyncClient(
@@ -131,7 +134,7 @@ async def test_prerender_on_render_reaped_mid_request_mints_fresh_render(
 
 		# The render dies after the middleware would have resolved it.
 		stale = app.render_sessions[render_id]
-		app.close_render(render_id)
+		await app.close_render(render_id)
 		assert render_id not in app.render_sessions
 
 		# Pin middleware resolution to the stale object: the handler's identity
@@ -165,6 +168,7 @@ async def test_prerender_reused_render_is_held_alive_during_request(
 	monkeypatch.setenv("PULSE_REACT_SERVER_ADDRESS", "http://localhost:3000")
 	app = ps.App(routes=[Route("a", prerender_home)], session_timeout=60.0)
 	app.setup("http://example.com")
+	await app.task_scope.start()
 
 	transport = httpx.ASGITransport(app=app.fastapi)
 	async with httpx.AsyncClient(
@@ -181,14 +185,14 @@ async def test_prerender_reused_render_is_held_alive_during_request(
 		cleanup_live_during_prerender: list[bool] = []
 		original_prerender = render.prerender
 
-		def spy_prerender(
+		async def spy_prerender(
 			paths: list[str], route_info: RouteInfo | None = None
 		) -> dict[str, ServerInitMessage | ServerNavigateToMessage]:
 			handle = app._render_cleanups.get(render_id)  # pyright: ignore[reportPrivateUsage]
 			cleanup_live_during_prerender.append(
 				handle is not None and not handle.cancelled()
 			)
-			return original_prerender(paths, route_info)
+			return await original_prerender(paths, route_info)
 
 		monkeypatch.setattr(render, "prerender", spy_prerender)
 
@@ -220,6 +224,7 @@ async def test_prerender_redirect_leaves_mountless_render_on_pending_timeout(
 		pending_timeout=0.05,
 	)
 	app.setup("http://example.com")
+	await app.task_scope.start()
 
 	transport = httpx.ASGITransport(app=app.fastapi)
 	async with httpx.AsyncClient(

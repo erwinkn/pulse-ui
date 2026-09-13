@@ -15,7 +15,7 @@ handle = ps.later(delay, fn, *args, **kwargs)
 - `fn` - Sync or async function
 - `*args, **kwargs` - Arguments passed to fn
 
-**Returns:** `asyncio.TimerHandle` with `.cancel()` method
+**Returns:** `ps.Task` with `.cancel()` and `await task.wait()`
 
 `ps.later()` callbacks are not canceled by route unmounting. They run unless you
 cancel the returned handle or the render session/app closes. If a later callback
@@ -45,12 +45,22 @@ ps.later(2.0, save_draft)  # Runs as task after 2s
 
 **Note:** Callbacks run outside reactive scope (via `Untrack()`), so they won't create dependencies.
 
-## ps.repeat()
+## Threading
+
+Scheduling is loop-affine: `later()`, `repeat()`, `every()`, and `spawn()` must
+be called from the loop that owns the active task scope, or they raise
+`RuntimeError`. Threads are handled inside the reactive runtime, which posts
+work back onto the serving loop when synchronous code (for example a sync
+FastAPI endpoint running in Starlette's threadpool) writes state. There is no
+public thread-safe scheduling helper.
+
+## ps.repeat() and ps.every()
 
 Run a function repeatedly at an interval.
 
 ```python
-handle = ps.repeat(interval, fn, *args, **kwargs)
+handle = ps.repeat(interval, fn, *args, **kwargs)  # first run after interval
+handle = ps.every(interval, fn, *args, **kwargs)   # first run immediately
 ```
 
 **Parameters:**
@@ -58,7 +68,7 @@ handle = ps.repeat(interval, fn, *args, **kwargs)
 - `fn` - Sync or async function
 - `*args, **kwargs` - Arguments passed to fn
 
-**Returns:** `RepeatHandle` with `.cancel()` method
+**Returns:** `ps.Task` with `.cancel()` and `await task.wait()`
 
 ```python
 class DashboardState(ps.State):
@@ -225,15 +235,20 @@ lambda name, idx: ... # 2 args
 
 These are used internally but available if needed:
 
-### RepeatHandle
+### ps.Task
 
 ```python
-class RepeatHandle:
-    task: asyncio.Task | None
-    cancelled: bool
-
+class Task:
     def cancel(self) -> None: ...
+    def done(self) -> bool: ...
+    def cancelled(self) -> bool: ...
+    async def wait(self) -> TaskOutcome: ...  # COMPLETED | CANCELLED | FAILED
 ```
+
+Tasks returned by `later()`, `repeat()`, `every()`, and `spawn()` can be
+cancelled and awaited with `await task.wait()`, which reports how the task
+ended without raising the task's own outcome. A task is bound to the loop that
+owns its scope.
 
 ### Disposable
 

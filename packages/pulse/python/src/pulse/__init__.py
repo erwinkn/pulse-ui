@@ -1442,18 +1442,6 @@ from pulse.requirements import require as require
 from pulse.routing import Layout as Layout
 from pulse.routing import Route as Route
 from pulse.routing import RouteInfo as RouteInfo
-from pulse.scheduling import (
-	TaskRegistry as TaskRegistry,
-)
-from pulse.scheduling import (
-	TimerRegistry as TimerRegistry,
-)
-from pulse.scheduling import (
-	later as later,
-)
-from pulse.scheduling import (
-	repeat as repeat,
-)
 from pulse.serializer import deserialize as deserialize
 
 # Serializer
@@ -1462,6 +1450,16 @@ from pulse.serializer import serialize as serialize
 # State and routing
 from pulse.state.query_param import QueryParam as QueryParam
 from pulse.state.state import State as State
+from pulse.tasks import Task as Task
+from pulse.tasks import (
+	every as every,
+)
+from pulse.tasks import (
+	later as later,
+)
+from pulse.tasks import (
+	repeat as repeat,
+)
 
 # Transpiler v2
 from pulse.transpiler.function import JsFunction as JsFunction

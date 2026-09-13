@@ -29,6 +29,9 @@ function browserIsOnline(): boolean {
 
 const PAGE_INSTANCE_AUTH_KEY = "__pulse_page_instance_id";
 const RENDER_ID_COLLISION_CODE = "render_id_collision";
+// The render id in the socket auth is unknown: never minted, or already
+// closed (expired render or server restart). Reloading mints fresh directives.
+const UNKNOWN_RENDER_CODE = "unknown_render";
 const pageWindow =
 	typeof window === "undefined"
 		? undefined
@@ -241,7 +244,11 @@ export class PulseSocketIOClient {
 				if (this.#socket !== socket) return;
 				console.error("[SocketIOTransport] Connection failed:", err);
 				const data = (err as Error & { data?: { code?: unknown } }).data;
-				if (data?.code === RENDER_ID_COLLISION_CODE && typeof window !== "undefined") {
+				if (
+					(data?.code === RENDER_ID_COLLISION_CODE ||
+						data?.code === UNKNOWN_RENDER_CODE) &&
+					typeof window !== "undefined"
+				) {
 					window.location.reload();
 				}
 				this.#handleConnectionError();

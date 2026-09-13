@@ -366,9 +366,7 @@ def client_address() -> str:
 			"client_address() must be called inside a Pulse render/callback context"
 		)
 	if not ctx.render.client_address:
-		raise RuntimeError(
-			"Client address unavailable. It is set during prerender or socket connect."
-		)
+		raise RuntimeError("Client address unavailable. It is set during prerender.")
 	return ctx.render.client_address
 
 

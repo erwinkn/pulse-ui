@@ -8,7 +8,11 @@
  * commit through native setters so React's onChange observes the edit.
  */
 
-type CapturedEntry = { ord: number } & ({ value: string } | { checked: boolean });
+type CapturedEntry = { ord: number } & (
+	| { value: string }
+	| { checked: boolean }
+	| { values: string[] }
+);
 
 type CaptureHandle = {
 	records: Map<Element, CapturedEntry>;
@@ -53,6 +57,11 @@ export const preHydrationInputCaptureScript = `(function () {
 		}
 		if (t.type === "checkbox" || t.type === "radio") {
 			entry.checked = t.checked;
+		} else if (t.type === "select-multiple") {
+			entry.values = [];
+			for (var j = 0; j < t.options.length; j++) {
+				if (t.options[j].selected) entry.values.push(t.options[j].value);
+			}
 		} else {
 			entry.value = t.value;
 		}
@@ -111,6 +120,20 @@ export function replayPreHydrationInputs(): void {
 			if (!setChecked) continue;
 			setChecked.call(input, !entry.checked);
 			input.click();
+			capture.records.delete(element);
+			continue;
+		}
+
+		if ("values" in entry) {
+			const select = target as HTMLSelectElement;
+			// Desync the value tracker with a sentinel no option can match, then
+			// restore each option's selected state — select.value follows the DOM.
+			Object.getOwnPropertyDescriptor(select, "value")?.set?.call(select, "\0");
+			for (const opt of select.options) {
+				opt.selected = entry.values.includes(opt.value);
+			}
+			select.dispatchEvent(new Event("input", { bubbles: true }));
+			select.dispatchEvent(new Event("change", { bubbles: true }));
 			capture.records.delete(element);
 			continue;
 		}

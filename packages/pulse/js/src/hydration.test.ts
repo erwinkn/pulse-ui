@@ -129,6 +129,28 @@ describe("pre-hydration input capture", () => {
 		expect(select.value).toBe("two");
 	});
 
+	test("replays every selected option on a multi-select", () => {
+		installCaptureScript();
+		const select = document.createElement("select");
+		select.multiple = true;
+		for (const value of ["one", "two", "three"]) {
+			const option = document.createElement("option");
+			option.value = value;
+			option.textContent = value;
+			select.appendChild(option);
+		}
+		document.body.appendChild(select);
+
+		select.options[0]!.selected = true;
+		select.options[2]!.selected = true;
+		select.dispatchEvent(new Event("change", { bubbles: true }));
+
+		for (const option of select.options) option.selected = false; // hydration reset
+		replayPreHydrationInputs();
+
+		expect([...select.selectedOptions].map((o) => o.value)).toEqual(["one", "three"]);
+	});
+
 	test("ignores file inputs and is a no-op without the script", () => {
 		installCaptureScript();
 		const file = document.createElement("input");
@@ -299,6 +321,54 @@ describe("replay through a hydrated React controlled input", () => {
 
 		expect(input.checked).toBe(true);
 		expect(seen).toEqual([true]);
+	});
+
+	test("replays all selected options through a hydrated multi-select", async () => {
+		const options = ["one", "two", "three"].map((v) =>
+			createElement("option", { key: v, value: v }, v),
+		);
+		const html = renderToString(
+			createElement("select", { multiple: true, value: [], onChange() {} }, options),
+		);
+		const container = document.createElement("div");
+		container.innerHTML = html;
+		document.body.appendChild(container);
+		const select = container.querySelector("select");
+		if (!select) throw new Error("expected SSR select");
+
+		installCaptureScript();
+		select.options[0]!.selected = true;
+		select.options[2]!.selected = true;
+		select.dispatchEvent(new Event("change", { bubbles: true }));
+
+		const seen: string[][] = [];
+		function Hydrated() {
+			const [value, setValue] = useState<string[]>([]);
+			return createElement(
+				"select",
+				{
+					multiple: true,
+					value,
+					onChange: (event: ChangeEvent<HTMLSelectElement>) => {
+						const next = [...event.target.selectedOptions].map((o) => o.value);
+						seen.push(next);
+						setValue(next);
+					},
+				},
+				options,
+			);
+		}
+
+		await act(async () => {
+			hydrateRoot(container, createElement(Hydrated));
+		});
+
+		await act(async () => {
+			replayPreHydrationInputs();
+		});
+
+		expect([...select.selectedOptions].map((o) => o.value)).toEqual(["one", "three"]);
+		expect(seen).toEqual([["one", "three"]]);
 	});
 
 	test("desyncs React's checked tracker for radios after hydrate", async () => {

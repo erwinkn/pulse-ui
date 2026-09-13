@@ -12,6 +12,7 @@ import {
 import { useLocation, useNavigate, useParams } from "react-router";
 import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
 import type { RouteInfo } from "./helpers";
+import { preHydrationInputCaptureScript, replayPreHydrationInputs } from "./hydration";
 import type { ServerError } from "./messages";
 import { VDOMRenderer } from "./renderer";
 import type { VDOM } from "./vdom";
@@ -127,6 +128,13 @@ export function PulseProvider({ children, config, prerender }: PulseProviderProp
 		};
 	}, [client]);
 
+	// After child PulseViews attach (same commit's useEffects). Layout-phase
+	// replay would fire before attach and invokeCallback would drop the events.
+	// Replay consumes the whole buffer, so a single pass suffices.
+	useEffect(() => {
+		queueMicrotask(replayPreHydrationInputs);
+	}, []);
+
 	useEffect(() => {
 		if (!inBrowser) return;
 
@@ -165,6 +173,10 @@ export function PulseProvider({ children, config, prerender }: PulseProviderProp
 		<PulseClientContext.Provider value={client}>
 			<PulseDirectivesContext.Provider value={directivesRef}>
 				<PulsePrerenderContext.Provider value={prerender}>
+					<script
+						// biome-ignore lint/security/noDangerouslySetInnerHtml: own capture bootstrap
+						dangerouslySetInnerHTML={{ __html: preHydrationInputCaptureScript }}
+					/>
 					{statusMessage && (
 						<div
 							style={{

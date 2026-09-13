@@ -248,18 +248,18 @@ An attack where a malicious site tricks a user's browser into submitting forms t
 ## Scheduling
 
 **Task**
-A `ps.Task` returned by Pulse scheduling functions. Await it for completion,
-or call `.cancel()` to stop the work. `.wait()` returns when the task ends
-without raising the task's own failure or cancellation; awaiting a cancelled
-task raises `asyncio.CancelledError`. A task belongs to the event loop that
-owns its scheduler; `post()` schedules without returning a task.
+A `ps.Task` returned by Pulse scheduling functions (`later()`, `repeat()`,
+`every()`, `spawn()`). Call `.cancel()` to stop the work, or
+`await task.wait()` to wait for it and learn how it ended (`COMPLETED`,
+`CANCELLED`, or `FAILED`). A task belongs to the event loop that owns its task
+scope, so it is cancelled and awaited only from that loop.
 
-**Scheduler**
-The scope owned by a render session or the app. It tracks scheduled tasks and
-callbacks, owns the event-loop reference, and cancels and drains its work when
-the owner closes or shuts down. Handle-returning scheduling runs on that loop;
-`post()` is the thread-safe callback door. Route unmounting does not cancel
-`later()` callbacks.
+**Task scope**
+The internal lifetime owned by a render session or the app. It tracks
+scheduled tasks and callbacks, owns the event-loop reference, and cancels and
+drains its work when the owner closes or shuts down. Scheduling is loop-affine:
+handle-returning calls from another thread or loop raise. Route unmounting does
+not cancel `later()` callbacks.
 
 **Debouncing**
 Delaying an action until a pause in events. Common for search-as-you-type: wait until the user stops typing before searching. Implemented with `later()` and cancelling previous timers.

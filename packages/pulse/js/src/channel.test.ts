@@ -147,7 +147,7 @@ describe("ChannelBridge", () => {
 		);
 		expect(() => first.on("event", vi.fn())).not.toThrow();
 		expect(sent).toEqual([
-			expect.objectContaining({ type: "channel_connect", channel: "chan-1", path: "/a" }),
+			expect.objectContaining({ type: "channel_connect", channel: "chan-1", view: "/a" }),
 		]);
 
 		client.releaseChannel("chan-1", "/a");
@@ -179,7 +179,7 @@ describe("ChannelBridge", () => {
 		lease.release();
 
 		expect(sent).toEqual([
-			expect.objectContaining({ type: "channel_connect", path: "/view" }),
+			expect.objectContaining({ type: "channel_connect", view: "/view" }),
 			expect.objectContaining({ type: "channel_disconnect", channel: "chan-1" }),
 		]);
 	});

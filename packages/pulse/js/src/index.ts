@@ -13,7 +13,8 @@ export type { PulseFormProps } from "./form";
 export { FormSubmissionError, PulseForm, submitForm } from "./form";
 export type { RouteInfo } from "./helpers";
 // Server helpers
-export { extractServerRouteInfo } from "./helpers";
+export { buildRouteInfo, type LocationLike } from "./helpers";
+export * from "./router";
 // Messages (types only)
 export type {
 	ClientApiResultMessage,
@@ -39,14 +40,14 @@ export type {
 export type { PulseConfig, PulsePrerender, PulseProviderProps } from "./pulse";
 // Core React bindings
 export {
-	PulseViewPathContext,
+	PulseViewIdContext,
 	PulseProvider,
 	PulseView,
 	usePulseChannel,
 	usePulseChannelManager,
-	usePulseChannelManagerForPath,
+	usePulseChannelManagerForView,
 	usePulseClient,
-	usePulseViewPath,
+	usePulseViewId,
 } from "./pulse";
 // Renderer helpers
 // Renderer (structural expressions + eval-keyed props)

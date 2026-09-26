@@ -235,9 +235,9 @@ def navigate(
 			a new one (default: False).
 		hard: If True, performs a full page reload instead of client-side
 			navigation (default: False).
-		force: If True, navigate even if the route that requested navigation
-			has since unmounted. Defaults to False, so navigation is bound to
-			the current route when called from a route context.
+		force: If True, navigate even if the view that requested navigation
+			has since unmounted or changed URL. Defaults to False, so navigation
+			is bound to the originating view when called from a view context.
 
 	Raises:
 		RuntimeError: If called outside of a Pulse callback context.
@@ -259,11 +259,9 @@ def navigate(
 		"replace": replace,
 		"hard": hard,
 	}
-	if not force and ctx.route is not None:
-		message["sourceRoutePath"] = ctx.source_route_path or ctx.route.route_path
-		message["sourcePath"] = ctx.source_path or ctx.route.pathname
-		if ctx.source_mount_id is not None:
-			message["sourceMountId"] = ctx.source_mount_id
+	if not force and ctx.view is not None:
+		message["sourceView"] = ctx.view.id
+		message["sourcePathname"] = ctx.source_pathname or ctx.view.route.pathname
 	ctx.render.send(message)
 
 

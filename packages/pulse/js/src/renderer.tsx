@@ -56,7 +56,7 @@ type ElementMeta = {
 
 export class VDOMRenderer {
 	#client: PulseSocketIOClient;
-	#path: string;
+	#viewId: string;
 	#registry: ComponentRegistry;
 	#refRegistry: RefRegistry;
 
@@ -69,11 +69,11 @@ export class VDOMRenderer {
 	constructor(
 		client: PulseSocketIOClient,
 		channels: PulseChannelManager,
-		path: string,
+		viewId: string,
 		registry: ComponentRegistry = {},
 	) {
 		this.#client = client;
-		this.#path = path;
+		this.#viewId = viewId;
 		this.#registry = registry;
 		this.#callbackEntries = new Set();
 		this.#metaMap = new WeakMap();
@@ -302,7 +302,7 @@ export class VDOMRenderer {
 		if (!entry) {
 			const fire = (args: any[]) => {
 				const key = this.#propPath(meta.path ?? "", prop);
-				this.#client.invokeCallback(this.#path, key, args);
+				this.#client.invokeCallback(this.#viewId, key, args);
 			};
 			entry = {
 				fn: (...args: any[]) => {

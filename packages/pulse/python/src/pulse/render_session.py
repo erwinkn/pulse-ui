@@ -13,6 +13,7 @@ from pulse.messages import (
 	ClientResumeChannel,
 	ClientResumeView,
 	ServerApiCallMessage,
+	ServerErrorMessage,
 	ServerErrorPhase,
 	ServerInitMessage,
 	ServerJsExecMessage,
@@ -56,17 +57,17 @@ class JsExecError(Exception):
 
 
 class RenderLoopError(RuntimeError):
-	path: str
+	route_path: str
 	renders: int
 	batch_id: int
 
-	def __init__(self, path: str, renders: int, batch_id: int) -> None:
+	def __init__(self, route_path: str, renders: int, batch_id: int) -> None:
 		super().__init__(
 			"Detected an infinite render loop in Pulse. "
-			+ f"Render path '{path}' exceeded {renders} renders in reactive batch {batch_id}. "
+			+ f"Render path '{route_path}' exceeded {renders} renders in reactive batch {batch_id}. "
 			+ "This usually happens when a render or effect mutates state without a guard."
 		)
-		self.path = path
+		self.route_path = route_path
 		self.renders = renders
 		self.batch_id = batch_id
 
@@ -88,54 +89,57 @@ def run_js(expr: Any, *, result: bool = False) -> asyncio.Future[Any] | None:
 	return ctx.render.run_js(expr, result=result)
 
 
-MountState = Literal["pending", "active", "idle", "closed"]
+ViewState = Literal["pending", "active", "idle", "closed"]
 PendingAction = Literal["idle", "dispose"]
 T_Render = TypeVar("T_Render")
 
 
-class RouteMount:
+class View:
+	"""A single rendered route or layout instance for one client.
+
+	Each view is anchored to a unique id for its entire lifetime. Protocol
+	messages between server and client are scoped to this id, so stale actors
+	(callbacks, channels, navigations from disposed views) are rejected
+	structurally instead of via path + generation counters.
+	"""
+
+	id: str
 	render: "RenderSession"
-	path: str
+	route_path: str
 	route: RouteContext
 	tree: RenderTree
 	effect: Effect | None
-	_pulse_ctx: PulseContext | None
 	initialized: bool
-	state: MountState
+	state: ViewState
 	pending_action: PendingAction | None
 	queue: list[ServerMessage] | None
 	queue_timeout: TimerHandleLike | None
-	mount_id: str
 	render_batch_id: int
 	render_batch_renders: int
 
 	def __init__(
 		self,
 		render: "RenderSession",
-		path: str,
+		route_path: str,
 		route: Route | Layout,
 		route_info: RouteInfo,
 	) -> None:
+		self.id = uuid.uuid4().hex
 		self.render = render
-		self.path = ensure_absolute_path(path)
-		self.route = RouteContext(route_info, route, render, self.path)
+		self.route_path = ensure_absolute_path(route_path)
+		self.route = RouteContext(route_info, route, render, self.route_path)
 		self.effect = None
-		self._pulse_ctx = None
 		self.tree = RenderTree(route.render())
 		self.initialized = False
 		self.state = "pending"
 		self.pending_action = None
 		self.queue = []
 		self.queue_timeout = None
-		self.mount_id = uuid.uuid4().hex
 		self.render_batch_id = -1
 		self.render_batch_renders = 0
 
 	def update_route(self, route_info: RouteInfo) -> None:
 		self.route.update(route_info)
-
-	def renew_mount_id(self) -> None:
-		self.mount_id = uuid.uuid4().hex
 
 	def _cancel_pending_timeout(self) -> None:
 		if self.queue_timeout is not None:
@@ -150,7 +154,7 @@ class RouteMount:
 		action = self.pending_action
 		self.pending_action = None
 		if action == "dispose":
-			self.render.dispose_mount(self.path, self)
+			self.render.dispose_view(self)
 			return
 		self.to_idle()
 
@@ -191,14 +195,16 @@ class RouteMount:
 	):
 		if self.state == "pending":
 			if self.queue is None:
-				raise RuntimeError(f"Pending mount missing queue for {self.path!r}")
+				raise RuntimeError(
+					f"Pending view missing queue for {self.route_path!r}"
+				)
 			self.queue.append(message)
 			return
 		if self.state == "active":
 			send_message(message)
 			return
 		if self.state == "closed":
-			raise RuntimeError(f"Message sent to closed mount {self.path!r}")
+			raise RuntimeError(f"Message sent to closed view {self.route_path!r}")
 
 	def to_idle(self) -> None:
 		if self.state != "pending":
@@ -219,7 +225,7 @@ class RouteMount:
 		session = ctx.session
 
 		def _render_effect():
-			message = self.render.rerender(self, self.path, session=session)
+			message = self.render.rerender(self, session=session)
 			if message is not None:
 				self.render.send(message)
 
@@ -230,12 +236,12 @@ class RouteMount:
 					"renders": exc.renders,
 					"batch_id": exc.batch_id,
 				}
-			self.render.report_error(self.path, "render", exc, details)
+			self.render.report_error(self.id, "render", exc, details)
 
 		self.effect = Effect(
 			_render_effect,
 			immediate=False,
-			name=f"{self.path}:render",
+			name=f"{self.route_path}:render",
 			on_error=_report_render_error,
 			lazy=lazy,
 		)
@@ -257,19 +263,20 @@ class RenderSession:
 	channels: "ChannelsManager"
 	forms: "FormRegistry"
 	query_store: QueryStore
-	route_mounts: dict[str, RouteMount]
+	views: dict[str, View]
 	connected: bool
 	prerender_queue_timeout: float
 	dev_strict_mode_detach_timeout: float
 	disconnect_queue_timeout: float
 	render_loop_limit: int
+	_views_by_path: dict[str, View]
 	_server_address: str | None
 	_client_address: str | None
 	_send_message: Callable[[ServerMessage], Any] | None
 	_pending_api: dict[str, asyncio.Future[dict[str, Any]]]
 	_pending_js_results: dict[str, asyncio.Future[Any]]
 	_ref_channel: Channel | None
-	_ref_channels_by_route: dict[str, Channel]
+	_ref_channels_by_view: dict[str, Channel]
 	_global_states: dict[str, State]
 	_global_queue: list[ServerMessage]
 	_tasks: TaskRegistry
@@ -292,7 +299,8 @@ class RenderSession:
 
 		self.id = id
 		self.routes = routes
-		self.route_mounts = {}
+		self.views = {}
+		self._views_by_path = {}
 		self._server_address = server_address
 		self._client_address = client_address
 		self._send_message = None
@@ -304,7 +312,7 @@ class RenderSession:
 		self._pending_api = {}
 		self._pending_js_results = {}
 		self._ref_channel = None
-		self._ref_channels_by_route = {}
+		self._ref_channels_by_view = {}
 		self._tasks = TaskRegistry(name=f"render:{id}")
 		self._timers = TimerRegistry(tasks=self._tasks, name=f"render:{id}")
 		self.query_store = QueryStore()
@@ -327,8 +335,8 @@ class RenderSession:
 
 	def _on_effect_error(self, effect: Effect, exc: Exception):
 		details = {"effect": effect.name or "<unnamed>"}
-		for path in list(self.route_mounts.keys()):
-			self.report_error(path, "effect", exc, details)
+		for view_id in list(self.views.keys()):
+			self.report_error(view_id, "effect", exc, details)
 
 	# ---- Connection lifecycle ----
 
@@ -348,99 +356,81 @@ class RenderSession:
 		self.connected = False
 		self.channels.disconnect_all()
 
-		for mount in self.route_mounts.values():
-			if mount.state == "active":
-				mount.start_pending(self.disconnect_queue_timeout)
+		for view in self.views.values():
+			if view.state == "active":
+				view.start_pending(self.disconnect_queue_timeout)
 
 	# ---- Message routing ----
 
 	def send(self, message: ServerMessage):
-		"""Route message based on mount state."""
-		# Forced navigation is global. Route-bound navigation is dropped once
-		# its source route has unmounted.
+		"""Route message based on the owning view's state."""
+		# Forced navigation is global. View-bound navigation is dropped once its
+		# origin view has been disposed or its URL has changed since.
 		if message.get("type") == "navigate_to":
-			source_route_path = message.get("sourceRoutePath")
-			source_path = message.get("sourcePath")
-			source_mount_id = message.get("sourceMountId")
-			if isinstance(source_route_path, str) and isinstance(source_path, str):
-				mount = self.route_mounts.get(ensure_absolute_path(source_route_path))
-				source_path = ensure_absolute_path(source_path)
-				if (
-					mount is None
-					or mount.route.pathname != source_path
-					or (
-						isinstance(source_mount_id, str)
-						and mount.mount_id != source_mount_id
-					)
-				):
+			source_view = message.get("sourceView")
+			source_pathname = message.get("sourcePathname")
+			if isinstance(source_view, str):
+				view = self.views.get(source_view)
+				if view is None:
 					return
-			elif isinstance(source_path, str):
-				source_path = ensure_absolute_path(source_path)
-				with Untrack():
-					source_path_is_active = any(
-						mount.route.pathname == source_path
-						for mount in self.route_mounts.values()
-					)
-				if not source_path_is_active:
-					return
+				if isinstance(source_pathname, str):
+					with Untrack():
+						if view.route.pathname != source_pathname:
+							return
 			if self._send_message:
 				self._send_message(message)
 			else:
 				self._global_queue.append(message)
 			return
-		# Global messages (not path-specific) go directly if connected
-		path = message.get("path")
-		if path is None:
+		# Global messages (not view-specific) go directly if connected
+		view_id = message.get("view")
+		if view_id is None:
 			if self._send_message:
 				self._send_message(message)
 			else:
 				self._global_queue.append(message)
 			return
 
-		# Normalize path for lookup
-		path = ensure_absolute_path(path)
-		mount = self.route_mounts.get(path)
-		if not mount:
-			# Unknown path - send directly if connected (for js_exec, etc.)
+		view = self.views.get(view_id)
+		if not view:
+			# Unknown view - send directly if connected (client discards stale ids)
 			if self._send_message:
 				self._send_message(message)
 			return
 
 		if self._send_message:
-			mount.deliver(message, self._send_message)
+			view.deliver(message, self._send_message)
 			return
-		if mount.state == "pending":
-			mount.deliver(message, lambda _: None)
+		if view.state == "pending":
+			view.deliver(message, lambda _: None)
 		# idle: drop (effect should be paused anyway)
 
 	def report_error(
 		self,
-		path: str,
+		view_id: str | None,
 		phase: ServerErrorPhase,
 		exc: BaseException,
 		details: dict[str, Any] | None = None,
 	):
-		self.send(
-			{
-				"type": "server_error",
-				"path": path,
-				"error": {
-					"message": str(exc),
-					"stack": traceback.format_exc(),
-					"phase": phase,
-					"details": details or {},
-				},
-			}
-		)
+		message: ServerErrorMessage = {
+			"type": "server_error",
+			"error": {
+				"message": str(exc),
+				"stack": traceback.format_exc(),
+				"phase": phase,
+				"details": details or {},
+			},
+		}
+		if view_id is not None:
+			message["view"] = view_id
+		self.send(message)
 		logger.error(
-			"Error reported for path %r during %s: %s\n%s",
-			path,
+			"Error reported for view %r during %s: %s\n%s",
+			view_id,
 			phase,
 			exc,
 			traceback.format_exc(),
 		)
-
-	# ---- State transitions ----
 
 	# ---- Prerendering ----
 
@@ -449,7 +439,7 @@ class RenderSession:
 	) -> dict[str, ServerInitMessage | ServerNavigateToMessage]:
 		"""
 		Synchronous render for SSR. Returns per-path init or navigate_to messages.
-		- Creates mounts in PENDING state and starts queue
+		- Creates views in PENDING state and starts queue
 		"""
 		normalized = [ensure_absolute_path(path) for path in paths]
 
@@ -458,57 +448,56 @@ class RenderSession:
 		for path in normalized:
 			route = self.routes.find(path)
 			info = route_info or route.default_route_info()
-			mount = self.route_mounts.get(path)
+			view = self._views_by_path.get(path)
 
-			if mount is None:
-				mount = RouteMount(self, path, route, info)
-				self.route_mounts[path] = mount
-				mount.ensure_effect(lazy=True, flush=False)
+			if view is None:
+				view = View(self, path, route, info)
+				self.views[view.id] = view
+				self._views_by_path[path] = view
+				view.ensure_effect(lazy=True, flush=False)
 			else:
-				mount.update_route(info)
-				if mount.effect is None:
-					mount.ensure_effect(lazy=True, flush=False)
-				if route_info is not None and mount.state == "active":
-					mount.start_pending(self.prerender_queue_timeout)
+				view.update_route(info)
+				if view.effect is None:
+					view.ensure_effect(lazy=True, flush=False)
+				if route_info is not None and view.state == "active":
+					view.start_pending(self.prerender_queue_timeout)
 
-			if mount.state != "active" and mount.queue_timeout is None:
-				mount.start_pending(self.prerender_queue_timeout)
-			assert mount.effect is not None
-			with mount.effect.capture_deps(update_deps=True):
-				message = self.render(mount, path)
+			if view.state != "active" and view.queue_timeout is None:
+				view.start_pending(self.prerender_queue_timeout)
+			assert view.effect is not None
+			with view.effect.capture_deps(update_deps=True):
+				message = self.render(view)
 
 			results[path] = message
 			if message["type"] == "navigate_to":
-				mount.dispose()
-				del self.route_mounts[path]
+				self.dispose_view(view)
 				continue
 
 		return results
 
 	# ---- Client lifecycle ----
 
-	def attach(self, path: str, route_info: RouteInfo) -> bool:
+	def attach(self, view_id: str, route_info: RouteInfo) -> bool:
 		"""
-		Client ready to receive updates for path.
+		Client ready to receive updates for a view.
 		- PENDING: flush queue, transition to ACTIVE
 		- IDLE: request reload
 		- ACTIVE: update route_info
-		- No mount: request reload
-		Returns True when callbacks can be accepted for this path.
+		- Unknown view: request reload
+		Returns True when callbacks can be accepted for this view.
 		"""
-		path = ensure_absolute_path(path)
-		mount = self.route_mounts.get(path)
+		view = self.views.get(view_id)
 
-		if mount is None or mount.state == "idle":
+		if view is None or view.state == "idle":
 			# Initial render must come from prerender
 			self.send({"type": "reload"})
 			return False
 
-		# Update route info for active and pending mounts
-		mount.update_route(route_info)
-		if mount.state == "pending" and self._send_message:
-			mount.activate(self._send_message)
-		return mount.state == "active"
+		# Update route info for active and pending views
+		view.update_route(route_info)
+		if view.state == "pending" and self._send_message:
+			view.activate(self._send_message)
+		return view.state == "active"
 
 	def resume(
 		self,
@@ -517,12 +506,12 @@ class RenderSession:
 		channels: list[ClientResumeChannel],
 	) -> bool:
 		accepted_views: list[ServerResumeView] = []
-		accepted_paths: set[str] = set()
+		accepted_ids: set[str] = set()
 
-		for view in views:
-			path = ensure_absolute_path(view["path"])
-			mount = self.route_mounts.get(path)
-			if mount is None or mount.state in ("idle", "closed"):
+		for declared in views:
+			view_id = declared["view"]
+			view = self.views.get(view_id)
+			if view is None or view.state in ("idle", "closed"):
 				self.send(
 					ServerResumeMessage(
 						type="server_resume",
@@ -531,10 +520,10 @@ class RenderSession:
 					)
 				)
 				return False
-			mount.update_route(view["routeInfo"])
-			if mount.state == "pending" and self._send_message:
-				mount.activate(self._send_message)
-			if mount.state != "active":
+			view.update_route(declared["routeInfo"])
+			if view.state == "pending" and self._send_message:
+				view.activate(self._send_message)
+			if view.state != "active":
 				self.send(
 					ServerResumeMessage(
 						type="server_resume",
@@ -543,20 +532,20 @@ class RenderSession:
 					)
 				)
 				return False
-			accepted_paths.add(path)
-			resumed_view: ServerResumeView = {"path": path}
-			if attach_id := view.get("attachId"):
+			accepted_ids.add(view_id)
+			resumed_view: ServerResumeView = {"view": view_id}
+			if attach_id := declared.get("attachId"):
 				resumed_view["attachId"] = attach_id
 			accepted_views.append(resumed_view)
 
 		accepted_channels: list[ServerResumeChannel] = []
 		for channel in channels:
 			channel_id = str(channel.get("channel", ""))
-			path = ensure_absolute_path(str(channel.get("path", "")))
-			if path not in accepted_paths:
+			view_id = str(channel.get("view", ""))
+			if view_id not in accepted_ids:
 				continue
-			if self.channels.resume_client_channel(channel_id, path):
-				accepted_channels.append({"channel": channel_id, "path": path})
+			if self.channels.resume_client_channel(channel_id, view_id):
+				accepted_channels.append({"channel": channel_id, "view": view_id})
 
 		self.send(
 			ServerResumeMessage(
@@ -569,72 +558,67 @@ class RenderSession:
 		)
 		return True
 
-	def update_route(self, path: str, route_info: RouteInfo):
-		"""Update routing state (query params, etc.) for attached path."""
-		path = ensure_absolute_path(path)
-		mount = self.route_mounts.get(path)
-		if mount is None:
-			# No-op when mount does not exist yet.
-			# Route updates may arrive before prerender; prerender creates the mount with
-			# the authoritative RouteInfo, so replaying/stashing is unnecessary.
+	def update_route(self, view_id: str, route_info: RouteInfo):
+		"""Update routing state (query params, etc.) for an attached view."""
+		view = self.views.get(view_id)
+		if view is None:
+			# No-op when the view does not exist yet.
+			# Route updates may arrive before prerender; prerender creates the view
+			# with the authoritative RouteInfo, so replaying/stashing is unnecessary.
 			return
 		try:
-			mount.update_route(route_info)
-			if mount.state == "pending" and self._send_message:
-				mount.activate(self._send_message)
+			view.update_route(route_info)
+			if view.state == "pending" and self._send_message:
+				view.activate(self._send_message)
 		except Exception as e:
-			self.report_error(path, "navigate", e)
+			self.report_error(view.id, "navigate", e)
 
-	def dispose_mount(self, path: str, mount: RouteMount) -> None:
-		current = self.route_mounts.get(path)
-		if current is not mount:
+	def dispose_view(self, view: View) -> None:
+		current = self.views.get(view.id)
+		if current is not view:
 			return
 		try:
-			self.channels.remove_route(path)
-			self.route_mounts.pop(path, None)
-			self._ref_channels_by_route.pop(path, None)
-			mount.dispose()
+			self.channels.remove_view(view.id)
+			self.views.pop(view.id, None)
+			if self._views_by_path.get(view.route_path) is view:
+				self._views_by_path.pop(view.route_path, None)
+			self._ref_channels_by_view.pop(view.id, None)
+			view.dispose()
 		except Exception as e:
-			self.report_error(path, "unmount", e)
+			self.report_error(view.id, "unmount", e)
 
-	def detach(self, path: str):
-		"""Client route unmounted. Dispose immediately outside dev StrictMode replay."""
-		path = ensure_absolute_path(path)
-		mount = self.route_mounts.get(path)
-		if not mount:
+	def detach(self, view_id: str):
+		"""Client view unmounted. Dispose immediately outside dev StrictMode replay."""
+		view = self.views.get(view_id)
+		if not view:
 			return
-		old_mount_id = mount.mount_id
-		mount.renew_mount_id()
-		self.channels.rebind_route_mount(path, old_mount_id, mount.mount_id)
 		if self.dev_strict_mode_detach_timeout > 0:
 			# React StrictMode in development intentionally replays mount effects as
-			# attach -> detach -> attach without another prerender. Keep the mount for
-			# a very short dev-only window so that synthetic cleanup can be cancelled
-			# by the replayed attach. The mount id was renewed above before this delay,
-			# so async work from the detached generation is still route-stale and cannot
-			# navigate during the grace period.
-			mount.start_pending(self.dev_strict_mode_detach_timeout, action="dispose")
+			# attach -> detach -> attach without another prerender. Keep the view
+			# alive for a very short dev-only window so the replayed attach can
+			# cancel the disposal. The view keeps its id: the replayed attach is
+			# the same logical view.
+			view.start_pending(self.dev_strict_mode_detach_timeout, action="dispose")
 			return
-		self.dispose_mount(path, mount)
+		self.dispose_view(view)
 
-	# ---- Effect creation ----
+	# ---- Rendering ----
 
-	def _check_render_loop(self, mount: RouteMount, path: str) -> None:
+	def _check_render_loop(self, view: View) -> None:
 		batch_id = REACTIVE_CONTEXT.get().batch.flush_id
-		if mount.render_batch_id == batch_id:
-			mount.render_batch_renders += 1
+		if view.render_batch_id == batch_id:
+			view.render_batch_renders += 1
 		else:
-			mount.render_batch_id = batch_id
-			mount.render_batch_renders = 1
-		if mount.render_batch_renders > self.render_loop_limit:
-			if mount.effect:
-				mount.effect.pause()
-			raise RenderLoopError(path, mount.render_batch_renders, batch_id)
+			view.render_batch_id = batch_id
+			view.render_batch_renders = 1
+		if view.render_batch_renders > self.render_loop_limit:
+			if view.effect:
+				view.effect.pause()
+			raise RenderLoopError(view.route_path, view.render_batch_renders, batch_id)
 
 	def _render_with_interrupts(
 		self,
-		mount: RouteMount,
-		path: str,
+		view: View,
 		*,
 		session: Any | None = None,
 		render_fn: Callable[[], T_Render],
@@ -642,19 +626,16 @@ class RenderSession:
 		ctx = PulseContext.get()
 		render_session = ctx.session if session is None else session
 		with Untrack():
-			source_path = mount.route.pathname
-			source_route_path = mount.route.route_path
-			source_mount_id = mount.mount_id
+			source_pathname = view.route.pathname
 		with PulseContext.update(
 			session=render_session,
 			render=self,
-			route=mount.route,
-			source_route_path=source_route_path,
-			source_path=source_path,
-			source_mount_id=source_mount_id,
+			route=view.route,
+			view=view,
+			source_pathname=source_pathname,
 		):
 			try:
-				self._check_render_loop(mount, path)
+				self._check_render_loop(view)
 				return render_fn()
 			except RedirectInterrupt as r:
 				return ServerNavigateToMessage(
@@ -673,32 +654,34 @@ class RenderSession:
 				)
 
 	def render(
-		self, mount: RouteMount, path: str, *, session: Any | None = None
+		self, view: View, *, session: Any | None = None
 	) -> ServerInitMessage | ServerNavigateToMessage:
 		def _render() -> ServerInitMessage:
-			vdom = mount.tree.render()
-			mount.initialized = True
-			return ServerInitMessage(type="vdom_init", path=path, vdom=vdom)
+			vdom = view.tree.render()
+			view.initialized = True
+			return ServerInitMessage(
+				type="vdom_init",
+				view=view.id,
+				routePath=view.route_path,
+				vdom=vdom,
+			)
 
-		message = self._render_with_interrupts(
-			mount, path, session=session, render_fn=_render
-		)
-		return message
+		return self._render_with_interrupts(view, session=session, render_fn=_render)
 
 	def rerender(
-		self, mount: RouteMount, path: str, *, session: Any | None = None
+		self, view: View, *, session: Any | None = None
 	) -> ServerUpdateMessage | ServerNavigateToMessage | None:
 		def _rerender() -> ServerUpdateMessage | None:
-			if not mount.initialized:
-				raise RuntimeError(f"rerender called before init for {path!r}")
-			ops = mount.tree.rerender()
+			if not view.initialized:
+				raise RuntimeError(
+					f"rerender called before init for {view.route_path!r}"
+				)
+			ops = view.tree.rerender()
 			if ops:
-				return ServerUpdateMessage(type="vdom_update", path=path, ops=ops)
+				return ServerUpdateMessage(type="vdom_update", view=view.id, ops=ops)
 			return None
 
-		return self._render_with_interrupts(
-			mount, path, session=session, render_fn=_rerender
-		)
+		return self._render_with_interrupts(view, session=session, render_fn=_rerender)
 
 	# ---- Helpers ----
 
@@ -707,9 +690,10 @@ class RenderSession:
 		self._timers.cancel_all()
 		self.forms.dispose()
 		self._tasks.cancel_all()
-		for path, mount in list(self.route_mounts.items()):
-			self.dispose_mount(path, mount)
-		self.route_mounts.clear()
+		for view in list(self.views.values()):
+			self.dispose_view(view)
+		self.views.clear()
+		self._views_by_path.clear()
 		self.query_store.dispose_all()
 		for value in self._global_states.values():
 			value.dispose()
@@ -728,19 +712,26 @@ class RenderSession:
 				fut.cancel()
 		self._pending_js_results.clear()
 		self._ref_channel = None
-		self._ref_channels_by_route.clear()
+		self._ref_channels_by_view.clear()
 		# Close any timer that may have been scheduled during cleanup (ex: query GC)
 		self._timers.cancel_all()
 		self._global_queue = []
 		self._send_message = None
 		self.connected = False
 
-	def get_route_mount(self, path: str) -> RouteMount:
+	def get_view(self, view_id: str) -> View:
+		view = self.views.get(view_id)
+		if not view:
+			raise ValueError(f"No view with id '{view_id}'")
+		return view
+
+	def view_for_path(self, path: str) -> View:
+		"""Look up the view rendering the given route pattern path."""
 		path = ensure_absolute_path(path)
-		mount = self.route_mounts.get(path)
-		if not mount:
-			raise ValueError(f"No active route for '{path}'")
-		return mount
+		view = self._views_by_path.get(path)
+		if not view:
+			raise ValueError(f"No view for route '{path}'")
+		return view
 
 	def get_global_state(self, key: str, factory: Callable[[], Any]) -> Any:
 		"""Return a per-session singleton for the provided key."""
@@ -752,20 +743,20 @@ class RenderSession:
 
 	def get_ref_channel(self) -> Channel:
 		ctx = PulseContext.get()
-		if ctx.route is None:
+		if ctx.view is None:
 			if self._ref_channel is not None and not self._ref_channel.closed:
 				return self._ref_channel
-			self._ref_channel = self.channels.create(bind_route=False)
+			self._ref_channel = self.channels.create(bind_view=False)
 			return self._ref_channel
 
-		route_path = ctx.route.route_path
-		channel = self._ref_channels_by_route.get(route_path)
+		view_id = ctx.view.id
+		channel = self._ref_channels_by_view.get(view_id)
 		if channel is not None and channel.closed:
-			self._ref_channels_by_route.pop(route_path, None)
+			self._ref_channels_by_view.pop(view_id, None)
 			channel = None
 		if channel is None:
-			channel = self.channels.create(bind_route=True)
-			self._ref_channels_by_route[route_path] = channel
+			channel = self.channels.create(bind_view=True)
+			self._ref_channels_by_view[view_id] = channel
 		return channel
 
 	def flush(self):
@@ -794,31 +785,33 @@ class RenderSession:
 		"""Remove a timer handle from the session registry."""
 		self._timers.discard(handle)
 
-	def execute_callback(self, path: str, key: str, args: list[Any] | tuple[Any, ...]):
-		path = ensure_absolute_path(path)
-		mount = self.route_mounts.get(path)
-		if mount is None or mount.state == "closed":
-			logger.warning("Dropping callback %r for missing route %r", key, path)
+	def execute_callback(
+		self, view_id: str, key: str, args: list[Any] | tuple[Any, ...]
+	):
+		view = self.views.get(view_id)
+		if view is None or view.state == "closed":
+			logger.warning("Dropping callback %r for missing view %r", key, view_id)
 			return
-		cb = mount.tree.callbacks.get(key)
+		cb = view.tree.callbacks.get(key)
 		if cb is None:
-			logger.warning("Dropping stale callback %r for route %r", key, path)
+			logger.warning(
+				"Dropping stale callback %r for view %r", key, view.route_path
+			)
 			return
 
 		def report(e: BaseException, is_async: bool = False):
-			self.report_error(path, "callback", e, {"callback": key, "async": is_async})
+			self.report_error(
+				view.id, "callback", e, {"callback": key, "async": is_async}
+			)
 
 		try:
 			with Untrack():
-				source_path = mount.route.pathname
-				source_route_path = mount.route.route_path
-				source_mount_id = mount.mount_id
+				source_pathname = view.route.pathname
 			with PulseContext.update(
 				render=self,
-				route=mount.route,
-				source_route_path=source_route_path,
-				source_path=source_path,
-				source_mount_id=source_mount_id,
+				route=view.route,
+				view=view,
+				source_pathname=source_pathname,
 			):
 				res = cb.fn(*(args if cb.accepts_varargs else args[: cb.n_args]))
 				if iscoroutine(res):
@@ -954,16 +947,16 @@ class RenderSession:
 			)
 
 		ctx = PulseContext.get()
+		if ctx.view is None:
+			raise RuntimeError(
+				"run_js() requires an active view context (component render, callback, or effect)"
+			)
 		exec_id = next_id()
-
-		# Get route pattern path (e.g., "/users/:id") not pathname (e.g., "/users/123")
-		# This must match the path used to key views on the client side
-		path = ctx.route.pulse_route.unique_path() if ctx.route else "/"
 
 		self.send(
 			ServerJsExecMessage(
 				type="js_exec",
-				path=path,
+				view=ctx.view.id,
 				id=exec_id,
 				expr=expr.render(),
 			)

@@ -1,19 +1,84 @@
 # Pulse Pandas
 
-Optional Pandas serialization adapters for Pulse.
+Optional Pandas and NumPy serialization support for Pulse.
 
 ```python
 import pulse as ps
-from pulse_pandas import dataframe_adapter
+from pulse_pandas import PulsePandas
 
 app = ps.App(
-	serializer=ps.Serializer([dataframe_adapter]),
+	plugins=[PulsePandas()],
 )
 ```
 
-The adapter projects each `DataFrame` into an ordered `columns` list and `rows`
-arrays. It omits the index, requires unique string column names, converts missing
-values to `None`, and converts NumPy scalars to Python scalars. Other values
-continue through the app's configured serializer.
+`PulsePandas` projects Pandas and NumPy values into the Pulse wire format. The
+projection is one-way: the browser receives regular JavaScript values and never
+receives a `DataFrame`, `Series`, or other Pandas object back.
 
-`Series` and indexes are intentionally unsupported.
+## DataFrame formats
+
+DataFrames use records by default:
+
+```python
+app = ps.App(plugins=[PulsePandas()])
+```
+
+```json
+[
+	{"product": "Keyboard", "revenue": 1200},
+	{"product": "Mouse", "revenue": 850}
+]
+```
+
+Use columns when a compact, column-oriented payload is more efficient:
+
+```python
+app = ps.App(plugins=[PulsePandas(dataframes="columns")])
+```
+
+```json
+{
+	"columns": ["product", "revenue"],
+	"rows": [["Keyboard", 1200], ["Mouse", 850]]
+}
+```
+
+Both formats preserve column and row order and drop the DataFrame index. When
+the index matters, pass `series.to_dict()` or an equivalent explicit mapping.
+Column names must be unique strings, checked with exact `str` type semantics.
+
+## Supported values
+
+| Value | Wire projection |
+|---|---|
+| `pd.DataFrame` | Records by default, or `columns` format |
+| `pd.Series` | List of values; index dropped |
+| `pd.Index` | `tolist()`; includes `DatetimeIndex` and `MultiIndex` |
+| `np.ndarray` | Lists, including nested arrays, `datetime64` arrays, and object arrays of timestamps |
+| `ExtensionArray` | `tolist()`; includes categoricals and nullable arrays |
+| `pd.Timestamp` | UTC-localized when naive, then timezone-aware Pulse timestamp after millisecond validation |
+| `np.datetime64` | UTC-localized timestamp |
+| NumPy scalar | Python scalar via `.item()` |
+| `pd.NaT`, `pd.NA`, `NaN` | `null` |
+
+Missing values become `null`. Naive temporal values are interpreted as UTC by
+default and all temporal values must use exact millisecond precision. Pandas
+Series and indexes with `DatetimeTZDtype`, created with `tz_localize` or
+`tz_convert`, and object arrays containing timezone-aware `Timestamp` values are
+supported. Infinity remains invalid under the core serializer.
+
+## Rejected values
+
+The following values have no duration or structured scalar representation on
+the Pulse wire:
+
+| Value | Suggested conversion |
+|---|---|
+| `pd.Timedelta`, `np.timedelta64` | `.total_seconds()` or a formatted string |
+| `pd.Period` | `str(period)` |
+| `pd.Interval` | `str(interval)` |
+| NumPy complex scalar | A real component or a formatted string |
+
+Use `PulsePandas(naive_timestamps="reject")` to require explicit localization
+of naive temporal values. In strict mode, localize values with
+`.tz_localize("UTC")`, or use `.dt.tz_localize("UTC")` for a Series column.

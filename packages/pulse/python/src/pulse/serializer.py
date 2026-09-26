@@ -71,6 +71,10 @@ class Serializer:
 		"""Deserialize a Pulse wire payload."""
 		return Decoder().run(payload)
 
+	def with_adapters(self, adapters: Iterable[SerializerAdapter[Any]]) -> Serializer:
+		"""Return a serializer with additional adapters."""
+		return Serializer([*self._adapter_lookup.values(), *adapters])
+
 
 _DEFAULT_SERIALIZER = Serializer()
 

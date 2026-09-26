@@ -29,6 +29,10 @@ class Serializer:
 
     def serialize(self, value: object) -> Serialized: ...
     def deserialize(self, payload: object) -> object: ...
+    def with_adapters(
+        self,
+        adapters: Iterable[SerializerAdapter[Any]],
+    ) -> Serializer: ...
 ```
 
 `ps.App(serializer=...)` uses that serializer for the app's render sessions,
@@ -110,6 +114,10 @@ Resolution order is:
 
 Configured adapters override `PulseSerializable` and dataclass behavior.
 Duplicate targets and adapters for `object` or core wire types are rejected.
+Plugins can contribute adapters through `Plugin.serializer_adapters()`. Pulse
+adds those adapters after the explicit app serializer, preserving plugin
+priority order and applying the same validation as direct serializer
+configuration.
 
 Structural projections share the source object's wire identity, so repetition
 and self-cycles survive. Scalar projections use value semantics. Returning the

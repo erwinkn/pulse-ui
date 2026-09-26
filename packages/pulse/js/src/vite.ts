@@ -1,8 +1,11 @@
-import { writeSync } from "node:fs";
 import type { Plugin, ViteDevServer } from "vite";
 
 const HMR_CLIENT_PORT_ENV = "PULSE_HMR_CLIENT_PORT";
-const READY_FD_ENV = "PULSE_VITE_READY_FD";
+const SUPERVISED_ENV = "PULSE_SUPERVISED";
+const PROTOCOL_PREFIX = "\x00pulse:";
+const VITE_CONFIGURED = "vite-configured";
+const VITE_LISTENING = "vite-listening";
+let stdoutWithErrorListener: typeof process.stdout | undefined;
 
 function hmrClientPort(): number | undefined {
 	const raw = process.env[HMR_CLIENT_PORT_ENV];
@@ -12,20 +15,8 @@ function hmrClientPort(): number | undefined {
 	return port;
 }
 
-function readyFd(): number | undefined {
-	const raw = process.env[READY_FD_ENV];
-	if (raw === undefined || raw.trim() === "") return;
-	const fd = Number(raw);
-	if (!Number.isInteger(fd) || fd < 0) {
-		throw new Error(
-			`${READY_FD_ENV} must be a non-negative integer, got ${JSON.stringify(raw)}`,
-		);
-	}
-	return fd;
-}
-
 export function pulse(): Plugin {
-	const fd = readyFd();
+	const supervised = process.env[SUPERVISED_ENV] === "1";
 	return {
 		name: "pulse",
 		apply: "serve",
@@ -49,28 +40,36 @@ export function pulse(): Plugin {
 			};
 		},
 		configureServer(server) {
-			if (fd === undefined) return;
-			notify(fd, "c");
-			bindListening(server, () => notify(fd, "1"));
+			if (!supervised) return;
+			const httpServer = server.httpServer;
+			if (!httpServer) {
+				throw new Error(
+					"Pulse Vite plugin requires an HTTP server. Middleware mode is not supported.",
+				);
+			}
+			notify(VITE_CONFIGURED);
+			bindListening(httpServer, () => notify(VITE_LISTENING));
 		},
 	};
 }
 
-function notify(fd: number, payload: string) {
+function notify(message: string) {
+	const stdout = process.stdout;
+	if (stdoutWithErrorListener !== stdout) {
+		stdout.on("error", () => {});
+		stdoutWithErrorListener = stdout;
+	}
 	try {
-		writeSync(fd, payload);
+		stdout.write(`${PROTOCOL_PREFIX}${message}\n`, () => {});
 	} catch {
-		// Supervisor closed the pipe (shutdown) or the write end is stale.
+		// Readiness reporting must never prevent Vite from starting.
 	}
 }
 
-function bindListening(server: ViteDevServer, onListening: () => void) {
-	const httpServer = server.httpServer;
-	if (!httpServer) {
-		throw new Error(
-			"Pulse Vite plugin requires an HTTP server. Middleware mode is not supported.",
-		);
-	}
+function bindListening(
+	httpServer: NonNullable<ViteDevServer["httpServer"]>,
+	onListening: () => void,
+) {
 	if (httpServer.listening) {
 		onListening();
 		return;

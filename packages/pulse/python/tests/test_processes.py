@@ -15,6 +15,7 @@ import pytest
 from pulse.cli import processes as process_module
 from pulse.cli.models import CommandSpec
 from pulse.cli.processes import ManagedProcess
+from pulse.cli.protocol import PREFIX, VITE_CONFIGURED
 
 
 def test_windows_launcher_waits_for_gate_and_preserves_process_contract(
@@ -379,3 +380,57 @@ def test_managed_process_keeps_last_output_line(tmp_path: Path) -> None:
 
 	assert process.returncode == 3
 	assert "traceback-tail" in lines
+
+
+def test_guard_forwards_protocol_markers_and_output(tmp_path: Path) -> None:
+	lines: list[str] = []
+	marker_seen = threading.Event()
+	before_seen = threading.Event()
+	after_seen = threading.Event()
+	all_output_seen = threading.Event()
+	marker = f"{PREFIX}{VITE_CONFIGURED}"
+	child = (
+		"import time\n"
+		"print('before', flush=True)\n"
+		"print(chr(0) + 'pulse:vite-configured', flush=True)\n"
+		"print('after', flush=True)\n"
+		"time.sleep(10)\n"
+	)
+
+	def on_output(line: str) -> None:
+		lines.append(line)
+		if marker in line:
+			marker_seen.set()
+		if line == "before":
+			before_seen.set()
+		if line == "after":
+			after_seen.set()
+		if marker_seen.is_set() and before_seen.is_set() and after_seen.is_set():
+			all_output_seen.set()
+
+	process = ManagedProcess.start(
+		CommandSpec(
+			name="guard",
+			args=[
+				sys.executable,
+				"-m",
+				"pulse.cli.guard",
+				"--",
+				sys.executable,
+				"-c",
+				child,
+			],
+			cwd=tmp_path,
+			env=os.environ.copy(),
+		),
+		on_output,
+		lambda _code: None,
+	)
+	try:
+		assert all_output_seen.wait(2), lines
+		assert marker_seen.is_set()
+		assert "before" in lines
+		assert "after" in lines
+	finally:
+		process.kill_tree()
+		process.close()

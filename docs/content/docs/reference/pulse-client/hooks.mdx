@@ -86,13 +86,13 @@ interface PulseClient {
   isConnected(): boolean;
   onConnectionChange(listener: ConnectionStatusListener): () => void;
 
-  // Route management
-  updateRoute(path: string, routeInfo: RouteInfo): void;
-  attach(path: string, view: MountedView): void;
-  detach(path: string): void;
+  // View management (views are identified by their server-generated id)
+  updateRoute(viewId: string, routeInfo: RouteInfo): void;
+  attach(viewId: string, view: MountedView): void;
+  detach(viewId: string): void;
 
   // Callbacks
-  invokeCallback(path: string, callback: string, args: any[]): void;
+  invokeCallback(viewId: string, callback: string, args: any[]): void;
 }
 ```
 
@@ -130,7 +130,7 @@ Returns `null` during the first render, then a `ChannelBridge` instance after th
 
 The hook manages channel subscription automatically:
 
-1. On mount: acquires the channel for the current `PulseView` path
+1. On mount: acquires the channel, bound to the enclosing view's id
 2. On unmount: releases the channel lease
 3. When the lease is released: the client bridge closes
 
@@ -237,12 +237,14 @@ function usePulsePrerender(path: string): PulsePrerenderView
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `path` | `string` | View path to get prerender data for |
+| `path` | `string` | Route pattern path to get prerender data for (e.g. `/users/:id`) |
 
 ### Returns
 
 ```ts
 interface PulsePrerenderView {
+  view: string;       // Unique id of the server-side view
+  routePath: string;  // Route pattern path
   vdom: VDOM;
 }
 ```
@@ -272,8 +274,88 @@ This hook is primarily used internally by `PulseView`. Most applications won't n
 
 ---
 
+## usePulseViewId
+
+Hook to get the unique id of the enclosing view. Every rendered route or layout instance is a view with a server-generated id, and all protocol messages (callbacks, channels, refs) are scoped to it.
+
+```ts
+import { usePulseViewId } from "pulse-ui-client";
+
+function usePulseViewId(): string
+```
+
+### Throws
+
+Throws if used outside of a `PulseView`.
+
+---
+
+## Router Hooks
+
+Hooks for the built-in Pulse router. All of them throw if used outside a `PulseRouterProvider` (which `PulseApp` renders for you).
+
+### useNavigate
+
+```ts
+function useNavigate(): NavigateFunction
+
+type NavigateFunction = (to: string | number, options?: NavigateOptions) => void;
+
+type NavigateOptions = {
+  replace?: boolean;
+  preventScrollReset?: boolean;
+};
+```
+
+Navigate programmatically. Pass a path (`navigate("/dashboard")`) or a history delta (`navigate(-1)` to go back).
+
+### useLocation
+
+```ts
+function useLocation(): LocationLike
+
+interface LocationLike {
+  pathname: string;
+  search: string;
+  hash: string;
+}
+```
+
+The current location.
+
+### useParams
+
+```ts
+function useParams(): Record<string, string | undefined>
+```
+
+Path parameters for the current match (e.g. `{ id: "123" }` for `/users/:id`).
+
+### useRouteInfo
+
+```ts
+function useRouteInfo(): RouteInfo
+```
+
+The full route info for the current location—pathname, query, hash, path params, and catch-all segments. This is what `PulseView` sends to the server.
+
+### useNavigationError
+
+```ts
+function useNavigationError(): NavigationError | null
+
+type NavigationError = {
+  error: Error;
+  location: LocationLike;
+};
+```
+
+The last navigation error, or `null`. When a navigation fails, the router stays on the current page and surfaces the error here.
+
+---
+
 ## See Also
 
-- [Components](/docs/reference/pulse-client/components) - PulseProvider, PulseView, PulseForm
+- [Components](/docs/reference/pulse-client/components) - PulseApp, PulseView, PulseForm, router components
 - [Classes](/docs/reference/pulse-client/classes) - ChannelBridge, VDOMRenderer
-- [Channels guide](/docs/guide/channels) - How to use channels
+- [Channels guide](/docs/advanced/channels) - How to use channels

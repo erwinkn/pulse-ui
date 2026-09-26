@@ -19,7 +19,7 @@
 
 ## 5. Test the setup flow
 - Run through `setup.mdx` on a fresh machine to catch missing steps
-- The React Router scaffolding command may have changed
+- The web project is now copied from `examples/web/` (no scaffolding command yet); verify that flow works outside the monorepo
 
 ## 6. Get feedback
 - Have someone unfamiliar with Pulse read Getting Started and first few tutorial pages

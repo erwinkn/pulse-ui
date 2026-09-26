@@ -6,9 +6,10 @@ import re
 import socket
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, cast, final
 
 import pulse.cli.cmd as cmd_mod
 import pytest
@@ -35,7 +36,7 @@ from pulse.cli.packages import (
 	spec_satisfies,
 )
 from pulse.cli.ports import PortReservation
-from pulse.cli.processes import execute_commands
+from pulse.cli.processes import ManagedProcess, execute_commands
 from pulse.cli.secrets import resolve_dev_secret
 from pulse.env import ENV_PULSE_HMR_CLIENT_PORT, ENV_PULSE_REACT_SERVER_ADDRESS, env
 from pulse.transpiler.imports import Import, clear_import_registry
@@ -854,6 +855,28 @@ def test_build_web_command_passes_host_to_dev_server(tmp_path: Path) -> None:
 	assert "HOST" not in spec.env
 
 
+def test_build_web_command_filters_vite_output_unless_verbose(
+	tmp_path: Path,
+) -> None:
+	web_root = tmp_path / "web"
+	web_root.mkdir()
+
+	filtered = cmd_mod.build_web_command(
+		web_root=web_root,
+		extra_args=[],
+		verbose=False,
+	)
+	verbose = cmd_mod.build_web_command(
+		web_root=web_root,
+		extra_args=[],
+		verbose=True,
+	)
+
+	assert "Network: use --host to expose" in filtered.output_filters
+	assert "?import" in filtered.output_filters
+	assert verbose.output_filters == ()
+
+
 def test_web_workspaces_using_pulse_ui_client_declare_ws() -> None:
 	root = Path(__file__).resolve().parents[4]
 	workspace_manifests = [
@@ -1013,6 +1036,153 @@ def test_execute_commands_preserves_clean_exit_when_stopping_survivor(
 	output = capsys.readouterr().out
 	assert "web-exited" in output
 	assert "server-finished" not in output
+
+
+@final
+class _FakeCommandProcess:
+	def __init__(self) -> None:
+		self.alive = True
+		self.code: int | None = None
+		self.stop_requested = False
+		self.stop_induced = False
+		self.on_exit: Callable[[int], None] | None = None
+		self.on_request_stop: Callable[[], None] | None = None
+
+	@property
+	def returncode(self) -> int | None:
+		return self.code
+
+	def is_alive(self) -> bool:
+		return self.alive
+
+	def request_stop(self) -> None:
+		self.stop_requested = True
+		if self.on_request_stop is not None:
+			self.on_request_stop()
+
+	def kill_tree(self) -> None:
+		self.stop_requested = True
+		self.exit(-9)
+
+	def close(self) -> None:
+		return None
+
+	def exit(self, code: int) -> None:
+		if not self.alive:
+			return
+		self.alive = False
+		self.code = code
+		self.stop_induced = self.stop_requested
+		assert self.on_exit is not None
+		self.on_exit(code)
+
+
+def _install_fake_command_processes(
+	monkeypatch: pytest.MonkeyPatch,
+	processes: dict[str, _FakeCommandProcess],
+) -> None:
+	@classmethod
+	def start(
+		_cls: type[ManagedProcess],
+		spec: CommandSpec,
+		_on_output: Callable[[str], None],
+		on_exit: Callable[[int], None],
+		*,
+		pass_fds: tuple[int, ...] = (),
+	) -> _FakeCommandProcess:
+		process = processes[spec.name]
+		process.on_exit = on_exit
+		if spec.on_spawn is not None:
+			spec.on_spawn()
+		return process
+
+	monkeypatch.setattr(ManagedProcess, "start", start)
+
+
+def test_execute_commands_ignores_stop_induced_exit_code_one(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	server = _FakeCommandProcess()
+	web = _FakeCommandProcess()
+	server.on_request_stop = lambda: server.exit(1)
+	_install_fake_command_processes(monkeypatch, {"server": server, "web": web})
+	web_spec = CommandSpec(
+		name="web", args=["web"], cwd=tmp_path, env={}, on_spawn=lambda: web.exit(0)
+	)
+
+	assert (
+		execute_commands(
+			[
+				CommandSpec(name="server", args=["server"], cwd=tmp_path, env={}),
+				web_spec,
+			],
+			tag_mode="plain",
+		)
+		== 0
+	)
+
+
+def test_execute_commands_reports_independent_exit_code_one_during_shutdown(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	server = _FakeCommandProcess()
+	web = _FakeCommandProcess()
+
+	def stop_server() -> None:
+		web.exit(1)
+		server.exit(0)
+
+	server.on_request_stop = stop_server
+
+	def start_server() -> None:
+		server.stop_requested = True
+		server.exit(0)
+
+	_install_fake_command_processes(monkeypatch, {"server": server, "web": web})
+
+	assert (
+		execute_commands(
+			[
+				CommandSpec(
+					name="server",
+					args=["server"],
+					cwd=tmp_path,
+					env={},
+					on_spawn=start_server,
+				),
+				CommandSpec(name="web", args=["web"], cwd=tmp_path, env={}),
+			],
+			tag_mode="plain",
+		)
+		== 1
+	)
+
+
+def test_execute_commands_returns_first_independent_exit(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	server = _FakeCommandProcess()
+	web = _FakeCommandProcess()
+	server.on_request_stop = lambda: web.exit(9)
+	_install_fake_command_processes(monkeypatch, {"server": server, "web": web})
+	server_spec = CommandSpec(
+		name="server",
+		args=["server"],
+		cwd=tmp_path,
+		env={},
+		on_spawn=lambda: server.exit(1),
+	)
+
+	assert (
+		execute_commands(
+			[
+				server_spec,
+				CommandSpec(name="web", args=["web"], cwd=tmp_path, env={}),
+			],
+			tag_mode="plain",
+		)
+		== 1
+	)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group behavior")

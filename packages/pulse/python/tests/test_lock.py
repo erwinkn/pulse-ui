@@ -30,6 +30,26 @@ def test_process_liveness_probe_does_not_terminate_live_process():
 	assert not is_process_alive(proc.pid)
 
 
+@pytest.mark.parametrize("pid", [-5, 10**30])
+def test_process_liveness_rejects_out_of_range_pids(pid: int):
+	assert not is_process_alive(pid)
+
+
+@pytest.mark.parametrize(
+	("family", "pid"),
+	[("posix", 2**31), ("windows", 2**32)],
+)
+def test_process_liveness_bound_follows_platform_pid_width(
+	monkeypatch: pytest.MonkeyPatch,
+	family: str,
+	pid: int,
+) -> None:
+	# os.kill() raises OverflowError past signed pid_t, so the POSIX bound has to
+	# be narrower than the unsigned DWORD Windows accepts.
+	monkeypatch.setattr(lock_mod, "os_family", lambda: family)
+	assert not is_process_alive(pid)
+
+
 @pytest.mark.parametrize(
 	"wait_result",
 	[lock_mod.WAIT_OBJECT_0, lock_mod.WAIT_FAILED],
@@ -103,6 +123,26 @@ def test_active_lock_info_ignores_stale_lock(
 	write_lock_info(lock_path, stale)
 
 	assert read_lock_info(lock_path) == stale
+	assert active_lock_info(tmp_path) is None
+
+
+@pytest.mark.parametrize("pid", [0, -5, 2**32])
+def test_read_lock_info_rejects_out_of_range_pid(tmp_path: Path, pid: int):
+	lock_path = lock_path_for_web_root(tmp_path)
+	info = LockInfo(
+		pid=pid,
+		created_at=1,
+		hostname="host",
+		platform="test-platform",
+		python="3.12.0",
+		cwd=str(tmp_path),
+		address="localhost",
+		port=8123,
+	)
+
+	write_lock_info(lock_path, info)
+
+	assert read_lock_info(lock_path) is None
 	assert active_lock_info(tmp_path) is None
 
 

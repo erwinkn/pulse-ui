@@ -663,12 +663,12 @@ class TestState:
 
 		state = MyState()
 
-		# These special attributes should be allowed
+		# Arbitrary private attributes should be allowed
 		from pulse.reactive import Scope
 
 		new_scope = Scope()
-		state._scope = new_scope  # pyright: ignore[reportPrivateUsage]
-		assert state._scope is new_scope  # pyright: ignore[reportPrivateUsage]
+		state._custom_scope = new_scope  # pyright: ignore[reportAttributeAccessIssue]
+		assert state._custom_scope is new_scope  # pyright: ignore[reportAttributeAccessIssue]
 
 	def test_assignment_to_private_property(self):
 		"""Test that properties can be assigned during custom __init__ before full initialization"""

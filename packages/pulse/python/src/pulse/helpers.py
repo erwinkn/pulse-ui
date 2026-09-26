@@ -2,14 +2,10 @@ import inspect
 import linecache
 import os
 import socket
-from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from functools import wraps
 from typing import (
 	Any,
-	ClassVar,
 	ParamSpec,
-	Self,
 	TypedDict,
 	TypeVar,
 	overload,
@@ -18,8 +14,6 @@ from typing import (
 from urllib.parse import urlsplit
 
 from fastapi import Request
-
-from pulse.env import env
 
 
 def values_equal(a: Any, b: Any) -> bool:
@@ -135,34 +129,6 @@ def data(**attrs: Any):
 	    data(foo="bar") -> {"data-foo": "bar"}
 	"""
 	return {f"data-{k}": v for k, v in attrs.items()}
-
-
-class Disposable(ABC):
-	__disposed__: bool = False
-	__idempotent_dispose__: ClassVar[bool] = False
-
-	@abstractmethod
-	def dispose(self) -> None: ...
-
-	def __init_subclass__(cls, **kwargs: Any):
-		super().__init_subclass__(**kwargs)
-
-		if "dispose" in cls.__dict__:
-			original_dispose = cls.dispose
-
-			@wraps(original_dispose)
-			def wrapped_dispose(self: Self, *args: Any, **kwargs: Any):
-				if self.__disposed__:
-					if not self.__idempotent_dispose__ and env.pulse_env == "dev":
-						cls_name = type(self).__name__
-						raise RuntimeError(
-							f"{self} (type={cls_name}) was disposed twice. This is likely a bug."
-						)
-					return
-				self.__disposed__ = True
-				return original_dispose(self, *args, **kwargs)
-
-			cls.dispose = wrapped_dispose
 
 
 def get_client_address(request: Request) -> str | None:

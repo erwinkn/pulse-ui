@@ -9,9 +9,9 @@ from typing import Any, Generic, Literal, TypeVar, cast, overload, override
 
 from pulse.channel import Channel
 from pulse.context import PulseContext
-from pulse.helpers import Disposable
 from pulse.hooks.core import HookMetadata, HookState, hooks
 from pulse.hooks.state import collect_component_identity
+from pulse.resources import Resource
 from pulse.scheduling import create_future, create_task
 
 T = TypeVar("T")
@@ -109,7 +109,7 @@ class RefTimeout(asyncio.TimeoutError):
 	"""Raised when waiting for a ref mount times out."""
 
 
-class RefHandle(Disposable, Generic[T]):
+class RefHandle(Resource, Generic[T]):
 	"""Server-side handle for a client DOM ref."""
 
 	__slots__: tuple[str, ...] = (
@@ -823,17 +823,13 @@ class RefHookState(HookState):
 			if ctx.render is None:
 				raise RuntimeError("ref() requires an active render session")
 			self._channel = ctx.render.get_ref_channel()
-		handle = RefHandle(self._channel, owns_channel=False)
+		handle: RefHandle[Any] = RefHandle(self._channel, owns_channel=False)
+		self.resources.own(handle)
 		self.instances[full_identity] = handle
 		return handle, True
 
 	@override
-	def dispose(self) -> None:
-		for handle in self.instances.values():
-			try:
-				handle.dispose()
-			except Exception:
-				pass
+	def on_dispose(self) -> None:
 		self._channel = None
 		self.instances.clear()
 

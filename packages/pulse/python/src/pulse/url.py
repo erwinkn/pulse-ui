@@ -1,14 +1,20 @@
 """The URL currently displayed by a render session's browser tab."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any, ClassVar, override
+from dataclasses import dataclass, field
+from typing import Any, override
 from urllib.parse import urlencode
 
-from pulse.helpers import Disposable, values_equal
+from pulse.helpers import values_equal
 from pulse.messages import ServerNavigateToMessage
 from pulse.reactive import Effect, Scope, Signal
 from pulse.reactive_extensions import reactive, unwrap
+from pulse.resources import (
+	Resource,
+	ResourceOwner,
+	ResourceScope,
+	suspend_resource_scope,
+)
 from pulse.routing import RouteInfo
 from pulse.state.query_param import (
 	QueryParamCodec,
@@ -22,6 +28,7 @@ class _TypedView:
 	codec: QueryParamCodec
 	default: Any
 	signal: Signal[Any]
+	holders: "dict[ResourceScope, _ViewHandle]" = field(default_factory=dict)
 
 
 @dataclass
@@ -30,7 +37,37 @@ class _QueryParamSlot:
 	views: list[_TypedView]
 
 
-class SessionUrl(Disposable):
+class _ViewHandle(Resource):
+	"""One scope's claim on a typed view of a query parameter.
+
+	A view is shared by every declaration with the same codec and default, so
+	it is refcounted: when the last holder is disposed the view is dropped.
+	The raw slot and the URL are untouched, they belong to the session.
+	"""
+
+	_url: "SessionUrl"
+	_name: str
+	_view: _TypedView
+	_scope: ResourceScope
+
+	def __init__(
+		self,
+		url: "SessionUrl",
+		name: str,
+		view: _TypedView,
+		scope: ResourceScope,
+	) -> None:
+		self._url = url
+		self._name = name
+		self._view = view
+		self._scope = scope
+
+	@override
+	def dispose(self) -> None:
+		self._url.release_view(self._name, self._view, self._scope)
+
+
+class SessionUrl(ResourceOwner):
 	"""The URL currently displayed by the session's browser tab.
 
 	A render session is one browser tab, so it has exactly one URL. Every
@@ -56,6 +93,13 @@ class SessionUrl(Disposable):
 	Slot writes are immediate and session-owned. If a State constructor raises
 	after writing a query parameter, its write is intentionally retained for
 	other states sharing the session slot.
+
+	Raw slots live as long as the session, because the URL string is the source
+	of truth and survives navigation. Typed views do not: each is refcounted by
+	the `ResourceScope`s that asked for it and is dropped when the last of them
+	is disposed, so a dead declaration can no longer fail to decode a later URL
+	change on behalf of live ones. Dropping a view leaves the slot and the URL
+	untouched.
 	"""
 
 	pathname: str
@@ -68,9 +112,10 @@ class SessionUrl(Disposable):
 	_pending: list[dict[str, str]]
 	_closed: bool
 	_route_revision: Signal[int]
-	__idempotent_dispose__: ClassVar[bool] = True
+	_resource_scope: ResourceScope | None
 
 	def __init__(self, send: Callable[[ServerNavigateToMessage], Any]) -> None:
+		self._resource_scope = ResourceScope(label="SessionUrl")
 		self.pathname = ""
 		self.hash = ""
 		self.query_params = {}
@@ -127,15 +172,42 @@ class SessionUrl(Disposable):
 		if first_error is not None:
 			raise first_error from None
 
-	def param(self, name: str, codec: QueryParamCodec, default: Any) -> Signal[Any]:
+	def param(
+		self,
+		name: str,
+		codec: QueryParamCodec,
+		default: Any,
+		*,
+		owner: ResourceScope | None = None,
+	) -> Signal[Any]:
+		"""Return the signal of the typed view for ``name``, creating it if needed.
+
+		``owner`` is the scope of the declaration asking for the view; it becomes
+		one of the view's holders, and the view is dropped when every holder has
+		been disposed.
+		"""
 		if self._closed:
 			raise RuntimeError("SessionUrl is closed")
 		if not name:
 			raise RuntimeError("QueryParam param name was not resolved")
 		slot = self._slots.get(name)
 		if slot is None:
-			raw = self.query_params.get(name)
-			value = self._parse(raw, codec=codec, default=default, name=name)
+			slot = _QueryParamSlot(
+				raw=Signal(self.query_params.get(name), name=f"QueryParam.raw.{name}"),
+				views=[],
+			)
+			self._slots[name] = slot
+			self._ensure_sync()
+		view = next(
+			(
+				candidate
+				for candidate in slot.views
+				if candidate.codec == codec and values_equal(candidate.default, default)
+			),
+			None,
+		)
+		if view is None:
+			value = self._parse(slot.raw.value, codec=codec, default=default, name=name)
 			view = _TypedView(
 				codec=codec,
 				default=default,
@@ -144,56 +216,52 @@ class SessionUrl(Disposable):
 					name=f"QueryParam.{name}",
 				),
 			)
-			slot = _QueryParamSlot(
-				raw=Signal(raw, name=f"QueryParam.raw.{name}"),
-				views=[view],
-			)
-			self._slots[name] = slot
-			self._ensure_sync()
-			return view.signal
-		for view in slot.views:
-			if view.codec == codec and values_equal(view.default, default):
-				return view.signal
-		value = self._parse(
-			slot.raw.value,
-			codec=codec,
-			default=default,
-			name=name,
-		)
-		view = _TypedView(
-			codec=codec,
-			default=default,
-			signal=Signal(
-				reactive(value),  # pyright: ignore[reportUnknownArgumentType]
-				name=f"QueryParam.{name}",
-			),
-		)
-		slot.views.append(view)
+			slot.views.append(view)
+		if owner is not None and owner not in view.holders:
+			handle = _ViewHandle(self, name, view, owner)
+			view.holders[owner] = handle
+			owner.own(handle)
 		return view.signal
+
+	def release_view(self, name: str, view: _TypedView, scope: ResourceScope) -> None:
+		"""Drop one scope's claim on a typed view, and the view if it was the last.
+
+		A write the view has not pushed yet lands in the raw slot on the way out:
+		writes belong to the session, like the slot itself. Beyond that the slot
+		and the URL are left alone, dropping a view never rewrites them.
+		"""
+		view.holders.pop(scope, None)
+		if view.holders:
+			return
+		slot = self._slots.get(name)
+		if slot is None:
+			return
+		self._push_view(name, slot, view)
+		slot.views = [candidate for candidate in slot.views if candidate is not view]
+		self.prime()
 
 	def prime(self) -> None:
 		if self._sync_effect is not None and not self._closed:
 			self._sync_effect.schedule()
 
 	@override
-	def dispose(self) -> None:
-		if self._closed:
-			return
+	def on_dispose(self) -> None:
 		self._closed = True
-		if self._sync_effect is not None:
-			self._sync_effect.dispose()
-			self._sync_effect = None
+		self._sync_effect = None
 		self._slots.clear()
 
 	def _ensure_sync(self) -> None:
 		if self._sync_effect is not None:
 			return
-		with Scope():
+		# The sync effect belongs to the session, not to whichever scope
+		# happened to declare the first query parameter.
+		with suspend_resource_scope(), Scope():
 			self._sync_effect = Effect(
 				self._sync_to_route,
 				name="SessionUrl:query_param",
 				lazy=True,
 			)
+		self.resources.own(self._sync_effect)
 
 	def _parse(
 		self,
@@ -231,6 +299,41 @@ class SessionUrl(Disposable):
 			view.signal.write(reactive(parsed))
 		return errors
 
+	def _push_view(
+		self, name: str, slot: _QueryParamSlot, view: _TypedView
+	) -> Exception | None:
+		"""Write a view's value into the raw slot when it diverges from it."""
+		value = view.signal.read()
+		if view.codec.kind == "list" and value is not None:
+			# Read through the reactive list so an in-place mutation re-runs
+			# the sync effect.
+			value = unwrap(value)
+		raw = slot.raw.value
+		try:
+			decoded = self._parse(
+				raw, codec=view.codec, default=view.default, name=name
+			)
+		except Exception:
+			# The raw value does not decode for this view. The URL is the
+			# source of truth, so it stays; `apply` reports the error.
+			return None
+		if values_equal(value, decoded):
+			# The view still holds what `raw` decodes to, so nobody wrote it and
+			# it has nothing to push. Serializing anyway would rewrite the URL on
+			# load whenever a value happens to equal this view's default, and
+			# reset sibling views declaring another default for the same name.
+			return None
+		serialized = serialize_query_param_value(
+			value,
+			default=view.default,
+			codec=view.codec,
+			param=name,
+		)
+		if serialized == raw:
+			return None
+		errors = self._set_raw(name, slot, serialized)
+		return errors[0] if errors else None
+
 	def _sync_to_route(self) -> None:
 		self._route_revision.read()
 		if not self.pathname:
@@ -238,37 +341,9 @@ class SessionUrl(Disposable):
 		first_error: Exception | None = None
 		for name, slot in self._slots.items():
 			for view in slot.views:
-				value = view.signal.read()
-				if view.codec.kind == "list" and value is not None:
-					# Read through the reactive list so an in-place mutation
-					# re-runs this effect.
-					value = unwrap(value)
-				raw = slot.raw.value
-				try:
-					decoded = self._parse(
-						raw, codec=view.codec, default=view.default, name=name
-					)
-				except Exception:
-					# The raw value does not decode for this view. The URL is the
-					# source of truth, so it stays; `apply` reports the error.
-					continue
-				if values_equal(value, decoded):
-					# The view still holds what `raw` decodes to, so nobody wrote
-					# it and it has nothing to push. Serializing anyway would
-					# rewrite the URL on load whenever a value happens to equal
-					# this view's default, and reset sibling views declaring
-					# another default for the same name.
-					continue
-				serialized = serialize_query_param_value(
-					value,
-					default=view.default,
-					codec=view.codec,
-					param=name,
-				)
-				if serialized != raw:
-					errors = self._set_raw(name, slot, serialized)
-					if first_error is None and errors:
-						first_error = errors[0]
+				error = self._push_view(name, slot, view)
+				if first_error is None:
+					first_error = error
 
 		current_params = dict(self._applied_params)
 		query_params = dict(current_params)

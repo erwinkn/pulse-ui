@@ -22,12 +22,13 @@ from starlette.datastructures import UploadFile
 
 from pulse.context import PulseContext
 from pulse.dom.props import HTMLFormProps
-from pulse.helpers import Disposable, call_flexible, maybe_await
+from pulse.helpers import call_flexible, maybe_await
 from pulse.hooks.core import HOOK_CONTEXT, HookMetadata, HookState, hooks
 from pulse.hooks.runtime import server_address
 from pulse.hooks.stable import stable
 from pulse.react_component import react_component
 from pulse.reactive import Signal
+from pulse.resources import Resource
 from pulse.serializer import deserialize
 from pulse.transpiler.imports import Import
 from pulse.transpiler.nodes import Node
@@ -112,7 +113,7 @@ def _parse_finite_json_number(value: str) -> float:
 	return parsed
 
 
-class FormRegistry(Disposable):
+class FormRegistry(Resource):
 	"""Internal class managing form registrations.
 
 	Not typically used directly. Forms are registered automatically via
@@ -511,7 +512,7 @@ class GeneratedFormProps(TypedDict):
 	onSubmit: Callable[[], None]
 
 
-class ManualForm(Disposable):
+class ManualForm(Resource):
 	"""Low-level form handler for custom form implementations.
 
 	Use when you need more control over form rendering than ``ps.Form`` provides.
@@ -710,15 +711,12 @@ class FormStorage(HookState):
 		form = self.prev_forms.pop(key, None)
 		if form is None:
 			form = factory()
+			self.resources.own(form)
 		self.forms[key] = form
 		return form
 
 	@override
-	def dispose(self) -> None:
-		for form in self.forms.values():
-			form.dispose()
-		for form in self.prev_forms.values():
-			form.dispose()
+	def on_dispose(self) -> None:
 		self.forms.clear()
 		self.prev_forms.clear()
 

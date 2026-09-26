@@ -185,6 +185,8 @@ def UserView(user_id: str):
     return ps.div(state.name)
 ```
 
+`ps.init()` owns states and effects created inside its block. It disposes them on key change, failed initialization, or component unmount. States passed in or obtained from `ps.state()` / `ps.global_state()` keep their existing owners.
+
 #### `ps.setup(fn, *args)` — One-time initialization with args
 
 ```python
@@ -196,6 +198,8 @@ def UserView(user_id: int):
     meta = ps.setup(create_api, user_id)  # Re-runs if user_id changes
     return ps.div(f"User: {meta['user_id']}")
 ```
+
+`ps.setup()` applies the same ownership rules to states and effects created by its initializer. It disposes them on `ps.setup_key()` change, failed initialization, or component unmount; shared states keep their existing owners.
 
 #### `ps.state(arg, *, key=None)` — Inline state instances
 

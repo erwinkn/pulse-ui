@@ -2,15 +2,16 @@ import datetime as dt
 from collections.abc import Callable
 from typing import Any, TypeVar, cast, override
 
-from pulse.helpers import MISSING, Disposable, Missing
+from pulse.helpers import MISSING, Missing
 from pulse.queries.common import Key, QueryKey, normalize_key
 from pulse.queries.infinite_query import InfiniteQuery, Page
 from pulse.queries.query import RETRY_DELAY_DEFAULT, KeyedQuery, UnkeyedQueryResult
+from pulse.resources import ResourceOwner, ResourceScope
 
 T = TypeVar("T")
 
 
-class QueryStore(Disposable):
+class QueryStore(ResourceOwner):
 	"""
 	Store for query entries. Manages creation, retrieval, and disposal of queries.
 
@@ -22,6 +23,7 @@ class QueryStore(Disposable):
 	suspended: bool
 
 	def __init__(self):
+		self._resource_scope: ResourceScope | None = ResourceScope(label="QueryStore")
 		self._entries: dict[Key, KeyedQuery[Any] | InfiniteQuery[Any, Any]] = {}
 		self._unkeyed: set[UnkeyedQueryResult[Any]] = set()
 		self.suspended = False
@@ -97,6 +99,7 @@ class QueryStore(Disposable):
 		)
 		if self.suspended:
 			entry.suspend()
+		self.resources.own(entry)
 		self._entries[nkey] = entry
 		return entry
 
@@ -161,17 +164,20 @@ class QueryStore(Disposable):
 		)
 		if self.suspended:
 			entry.suspend()
+		self.resources.own(entry)
 		self._entries[nkey] = entry
 		return entry
 
 	def dispose_all(self) -> None:
 		"""Dispose all queries and clear the store."""
-		for entry in list(self._entries.values()):
-			entry.dispose()
-		self._entries.clear()
-		# Unkeyed results are owned and disposed by their States; just drop refs
-		self._unkeyed.clear()
+		try:
+			if not self.resources.__disposed__:
+				self.resources.dispose()
+		finally:
+			self._entries.clear()
+			# Unkeyed results are owned and disposed by their States; drop refs
+			self._unkeyed.clear()
 
 	@override
-	def dispose(self) -> None:
+	def on_dispose(self) -> None:
 		self.dispose_all()

@@ -18,7 +18,6 @@ from typing import (
 from pulse.context import PulseContext
 from pulse.helpers import (
 	MISSING,
-	Disposable,
 	Missing,
 	call_flexible,
 	maybe_await,
@@ -43,6 +42,12 @@ from pulse.queries.query import (
 )
 from pulse.reactive import Computed, Effect, Signal, Untrack
 from pulse.reactive_extensions import ReactiveList, unwrap
+from pulse.resources import (
+	Resource,
+	ResourceOwner,
+	ResourceScope,
+	suspend_resource_scope,
+)
 from pulse.scheduling import TimerHandleLike, create_task, later
 from pulse.state.property import InitializableProperty, StateMemberDescriptor
 from pulse.state.state import State
@@ -147,7 +152,7 @@ class InfiniteQueryConfig(QueryConfig[list[Page[T, TParam]]], Generic[T, TParam]
 	max_pages: int
 
 
-class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
+class InfiniteQuery(Generic[T, TParam], ResourceOwner, SuspendableQuery):
 	"""Paginated query that stores data as a list of Page(data, param)."""
 
 	key: Key
@@ -195,12 +200,15 @@ class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
 				return
 			self.invalidate(fetch_fn=observer._fetch_fn, observer=observer)  # pyright: ignore[reportPrivateUsage]
 
-		return Effect(
-			interval_fn,
-			name=f"inf_query_interval({self.key})",
-			interval=interval,
-			immediate=True,
-		)
+		with suspend_resource_scope():
+			effect = Effect(
+				interval_fn,
+				name=f"inf_query_interval({self.key})",
+				interval=interval,
+				immediate=True,
+			)
+		self.resources.own(effect)
+		return effect
 
 	def _update_interval(self) -> None:
 		new_interval, new_observer = self._select_interval_observer()
@@ -340,6 +348,9 @@ class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
 		self._gc_handle = None
 		self._interval = None
 		self._interval_observer = None
+		self._resource_scope: ResourceScope | None = ResourceScope(
+			label=f"InfiniteQuery({key})"
+		)
 		self._init_suspendable_query()
 		self.invalidated = False
 
@@ -864,7 +875,7 @@ class InfiniteQuery(Generic[T, TParam], Disposable, SuspendableQuery):
 		return await self._enqueue(action, cancel_fetch=cancel_fetch)
 
 	@override
-	def dispose(self):
+	def on_dispose(self):
 		self.cancel_gc()
 		self._cancel_queue()
 		if self._queue_task and not self._queue_task.done():
@@ -878,7 +889,7 @@ def none_if_missing(value: Any):
 	return None if value is MISSING else value
 
 
-class InfiniteQueryResult(Generic[T, TParam], Disposable):
+class InfiniteQueryResult(Generic[T, TParam], Resource):
 	"""Observer wrapper for InfiniteQuery with lifecycle and stale tracking.
 
 	InfiniteQueryResult provides the interface for interacting with paginated

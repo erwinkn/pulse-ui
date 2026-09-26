@@ -62,7 +62,10 @@ Cleanup runs:
 - Before the effect runs again (when tracked dependencies change)
 - When the state is disposed
 
+Effects created inside a `ps.init()` block or `ps.setup()` initializer belong to that initializer. Their cleanup runs when its key changes, when initialization fails, or when the component unmounts.
+
 Async cleanups are awaited by async effects and scheduled by synchronous cleanup paths, so returning an `async def` cleanup does not silently drop it.
+
 
 <Callout type="info">
 Pulse's `ps.later()` and `ps.repeat()` are automatically cleaned up when the render session closes. Route unmounting does not cancel `ps.later()` callbacks; cancel the returned handle in cleanup if the callback should not run after unmount. See [Scheduling](/docs/reference/pulse/scheduling) for details.

@@ -14,10 +14,10 @@ from typing import (
 )
 
 from pulse.helpers import (
-	Disposable,
 	maybe_await,
 	values_equal,
 )
+from pulse.resources import Resource
 from pulse.scheduling import (
 	TimerHandleLike,
 	call_soon,
@@ -358,7 +358,7 @@ EffectFn = Callable[[], EffectCleanup | None]
 AsyncEffectFn = Callable[[], Awaitable[EffectCleanup | None]]
 
 
-class Effect(Disposable):
+class Effect(Resource):
 	"""Runs a function when dependencies change.
 
 	Synchronous effect and base class. Use AsyncEffect for async effects.
@@ -434,6 +434,8 @@ class Effect(Disposable):
 
 		if immediate and lazy:
 			raise ValueError("An effect cannot be boht immediate and lazy")
+
+		self._capture()
 
 		# Register seeded/explicit dependencies immediately upon initialization
 		if deps is not None:

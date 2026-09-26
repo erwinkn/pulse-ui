@@ -251,6 +251,10 @@ def UserComponent(user_id: str):
     return ps.div(str(state.count))
 ```
 
+`ps.init()` owns states and effects created inside its block. It disposes them before re-running for a new key, if initialization raises, and when the component unmounts. `ps.setup()` applies the same rules to its initializer and `ps.setup_key()`.
+
+States passed into an initializer or obtained through `ps.state()` / `ps.global_state()` keep their existing owners. Accessing a shared state does not tie it to the initializer's lifetime.
+
 ### Creation with `ps.state`
 
 For inline state with caching by callsite:
@@ -278,7 +282,7 @@ def ItemList():
 
 ### Disposal
 
-State is disposed when the component unmounts, a `ps.state` key changes, or the `ps.state` call is skipped. Override `on_dispose()` for cleanup:
+Component-owned state is disposed when its owning hook is replaced, a `ps.state` key changes, the `ps.state` call is skipped, or the component unmounts. Global state remains alive until its render session closes. A state owns the resources (effects, nested states) created in its constructor, plus any unowned resource assigned to one of its attributes later (e.g. `self._poller = Effect(...)` from an event handler); disposing the state disposes them all. Assigning over an owned resource disposes the replaced one. Override `on_dispose()` for cleanup beyond that (`dispose()` itself cannot be overridden):
 
 ```python
 class ConnectionState(ps.State):

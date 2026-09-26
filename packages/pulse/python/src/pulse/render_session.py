@@ -30,14 +30,9 @@ from pulse.routing import (
 	RouteTree,
 	ensure_absolute_path,
 )
-from pulse.scheduling import (
-	TaskRegistry,
-	TimerHandleLike,
-	TimerRegistry,
-	create_future,
-)
 from pulse.state.query_param import QueryParamSync
 from pulse.state.state import State
+from pulse.tasks import Task, TaskScope
 from pulse.transpiler.id import next_id
 from pulse.transpiler.nodes import Expr
 
@@ -115,7 +110,7 @@ class RouteMount:
 	ever_active: bool
 	dispose_on_timeout: bool
 	queue: list[ServerMessage] | None
-	queue_timeout: TimerHandleLike | None
+	queue_timeout: Task | None
 	mount_id: str
 	render_batch_id: int
 	render_batch_renders: int
@@ -152,7 +147,6 @@ class RouteMount:
 	def _cancel_pending_timeout(self) -> None:
 		if self.queue_timeout is not None:
 			self.queue_timeout.cancel()
-			self.render.discard_timer(self.queue_timeout)
 			self.queue_timeout = None
 
 	def _on_pending_timeout(self) -> None:
@@ -282,8 +276,7 @@ class RenderSession:
 	_ref_channels_by_route: dict[str, Channel]
 	_global_states: dict[str, State]
 	_global_queue: list[ServerMessage]
-	_tasks: TaskRegistry
-	_timers: TimerRegistry
+	task_scope: TaskScope
 
 	def __init__(
 		self,
@@ -324,8 +317,7 @@ class RenderSession:
 		self._pending_js_results = {}
 		self._ref_channel = None
 		self._ref_channels_by_route = {}
-		self._tasks = TaskRegistry(name=f"render:{id}")
-		self._timers = TimerRegistry(tasks=self._tasks, name=f"render:{id}")
+		self.task_scope = TaskScope(f"render:{id}")
 		self.query_store = QueryStore()
 		self.pending_timeout = pending_timeout
 		self.dev_strict_mode_detach_timeout = dev_strict_mode_detach_timeout
@@ -488,12 +480,15 @@ class RenderSession:
 
 	# ---- Prerendering ----
 
-	def prerender(
+	async def prerender(
 		self, paths: list[str], route_info: RouteInfo | None = None
 	) -> dict[str, ServerInitMessage | ServerNavigateToMessage]:
 		"""
-		Synchronous render for SSR. Returns per-path init or navigate_to messages.
+		Render for SSR. Returns per-path init or navigate_to messages.
 		- Creates mounts in PENDING state and starts queue
+
+		Async so callers are provably on the scope's event loop before
+		scheduling the pending timeout.
 		"""
 		normalized = [ensure_absolute_path(path) for path in paths]
 
@@ -712,12 +707,9 @@ class RenderSession:
 
 	# ---- Helpers ----
 
-	def close(self):
-		# Close all pending timers at the start, to avoid anything firing while we clean up
-		self._timers.cancel_all()
+	async def close(self):
 		self.query_param_sync.dispose()
 		self.forms.dispose()
-		self._tasks.cancel_all()
 		for path, mount in list(self.route_mounts.items()):
 			self.dispose_mount(path, mount)
 		self.route_mounts.clear()
@@ -740,8 +732,7 @@ class RenderSession:
 		self._pending_js_results.clear()
 		self._ref_channel = None
 		self._ref_channels_by_route.clear()
-		# Close any timer that may have been scheduled during cleanup (ex: query GC)
-		self._timers.cancel_all()
+		await self.task_scope.close()
 		self._global_queue = []
 		self._send_message = None
 		self.connected = False
@@ -797,27 +788,26 @@ class RenderSession:
 		with PulseContext.update(render=self):
 			flush_effects()
 
-	def create_task(
+	def spawn(
 		self,
 		coroutine: Callable[[], Any] | Awaitable[Any],
 		*,
 		name: str | None = None,
-		on_done: Callable[[asyncio.Task[Any]], None] | None = None,
-	) -> asyncio.Task[Any]:
+	) -> Task:
 		"""Create a tracked task tied to this render session."""
 		if callable(coroutine):
-			return self._tasks.create_task(coroutine(), name=name, on_done=on_done)
-		return self._tasks.create_task(coroutine, name=name, on_done=on_done)
+			return self.task_scope.spawn(coroutine(), name=name)
+
+		async def _await_coroutine():
+			await coroutine
+
+		return self.task_scope.spawn(_await_coroutine(), name=name)
 
 	def schedule_later(
 		self, delay: float, fn: Callable[..., Any], *args: Any, **kwargs: Any
-	) -> TimerHandleLike:
+	) -> Task:
 		"""Schedule a tracked timer tied to this render session."""
-		return self._timers.later(delay, fn, *args, **kwargs)
-
-	def discard_timer(self, handle: TimerHandleLike | None) -> None:
-		"""Remove a timer handle from the session registry."""
-		self._timers.discard(handle)
+		return self.task_scope.later(delay, fn, *args, **kwargs)
 
 	def execute_callback(self, path: str, key: str, args: list[Any] | tuple[Any, ...]):
 		path = ensure_absolute_path(path)
@@ -848,17 +838,13 @@ class RenderSession:
 				res = cb.fn(*(args if cb.accepts_varargs else args[: cb.n_args]))
 				if iscoroutine(res):
 
-					def _on_done(t: asyncio.Task[Any]) -> None:
-						if t.cancelled():
-							return
+					async def _run_callback():
 						try:
-							exc = t.exception()
-						except asyncio.CancelledError:
-							return
-						if exc:
+							await res
+						except Exception as exc:
 							report(exc, True)
 
-					self.create_task(res, name=f"callback:{key}", on_done=_on_done)
+					self.spawn(_run_callback(), name=f"callback:{key}")
 		except Exception as e:
 			report(e)
 
@@ -886,7 +872,7 @@ class RenderSession:
 			api_path = url_or_path if url_or_path.startswith("/") else "/" + url_or_path
 			url = f"{base}{api_path}"
 		corr_id = uuid.uuid4().hex
-		fut = create_future()
+		fut = asyncio.get_running_loop().create_future()
 		self._pending_api[corr_id] = fut
 		headers = headers or {}
 		headers["x-pulse-render-id"] = self.id
@@ -1004,7 +990,7 @@ class RenderSession:
 				if not future.done():
 					future.set_exception(asyncio.TimeoutError())
 
-			self._timers.later(timeout, _on_timeout)
+			self.task_scope.later(timeout, _on_timeout)
 
 			return future
 

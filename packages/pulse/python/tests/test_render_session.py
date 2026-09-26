@@ -13,6 +13,7 @@ from typing import Any, cast, override
 
 import pulse as ps
 import pytest
+import pytest_asyncio
 from pulse import javascript
 from pulse.hooks.core import HookContext
 from pulse.hooks.runtime import NotFoundInterrupt, RedirectInterrupt
@@ -29,12 +30,14 @@ def get_answer() -> int:
 	return 42
 
 
-@pytest.fixture(autouse=True)
-def _pulse_context():  # pyright: ignore[reportUnusedFunction]
+@pytest_asyncio.fixture(autouse=True)
+async def _pulse_context():  # pyright: ignore[reportUnusedFunction]
 	app = ps.App()
+	await app.task_scope.start()
 	ctx = ps.PulseContext(app=app)
 	with ctx:
 		yield
+	await app.task_scope.close()
 
 
 class CounterState(ps.State):
@@ -114,10 +117,10 @@ class RouteMessageLog:
 		if isinstance(path, str) and path in self.listened_paths:
 			self.messages.append(message)
 
-	def mount(self, path: str) -> tuple[PathMessages, Callable[[], None]]:
+	async def mount(self, path: str) -> tuple[PathMessages, Callable[[], None]]:
 		self.listened_paths.add(path)
 		with ps.PulseContext.update(render=self.session):
-			self.session.prerender(sorted(self.listened_paths))
+			await self.session.prerender(sorted(self.listened_paths))
 			self.session.attach(path, make_route_info(path))
 
 		def disconnect() -> None:
@@ -147,9 +150,10 @@ def first_callback_key(session: RenderSession, path: str) -> str:
 async def test_pulse_context_update_can_clear_route_source():
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	route = session.route_mounts["/a"].route
@@ -172,7 +176,7 @@ async def test_pulse_context_update_can_clear_route_source():
 			assert ctx.source_path is None
 			assert ctx.source_mount_id is None
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -180,14 +184,16 @@ async def test_two_sessions_two_routes_are_isolated():
 	routes = make_routes()
 	s1 = RenderSession("s1", routes)
 	s2 = RenderSession("s2", routes)
+	await s1.task_scope.start()
+	await s2.task_scope.start()
 	log_s1 = RouteMessageLog(s1)
 	log_s2 = RouteMessageLog(s2)
 
 	# Mount both routes on both sessions and keep listeners active
-	msgs_s1_a, disc_s1_a = log_s1.mount("/a")
-	msgs_s1_b, disc_s1_b = log_s1.mount("/b")
-	msgs_s2_a, disc_s2_a = log_s2.mount("/a")
-	msgs_s2_b, disc_s2_b = log_s2.mount("/b")
+	msgs_s1_a, disc_s1_a = await log_s1.mount("/a")
+	msgs_s1_b, disc_s1_b = await log_s1.mount("/b")
+	msgs_s2_a, disc_s2_a = await log_s2.mount("/a")
+	msgs_s2_b, disc_s2_b = await log_s2.mount("/b")
 
 	# Initial counts are zero
 	assert extract_count_from_ctx(s1, "/a") == 0
@@ -234,8 +240,8 @@ async def test_two_sessions_two_routes_are_isolated():
 	disc_s1_b()
 	disc_s2_a()
 	disc_s2_b()
-	s1.close()
-	s2.close()
+	await s1.close()
+	await s2.close()
 
 
 class GlobalCounterState(ps.State):
@@ -281,14 +287,16 @@ async def test_global_state_shared_within_session_and_isolated_across_sessions()
 	routes = make_global_routes()
 	s1 = RenderSession("s1", routes)
 	s2 = RenderSession("s2", routes)
+	await s1.task_scope.start()
+	await s2.task_scope.start()
 	log_s1 = RouteMessageLog(s1)
 	log_s2 = RouteMessageLog(s2)
 
 	# Mount both routes on both sessions
-	msgs_s1_a, disc_s1_a = log_s1.mount("/a")
-	msgs_s1_b, disc_s1_b = log_s1.mount("/b")
-	msgs_s2_a, disc_s2_a = log_s2.mount("/a")
-	msgs_s2_b, disc_s2_b = log_s2.mount("/b")
+	msgs_s1_a, disc_s1_a = await log_s1.mount("/a")
+	msgs_s1_b, disc_s1_b = await log_s1.mount("/b")
+	msgs_s2_a, disc_s2_a = await log_s2.mount("/a")
+	msgs_s2_b, disc_s2_b = await log_s2.mount("/b")
 
 	# Initial counts are zero across both routes/sessions
 	assert extract_global_count(s1, "/a") == 0
@@ -331,8 +339,8 @@ async def test_global_state_shared_within_session_and_isolated_across_sessions()
 	disc_s1_b()
 	disc_s2_a()
 	disc_s2_b()
-	s1.close()
-	s2.close()
+	await s1.close()
+	await s2.close()
 
 
 @pytest.mark.asyncio
@@ -352,14 +360,15 @@ async def test_global_state_disposed_on_session_close():
 		[Route("a", ps.component(lambda: ps.div()[ps.span()[str(accessor().count)]]))]
 	)
 	s = RenderSession("s1", routes)
+	await s.task_scope.start()
 	log = RouteMessageLog(s)
-	_msgs, disc = log.mount("/a")
+	_msgs, disc = await log.mount("/a")
 	# Ensure instance is created by rendering
 	assert extract_count_from_ctx(s, "/a") == 0
 
 	# Close session -> should dispose the global singleton instance
 	disc()
-	s.close()
+	await s.close()
 	assert disposed == ["ok"]
 
 
@@ -367,12 +376,15 @@ class KeyedState(ps.State):
 	count: int = 0
 
 
-def test_global_state_with_id_is_session_scoped():
+@pytest.mark.asyncio
+async def test_global_state_with_id_is_session_scoped():
 	"""`id` keys instances within a session; it never widens the scope."""
 	accessor = ps.global_state(KeyedState)
 	routes = make_global_routes()
 	s1 = RenderSession("s1", routes)
 	s2 = RenderSession("s2", routes)
+	await s1.task_scope.start()
+	await s2.task_scope.start()
 
 	with ps.PulseContext.update(render=s1):
 		a1 = accessor(id="room-1")
@@ -392,8 +404,8 @@ def test_global_state_with_id_is_session_scoped():
 	a1.count = 5
 	assert b1.count == 0
 
-	s1.close()
-	s2.close()
+	await s1.close()
+	await s2.close()
 
 
 def test_global_state_requires_render_context():
@@ -405,7 +417,8 @@ def test_global_state_requires_render_context():
 		accessor(id="room-1")
 
 
-def test_keyed_global_states_disposed_on_session_close():
+@pytest.mark.asyncio
+async def test_keyed_global_states_disposed_on_session_close():
 	disposed: list[str] = []
 
 	class Tracked(ps.State):
@@ -417,12 +430,13 @@ def test_keyed_global_states_disposed_on_session_close():
 
 	accessor = ps.global_state(Tracked)
 	session = RenderSession("s1", make_global_routes())
+	await session.task_scope.start()
 	with ps.PulseContext.update(render=session):
 		accessor(id="a").label = "a"
 		accessor(id="b").label = "b"
 		accessor().label = "none"
 
-	session.close()
+	await session.close()
 	assert sorted(disposed) == ["a", "b", "none"]
 
 
@@ -431,7 +445,8 @@ def test_dummy_placeholder_to_keep_line_numbers_stable():
 	assert True
 
 
-def test_global_navigate_to_bypasses_pending_mount_queue():
+@pytest.mark.asyncio
+async def test_global_navigate_to_bypasses_pending_mount_queue():
 	routes = RouteTree(
 		[
 			Route("a", simple_component),
@@ -439,12 +454,13 @@ def test_global_navigate_to_bypasses_pending_mount_queue():
 		]
 	)
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a", "/a/b"])
+		await session.prerender(["/a", "/a/b"])
 		session.attach("/a", make_route_info("/a"))
 		session.attach("/a/b", make_route_info("/a/b"))
 
@@ -466,18 +482,20 @@ def test_global_navigate_to_bypasses_pending_mount_queue():
 	assert messages[0]["type"] == "navigate_to"
 	assert mount.queue == []
 
-	session.close()
+	await session.close()
 
 
-def test_navigate_to_queued_as_global_on_disconnect():
+@pytest.mark.asyncio
+async def test_navigate_to_queued_as_global_on_disconnect():
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	session.disconnect()
@@ -498,7 +516,7 @@ def test_navigate_to_queued_as_global_on_disconnect():
 	assert len(messages2) == 1
 	assert messages2[0]["type"] == "navigate_to"
 
-	session.close()
+	await session.close()
 
 
 # =============================================================================
@@ -516,6 +534,7 @@ async def test_attach_without_prerender_requests_reload():
 	"""Test that attaching without prerender requests a reload."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
@@ -527,7 +546,7 @@ async def test_attach_without_prerender_requests_reload():
 	assert len(messages) == 1
 	assert messages[0]["type"] == "reload"
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -548,11 +567,12 @@ async def test_async_callback_navigation_after_detach_is_ignored_by_default():
 
 	routes = RouteTree([Route("a", Page)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 	messages: list[ServerMessage] = []
 	session.connect(messages.append)
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	session.execute_callback("/a", first_callback_key(session, "/a"), [])
@@ -565,7 +585,7 @@ async def test_async_callback_navigation_after_detach_is_ignored_by_default():
 	assert not [msg for msg in messages if msg["type"] == "navigate_to"]
 	assert not [msg for msg in messages if msg["type"] == "server_error"]
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -584,11 +604,12 @@ async def test_async_callback_force_navigation_after_detach_still_navigates():
 
 	routes = RouteTree([Route("a", Page)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 	messages: list[ServerMessage] = []
 	session.connect(messages.append)
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	session.execute_callback("/a", first_callback_key(session, "/a"), [])
@@ -601,22 +622,24 @@ async def test_async_callback_force_navigation_after_detach_still_navigates():
 	assert len(navigations) == 1
 	assert navigations[0]["path"] == "/after"
 
-	session.close()
+	await session.close()
 
 
-def test_route_bound_navigation_uses_current_path_for_dynamic_routes():
+@pytest.mark.asyncio
+async def test_route_bound_navigation_uses_current_path_for_dynamic_routes():
 	@ps.component
 	def Page():
 		return ps.button(onClick=lambda: ps.navigate("/after"))["go"]
 
 	routes = RouteTree([Route("items/:id", Page)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 	messages: list[ServerMessage] = []
 	session.connect(messages.append)
 	route_info = make_route_info("/items/123", path_params={"id": "123"})
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/items/:id"], route_info)
+		await session.prerender(["/items/:id"], route_info)
 		session.attach("/items/:id", route_info)
 
 	session.execute_callback(
@@ -632,20 +655,22 @@ def test_route_bound_navigation_uses_current_path_for_dynamic_routes():
 	assert navigations[0].get("sourcePath") == "/items/123"
 	assert isinstance(navigations[0].get("sourceMountId"), str)
 
-	session.close()
+	await session.close()
 
 
-def test_route_bound_navigation_validates_source_route_identity():
+@pytest.mark.asyncio
+async def test_route_bound_navigation_validates_source_route_identity():
 	routes = RouteTree([Route("a", simple_component), Route("b", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 	messages: list[ServerMessage] = []
 	session.connect(messages.append)
 	route_info = make_route_info("/shared")
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"], route_info)
+		await session.prerender(["/a"], route_info)
 		session.attach("/a", route_info)
-		session.prerender(["/b"], route_info)
+		await session.prerender(["/b"], route_info)
 		session.attach("/b", route_info)
 
 	mount = session.route_mounts["/a"]
@@ -661,7 +686,7 @@ def test_route_bound_navigation_validates_source_route_identity():
 	assert "/b" in session.route_mounts
 	assert not [msg for msg in messages if msg["type"] == "navigate_to"]
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -682,11 +707,12 @@ async def test_async_callback_navigation_after_same_url_remount_is_ignored():
 
 	routes = RouteTree([Route("a", Page)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 	messages: list[ServerMessage] = []
 	session.connect(messages.append)
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	session.execute_callback("/a", first_callback_key(session, "/a"), [])
@@ -694,7 +720,7 @@ async def test_async_callback_navigation_after_same_url_remount_is_ignored():
 	session.detach("/a")
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	release.set()
@@ -704,7 +730,7 @@ async def test_async_callback_navigation_after_same_url_remount_is_ignored():
 	assert not [msg for msg in messages if msg["type"] == "navigate_to"]
 	assert not [msg for msg in messages if msg["type"] == "server_error"]
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -725,13 +751,14 @@ async def test_async_callback_navigation_after_route_update_is_ignored_by_defaul
 
 	routes = RouteTree([Route("items/:id", Page)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 	messages: list[ServerMessage] = []
 	session.connect(messages.append)
 	first_info = make_route_info("/items/123", path_params={"id": "123"})
 	next_info = make_route_info("/items/456", path_params={"id": "456"})
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/items/:id"], first_info)
+		await session.prerender(["/items/:id"], first_info)
 		session.attach("/items/:id", first_info)
 
 	session.execute_callback(
@@ -746,17 +773,19 @@ async def test_async_callback_navigation_after_route_update_is_ignored_by_defaul
 	assert not [msg for msg in messages if msg["type"] == "navigate_to"]
 	assert not [msg for msg in messages if msg["type"] == "server_error"]
 
-	session.close()
+	await session.close()
 
 
-def test_queued_route_bound_navigation_is_revalidated_on_reconnect():
+@pytest.mark.asyncio
+async def test_queued_route_bound_navigation_is_revalidated_on_reconnect():
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 	messages: list[ServerMessage] = []
 	session.connect(messages.append)
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	session.disconnect()
@@ -774,7 +803,7 @@ def test_queued_route_bound_navigation_is_revalidated_on_reconnect():
 
 	assert not [msg for msg in messages if msg["type"] == "navigate_to"]
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -794,11 +823,12 @@ async def test_later_callback_runs_after_detach_but_route_navigation_is_ignored(
 
 	routes = RouteTree([Route("a", Page)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 	messages: list[ServerMessage] = []
 	session.connect(messages.append)
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	session.execute_callback("/a", first_callback_key(session, "/a"), [])
@@ -810,7 +840,7 @@ async def test_later_callback_runs_after_detach_but_route_navigation_is_ignored(
 	assert not [msg for msg in messages if msg["type"] == "navigate_to"]
 	assert not [msg for msg in messages if msg["type"] == "server_error"]
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -818,12 +848,13 @@ async def test_disconnect_pauses_render_effects():
 	"""Test that RenderSession.disconnect() pauses all route render effects."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	mount = session.route_mounts["/a"]
@@ -837,7 +868,7 @@ async def test_disconnect_pauses_render_effects():
 	# Note: now effects transition to PENDING first, not immediately paused
 	assert mount.state == "pending"
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -845,13 +876,14 @@ async def test_reconnect_flushes_queue_when_pending():
 	"""Test that reconnecting to an existing session flushes queued messages."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	# First connection
 	messages1: list[ServerMessage] = []
 	session.connect(lambda msg: messages1.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	assert len(messages1) == 0
@@ -873,23 +905,25 @@ async def test_reconnect_flushes_queue_when_pending():
 	assert len(messages2) == 0
 	assert mount.state == "active"
 
-	session.close()
+	await session.close()
 
 
-def test_prerender_of_active_path_queues_updates_until_route_sync():
+@pytest.mark.asyncio
+async def test_prerender_of_active_path_queues_updates_until_route_sync():
 	routes = make_routes()
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 	messages: list[ServerMessage] = []
 	session.connect(messages.append)
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	messages.clear()
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"], make_route_info("/a"))
+		await session.prerender(["/a"], make_route_info("/a"))
 
 	session.execute_callback("/a", first_callback_key(session, "/a"), [])
 	session.flush()
@@ -902,7 +936,7 @@ def test_prerender_of_active_path_queues_updates_until_route_sync():
 	updates = [message for message in messages if message["type"] == "vdom_update"]
 	assert len(updates) == 1
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -910,12 +944,13 @@ async def test_messages_dropped_while_disconnected():
 	"""Test that messages are dropped (not buffered) while disconnected."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 	messages.clear()
 
@@ -932,7 +967,7 @@ async def test_messages_dropped_while_disconnected():
 	# Message should NOT have been buffered
 	assert len(messages2) == 0
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -940,6 +975,7 @@ async def test_route_info_updated_on_reconnect():
 	"""Test that routeInfo is updated when reconnecting with different params."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
@@ -953,7 +989,7 @@ async def test_route_info_updated_on_reconnect():
 		"catchall": [],
 	}
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"], route_info1)
+		await session.prerender(["/a"], route_info1)
 		session.attach("/a", route_info1)
 
 	mount = session.route_mounts["/a"]
@@ -979,7 +1015,7 @@ async def test_route_info_updated_on_reconnect():
 	# Route info should be updated
 	assert mount.route.query == "baz=qux"
 
-	session.close()
+	await session.close()
 
 
 @ps.component
@@ -1001,13 +1037,14 @@ async def test_state_preserved_across_reconnect():
 	"""Test that state changes are reflected in VDOM after reconnect."""
 	routes = RouteTree([Route("a", StatefulCounter)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	# First connection
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		result = session.prerender(["/a"], make_route_info("/a"))["/a"]
+		result = (await session.prerender(["/a"], make_route_info("/a")))["/a"]
 		session.attach("/a", make_route_info("/a"))
 
 	# Should have initial vdom_init with count 0
@@ -1051,7 +1088,7 @@ async def test_state_preserved_across_reconnect():
 	vdom = mount.tree.render()
 	assert "2" in str(vdom)
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -1059,12 +1096,13 @@ async def test_mount_suspended_after_disconnect_timeout():
 	"""Attached mounts suspend (tree kept, rendering paused) when the queue times out."""
 	routes = make_routes()
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	mount = session.route_mounts["/a"]
@@ -1087,7 +1125,7 @@ async def test_mount_suspended_after_disconnect_timeout():
 	assert mount.queue is None
 	assert mount.tree.rendered is True
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -1095,13 +1133,14 @@ async def test_attach_resumes_suspended_mounts_with_fresh_init():
 	"""Re-attaching suspended mounts sends a fresh vdom_init instead of a reload."""
 	routes = make_routes()
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	# First connection - mount both routes
 	messages1: list[ServerMessage] = []
 	session.connect(lambda msg: messages1.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a", "/b"])
+		await session.prerender(["/a", "/b"])
 		session.attach("/a", make_route_info("/a"))
 		session.attach("/b", make_route_info("/b"))
 
@@ -1130,7 +1169,7 @@ async def test_attach_resumes_suspended_mounts_with_fresh_init():
 	assert mount_a.effect is not None and mount_a.effect.paused is False
 	assert mount_b.effect is not None and mount_b.effect.paused is False
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -1138,12 +1177,13 @@ async def test_suspend_resume_preserves_state():
 	"""Component state survives a disconnect that outlives the message queue."""
 	routes = RouteTree([Route("a", StatefulCounter)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"], make_route_info("/a"))
+		await session.prerender(["/a"], make_route_info("/a"))
 		session.attach("/a", make_route_info("/a"))
 
 	session.execute_callback("/a", "1.onClick", [])
@@ -1174,7 +1214,7 @@ async def test_suspend_resume_preserves_state():
 	session.flush()
 	assert any(m["type"] == "vdom_update" for m in messages2[1:])
 
-	session.close()
+	await session.close()
 
 
 # =============================================================================
@@ -1187,12 +1227,13 @@ async def test_call_api_timeout():
 	"""Test that call_api raises TimeoutError when no response arrives."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes, server_address="http://localhost:8000")
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	# Call API with a very short timeout - no response will arrive
@@ -1202,7 +1243,7 @@ async def test_call_api_timeout():
 	# Verify the pending API was cleaned up
 	assert len(session._pending_api) == 0  # pyright: ignore[reportPrivateUsage]
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -1210,12 +1251,13 @@ async def test_call_api_success_before_timeout():
 	"""Test that call_api succeeds when response arrives before timeout."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes, server_address="http://localhost:8000")
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	# Start the API call
@@ -1247,7 +1289,7 @@ async def test_call_api_success_before_timeout():
 	assert result["ok"] is True
 	assert result["body"] == {"success": True}
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -1255,12 +1297,13 @@ async def test_run_js_timeout():
 	"""Test that run_js future raises TimeoutError when no response arrives."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	# Run JS with result=True and short timeout
@@ -1276,7 +1319,7 @@ async def test_run_js_timeout():
 	# Verify the pending JS result was cleaned up
 	assert len(session._pending_js_results) == 0  # pyright: ignore[reportPrivateUsage]
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -1284,12 +1327,13 @@ async def test_run_js_success_before_timeout():
 	"""Test that run_js future resolves when response arrives before timeout."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	# Run JS with result=True
@@ -1310,7 +1354,7 @@ async def test_run_js_success_before_timeout():
 	result = await future
 	assert result == 42
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -1318,12 +1362,13 @@ async def test_session_close_cancels_pending_api():
 	"""Test that session.close() cancels pending API futures."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes, server_address="http://localhost:8000")
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	# Create a pending API future manually (simulating an in-flight request)
@@ -1332,7 +1377,7 @@ async def test_session_close_cancels_pending_api():
 	session._pending_api["test-id"] = fut  # pyright: ignore[reportPrivateUsage]
 
 	# Close the session
-	session.close()
+	await session.close()
 
 	# The future should be cancelled
 	assert fut.cancelled()
@@ -1344,12 +1389,13 @@ async def test_session_close_cancels_pending_js():
 	"""Test that session.close() cancels pending JS result futures."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	# Create a pending JS future manually
@@ -1358,7 +1404,7 @@ async def test_session_close_cancels_pending_js():
 	session._pending_js_results["test-id"] = fut  # pyright: ignore[reportPrivateUsage]
 
 	# Close the session
-	session.close()
+	await session.close()
 
 	# The future should be cancelled
 	assert fut.cancelled()
@@ -1369,6 +1415,7 @@ async def test_session_close_cancels_pending_js():
 async def test_session_close_cancels_tracked_tasks():
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	started = asyncio.Event()
 	cancelled = asyncio.Event()
@@ -1381,10 +1428,10 @@ async def test_session_close_cancels_tracked_tasks():
 			cancelled.set()
 			raise
 
-	session.create_task(work(), name="test.task")
+	session.spawn(work(), name="test.task")
 	assert await wait_for(lambda: started.is_set(), timeout=0.2)
 
-	session.close()
+	await session.close()
 
 	assert await wait_for(lambda: cancelled.is_set(), timeout=0.2)
 
@@ -1408,6 +1455,7 @@ async def test_session_close_ignores_cancelled_callback_tasks():
 
 	routes = RouteTree([Route("a", AsyncCallbackComponent)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	errors: list[dict[str, Any]] = []
 	loop = asyncio.get_running_loop()
@@ -1419,7 +1467,7 @@ async def test_session_close_ignores_cancelled_callback_tasks():
 	loop.set_exception_handler(handler)
 	try:
 		with ps.PulseContext.update(render=session):
-			session.prerender(["/a"])
+			await session.prerender(["/a"])
 			session.attach("/a", make_route_info("/a"))
 
 		callbacks = session.route_mounts["/a"].tree.callbacks
@@ -1428,7 +1476,7 @@ async def test_session_close_ignores_cancelled_callback_tasks():
 		session.execute_callback("/a", key, [])
 		assert await wait_for(lambda: started.is_set(), timeout=0.2)
 
-		session.close()
+		await session.close()
 
 		assert await wait_for(lambda: cancelled.is_set(), timeout=0.2)
 		await asyncio.sleep(0)
@@ -1441,6 +1489,7 @@ async def test_session_close_ignores_cancelled_callback_tasks():
 async def test_session_close_cancels_tracked_timers():
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	fired = False
 
@@ -1449,7 +1498,7 @@ async def test_session_close_cancels_tracked_timers():
 		fired = True
 
 	session.schedule_later(0.05, on_fire)
-	session.close()
+	await session.close()
 
 	await asyncio.sleep(0.1)
 	assert fired is False
@@ -1486,22 +1535,25 @@ async def test_session_close_cancels_cleanup_timers():
 
 	routes = RouteTree([Route("a", component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	assert state_box
-	session.close()
+	await session.close()
 
 	await asyncio.sleep(0.1)
 	assert state_box[0].fired is False
 
 
-def test_handle_api_result_ignores_unknown_id():
+@pytest.mark.asyncio
+async def test_handle_api_result_ignores_unknown_id():
 	"""Test that handle_api_result silently ignores unknown correlation IDs."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 	session.connect(lambda _: None)
 
 	# Should not raise
@@ -1509,19 +1561,21 @@ def test_handle_api_result_ignores_unknown_id():
 		{"id": "unknown-id", "ok": True, "status": 200, "headers": {}, "body": None}
 	)
 
-	session.close()
+	await session.close()
 
 
-def test_handle_js_result_ignores_unknown_id():
+@pytest.mark.asyncio
+async def test_handle_js_result_ignores_unknown_id():
 	"""Test that handle_js_result silently ignores unknown exec IDs."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 	session.connect(lambda _: None)
 
 	# Should not raise
 	session.handle_js_result({"id": "unknown-id", "result": 42, "error": None})
 
-	session.close()
+	await session.close()
 
 
 # =============================================================================
@@ -1540,14 +1594,15 @@ async def test_prerender_renders_once():
 
 	routes = RouteTree([Route("a", counting_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	with ps.PulseContext.update(render=session):
-		result = session.prerender(["/a"], None)["/a"]
+		result = (await session.prerender(["/a"], None))["/a"]
 
 	assert result["type"] == "vdom_init"
 	assert len(render_calls) == 1
 
-	session.close()
+	await session.close()
 
 
 @ps.component
@@ -1565,9 +1620,10 @@ async def test_prerender_redirect_removes_mount():
 	"""Test that RedirectInterrupt during first prerender removes mount from route_mounts."""
 	routes = RouteTree([Route("redirect", redirecting_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	with ps.PulseContext.update(render=session):
-		result = session.prerender(["/redirect"], None)["/redirect"]
+		result = (await session.prerender(["/redirect"], None))["/redirect"]
 
 	# Should return navigate_to message
 	assert result["type"] == "navigate_to"
@@ -1577,7 +1633,7 @@ async def test_prerender_redirect_removes_mount():
 	# Mount should NOT be in route_mounts (was removed after interrupt)
 	assert "/redirect" not in session.route_mounts
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -1585,9 +1641,10 @@ async def test_prerender_not_found_removes_mount():
 	"""Test that NotFoundInterrupt during first prerender removes mount from route_mounts."""
 	routes = RouteTree([Route("missing", not_found_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	with ps.PulseContext.update(render=session):
-		result = session.prerender(["/missing"], None)["/missing"]
+		result = (await session.prerender(["/missing"], None))["/missing"]
 
 	# Should return navigate_to message pointing to app.not_found
 	assert result["type"] == "navigate_to"
@@ -1596,7 +1653,7 @@ async def test_prerender_not_found_removes_mount():
 	# Mount should NOT be in route_mounts
 	assert "/missing" not in session.route_mounts
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -1604,10 +1661,11 @@ async def test_prerender_then_attach_works():
 	"""Test the normal prerender → attach flow."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	# Prerender first
 	with ps.PulseContext.update(render=session):
-		result = session.prerender(["/a"], None)["/a"]
+		result = (await session.prerender(["/a"], None))["/a"]
 
 	assert result["type"] == "vdom_init"
 	assert "/a" in session.route_mounts
@@ -1627,7 +1685,7 @@ async def test_prerender_then_attach_works():
 	assert mount.queue is None
 	assert len(messages) == 0  # No new messages, VDOM already sent during prerender
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -1650,12 +1708,13 @@ async def test_prerender_seeds_effect_deps_for_updates():
 
 	routes = RouteTree([Route("a", ps.component(prerender_counter))])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"], None)
+		await session.prerender(["/a"], None)
 
 	mount = session.route_mounts["/a"]
 	assert mount.effect is not None
@@ -1669,7 +1728,7 @@ async def test_prerender_seeds_effect_deps_for_updates():
 
 	assert len([m for m in messages if m["type"] == "vdom_update"]) == 1
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -1677,12 +1736,13 @@ async def test_prerender_keeps_mounts_for_unrendered_paths():
 	"""Test that prerender preserves mounts that are not part of the new paths."""
 	routes = make_routes()
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a", "/b"])
+		await session.prerender(["/a", "/b"])
 		session.attach("/a", make_route_info("/a"))
 		session.attach("/b", make_route_info("/b"))
 
@@ -1700,7 +1760,7 @@ async def test_prerender_keeps_mounts_for_unrendered_paths():
 	nav_info["queryParams"] = {"page": "2"}
 
 	with ps.PulseContext.update(render=session):
-		result = session.prerender(["/a"], nav_info)["/a"]
+		result = (await session.prerender(["/a"], nav_info))["/a"]
 
 	assert result["type"] == "vdom_init"
 	assert session.route_mounts["/a"] is mount_a
@@ -1718,7 +1778,7 @@ async def test_prerender_keeps_mounts_for_unrendered_paths():
 
 	assert len([m for m in messages if m["type"] == "vdom_update"]) == 1
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -1736,10 +1796,11 @@ async def test_attach_after_redirect_prerender_requests_reload():
 
 	routes = RouteTree([Route("cond", conditional_redirect)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	# First prerender - redirects
 	with ps.PulseContext.update(render=session):
-		result = session.prerender(["/cond"], None)["/cond"]
+		result = (await session.prerender(["/cond"], None))["/cond"]
 
 	assert result["type"] == "navigate_to"
 	assert "/cond" not in session.route_mounts
@@ -1756,7 +1817,7 @@ async def test_attach_after_redirect_prerender_requests_reload():
 	assert len(messages) == 1
 	assert messages[0]["type"] == "reload"
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -1764,10 +1825,11 @@ async def test_re_prerender_returns_fresh_vdom():
 	"""Test that calling prerender again on same path returns fresh VDOM."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	with ps.PulseContext.update(render=session):
-		result1 = session.prerender(["/a"], None)["/a"]
-		result2 = session.prerender(["/a"], None)["/a"]
+		result1 = (await session.prerender(["/a"], None))["/a"]
+		result2 = (await session.prerender(["/a"], None))["/a"]
 
 	assert result1["type"] == "vdom_init"
 	assert result2["type"] == "vdom_init"
@@ -1775,7 +1837,7 @@ async def test_re_prerender_returns_fresh_vdom():
 	assert result1["vdom"] is not None
 	assert result2["vdom"] is not None
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -1783,9 +1845,10 @@ async def test_re_prerender_clears_stale_pending_queue():
 	"""Re-prerender of a pending mount drops queued updates from the old tree."""
 	routes = RouteTree([Route("a", StatefulCounter)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"], make_route_info("/a"))
+		await session.prerender(["/a"], make_route_info("/a"))
 
 	mount = session.route_mounts["/a"]
 	assert mount.state == "pending"
@@ -1800,13 +1863,13 @@ async def test_re_prerender_clears_stale_pending_queue():
 	assert any(m["type"] == "vdom_update" for m in mount.queue)
 
 	with ps.PulseContext.update(render=session):
-		result = session.prerender(["/a"], make_route_info("/a"))["/a"]
+		result = (await session.prerender(["/a"], make_route_info("/a")))["/a"]
 
 	assert result["type"] == "vdom_init"
 	assert mount.state == "pending"
 	assert mount.queue == []
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -1814,12 +1877,13 @@ async def test_detach_immediate_removes_mount_and_disposes_effect():
 	"""Test that detach immediately removes the mount and disposes its effect."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	mount = session.route_mounts["/a"]
@@ -1832,17 +1896,19 @@ async def test_detach_immediate_removes_mount_and_disposes_effect():
 	assert len(effect.deps) == 0
 	assert effect.parent is None
 
-	session.close()
+	await session.close()
 
 
-def test_dev_strict_mode_detach_replay_reuses_mount_without_reload():
+@pytest.mark.asyncio
+async def test_dev_strict_mode_detach_replay_reuses_mount_without_reload():
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes, dev_strict_mode_detach_timeout=10.0)
+	await session.task_scope.start()
 	messages: list[ServerMessage] = []
 	session.connect(messages.append)
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	mount = session.route_mounts["/a"]
@@ -1861,34 +1927,37 @@ def test_dev_strict_mode_detach_replay_reuses_mount_without_reload():
 	assert mount.state == "active"
 	assert not [msg for msg in messages if msg["type"] == "reload"]
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
 async def test_dev_strict_mode_detach_disposes_after_timeout():
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes, dev_strict_mode_detach_timeout=0.01)
+	await session.task_scope.start()
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	session.detach("/a")
 
 	await wait_for(lambda: "/a" not in session.route_mounts)
 
-	session.close()
+	await session.close()
 
 
-def test_detach_nonexistent_path_is_noop():
+@pytest.mark.asyncio
+async def test_detach_nonexistent_path_is_noop():
 	"""Test that detaching a path that doesn't exist is a no-op."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	# Should not raise
 	session.detach("/nonexistent")
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -1896,6 +1965,7 @@ async def test_update_route_updates_route_context():
 	"""Test that update_route updates the route context for an attached path."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
@@ -1909,7 +1979,7 @@ async def test_update_route_updates_route_context():
 		"catchall": [],
 	}
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"], initial_info)
+		await session.prerender(["/a"], initial_info)
 		session.attach("/a", initial_info)
 
 	mount = session.route_mounts["/a"]
@@ -1929,12 +1999,16 @@ async def test_update_route_updates_route_context():
 	assert mount.route.query == "y=2"
 	assert mount.route.hash == "section"
 
-	session.close()
+	await session.close()
 
 
-def test_update_route_missing_mount_is_noop(monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.asyncio
+async def test_update_route_missing_mount_is_noop(
+	monkeypatch: pytest.MonkeyPatch,
+):
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 	reported: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
 	def report_error(*args: Any, **kwargs: Any) -> None:
@@ -1946,12 +2020,16 @@ def test_update_route_missing_mount_is_noop(monkeypatch: pytest.MonkeyPatch):
 
 	assert reported == []
 
-	session.close()
+	await session.close()
 
 
-def test_execute_callback_missing_mount_is_noop(monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.asyncio
+async def test_execute_callback_missing_mount_is_noop(
+	monkeypatch: pytest.MonkeyPatch,
+):
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 	reported: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
 	def report_error(*args: Any, **kwargs: Any) -> None:
@@ -1963,12 +2041,16 @@ def test_execute_callback_missing_mount_is_noop(monkeypatch: pytest.MonkeyPatch)
 
 	assert reported == []
 
-	session.close()
+	await session.close()
 
 
-def test_execute_callback_stale_key_is_noop(monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.asyncio
+async def test_execute_callback_stale_key_is_noop(
+	monkeypatch: pytest.MonkeyPatch,
+):
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 	reported: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
 	def report_error(*args: Any, **kwargs: Any) -> None:
@@ -1977,14 +2059,14 @@ def test_execute_callback_stale_key_is_noop(monkeypatch: pytest.MonkeyPatch):
 	monkeypatch.setattr(session, "report_error", report_error)
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	session.execute_callback("/a", "missing.onClick", [])
 
 	assert reported == []
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -1993,9 +2075,10 @@ async def test_pending_timeout_disposes_mount():
 	routes = RouteTree([Route("a", simple_component)])
 	# Very short timeout for testing
 	session = RenderSession("test-id", routes, pending_timeout=0.01)
+	await session.task_scope.start()
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 
 	mount = session.route_mounts["/a"]
 	assert mount.state == "pending"
@@ -2008,7 +2091,7 @@ async def test_pending_timeout_disposes_mount():
 	assert mount.state == "closed"
 	assert mount.tree.rendered is False
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -2016,10 +2099,11 @@ async def test_attach_after_dispose_requests_reload():
 	"""Attaching to a disposed mount requests a reload."""
 	routes = RouteTree([Route("a", simple_component)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	# Prerender, then expire the pending queue
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 
 	mount = session.route_mounts["/a"]
 	expire_pending_mount(session, "/a")
@@ -2036,7 +2120,7 @@ async def test_attach_after_dispose_requests_reload():
 	assert len(messages) == 1
 	assert messages[0]["type"] == "reload"
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -2049,10 +2133,11 @@ async def test_rerender_does_not_accumulate_objects():
 	"""
 	routes = RouteTree([Route("a", StatefulCounter)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 	session.connect(lambda msg: None)
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"], make_route_info("/a"))
+		await session.prerender(["/a"], make_route_info("/a"))
 		session.attach("/a", make_route_info("/a"))
 
 	def rerender_once():
@@ -2081,7 +2166,7 @@ async def test_rerender_does_not_accumulate_objects():
 
 	assert after == baseline
 
-	session.close()
+	await session.close()
 
 
 class ChildCounterState(ps.State):
@@ -2109,12 +2194,13 @@ async def test_reprerender_preserves_child_component_state():
 	"""Re-prerendering a mounted route must reconcile, not rebuild child hook state."""
 	routes = RouteTree([Route("a", NestedParent)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 
 	messages: list[ServerMessage] = []
 	session.connect(lambda msg: messages.append(msg))
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"], make_route_info("/a"))
+		await session.prerender(["/a"], make_route_info("/a"))
 		session.attach("/a", make_route_info("/a"))
 
 	# Bump the child component's state
@@ -2123,12 +2209,12 @@ async def test_reprerender_preserves_child_component_state():
 
 	# Re-prerender the mounted route (client-side navigation re-init)
 	with ps.PulseContext.update(render=session):
-		result = session.prerender(["/a"], make_route_info("/a"))["/a"]
+		result = (await session.prerender(["/a"], make_route_info("/a")))["/a"]
 
 	assert result["type"] == "vdom_init"
 	assert "1" in str(result["vdom"])
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -2140,15 +2226,16 @@ async def test_reprerender_does_not_accumulate_objects():
 	"""
 	routes = RouteTree([Route("a", NestedParent)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 	session.connect(lambda msg: None)
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"], make_route_info("/a"))
+		await session.prerender(["/a"], make_route_info("/a"))
 		session.attach("/a", make_route_info("/a"))
 
-	def reprerender_once():
+	async def reprerender_once():
 		with ps.PulseContext.update(render=session):
-			session.prerender(["/a"], make_route_info("/a"))
+			await session.prerender(["/a"], make_route_info("/a"))
 			session.attach("/a", make_route_info("/a"))
 
 	tracked = (Element, PulseNode, HookContext, Effect)
@@ -2162,16 +2249,16 @@ async def test_reprerender_does_not_accumulate_objects():
 		return counts
 
 	for _ in range(3):
-		reprerender_once()
+		await reprerender_once()
 	baseline = census()
 
 	for _ in range(20):
-		reprerender_once()
+		await reprerender_once()
 	after = census()
 
 	assert after == baseline
 
-	session.close()
+	await session.close()
 
 
 @pytest.mark.asyncio
@@ -2189,11 +2276,12 @@ async def test_async_callback_error_reports_real_traceback():
 
 	routes = RouteTree([Route("a", Page)])
 	session = RenderSession("test-id", routes)
+	await session.task_scope.start()
 	messages: list[ServerMessage] = []
 	session.connect(messages.append)
 
 	with ps.PulseContext.update(render=session):
-		session.prerender(["/a"])
+		await session.prerender(["/a"])
 		session.attach("/a", make_route_info("/a"))
 
 	session.execute_callback("/a", first_callback_key(session, "/a"), [])
@@ -2208,4 +2296,4 @@ async def test_async_callback_error_reports_real_traceback():
 	assert "ValueError" in err["stack"]
 	assert "NoneType: None" not in err["stack"]
 
-	session.close()
+	await session.close()

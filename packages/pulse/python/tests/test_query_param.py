@@ -10,6 +10,8 @@ from pulse.reactive import flush_effects
 from pulse.render_session import RenderSession
 from pulse.routing import Route, RouteInfo, RouteTree
 
+pytestmark = pytest.mark.asyncio
+
 
 class MissingType:
 	pass
@@ -28,15 +30,16 @@ def make_route_info(
 	}
 
 
-def make_context(route_info: RouteInfo):
+async def make_context(route_info: RouteInfo):
 	def render():
 		return ps.div()
 
 	route = Route("/", ps.component(render))
 	routes = RouteTree([route])
 	session = RenderSession("test", routes)
+	await session.task_scope.start()
 	app = ps.App(routes=[route])
-	session.prerender(["/"], route_info)
+	await session.prerender(["/"], route_info)
 	route_ctx = session.route_mounts["/"].route
 	return app, session, route_ctx
 
@@ -49,7 +52,7 @@ def flush_query_param_sync(session: RenderSession) -> None:
 
 
 class TestQueryParam:
-	def test_query_param_is_available_in_state_constructor(self):
+	async def test_query_param_is_available_in_state_constructor(self):
 		class QState(ps.State):
 			q: ps.QueryParam[str] = "default"
 			initial_q: str = ""
@@ -57,7 +60,7 @@ class TestQueryParam:
 			def __init__(self):
 				self.initial_q = self.q
 
-		app, session, route_ctx = make_context(
+		app, session, route_ctx = await make_context(
 			make_route_info("/", query_params={"q": "hello"})
 		)
 		session.connect(lambda _msg: None)
@@ -66,7 +69,7 @@ class TestQueryParam:
 
 		assert state.initial_q == "hello"
 
-	def test_state_constructor_can_override_query_param(self):
+	async def test_state_constructor_can_override_query_param(self):
 		class QState(ps.State):
 			q: ps.QueryParam[str] = "default"
 			page: ps.QueryParam[int] = 1
@@ -77,7 +80,7 @@ class TestQueryParam:
 				self.q = "from-constructor"
 				self.page = 3
 
-		app, session, route_ctx = make_context(
+		app, session, route_ctx = await make_context(
 			make_route_info("/", query_params={"q": "from-url", "page": "2"})
 		)
 		messages: list[ServerMessage] = []
@@ -95,11 +98,11 @@ class TestQueryParam:
 		assert query["q"] == ["from-constructor"]
 		assert query["page"] == ["3"]
 
-	def test_state_to_url_preserves_params(self):
+	async def test_state_to_url_preserves_params(self):
 		class QState(ps.State):
 			q: ps.QueryParam[str] = ""
 
-		app, session, route_ctx = make_context(
+		app, session, route_ctx = await make_context(
 			make_route_info("/", query_params={"q": "hello", "other": "1"})
 		)
 		messages: list[ServerMessage] = []
@@ -126,11 +129,11 @@ class TestQueryParam:
 		assert query["q"] == ["next"]
 		assert query["other"] == ["1"]
 
-	def test_url_to_state_updates(self):
+	async def test_url_to_state_updates(self):
 		class QState(ps.State):
 			q: ps.QueryParam[str] = ""
 
-		app, session, route_ctx = make_context(
+		app, session, route_ctx = await make_context(
 			make_route_info("/", query_params={"q": "hello"})
 		)
 		messages: list[ServerMessage] = []
@@ -144,12 +147,12 @@ class TestQueryParam:
 			assert state.q == "world"
 		assert messages == []
 
-	def test_query_param_string_annotation_with_unresolved_type(self):
+	async def test_query_param_string_annotation_with_unresolved_type(self):
 		class QState(ps.State):
 			bad: "MissingType[int]" = ""  # pyright: ignore[reportInvalidTypeArguments,reportAssignmentType]
 			q: "ps.QueryParam[str]" = ""
 
-		app, session, route_ctx = make_context(
+		app, session, route_ctx = await make_context(
 			make_route_info("/", query_params={"q": "hello"})
 		)
 		session.connect(lambda _msg: None)
@@ -157,11 +160,11 @@ class TestQueryParam:
 			state = QState()
 			assert state.q == "hello"
 
-	def test_list_parsing_and_serialization(self):
+	async def test_list_parsing_and_serialization(self):
 		class TagState(ps.State):
 			tags: ps.QueryParam[list[str]] = []
 
-		app, session, route_ctx = make_context(
+		app, session, route_ctx = await make_context(
 			make_route_info("/", query_params={"tags": "a\\,b,c\\\\d"})
 		)
 		messages: list[ServerMessage] = []
@@ -182,11 +185,13 @@ class TestQueryParam:
 		query = parse_qs(parsed.query)
 		assert query["tags"] == ["x\\,y,z\\\\w"]
 
-	def test_list_in_place_mutation_updates_url(self):
+	async def test_list_in_place_mutation_updates_url(self):
 		class TagState(ps.State):
 			tags: ps.QueryParam[list[str]] = []
 
-		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+		app, session, route_ctx = await make_context(
+			make_route_info("/", query_params={})
+		)
 		messages: list[ServerMessage] = []
 		session.connect(messages.append)
 
@@ -204,11 +209,11 @@ class TestQueryParam:
 		query = parse_qs(parsed.query)
 		assert query["tags"] == ["alpha"]
 
-	def test_default_removal(self):
+	async def test_default_removal(self):
 		class QState(ps.State):
 			q: ps.QueryParam[str] = "hello"
 
-		app, session, route_ctx = make_context(
+		app, session, route_ctx = await make_context(
 			make_route_info("/", query_params={"q": "world", "other": "1"})
 		)
 		messages: list[ServerMessage] = []
@@ -229,21 +234,25 @@ class TestQueryParam:
 		assert "q" not in query
 		assert query["other"] == ["1"]
 
-	def test_optional_missing_uses_default(self):
+	async def test_optional_missing_uses_default(self):
 		class QState(ps.State):
 			q: ps.QueryParam[str | None] = "hello"
 
-		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+		app, session, route_ctx = await make_context(
+			make_route_info("/", query_params={})
+		)
 		session.connect(lambda _msg: None)
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			state = QState()
 			assert state.q == "hello"
 
-	def test_empty_list_serializes_when_not_default(self):
+	async def test_empty_list_serializes_when_not_default(self):
 		class TagState(ps.State):
 			tags: ps.QueryParam[list[str]] = ["alpha"]
 
-		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+		app, session, route_ctx = await make_context(
+			make_route_info("/", query_params={})
+		)
 		messages: list[ServerMessage] = []
 		session.connect(messages.append)
 
@@ -261,11 +270,11 @@ class TestQueryParam:
 		query = parse_qs(parsed.query, keep_blank_values=True)
 		assert query["tags"] == [""]
 
-	def test_hash_preserved_in_url(self):
+	async def test_hash_preserved_in_url(self):
 		class QState(ps.State):
 			q: ps.QueryParam[str] = ""
 
-		app, session, route_ctx = make_context(
+		app, session, route_ctx = await make_context(
 			make_route_info("/", query_params={}, hash="section1")
 		)
 		messages: list[ServerMessage] = []
@@ -283,11 +292,11 @@ class TestQueryParam:
 		parsed = urlparse(str(msg["path"]))
 		assert parsed.fragment == "section1"
 
-	def test_datetime_naive_warns(self):
+	async def test_datetime_naive_warns(self):
 		class TimeState(ps.State):
 			ts: ps.QueryParam[datetime] = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
-		app, session, route_ctx = make_context(
+		app, session, route_ctx = await make_context(
 			make_route_info("/", query_params={"ts": "2024-01-02T01:02:03"})
 		)
 		session.connect(lambda _msg: None)
@@ -296,14 +305,16 @@ class TestQueryParam:
 				state = TimeState()
 				assert state.ts.tzinfo == timezone.utc
 
-	def test_duplicate_param_in_same_route_raises(self):
+	async def test_duplicate_param_in_same_route_raises(self):
 		class First(ps.State):
 			q: ps.QueryParam[str] = ""
 
 		class Second(ps.State):
 			q: ps.QueryParam[str] = ""
 
-		app, session, route_ctx = make_context(make_route_info("/", query_params={}))
+		app, session, route_ctx = await make_context(
+			make_route_info("/", query_params={})
+		)
 		session.connect(lambda _msg: None)
 		with ps.PulseContext(app=app, render=session, route=route_ctx):
 			_first = First()
@@ -311,7 +322,7 @@ class TestQueryParam:
 				_second = Second()
 
 
-def make_two_route_session():
+async def make_two_route_session():
 	"""A session with routes /a and /b, nothing mounted yet."""
 
 	def render():
@@ -321,7 +332,9 @@ def make_two_route_session():
 	route_b = Route("b", ps.component(render))
 	routes = RouteTree([route_a, route_b])
 	app = ps.App(routes=[route_a, route_b])
-	return app, RenderSession("test", routes)
+	session = RenderSession("test", routes)
+	await session.task_scope.start()
+	return app, session
 
 
 def navigations(messages: list[ServerMessage]) -> list[ServerNavigateToMessage]:
@@ -335,7 +348,7 @@ class TestQueryParamAcrossMounts:
 	prerendered while the outgoing one is still mounted, then /a detaches.
 	"""
 
-	def navigate(
+	async def navigate(
 		self,
 		session: RenderSession,
 		path: str,
@@ -344,23 +357,23 @@ class TestQueryParamAcrossMounts:
 		detach: str | None = None,
 	) -> None:
 		info = make_route_info(path, query_params=query_params)
-		session.prerender([path], info)
+		await session.prerender([path], info)
 		if detach is not None:
 			session.detach(detach)
 		session.attach(path, info)
 
-	def test_binding_survives_mount_change(self):
+	async def test_binding_survives_mount_change(self):
 		class Filters(ps.State):
 			q: ps.QueryParam[str] = ""
 
 		session_filters = ps.global_state(Filters)
 
-		app, session = make_two_route_session()
+		app, session = await make_two_route_session()
 		messages: list[ServerMessage] = []
 		session.connect(messages.append)
 
 		start = make_route_info("/a", query_params={"q": "hello", "other": "1"})
-		session.prerender(["/a"], start)
+		await session.prerender(["/a"], start)
 		with ps.PulseContext(
 			app=app, render=session, route=session.route_mounts["/a"].route
 		):
@@ -368,7 +381,7 @@ class TestQueryParamAcrossMounts:
 			assert state.q == "hello"
 			flush_effects()
 
-		self.navigate(session, "/b", {"q": "hello", "other": "1"}, detach="/a")
+		await self.navigate(session, "/b", {"q": "hello", "other": "1"}, detach="/a")
 		assert "/a" not in session.route_mounts
 
 		# URL -> state still works after the mount that created the state is gone
@@ -393,17 +406,19 @@ class TestQueryParamAcrossMounts:
 		# Unrelated params on the new route are preserved
 		assert query["other"] == ["1"]
 
-		session.close()
+		await session.close()
 
-	def test_param_absent_from_new_route_resets_to_default(self):
+	async def test_param_absent_from_new_route_resets_to_default(self):
 		class Filters(ps.State):
 			q: ps.QueryParam[str] = "fallback"
 
 		session_filters = ps.global_state(Filters)
 
-		app, session = make_two_route_session()
+		app, session = await make_two_route_session()
 		session.connect(lambda _msg: None)
-		session.prerender(["/a"], make_route_info("/a", query_params={"q": "hello"}))
+		await session.prerender(
+			["/a"], make_route_info("/a", query_params={"q": "hello"})
+		)
 		with ps.PulseContext(
 			app=app, render=session, route=session.route_mounts["/a"].route
 		):
@@ -412,13 +427,13 @@ class TestQueryParamAcrossMounts:
 			flush_effects()
 
 		# The URL stays the source of truth: a route without the param means default.
-		self.navigate(session, "/b", {}, detach="/a")
+		await self.navigate(session, "/b", {}, detach="/a")
 		flush_effects()
 		assert state.q == "fallback"
 
-		session.close()
+		await session.close()
 
-	def test_same_param_on_another_route_takes_over(self):
+	async def test_same_param_on_another_route_takes_over(self):
 		"""Overlapping mounts must not collide; the newest binding owns the URL."""
 
 		class FiltersA(ps.State):
@@ -427,11 +442,13 @@ class TestQueryParamAcrossMounts:
 		class FiltersB(ps.State):
 			q: ps.QueryParam[str] = ""
 
-		app, session = make_two_route_session()
+		app, session = await make_two_route_session()
 		messages: list[ServerMessage] = []
 		session.connect(messages.append)
 
-		session.prerender(["/a"], make_route_info("/a", query_params={"q": "hello"}))
+		await session.prerender(
+			["/a"], make_route_info("/a", query_params={"q": "hello"})
+		)
 		with ps.PulseContext(
 			app=app, render=session, route=session.route_mounts["/a"].route
 		):
@@ -440,7 +457,7 @@ class TestQueryParamAcrossMounts:
 
 		# The new route is prerendered while /a is still mounted: no error.
 		info_b = make_route_info("/b", query_params={"q": "hello"})
-		session.prerender(["/b"], info_b)
+		await session.prerender(["/b"], info_b)
 		with ps.PulseContext(
 			app=app, render=session, route=session.route_mounts["/b"].route
 		):
@@ -468,9 +485,9 @@ class TestQueryParamAcrossMounts:
 		assert a.q == "shared"
 		assert b.q == "shared"
 
-		session.close()
+		await session.close()
 
-	def test_restored_binding_regains_url_ownership(self):
+	async def test_restored_binding_regains_url_ownership(self):
 		"""Disposing the owning binding hands the URL back to the previous one.
 
 		The restored binding must be re-tracked by the state effect, or its
@@ -494,11 +511,14 @@ class TestQueryParamAcrossMounts:
 		routes = RouteTree([route_a, route_b, route_c])
 		app = ps.App(routes=[route_a, route_b, route_c])
 		session = RenderSession("test", routes)
+		await session.task_scope.start()
 		messages: list[ServerMessage] = []
 		session.connect(messages.append)
 
 		# /a: the session-scoped state binds q.
-		session.prerender(["/a"], make_route_info("/a", query_params={"q": "hello"}))
+		await session.prerender(
+			["/a"], make_route_info("/a", query_params={"q": "hello"})
+		)
 		with ps.PulseContext(
 			app=app, render=session, route=session.route_mounts["/a"].route
 		):
@@ -507,7 +527,7 @@ class TestQueryParamAcrossMounts:
 
 		# /b: a route-local state takes over q.
 		info_b = make_route_info("/b", query_params={"q": "hello"})
-		session.prerender(["/b"], info_b)
+		await session.prerender(["/b"], info_b)
 		with ps.PulseContext(
 			app=app, render=session, route=session.route_mounts["/b"].route
 		):
@@ -518,7 +538,7 @@ class TestQueryParamAcrossMounts:
 
 		# /c: no local binding; /b unmounts and its state is disposed.
 		info_c = make_route_info("/c", query_params={"q": "hello"})
-		session.prerender(["/c"], info_c)
+		await session.prerender(["/c"], info_c)
 		session.detach("/b")
 		session.attach("/c", info_c)
 		b.dispose()
@@ -540,4 +560,4 @@ class TestQueryParamAcrossMounts:
 		assert parsed.path == "/c"
 		assert parse_qs(parsed.query)["q"] == ["from-restored"]
 
-		session.close()
+		await session.close()

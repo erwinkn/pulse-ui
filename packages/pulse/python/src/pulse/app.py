@@ -74,8 +74,8 @@ from pulse.proxy import Proxy, ReactProxy
 from pulse.render_session import RenderSession
 from pulse.request import PulseRequest
 from pulse.routing import Layout, Route, RouteTree, ensure_absolute_path
-from pulse.scheduling import TaskRegistry, TimerHandleLike, TimerRegistry
 from pulse.serializer import Serialized, deserialize, serialize
+from pulse.tasks import Task, TaskScope
 from pulse.user_session import (
 	CookieSessionStore,
 	SessionStore,
@@ -246,10 +246,9 @@ class App:
 	_render_connect_attempts: dict[str, object]
 	_connecting_sockets: set[str]
 	_pending_socket_messages: dict[str, list[Serialized]]
-	_render_cleanups: dict[str, TimerHandleLike]
+	_render_cleanups: dict[str, Task]
 	_render_message_locks: dict[str, asyncio.Lock]
-	_tasks: TaskRegistry
-	_timers: TimerRegistry
+	task_scope: TaskScope
 	_proxy: ReactProxy | None
 	proxy: Proxy
 	session_timeout: float
@@ -335,8 +334,7 @@ class App:
 		# Map render_id -> cleanup timer handle for timeout-based expiry
 		self._render_cleanups = {}
 		self._render_message_locks = {}
-		self._tasks = TaskRegistry(name="app")
-		self._timers = TimerRegistry(tasks=self._tasks, name="app")
+		self.task_scope = TaskScope("app")
 		self._proxy = None
 		self.session_timeout = session_timeout
 		self.pending_timeout = pending_timeout
@@ -416,6 +414,7 @@ class App:
 
 	@asynccontextmanager
 	async def fastapi_lifespan(self, _: FastAPI):
+		await self.task_scope.start()
 		try:
 			if isinstance(self.session_store, SessionStore):
 				await self.session_store.init()
@@ -617,7 +616,7 @@ class App:
 					# forever: cookie-less clients (bots, health checks) mint one
 					# per request. Their state lives in the cookie/session store,
 					# so dropping the in-memory object is safe.
-					self.close_session_if_inactive(session.sid)
+					await self.close_session_if_inactive(session.sid)
 
 		# Pulse built-ins live on a router with PulseFrameworkAPIRoute so
 		# middleware.api never sees prerender/health/forms. App.fastapi stays
@@ -672,7 +671,7 @@ class App:
 			else:
 				# Create new render session
 				render_id = new_sid()
-				render = self.create_render(
+				render = await self.create_render(
 					render_id, session, client_address=client_addr
 				)
 
@@ -707,7 +706,7 @@ class App:
 						},
 					}
 
-					captured = render.prerender(paths, route_info)
+					captured = await render.prerender(paths, route_info)
 
 					for p in paths:
 						res = _normalize_prerender_result(captured[p])
@@ -849,7 +848,7 @@ class App:
 			session = await self.get_or_create_session(cookie)
 			owner = self._render_to_user.get(render.id)
 			if owner != session.sid:
-				self.close_session_if_inactive(session.sid)
+				await self.close_session_if_inactive(session.sid)
 				logger.warning(
 					f"Socket connect session mismatch render={render.id} "
 					+ f"owner={owner} session={session.sid}"
@@ -866,7 +865,7 @@ class App:
 			if page_instance_claimed:
 				self._render_to_page_instance[rid] = page_instance_id
 			elif self._render_to_page_instance[rid] != page_instance_id:
-				self.close_session_if_inactive(session.sid)
+				await self.close_session_if_inactive(session.sid)
 				raise SocketIOConnectionRefusedError(
 					"Render session is active in another page instance",
 					{"code": RENDER_ID_COLLISION_CODE},
@@ -914,14 +913,12 @@ class App:
 							{"code": RENDER_ID_COLLISION_CODE},
 						)
 					if isinstance(res, Deny):
-						self.close_session_if_inactive(session.sid)
+						await self.close_session_if_inactive(session.sid)
 						raise SocketIOConnectionRefusedError("Socket connection denied")
 
 					def on_message(message: ServerMessage):
 						payload = list(serialize(message))
-						self._tasks.create_task(
-							self.sio.emit("message", payload, to=sid)
-						)
+						self.task_scope.spawn(self.sio.emit("message", payload, to=sid))
 
 					old_sid = self._render_to_socket.get(rid)
 					if old_sid is not None and old_sid != sid:
@@ -986,9 +983,7 @@ class App:
 		"""Cancel any pending cleanup task for a render session."""
 		cleanup_handle = self._render_cleanups.pop(rid, None)
 		if cleanup_handle:
-			if not cleanup_handle.cancelled():
-				cleanup_handle.cancel()
-			self._timers.discard(cleanup_handle)
+			cleanup_handle.cancel()
 
 	def _schedule_render_cleanup(self, rid: str):
 		"""Schedule cleanup of a RenderSession after the configured timeout."""
@@ -1009,16 +1004,16 @@ class App:
 		delay = self.session_timeout if render.route_mounts else self.pending_timeout
 
 		# Schedule new cleanup task
-		def _cleanup():
+		async def _cleanup():
 			render = self.render_sessions.get(rid)
 			if render is None:
 				return
 			# Only cleanup if not connected (if connected, keep it alive)
 			if not render.connected:
 				logger.info(f"RenderSession {rid} expired after {delay}s timeout")
-				self.close_render(rid)
+				await self.close_render(rid)
 
-		handle = self._timers.later(delay, _cleanup)
+		handle = self.task_scope.later(delay, _cleanup)
 		self._render_cleanups[rid] = handle
 
 	async def _handle_socket_message(self, sid: str, data: Serialized) -> None:
@@ -1255,7 +1250,7 @@ class App:
 			return None
 		return render
 
-	def create_render(
+	async def create_render(
 		self, rid: str, session: UserSession, *, client_address: str | None = None
 	):
 		if rid in self.render_sessions:
@@ -1274,12 +1269,13 @@ class App:
 			render_loop_limit=self.render_loop_limit,
 			on_mounts_emptied=lambda: self._schedule_render_cleanup(rid),
 		)
+		await render.task_scope.start()
 		self.render_sessions[rid] = render
 		self._render_to_user[rid] = session.sid
 		self._user_to_render[session.sid].append(rid)
 		return render
 
-	def close_render(self, rid: str):
+	async def close_render(self, rid: str):
 		# Cancel any pending cleanup task
 		self._cancel_render_cleanup(rid)
 		self._render_message_locks.pop(rid, None)
@@ -1294,11 +1290,11 @@ class App:
 			return
 		sid = self._render_to_user.pop(rid)
 		session = self.user_sessions[sid]
-		render.close()
+		await render.close()
 		self._user_to_render[session.sid].remove(rid)
 
 		if len(self._user_to_render[session.sid]) == 0:
-			self._timers.later(60, self.close_session_if_inactive, sid)
+			self.task_scope.later(60, self.close_session_if_inactive, sid)
 
 	def close_session(self, sid: str):
 		session = self.user_sessions.pop(sid, None)
@@ -1306,7 +1302,7 @@ class App:
 		if session:
 			session.dispose()
 
-	def close_session_if_inactive(self, sid: str):
+	async def close_session_if_inactive(self, sid: str):
 		if sid in self._sessions_in_request:
 			return
 		if not self._user_to_render.get(sid):
@@ -1331,15 +1327,14 @@ class App:
 
 		# Close all render sessions
 		for rid in list(self.render_sessions.keys()):
-			self.close_render(rid)
+			await self.close_render(rid)
 
 		# Close all user sessions
 		for sid in list(self.user_sessions.keys()):
 			self.close_session(sid)
 
 		# Cancel any remaining app-level tasks/timers
-		self._tasks.cancel_all()
-		self._timers.cancel_all()
+		await self.task_scope.close()
 		if self._proxy is not None:
 			try:
 				await self._proxy.close()
@@ -1375,7 +1370,7 @@ class App:
 			return  # no active render for this user session
 
 		# We don't want to wait for this to resolve
-		render.create_task(
+		render.spawn(
 			render.call_api(f"{self.api_prefix}/set-cookies", method="GET"),
 			name="cookies.refresh",
 		)

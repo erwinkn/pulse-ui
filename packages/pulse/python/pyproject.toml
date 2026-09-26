@@ -5,7 +5,8 @@ description = "Pulse - Full-stack framework for building real-time React applica
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.128.0",
+	"anyio>=4.14.2,<4.15.0",
+	"fastapi>=0.128.0",
     "uvicorn>=0.24.0",
     "mako>=1.3.10",
     "typer>=0.16.0",

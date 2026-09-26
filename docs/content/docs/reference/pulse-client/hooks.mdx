@@ -107,7 +107,7 @@ Hook to subscribe to a Pulse channel for bidirectional communication. Channels e
 ```ts
 import { usePulseChannel } from "pulse-ui-client";
 
-function usePulseChannel(channelId: string): ChannelBridge
+function usePulseChannel(channelId: string): ChannelBridge | null
 ```
 
 ### Parameters
@@ -118,22 +118,23 @@ function usePulseChannel(channelId: string): ChannelBridge
 
 ### Returns
 
-Returns a `ChannelBridge` instance for sending and receiving messages.
+Returns a `ChannelBridge` instance for sending and receiving messages, or `null` before the subscription effect has run.
 
 ### Throws
 
 - Throws if `channelId` is empty
 - Throws if used outside of a `PulseProvider`
+- Throws if used outside of a `PulseView`
 
 ### Lifecycle
 
 The hook manages channel subscription automatically:
 
-1. On mount: acquires a reference to the channel
-2. On unmount: releases the reference
-3. When all references are released: channel closes
+1. On mount: acquires the channel for the current `PulseView`
+2. Before the effect runs: returns `null`
+3. On unmount: releases the client endpoint
 
-Multiple components can subscribe to the same channel. The channel stays open as long as at least one component is subscribed.
+Channels are one-to-one. A channel ID can be acquired by one client endpoint at a time.
 
 ### Example: Chat Room
 
@@ -152,6 +153,8 @@ function ChatRoom({ roomId }: { roomId: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
 
   useEffect(() => {
+    if (!channel) return;
+
     // Listen for new messages
     const unsubscribe = channel.on("message", (msg: Message) => {
       setMessages((prev) => [...prev, msg]);
@@ -161,6 +164,7 @@ function ChatRoom({ roomId }: { roomId: string }) {
   }, [channel]);
 
   const sendMessage = (text: string) => {
+    if (!channel) return;
     channel.emit("message", { text });
   };
 
@@ -194,6 +198,8 @@ function UserSearch() {
   const [loading, setLoading] = useState(false);
 
   const search = async (query: string) => {
+    if (!channel) return;
+
     setLoading(true);
     try {
       const users = await channel.request("search", { query });
@@ -216,6 +222,43 @@ function UserSearch() {
   );
 }
 ```
+
+---
+
+## usePulseChannelManager
+
+Hook to acquire channels dynamically while still using the current `PulseView` path and React cleanup lifecycle.
+
+```ts
+import { usePulseChannelManager } from "pulse-ui-client";
+
+function usePulseChannelManager(): PulseChannelManager
+```
+
+### Returns
+
+Returns a manager with:
+
+```ts
+type PulseChannelManager = {
+  acquire(channelId: string): {
+    bridge: ChannelBridge;
+    release(): void;
+  };
+  dispose(): void;
+};
+```
+
+Use this for advanced integrations that do not know every channel ID upfront. Normal components should prefer `usePulseChannel(channelId)`.
+
+### Throws
+
+- Throws if used outside of a `PulseProvider`
+- Throws if used outside of a `PulseView`
+
+### Lifecycle
+
+Each `acquire()` call returns a lease. Call `release()` when that lease is no longer needed. `release()` is safe to call more than once. Any leases that are still open are released automatically when the owning component unmounts.
 
 ---
 

@@ -47,9 +47,9 @@ class NotificationProps(  # pyright: ignore[reportIncompatibleVariableOverride]
 	"""Controls notification line or icon color"""
 	radius: MantineRadius
 	"""Controls notification border radius"""
-	icon: ps.Element
+	icon: ps.Node
 	"""Notification icon, replaces color line"""
-	title: ps.Element  # pyright: ignore[reportIncompatibleVariableOverride]
+	title: ps.Node  # pyright: ignore[reportIncompatibleVariableOverride]
 	"""Notification title, displayed above the message body"""
 	loading: bool
 	"""If set, the Loader component is displayed instead of the icon"""
@@ -149,8 +149,8 @@ NotificationPosition = Literal[
 class NotificationDataWithoutId(NotificationProps, total=False):
 	id: str
 	"""Notification id, can be used to close or update notification"""
-	message: Required[str]
-	"""Main notification message. Real API also supports nodes, but we can't handle that yet."""
+	message: Required[ps.Node]
+	"""Main notification message"""
 	position: NotificationPosition
 	"""Notification position"""
 	autoClose: int | bool
@@ -179,6 +179,7 @@ def NotificationsInternal(
 
 
 NOTIFICATIONS_CHANNEL_ID = uuid.uuid4().hex
+CLIENT_CALLBACK_KEYS = {"onClose", "onOpen"}
 
 
 class NotificationsStore(ps.State):
@@ -199,7 +200,7 @@ class NotificationsStore(ps.State):
 		existing = self.registry.get(ident)
 		merged = payload if not existing else existing | payload
 		self.registry[ident] = merged
-		self._channel.emit("show", serialize(merged))
+		self._channel.emit("show", client_notification_payload(merged))
 		return ident
 
 	def update(self, kwargs: NotificationData) -> str:
@@ -208,7 +209,7 @@ class NotificationsStore(ps.State):
 		existing = self.registry.get(ident)
 		merged = payload if not existing else existing | payload
 		self.registry[ident] = merged
-		self._channel.emit("update", serialize(merged))
+		self._channel.emit("update", client_notification_payload(merged))
 		return ident
 
 	def hide(self, id: str) -> str:
@@ -246,14 +247,14 @@ class NotificationsStore(ps.State):
 			result = update(current)
 		else:
 			result = update
-		new_notifications: list[NotificationData] = []
+		new_notifications: list[dict[str, Any]] = []
 		for item in result:
 			ident, item = ensure_id(item)
 			self.registry[ident] = item
-			new_notifications.append(item)
+			new_notifications.append(client_notification_payload(item))
 		self._channel.emit(
 			"updateState",
-			{"notifications": [serialize(x) for x in new_notifications]},
+			{"notifications": new_notifications},
 		)
 
 	def _on_state_sync(self, payload: Any) -> None:
@@ -324,8 +325,10 @@ def ensure_id(
 	return ident, cast(NotificationData, value)
 
 
-def serialize(value: NotificationData):
-	return {k: v for k, v in value.items() if k not in ("onClose", "onOpen")}
+def client_notification_payload(value: Mapping[str, Any]) -> dict[str, Any]:
+	return {
+		key: entry for key, entry in value.items() if key not in CLIENT_CALLBACK_KEYS
+	}
 
 
 notifications_state = ps.global_state(NotificationsStore)

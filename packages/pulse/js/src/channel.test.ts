@@ -5,15 +5,15 @@ import {
 	PulseChannelResetError,
 } from "./channel";
 import { PulseSocketIOClient } from "./client";
-import type { ClientChannelMessage, ClientMessage } from "./messages";
+import type { ClientMessage } from "./messages";
 
 function makeClient() {
-	const sent: ClientChannelMessage[] = [];
-	const sendMessage = vi.fn(async (message: ClientChannelMessage) => {
+	const sent: ClientMessage[] = [];
+	const sendMessage = vi.fn(async (message: ClientMessage) => {
 		sent.push(message);
 	});
 	const client = { sendMessage } as any;
-	const bridge = new ChannelBridge(client, "chan-1");
+	const bridge = new ChannelBridge(client, "chan-1", "/view");
 	return { bridge, sent, sendMessage };
 }
 
@@ -22,7 +22,15 @@ describe("ChannelBridge", () => {
 		const { bridge, sent } = makeClient();
 		const pending = bridge.request("echo", { foo: 1 });
 		expect(sent).toHaveLength(1);
-		const requestId = sent[0]!.requestId!;
+		expect(sent[0]).toEqual(
+			expect.objectContaining({
+				type: "channel_message",
+				channel: "chan-1",
+				event: "echo",
+			}),
+		);
+		expect(sent[0]).not.toHaveProperty("path");
+		const requestId = (sent[0] as any).requestId!;
 		bridge.handleServerMessage({
 			type: "channel_message",
 			channel: "chan-1",
@@ -76,6 +84,24 @@ describe("ChannelBridge", () => {
 		await expect(pending).rejects.toBeInstanceOf(PulseChannelResetError);
 	});
 
+	it("rejects pending requests on transport disconnect without closing", async () => {
+		const { bridge, sent } = makeClient();
+		const pending = bridge.request("during-disconnect");
+		bridge.handleDisconnect(new PulseChannelResetError("Connection lost"));
+
+		await expect(pending).rejects.toBeInstanceOf(PulseChannelResetError);
+		expect(() => bridge.on("event", vi.fn())).not.toThrow();
+
+		bridge.emit("after-reconnect", { ok: true });
+		expect(sent.at(-1)).toEqual(
+			expect.objectContaining({
+				type: "channel_message",
+				channel: "chan-1",
+				event: "after-reconnect",
+			}),
+		);
+	});
+
 	it("reacquires a fresh bridge after release closes a channel", () => {
 		const client = new PulseSocketIOClient(
 			"http://pulse.test",
@@ -98,7 +124,7 @@ describe("ChannelBridge", () => {
 		expect(() => second.on("event", vi.fn())).not.toThrow();
 	});
 
-	it("rejects duplicate client channel acquisitions", () => {
+	it("connects once per channel id and rejects duplicate endpoints", () => {
 		const client = new PulseSocketIOClient(
 			"http://pulse.test",
 			{},
@@ -109,12 +135,26 @@ describe("ChannelBridge", () => {
 				reconnectErrorDelay: 0,
 			},
 		);
+		const sent: ClientMessage[] = [];
+		vi.spyOn(client, "sendMessage").mockImplementation((message: any) => {
+			sent.push(message);
+		});
 
-		client.acquireChannel("chan-1", "/a");
+		const first = client.acquireChannel("chan-1", "/a");
 
 		expect(() => client.acquireChannel("chan-1", "/b")).toThrow(
 			"Pulse channel 'chan-1' is already acquired",
 		);
+		expect(() => first.on("event", vi.fn())).not.toThrow();
+		expect(sent).toEqual([
+			expect.objectContaining({ type: "channel_connect", channel: "chan-1", path: "/a" }),
+		]);
+
+		client.releaseChannel("chan-1", "/a");
+		expect(sent.at(-1)).toEqual({
+			type: "channel_disconnect",
+			channel: "chan-1",
+		});
 	});
 
 	it("channel manager acquires with its view path and releases idempotently", () => {
@@ -139,18 +179,9 @@ describe("ChannelBridge", () => {
 		lease.release();
 
 		expect(sent).toEqual([
-			expect.objectContaining({
-				type: "channel_message",
-				channel: "chan-1",
-				event: "__close__",
-			}),
+			expect.objectContaining({ type: "channel_connect", path: "/view" }),
+			expect.objectContaining({ type: "channel_disconnect", channel: "chan-1" }),
 		]);
-		expect(sent as any[]).not.toContainEqual(
-			expect.objectContaining({ type: "channel_connect" }),
-		);
-		expect(sent as any[]).not.toContainEqual(
-			expect.objectContaining({ type: "channel_disconnect" }),
-		);
 	});
 
 	it("channel manager rejects duplicate acquires", () => {
@@ -164,6 +195,7 @@ describe("ChannelBridge", () => {
 				reconnectErrorDelay: 0,
 			},
 		);
+		vi.spyOn(client, "sendMessage").mockImplementation(() => {});
 
 		const manager = createPulseChannelManager(client, "/view");
 		manager.acquire("chan-1");
@@ -198,7 +230,7 @@ describe("ChannelBridge", () => {
 
 		expect(
 			sent
-				.filter((message) => message.type === "channel_message")
+				.filter((message) => message.type === "channel_disconnect")
 				.map((message) => message.channel),
 		).toEqual(["chan-b", "chan-a"]);
 		expect(() => manager.acquire("chan-c")).toThrow("PulseChannelManager is disposed");

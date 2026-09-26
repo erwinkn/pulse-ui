@@ -167,10 +167,26 @@ export class PulseSocketIOClient {
 				for (const [path, route] of this.#activeViews) {
 					this.#sendAttach(path, route.routeInfo, socket);
 				}
+				for (const [channel, endpoint] of this.#channels) {
+					socket.emit(
+						"message",
+						serialize({
+							type: "channel_connect",
+							channel,
+							path: endpoint.path,
+						}),
+					);
+				}
 
 				for (const payload of this.#messageQueue) {
 					// Already sent above
 					if (payload.type === "attach" && this.#activeViews.has(payload.path)) {
+						continue;
+					}
+					if (
+						payload.type === "channel_connect" ||
+						payload.type === "channel_disconnect"
+					) {
 						continue;
 					}
 					// We're reattaching all the routes, so no need to send update
@@ -470,8 +486,13 @@ export class PulseSocketIOClient {
 		if (this.#channels.has(id)) {
 			throw new Error(`Pulse channel '${id}' is already acquired`);
 		}
-		const bridge = new ChannelBridge(this, id);
+		const bridge = new ChannelBridge(this, id, path);
 		this.#channels.set(id, { path, bridge });
+		this.sendMessage({
+			type: "channel_connect",
+			channel: id,
+			path,
+		});
 		return bridge;
 	}
 
@@ -550,10 +571,8 @@ export class PulseSocketIOClient {
 		this.#channels.delete(id);
 		endpoint.bridge.dispose(new PulseChannelResetError("Channel released"));
 		this.sendMessage({
-			type: "channel_message",
+			type: "channel_disconnect",
 			channel: id,
-			event: "__close__",
-			payload: { reason: "refcount_zero" },
 		});
 	}
 }

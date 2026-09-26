@@ -76,6 +76,7 @@ class ServerApiCallMessage(TypedDict):
 
 class ServerChannelRequestMessage(TypedDict):
 	type: Literal["channel_message"]
+	path: NotRequired[str]
 	channel: str
 	event: str
 	payload: Any
@@ -85,6 +86,7 @@ class ServerChannelRequestMessage(TypedDict):
 
 class ServerChannelResponseMessage(TypedDict):
 	type: Literal["channel_message"]
+	path: NotRequired[str]
 	channel: str
 	event: None
 	responseTo: str

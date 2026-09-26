@@ -344,6 +344,11 @@ class ChannelsManager:
 		channel: "Channel",
 		msg: ServerChannelMessage,
 	) -> None:
+		if channel.route_path is not None and "path" not in msg:
+			msg = cast(
+				ServerChannelMessage,
+				cast(object, {**msg, "path": channel.route_path}),
+			)
 		self._render_session.send(msg)
 
 

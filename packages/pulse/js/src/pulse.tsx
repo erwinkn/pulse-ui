@@ -13,6 +13,7 @@ import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./c
 import type { RouteInfo } from "./helpers";
 import type { ServerError } from "./messages";
 import { VDOMRenderer } from "./renderer";
+import { deserialize } from "./serialize/serializer";
 import type { VDOM } from "./vdom";
 
 // =================================================================
@@ -221,6 +222,8 @@ export function PulseView({ path, registry }: PulseViewProps) {
 					client.sendJsResult(msg.id, result, error);
 				},
 				onServerError: setServerError,
+				deserializeMessage: (data) =>
+					deserialize(data, { coerceNullsToUndefined: true, renderer }),
 			});
 			return () => {
 				renderer.clearPendingCallbacks();

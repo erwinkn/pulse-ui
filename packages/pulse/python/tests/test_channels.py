@@ -49,6 +49,39 @@ async def test_channel_emit_sends_message():
 	assert message["payload"] == {"values": {"a": 1}}
 
 
+def test_route_bound_channel_emit_includes_path():
+	@ps.component
+	def view():
+		return ps.div()
+
+	app = ps.App([ps.Route("/", view)])
+	render = DummyRender()
+	session = SimpleNamespace(sid="session-route")
+
+	real_render = ps.RenderSession(render.id, app.routes)
+	real_render.send = render.send  # pyright: ignore[reportAttributeAccessIssue]
+
+	with ps.PulseContext(
+		app=app,
+		session=cast(UserSession, session),  # pyright: ignore[reportInvalidCast]
+		render=real_render,
+	):
+		real_render.prerender(["/"])
+		real_render.attach("/", app.routes.find("/").default_route_info())
+		mount = real_render.get_route_mount("/")
+		with ps.PulseContext.update(route=mount.route):
+			channel = real_render.channels.create("route-channel")
+			channel.emit("setValues", {"values": {"a": 1}})
+
+	assert len(render.sent) == 1
+	message = render.sent[0]
+	assert message["type"] == "channel_message"
+	assert message["path"] == "/"
+	assert message["channel"] == "route-channel"
+	assert message["event"] == "setValues"
+	assert message["payload"] == {"values": {"a": 1}}
+
+
 @pytest.mark.asyncio
 async def test_channel_request_resolves_on_response():
 	app = ps.App()

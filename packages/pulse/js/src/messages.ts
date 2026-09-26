@@ -43,6 +43,7 @@ export interface ServerApiCallMessage {
 
 export interface ServerChannelRequestMessage {
 	type: "channel_message";
+	path?: string;
 	channel: string;
 	event: string;
 	payload?: any;
@@ -53,6 +54,7 @@ export interface ServerChannelRequestMessage {
 
 export interface ServerChannelResponseMessage {
 	type: "channel_message";
+	path?: string;
 	channel: string;
 	event?: undefined;
 	responseTo: string;

@@ -1,0 +1,79 @@
+import { writeSync } from "node:fs";
+import type { Plugin, ViteDevServer } from "vite";
+
+const HMR_CLIENT_PORT_ENV = "PULSE_HMR_CLIENT_PORT";
+const READY_FD_ENV = "PULSE_VITE_READY_FD";
+
+function hmrClientPort(): number | undefined {
+	const raw = process.env[HMR_CLIENT_PORT_ENV];
+	if (raw === undefined || raw.trim() === "") return;
+	const port = Number(raw);
+	if (!Number.isInteger(port) || port <= 0) return;
+	return port;
+}
+
+function readyFd(): number | undefined {
+	const raw = process.env[READY_FD_ENV];
+	if (raw === undefined || raw.trim() === "") return;
+	const fd = Number(raw);
+	if (!Number.isInteger(fd) || fd < 0) {
+		throw new Error(
+			`${READY_FD_ENV} must be a non-negative integer, got ${JSON.stringify(raw)}`,
+		);
+	}
+	return fd;
+}
+
+export function pulse(): Plugin {
+	const fd = readyFd();
+	return {
+		name: "pulse",
+		apply: "serve",
+		enforce: "post",
+		config(userConfig) {
+			const clientPort = hmrClientPort();
+			if (clientPort === undefined) return;
+			const existingHmr = userConfig.server?.hmr;
+			// Respect an explicit HMR opt-out; merging an object over `false`
+			// would silently re-enable it.
+			if (existingHmr === false) return;
+			return {
+				server: {
+					hmr: {
+						...(typeof existingHmr === "object" && existingHmr
+							? existingHmr
+							: {}),
+						clientPort,
+					},
+				},
+			};
+		},
+		configureServer(server) {
+			if (fd === undefined) return;
+			notify(fd, "c");
+			bindListening(server, () => notify(fd, "1"));
+		},
+	};
+}
+
+function notify(fd: number, payload: string) {
+	try {
+		writeSync(fd, payload);
+	} catch {
+		// Supervisor closed the pipe (shutdown) or the write end is stale.
+	}
+}
+
+function bindListening(server: ViteDevServer, onListening: () => void) {
+	const httpServer = server.httpServer;
+	if (!httpServer) {
+		throw new Error(
+			"Pulse Vite plugin requires an HTTP server. Middleware mode is not supported.",
+		);
+	}
+	if (httpServer.listening) {
+		onListening();
+		return;
+	}
+	httpServer.once("listening", onListening);
+}

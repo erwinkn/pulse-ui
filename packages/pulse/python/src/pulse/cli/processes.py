@@ -2,21 +2,21 @@ from __future__ import annotations
 
 import contextlib
 import os
-import pty
 import re
-import select
 import signal
 import subprocess
 import sys
-from collections.abc import Sequence
-from io import TextIOBase
-from typing import TypeVar, cast
+import threading
+import time
+from collections.abc import Callable, Sequence
+from typing import IO, Any, cast, final
 
 from pulse.cli.helpers import os_family
 from pulse.cli.logging import TagMode
 from pulse.cli.models import CommandSpec
 
-_K = TypeVar("_K", int, str)
+PROCESS_STOP_TIMEOUT = 4.0
+PROCESS_KILL_TIMEOUT = 1.0
 
 # ANSI color codes for tagged output
 ANSI_CODES = {
@@ -31,6 +31,333 @@ TAG_COLORS = {"server": "cyan", "web": "orange1"}
 # Regex to strip ANSI escape codes
 ANSI_ESCAPE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
+# Strip terminal controls while preserving SGR formatting (CSI ... m).
+ANSI_TERMINAL_CONTROL = re.compile(
+	r"\x1B(?:\[[0-?]*[ -/]*(?:[@-l]|[n-~])"
+	+ r"|\][^\x07\x1B]*(?:\x07|\x1B\\)?"
+	+ r"|[PX^_][^\x1B]*(?:\x1B\\)?"
+	+ r"|(?!\[)[ -/]*[0-~])"
+)
+
+
+@final
+class _WindowsJob:
+	"""Own a Windows process tree and terminate every descendant on close."""
+
+	def __init__(self, process: subprocess.Popen[str]) -> None:
+		import ctypes
+		from ctypes import wintypes
+
+		@final
+		class IO_COUNTERS(ctypes.Structure):
+			_fields_ = [
+				("ReadOperationCount", ctypes.c_ulonglong),
+				("WriteOperationCount", ctypes.c_ulonglong),
+				("OtherOperationCount", ctypes.c_ulonglong),
+				("ReadTransferCount", ctypes.c_ulonglong),
+				("WriteTransferCount", ctypes.c_ulonglong),
+				("OtherTransferCount", ctypes.c_ulonglong),
+			]
+
+		@final
+		class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+			_fields_ = [
+				("PerProcessUserTimeLimit", ctypes.c_longlong),
+				("PerJobUserTimeLimit", ctypes.c_longlong),
+				("LimitFlags", wintypes.DWORD),
+				("MinimumWorkingSetSize", ctypes.c_size_t),
+				("MaximumWorkingSetSize", ctypes.c_size_t),
+				("ActiveProcessLimit", wintypes.DWORD),
+				("Affinity", ctypes.c_size_t),
+				("PriorityClass", wintypes.DWORD),
+				("SchedulingClass", wintypes.DWORD),
+			]
+
+		@final
+		class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+			_fields_ = [
+				("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+				("IoInfo", IO_COUNTERS),
+				("ProcessMemoryLimit", ctypes.c_size_t),
+				("JobMemoryLimit", ctypes.c_size_t),
+				("PeakProcessMemoryUsed", ctypes.c_size_t),
+				("PeakJobMemoryUsed", ctypes.c_size_t),
+			]
+
+		kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+		kernel32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+		kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+		kernel32.SetInformationJobObject.argtypes = [
+			wintypes.HANDLE,
+			ctypes.c_int,
+			wintypes.LPVOID,
+			wintypes.DWORD,
+		]
+		kernel32.SetInformationJobObject.restype = wintypes.BOOL
+		kernel32.AssignProcessToJobObject.argtypes = [
+			wintypes.HANDLE,
+			wintypes.HANDLE,
+		]
+		kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+		kernel32.OpenProcess.argtypes = [
+			wintypes.DWORD,
+			wintypes.BOOL,
+			wintypes.DWORD,
+		]
+		kernel32.OpenProcess.restype = wintypes.HANDLE
+		kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+		kernel32.TerminateJobObject.restype = wintypes.BOOL
+		kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+		kernel32.CloseHandle.restype = wintypes.BOOL
+
+		job = kernel32.CreateJobObjectW(None, None)
+		if not job:
+			raise ctypes.WinError(ctypes.get_last_error())
+
+		info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+		info.BasicLimitInformation.LimitFlags = 0x00002000  # KILL_ON_JOB_CLOSE
+		if not kernel32.SetInformationJobObject(
+			job, 9, ctypes.byref(info), ctypes.sizeof(info)
+		):
+			kernel32.CloseHandle(job)
+			raise ctypes.WinError(ctypes.get_last_error())
+
+		process_handle = kernel32.OpenProcess(
+			0x0001 | 0x0100,  # PROCESS_TERMINATE | PROCESS_SET_QUOTA
+			False,
+			process.pid,
+		)
+		if not process_handle:
+			kernel32.CloseHandle(job)
+			raise ctypes.WinError(ctypes.get_last_error())
+		try:
+			if not kernel32.AssignProcessToJobObject(job, process_handle):
+				raise ctypes.WinError(ctypes.get_last_error())
+		except BaseException:
+			kernel32.CloseHandle(job)
+			raise
+		finally:
+			kernel32.CloseHandle(process_handle)
+
+		self._kernel32 = kernel32
+		self._handle = job
+
+	def terminate(self) -> None:
+		if self._handle and not self._kernel32.TerminateJobObject(self._handle, 1):
+			import ctypes
+
+			raise ctypes.WinError(ctypes.get_last_error())
+
+	def close(self) -> None:
+		if self._handle:
+			self._kernel32.CloseHandle(self._handle)
+			self._handle = None
+
+
+@final
+class ManagedProcess:
+	"""A subprocess whose complete descendant tree has one lifecycle owner."""
+
+	def __init__(
+		self,
+		process: subprocess.Popen[str],
+		job: _WindowsJob | None,
+	) -> None:
+		self.process = process
+		self._reaped = False
+		self._output_thread: threading.Thread | None = None
+		self._wait_thread: threading.Thread | None = None
+		self._job = job
+		self._exit_code: int | None = None
+
+	@classmethod
+	def start(
+		cls,
+		spec: CommandSpec,
+		on_output: Callable[[str], None],
+		on_exit: Callable[[int], None],
+		*,
+		pass_fds: tuple[int, ...] = (),
+	) -> ManagedProcess:
+		windows = os_family() == "windows"
+		creationflags = 0
+		args = spec.args
+		kwargs: dict[str, object] = {}
+		if windows:
+			creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+			launcher = os.path.join(os.path.dirname(__file__), "_windows_launcher.py")
+			args = [sys.executable, "-I", launcher, *spec.args]
+			if pass_fds:
+				for fd in pass_fds:
+					os.set_inheritable(fd, True)
+				kwargs["close_fds"] = False
+		else:
+			kwargs["start_new_session"] = True
+			if pass_fds:
+				kwargs["pass_fds"] = pass_fds
+		process = subprocess.Popen(
+			args,
+			cwd=spec.cwd,
+			env=spec.env,
+			stdout=subprocess.PIPE,
+			stdin=subprocess.PIPE,
+			stderr=subprocess.STDOUT,
+			text=True,
+			bufsize=1,
+			creationflags=creationflags,
+			**cast(Any, kwargs),
+		)
+		job: _WindowsJob | None = None
+		try:
+			if windows:
+				job = _WindowsJob(process)
+				if process.stdin is None:
+					raise RuntimeError("launcher stdin is not available")
+				process.stdin.write("\0")
+				process.stdin.flush()
+		except BaseException:
+			if job is not None:
+				job.close()
+			with contextlib.suppress(Exception):
+				process.kill()
+			process.wait()
+			raise
+
+		def read_output(stream: IO[str] | None) -> None:
+			if stream is None:
+				return
+			for line in stream:
+				on_output(line.rstrip("\n"))
+
+		managed = cls(process, job)
+
+		def wait_for_exit() -> None:
+			if windows:
+				code = process.wait()
+			elif hasattr(os, "waitid"):
+				# Observe the exit without reaping (WNOWAIT): the zombie leader
+				# keeps the pid and pgid pinned until close() reaps it, so
+				# signalling the process group is always race-free.
+				try:
+					info = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
+				except ChildProcessError:
+					info = None
+				if info is not None and info.si_code == os.CLD_EXITED:
+					code = info.si_status
+				elif info is not None:
+					code = -info.si_status
+				else:
+					code = process.wait()
+			else:
+				# macOS below Python 3.13 lacks os.waitid: reap immediately and
+				# mark it, so group signals never target a recycled pgid.
+				code = process.wait()
+				managed._reaped = True
+			managed._exit_code = code
+			on_exit(code)
+
+		output_thread = threading.Thread(
+			target=read_output,
+			args=(process.stdout,),
+			name=f"pulse-{spec.name}-output",
+			daemon=True,
+		)
+		wait_thread = threading.Thread(
+			target=wait_for_exit,
+			name=f"pulse-{spec.name}-wait",
+			daemon=True,
+		)
+		output_thread.start()
+		wait_thread.start()
+		managed._output_thread = output_thread
+		managed._wait_thread = wait_thread
+		_call_on_spawn(spec)
+		return managed
+
+	@property
+	def returncode(self) -> int | None:
+		if os_family() == "windows":
+			return self.process.poll()
+		# Never poll() on POSIX: reaping is deferred to close() so the zombie
+		# leader keeps its pgid ours for the lifetime of this object.
+		return self._exit_code
+
+	def is_alive(self) -> bool:
+		return self.returncode is None
+
+	def request_stop(self) -> None:
+		if os_family() == "windows":
+			if not self.is_alive():
+				return
+			ctrl_break = getattr(signal, "CTRL_BREAK_EVENT", None)
+			if ctrl_break is not None:
+				with contextlib.suppress(OSError):
+					self.process.send_signal(ctrl_break)
+					return
+			self.process.terminate()
+			return
+		# Safe after the leader exits but before it is reaped: the zombie pins
+		# the pgid. Once reaped, the pgid may be recycled, so never signal it.
+		if self._reaped:
+			return
+		with contextlib.suppress(ProcessLookupError, PermissionError):
+			os.killpg(self.process.pid, signal.SIGTERM)
+
+	def send_line(self, line: str) -> None:
+		if self.process.stdin is None:
+			raise RuntimeError("process stdin is not available")
+		self.process.stdin.write(line + "\n")
+		self.process.stdin.flush()
+
+	def kill_tree(self) -> None:
+		if self._job is not None:
+			self._job.terminate()
+			return
+		# Kills surviving group members (e.g. grandchildren of a crashed
+		# leader) too: the zombie leader pins the pgid until close() reaps it.
+		# After the reap the pgid may be recycled, so never signal it then.
+		if self._reaped:
+			return
+		with contextlib.suppress(ProcessLookupError, PermissionError):
+			os.killpg(self.process.pid, signal.SIGKILL)
+
+	def close(self) -> None:
+		if self.process.stdin is not None:
+			with contextlib.suppress(Exception):
+				self.process.stdin.close()
+		# Wait for death and drain stdout before closing the pipe, otherwise a
+		# traceback printed as the child exits can be swallowed.
+		if self._wait_thread is not None:
+			self._wait_thread.join(timeout=1)
+		if self._output_thread is not None:
+			self._output_thread.join(timeout=1)
+			if self._output_thread.is_alive() and self.process.stdout is not None:
+				with contextlib.suppress(Exception):
+					self.process.stdout.close()
+				self._output_thread.join(timeout=1)
+		if self.process.stdout is not None:
+			with contextlib.suppress(Exception):
+				self.process.stdout.close()
+		if os_family() != "windows" and not self._reaped:
+			# Reap the leader last so its pgid stayed ours for every kill above.
+			# Mark first: once the reap happens the pgid may be recycled, so no
+			# later request_stop()/kill_tree() may signal it.
+			self._reaped = True
+			try:
+				self.process.wait(timeout=PROCESS_KILL_TIMEOUT)
+			except subprocess.TimeoutExpired:
+				# A child stuck in uninterruptible sleep: the pgid is provably
+				# still pinned here, so take one last shot at survivors, then
+				# leave the zombie rather than hanging shutdown forever.
+				with contextlib.suppress(ProcessLookupError, PermissionError):
+					os.killpg(self.process.pid, signal.SIGKILL)
+				sys.stderr.write(
+					f"Warning: process {self.process.pid} did not exit; leaving it unreaped\n"
+				)
+		if self._job is not None:
+			self._job.close()
+			self._job = None
+
 
 def execute_commands(
 	commands: Sequence[CommandSpec],
@@ -38,6 +365,10 @@ def execute_commands(
 	tag_mode: TagMode = "colored",
 ) -> int:
 	"""Run the provided commands, streaming tagged output to stdout.
+
+	Returns when any command exits; the others are stopped gracefully and then
+	killed with their descendant trees. Children see pipes, not a terminal;
+	command environments carry FORCE_COLOR when color output is wanted.
 
 	Args:
 		commands: List of command specifications to run
@@ -48,14 +379,78 @@ def execute_commands(
 	if not commands:
 		return 0
 
-	# Avoid pty.fork() in multi-threaded environments (like pytest) to prevent
-	# "DeprecationWarning: This process is multi-threaded, use of forkpty() may lead to deadlocks"
-	# Also skip pty on Windows or if fork is unavailable
-	in_pytest = "pytest" in sys.modules
-	if os_family() == "windows" or not hasattr(pty, "fork") or in_pytest:
-		return _run_without_pty(commands, tag_mode=tag_mode)
+	def interrupt_on_sigterm(_signum: int, _frame: object) -> None:
+		raise KeyboardInterrupt
 
-	return _run_with_pty(commands, tag_mode=tag_mode)
+	previous_sigterm = signal.signal(signal.SIGTERM, interrupt_on_sigterm)
+	processes: list[ManagedProcess] = []
+	exit_codes: dict[str, int] = {}
+	exited = threading.Event()
+
+	def start(spec: CommandSpec) -> ManagedProcess:
+		ready = threading.Event()
+
+		def on_output(line: str) -> None:
+			write_tagged_line(spec.name, line, tag_mode)
+			if spec.ready_pattern and not ready.is_set() and _matches_ready(spec, line):
+				ready.set()
+				if spec.on_ready:
+					try:
+						spec.on_ready()
+					except Exception:
+						pass
+
+		def on_exit(code: int) -> None:
+			exit_codes[spec.name] = code
+			exited.set()
+
+		return ManagedProcess.start(spec, on_output, on_exit)
+
+	try:
+		for spec in commands:
+			processes.append(start(spec))
+		# Poll the event instead of blocking forever: on Windows a bare
+		# Event.wait() would swallow Ctrl+C.
+		while not exited.wait(0.2):
+			pass
+		# Stop the survivors before reading exit codes so every process
+		# contributes one; _stop_processes is idempotent for the finally below.
+		_stop_processes(processes)
+		return max(exit_codes.values())
+	except KeyboardInterrupt:
+		sys.stdout.write("\nShutting down...\n")
+		sys.stdout.flush()
+		return 130
+	finally:
+		_stop_processes(processes)
+		signal.signal(signal.SIGTERM, previous_sigterm)
+
+
+def _stop_processes(processes: list[ManagedProcess]) -> None:
+	"""Stop processes gracefully, then terminate every owned descendant tree.
+
+	Output threads keep draining throughout, so full pipes cannot prevent a
+	child from completing its shutdown hooks. A second Ctrl+C skips the grace
+	period and goes straight to the kill.
+	"""
+	for process in processes:
+		process.request_stop()
+	with contextlib.suppress(KeyboardInterrupt):
+		deadline = time.monotonic() + PROCESS_STOP_TIMEOUT
+		while (
+			any(process.is_alive() for process in processes)
+			and time.monotonic() < deadline
+		):
+			time.sleep(0.05)
+	for process in processes:
+		process.kill_tree()
+	deadline = time.monotonic() + PROCESS_KILL_TIMEOUT
+	while (
+		any(process.is_alive() for process in processes) and time.monotonic() < deadline
+	):
+		time.sleep(0.05)
+	for process in processes:
+		process.close()
 
 
 def _call_on_spawn(spec: CommandSpec) -> None:
@@ -67,194 +462,13 @@ def _call_on_spawn(spec: CommandSpec) -> None:
 			pass
 
 
-def _check_on_ready(
-	spec: CommandSpec,
-	line: str,
-	ready_flags: dict[_K, bool],
-	key: _K,
-) -> None:
-	"""Check if line matches ready_pattern and call on_ready if needed."""
-	if spec.ready_pattern and not ready_flags[key]:
-		# Strip ANSI codes before matching
-		clean_line = ANSI_ESCAPE.sub("", line)
-		if re.search(spec.ready_pattern, clean_line):
-			ready_flags[key] = True
-			if spec.on_ready:
-				try:
-					spec.on_ready()
-				except Exception:
-					pass
+def _matches_ready(spec: CommandSpec, line: str) -> bool:
+	return bool(
+		spec.ready_pattern and re.search(spec.ready_pattern, ANSI_ESCAPE.sub("", line))
+	)
 
 
-def _run_with_pty(
-	commands: Sequence[CommandSpec],
-	*,
-	tag_mode: TagMode,
-) -> int:
-	procs: list[tuple[str, int, int]] = []
-	completed_codes: list[int] = []
-	fd_to_spec: dict[int, CommandSpec] = {}
-	buffers: dict[int, bytearray] = {}
-	ready_flags: dict[int, bool] = {}
-
-	try:
-		for spec in commands:
-			pid, fd = pty.fork()
-			if pid == 0:
-				if spec.cwd:
-					os.chdir(spec.cwd)
-				os.execvpe(spec.args[0], spec.args, spec.env)
-			else:
-				fcntl = __import__("fcntl")
-				fcntl.fcntl(fd, fcntl.F_SETFL, os.O_NONBLOCK)
-				procs.append((spec.name, pid, fd))
-				fd_to_spec[fd] = spec
-				buffers[fd] = bytearray()
-				ready_flags[fd] = False
-				_call_on_spawn(spec)
-
-		while procs:
-			for tag, pid, fd in list(procs):
-				try:
-					wpid, status = os.waitpid(pid, os.WNOHANG)
-					if wpid == pid:
-						procs.remove((tag, pid, fd))
-						completed_codes.append(
-							os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1
-						)
-						_close_fd(fd)
-				except ChildProcessError:
-					procs.remove((tag, pid, fd))
-					completed_codes.append(1)
-					_close_fd(fd)
-
-			if completed_codes or not procs:
-				break
-
-			readable = [fd for _, _, fd in procs]
-			try:
-				ready, _, _ = select.select(readable, [], [], 0.1)
-			except (OSError, ValueError):
-				break
-
-			for fd in ready:
-				try:
-					data = os.read(fd, 4096)
-					if not data:
-						continue
-					buffers[fd].extend(data)
-					while b"\n" in buffers[fd]:
-						line, remainder = buffers[fd].split(b"\n", 1)
-						buffers[fd] = remainder
-						decoded = line.decode(errors="replace")
-						if decoded:
-							spec = fd_to_spec[fd]
-							_write_tagged_line(spec.name, decoded, tag_mode)
-							_check_on_ready(spec, decoded, ready_flags, fd)
-				except OSError:
-					continue
-
-		return max(completed_codes) if completed_codes else 0
-
-	except KeyboardInterrupt:
-		for _tag, pid, _fd in procs:
-			try:
-				os.kill(pid, signal.SIGTERM)
-			except Exception:
-				pass
-		return 130
-	finally:
-		for _tag, pid, fd in procs:
-			try:
-				os.kill(pid, signal.SIGKILL)
-			except Exception:
-				pass
-			_close_fd(fd)
-
-
-def _run_without_pty(
-	commands: Sequence[CommandSpec],
-	*,
-	tag_mode: TagMode,
-) -> int:
-	from selectors import EVENT_READ, DefaultSelector
-
-	procs: list[tuple[str, subprocess.Popen[str], CommandSpec]] = []
-	completed_codes: list[int] = []
-	selector = DefaultSelector()
-	ready_flags: dict[str, bool] = {}
-
-	try:
-		for spec in commands:
-			proc = subprocess.Popen(
-				spec.args,
-				cwd=spec.cwd,
-				env=spec.env,
-				stdout=subprocess.PIPE,
-				stderr=subprocess.STDOUT,
-				text=True,
-				bufsize=1,
-				universal_newlines=True,
-			)
-			_call_on_spawn(spec)
-			if proc.stdout:
-				selector.register(proc.stdout, EVENT_READ, data=spec.name)
-			ready_flags[spec.name] = False
-			procs.append((spec.name, proc, spec))
-
-		while procs:
-			events = selector.select(timeout=0.1)
-			for key, _mask in events:
-				name = key.data
-				stream = key.fileobj
-				if isinstance(stream, int):
-					continue
-				# stream is now guaranteed to be a file-like object
-				line = cast(TextIOBase, stream).readline()
-				if line:
-					_write_tagged_line(name, line.rstrip("\n"), tag_mode)
-					spec = next((s for n, _, s in procs if n == name), None)
-					if spec:
-						_check_on_ready(spec, line, ready_flags, name)
-				else:
-					selector.unregister(stream)
-			remaining: list[tuple[str, subprocess.Popen[str], CommandSpec]] = []
-			for name, proc, spec in procs:
-				code = proc.poll()
-				if code is None:
-					remaining.append((name, proc, spec))
-				else:
-					completed_codes.append(code)
-					if proc.stdout:
-						with contextlib.suppress(Exception):
-							selector.unregister(proc.stdout)
-							proc.stdout.close()
-			procs = remaining
-			if completed_codes:
-				break
-	except KeyboardInterrupt:
-		for _name, proc, _spec in procs:
-			with contextlib.suppress(Exception):
-				proc.terminate()
-		return 130
-	finally:
-		for _name, proc, _spec in procs:
-			with contextlib.suppress(Exception):
-				proc.terminate()
-			with contextlib.suppress(Exception):
-				proc.wait(timeout=1)
-		for key in list(selector.get_map().values()):
-			with contextlib.suppress(Exception):
-				selector.unregister(key.fileobj)
-		selector.close()
-
-	exit_codes = completed_codes + [
-		proc.returncode or 0 for _name, proc, _spec in procs
-	]
-	return max(exit_codes) if exit_codes else 0
-
-
-def _write_tagged_line(name: str, message: str, tag_mode: TagMode) -> None:
+def write_tagged_line(name: str, message: str, tag_mode: TagMode) -> None:
 	"""Write a line of output with optional process tag.
 
 	Args:
@@ -275,6 +489,7 @@ def _write_tagged_line(name: str, message: str, tag_mode: TagMode) -> None:
 	):
 		return
 
+	message = ANSI_TERMINAL_CONTROL.sub("", message)
 	if tag_mode == "colored":
 		color = ANSI_CODES.get(TAG_COLORS.get(name, ""), "")
 		if color:
@@ -285,8 +500,3 @@ def _write_tagged_line(name: str, message: str, tag_mode: TagMode) -> None:
 		# Plain mode: tags without color
 		sys.stdout.write(f"[{name}] {message}\n")
 	sys.stdout.flush()
-
-
-def _close_fd(fd: int) -> None:
-	with contextlib.suppress(Exception):
-		os.close(fd)

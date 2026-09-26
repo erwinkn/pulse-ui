@@ -14,6 +14,8 @@ export { FormSubmissionError, PulseForm, submitForm } from "./form";
 export type { RouteInfo } from "./helpers";
 // Server helpers
 export { buildRouteInfo, type LocationLike } from "./helpers";
+// Pre-hydration input capture (SSR documents embed the script; PulseApp replays)
+export { preHydrationInputCaptureScript, replayPreHydrationInputs } from "./hydration";
 export * from "./router";
 // Messages (types only)
 export type {
@@ -37,9 +39,15 @@ export type {
 	ServerNavigateToMessage,
 	ServerUpdateMessage,
 } from "./messages";
-export type { PulseConfig, PulsePrerender, PulseProviderProps } from "./pulse";
+export type {
+	PulseAppProps,
+	PulseConfig,
+	PulsePrerender,
+	PulseProviderProps,
+} from "./pulse";
 // Core React bindings
 export {
+	PulseApp,
 	PulseViewIdContext,
 	PulseProvider,
 	PulseView,
@@ -61,7 +69,6 @@ export { VDOMRenderer } from "./renderer";
 // } from "./serialize/clean";
 export { deserialize, serialize } from "./serialize/serializer";
 // Transports (types only - implementation is internal)
-export type { MessageListener, Transport } from "./transport";
 // VDOM types and helpers
 export type {
 	ComponentRegistry,

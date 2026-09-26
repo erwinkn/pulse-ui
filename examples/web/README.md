@@ -1,34 +1,23 @@
-# Pulse + React Router example
+# Pulse web example
 
-A minimal React Router application wired up to the Pulse UI client. It is intended as a reference for integrating Pulse into an SSR-ready React Router project without any extra tooling.
+The web project for the Pulse examples in this directory. It hosts the
+generated Pulse app (`app/pulse/`, written by codegen) on top of a plain Vite +
+React setup with the custom Pulse router — no third-party routing framework.
 
 ## What's included
-- React Router SSR with the default `react-router-serve` server
+- Vite dev server for assets and HMR (`bun run dev`)
+- A small Bun SSR server (`server/ssr.ts`) that renders HTML for the Python
+  server (`bun run ssr`)
 - Tailwind CSS via `@tailwindcss/vite`
-- Pulse UI client components served from the `/app` alias
+- Client/server entries in `src/entry-client.tsx` and `src/entry-server.tsx`
 
-## Setup
+## Usage
 
-Install dependencies:
+You normally don't run this project directly — `pulse run ../main.py` starts
+the Python server, the Vite asset server, and the SSR server together.
 
-```bash
-npm install
-```
-
-Start the development server:
+To build for production:
 
 ```bash
-npm run dev
-```
-
-Generate a production build:
-
-```bash
-npm run build
-```
-
-Type definitions can be refreshed with:
-
-```bash
-npm run typecheck
+bun run build   # vite build && vite build --ssr src/entry-server.tsx
 ```

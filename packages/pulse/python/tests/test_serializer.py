@@ -5,7 +5,10 @@ import json
 from dataclasses import FrozenInstanceError, dataclass
 from typing import Any, cast, override
 
+import pulse as ps
 import pytest
+from pulse._serializer.types import PulseVDOM
+from pulse.renderer import Renderer
 from pulse.serializer import (
 	PulseSerializable,
 	Serializer,
@@ -14,6 +17,7 @@ from pulse.serializer import (
 	deserialize,
 	serialize,
 )
+from pulse.transpiler.nodes import Call, Identifier, Literal
 
 
 def wire_roundtrip(value: object) -> Any:
@@ -48,6 +52,7 @@ def test_serializer_configuration_is_immutable():
 		set,
 		dt.date,
 		dt.datetime,
+		PulseVDOM,
 		WireMap,
 	],
 )
@@ -304,3 +309,165 @@ def test_arbitrary_dunder_dict_objects_are_rejected():
 
 	with pytest.raises(TypeError, match="unsupported value of type Value"):
 		serialize(Value())
+
+
+def test_user_vdom_looking_dict_stays_plain_data():
+	data = {"tag": "span", "children": ["Feedback"]}
+
+	assert serialize(data) == [5, data]
+	assert wire_roundtrip(data) == data
+
+
+def test_nested_expr_serializes_as_vdom_marker():
+	wire = serialize({"value": Identifier("window")})
+
+	assert wire == [5, {"value": ["$", "v", {"t": "id", "name": "window"}]}]
+	assert deserialize(wire) == {"value": {"t": "id", "name": "window"}}
+
+
+def test_nested_element_serializes_as_vdom_marker():
+	wire = serialize({"title": ps.span("Feedback")})
+
+	assert wire == [5, {"title": ["$", "v", {"tag": "span", "children": ["Feedback"]}]}]
+	assert deserialize(wire) == {"title": {"tag": "span", "children": ["Feedback"]}}
+
+
+def test_snapshot_rendering_strips_callbacks_from_vdom_output():
+	wire = serialize({"button": ps.button("Save", onClick=lambda: None)})
+
+	assert wire == [5, {"button": ["$", "v", {"tag": "button", "children": ["Save"]}]}]
+
+
+def test_snapshot_rendering_does_not_mutate_original_element():
+	def handler() -> None:
+		pass
+
+	button = ps.button("Save", onClick=handler)
+	serialize({"button": button})
+
+	assert button.props_dict()["onClick"] is handler
+	vdom, _normalized = Renderer().render_node(button, "")
+	element = cast(dict[str, Any], cast(object, vdom))
+	assert element["props"]["onClick"] == "$cb"
+	assert element["eval"] == ["onClick"]
+
+
+def test_snapshot_rendering_does_not_mutate_original_pulse_node():
+	@ps.component
+	def Label():
+		return ps.span("Saved")
+
+	node = Label()
+	serialize({"label": node})
+
+	assert node.hooks is None
+	assert node.contents is None
+
+
+def test_plain_payload_callbacks_are_unsupported():
+	def on_open(_notification: object) -> None:
+		pass
+
+	with pytest.raises(TypeError, match="unsupported value"):
+		serialize(
+			{
+				"title": ps.span("Feedback"),
+				"message": "Done",
+				"onOpen": on_open,
+			}
+		)
+
+
+def test_snapshot_vdom_payload_is_recursively_serialized():
+	when = dt.datetime(2024, 4, 5, 6, 7, 8, tzinfo=dt.UTC)
+	wire = serialize({"title": ps.span(when)})
+
+	assert wire == [
+		5,
+		{
+			"title": [
+				"$",
+				"v",
+				{"tag": "span", "children": [["$", "t", "2024-04-05T06:07:08.000Z"]]},
+			]
+		},
+	]
+	parsed = wire_roundtrip({"title": ps.span(when)})
+	assert parsed["title"]["children"] == [when]
+
+
+def test_renderable_next_to_date_round_trips():
+	day = dt.date(2024, 1, 2)
+	wire = serialize([ps.span("x"), day])
+
+	assert wire == [
+		5,
+		[
+			["$", "v", {"tag": "span", "children": ["x"]}],
+			["$", "t", "2024-01-02T00:00:00.000Z"],
+		],
+	]
+	assert wire_roundtrip([ps.span("x"), day]) == [
+		{"tag": "span", "children": ["x"]},
+		dt.datetime(2024, 1, 2, tzinfo=dt.UTC),
+	]
+
+
+def test_reused_renderable_serializes_as_backref():
+	span = ps.span("x")
+	wire = serialize([span, span])
+
+	assert wire == [5, [["$", "v", {"tag": "span", "children": ["x"]}], ["$", 1]]]
+	parsed = wire_roundtrip([span, span])
+	assert parsed[0] is parsed[1]
+
+
+def test_js_exec_expr_can_include_element_payload():
+	expr = Call(Identifier("show"), [ps.span("Feedback"), Literal("Done")])
+	assert expr.render() == {
+		"t": "call",
+		"callee": {"t": "id", "name": "show"},
+		"args": [
+			{"tag": "span", "children": ["Feedback"]},
+			"Done",
+		],
+	}
+
+
+def test_snapshot_render_disposes_inline_effects():
+	from pulse.reactive import Signal, flush_effects
+
+	sig = Signal(0)
+	runs: list[int] = []
+
+	@ps.component
+	def Toast():
+		@ps.effect(immediate=True)
+		def track():  # pyright: ignore[reportUnusedFunction]
+			runs.append(sig())
+
+		return ps.div(f"value: {sig()}")
+
+	serialize(Toast())
+	flush_effects()
+	assert runs == [0]
+
+	sig.write(1)
+	flush_effects()
+	assert runs == [0]
+
+
+def test_configured_adapters_do_not_disable_renderable_projection():
+	class Price:
+		amount: int
+
+		def __init__(self, amount: int) -> None:
+			self.amount = amount
+
+	serializer = Serializer([SerializerAdapter(Price, lambda price: price.amount)])
+	wire = serializer.serialize({"price": Price(12), "title": ps.span("Hi")})
+
+	assert wire == [
+		5,
+		{"price": 12, "title": ["$", "v", {"tag": "span", "children": ["Hi"]}]},
+	]

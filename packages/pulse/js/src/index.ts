@@ -49,6 +49,7 @@ export {
 export { VDOMRenderer } from "./renderer";
 // Serialization helpers
 export { deserialize, serialize } from "./serialize/serializer";
+export type { DeserializeOptions } from "./serialize/serializer";
 // Transports (types only - implementation is internal)
 export type { MessageListener, Transport } from "./transport";
 // VDOM types and helpers

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Generic, Literal, TypeVar, override
 
 from pulse.helpers import Disposable, call_flexible
+from pulse.reactive import Untrack
 
 logger = logging.getLogger(__name__)
 
@@ -194,10 +195,15 @@ class HookNamespace(Generic[T]):
 		normalized = self._normalize_key(key)
 		state = self.states.get(normalized)
 		if state is None:
-			created = call_flexible(
-				self.hook.factory,
-				HookInit(definition=self.hook, render_cycle=ctx.render_cycle, key=key),
-			)
+			# Shield the factory from the ambient scope: the hook state owns
+			# whatever reactives it creates and disposes them itself.
+			with Untrack():
+				created = call_flexible(
+					self.hook.factory,
+					HookInit(
+						definition=self.hook, render_cycle=ctx.render_cycle, key=key
+					),
+				)
 			if inspect.isawaitable(created):
 				raise HookError(
 					f"Hook factory '{self.hook.name}' returned an awaitable; "
@@ -280,6 +286,15 @@ class HookContext:
 
 HOOK_CONTEXT: ContextVar[HookContext | None] = ContextVar(
 	"pulse_hook_context", default=None
+)
+
+# True while a one-time initializer (ps.setup init function or a ps.init()
+# block) is running. Effects created there are captured and owned by that
+# initializer's scope, so @ps.effect must create standalone effects instead
+# of registering them in the inline-effects hook (which would double-own
+# them and dispose mount-only effects on the next render).
+INIT_SCOPE_ACTIVE: ContextVar[bool] = ContextVar(
+	"pulse_init_scope_active", default=False
 )
 
 
@@ -446,6 +461,7 @@ __all__ = [
 	"HookState",
 	"HookAlreadyRegisteredError",
 	"HOOK_CONTEXT",
+	"INIT_SCOPE_ACTIVE",
 	"HookRegistry",
 	"hooks",
 	"MISSING",

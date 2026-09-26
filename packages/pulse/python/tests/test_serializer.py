@@ -284,3 +284,28 @@ def test_js_exec_expr_can_include_element_payload():
 			"Done",
 		],
 	}
+
+
+def test_snapshot_render_disposes_inline_effects():
+	"""Serializing a renderable must not leak effects created during the
+	one-shot snapshot render."""
+	from pulse.reactive import Signal, flush_effects
+
+	sig = Signal(0)
+	runs: list[int] = []
+
+	@ps.component
+	def Toast():
+		@ps.effect(immediate=True)
+		def track():  # pyright: ignore[reportUnusedFunction]
+			runs.append(sig())
+
+		return ps.div(f"value: {sig()}")
+
+	serialize(Toast())
+	flush_effects()
+	assert runs == [0]
+
+	sig.write(1)
+	flush_effects()
+	assert runs == [0]

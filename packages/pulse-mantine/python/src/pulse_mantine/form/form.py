@@ -1,4 +1,3 @@
-import json
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import datetime
 from typing import (
@@ -14,7 +13,6 @@ import pulse as ps
 from pulse.helpers import call_flexible, maybe_await
 from pulse.reactive_extensions import ReactiveDict
 from pulse.scheduling import create_task
-from pulse.serializer import deserialize
 
 from .internal import FormInternal, FormMode
 from .validators import (
@@ -122,19 +120,18 @@ class MantineForm(ps.State, Generic[TForm]):
 			self._create_channel()
 
 	async def _handle_form_data(self, data: ps.FormData):
-		# Expect one JSON-serialized entry under "__data__" with v3 serializer
-		# and remaining entries are files keyed by their dot/bracket paths.
-		raw = data.get("__data__")
+		# Pulse's form endpoint already deserialized the "__data__" entry and
+		# merged its values into `data` (see FormRegistry.handle_submit), so by
+		# the time we get here the dict holds the form values (files stripped
+		# client-side) plus UploadFile entries keyed by their dot/bracket paths.
 		base: dict[str, Any] = {}
-		if isinstance(raw, str) and raw:
-			try:
-				payload = json.loads(raw)
-				base = deserialize(payload)
-			except Exception:
-				base = {}
-
+		files: dict[str, Any] = {}
+		for key, value in data.items():
+			if _is_file_entry(value):
+				files[key] = value
+			else:
+				base[key] = value
 		# Merge file entries back into the nested structure
-		files: dict[str, Any] = {k: v for k, v in data.items() if k != "__data__"}
 		result = _merge_files_into_structure(base, files)
 
 		# Run server-side validation for ALL rules before forwarding to user's onSubmit.
@@ -532,6 +529,16 @@ def _check_for_reserved_keys(obj: Any, path: str = "") -> None:
 	elif isinstance(obj, list):
 		for idx, v in enumerate(cast(list[Any], obj)):
 			_check_for_reserved_keys(v, f"{path}[{idx}]")
+
+
+def _is_file_entry(value: Any) -> bool:
+	"""True for UploadFile entries (or lists of them) posted alongside __data__."""
+	if isinstance(value, ps.UploadFile):
+		return True
+	if isinstance(value, list):
+		values = cast(list[Any], value)
+		return len(values) > 0 and all(isinstance(v, ps.UploadFile) for v in values)
+	return False
 
 
 def _merge_files_into_structure(base: Any, files: dict[str, Any]) -> Any:

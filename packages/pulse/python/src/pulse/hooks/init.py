@@ -7,10 +7,13 @@ import inspect
 import textwrap
 import types
 from collections.abc import Callable, Sequence
+from contextvars import Token
+from dataclasses import dataclass, field
 from typing import Any, Literal, cast, override
 
-from pulse.helpers import getsourcecode
-from pulse.hooks.core import HookState, hooks
+from pulse.helpers import Disposable, dispose_owned_collection, getsourcecode
+from pulse.hooks.core import INIT_SCOPE_ACTIVE, HookState, hooks
+from pulse.reactive import Effect, Scope
 from pulse.transpiler.errors import TranspileError
 
 # Storage keyed by (code object, lineno) of the `with ps.init()` call site.
@@ -76,6 +79,8 @@ class InitContext:
 	pre_keys: set[str]
 	saved: dict[str, Any]
 	key: str | None
+	_scope: Scope | None
+	_flag_token: Token[bool] | None
 
 	def __init__(self, *, key: str | None = None):
 		self.callsite = None
@@ -84,6 +89,8 @@ class InitContext:
 		self.pre_keys = set()
 		self.saved = {}
 		self.key = key
+		self._scope = None
+		self._flag_token = None
 
 	def __enter__(self):
 		self.frame = previous_frame()
@@ -93,12 +100,22 @@ class InitContext:
 
 		storage = _init_hook().storage
 		entry = storage.get(self.callsite)
-		if entry is None or entry.get("key") != self.key:
+		if entry is None or entry.key != self.key:
+			if entry is not None:
+				# The key changed: the block re-runs, so everything the
+				# previous run created is replaced and must be disposed.
+				entry.dispose_owned()
+				del storage[self.callsite]
 			self.first_render = True
 			self.saved = {}
+			# Capture effects/states created by the block so the hook owns
+			# them; INIT_SCOPE_ACTIVE makes @ps.effect skip the inline cache.
+			self._scope = Scope()
+			self._scope.__enter__()
+			self._flag_token = INIT_SCOPE_ACTIVE.set(True)
 		else:
 			self.first_render = False
-			self.saved = entry["vars"]
+			self.saved = entry.vars
 		return self
 
 	def restore_variables(self):
@@ -112,7 +129,7 @@ class InitContext:
 		self.saved = values
 		assert self.callsite is not None, "callsite is None"
 		storage = _init_hook().storage
-		storage[self.callsite] = {"vars": values, "key": self.key}
+		storage[self.callsite] = InitEntry(vars=values, key=self.key)
 
 	def _capture_new_locals(self) -> dict[str, Any]:
 		frame = self.frame
@@ -132,11 +149,27 @@ class InitContext:
 		exc_value: BaseException | None,
 		exc_tb: Any,
 	) -> Literal[False]:
+		scope = self._scope
+		if scope is not None:
+			assert self._flag_token is not None
+			INIT_SCOPE_ACTIVE.reset(self._flag_token)
+			self._flag_token = None
+			scope.__exit__(exc_type, exc_value, exc_tb)
+			self._scope = None
 		if exc_type is None:
-			captured = self._capture_new_locals()
-			assert self.callsite is not None, "callsite  None"
-			storage = _init_hook().storage
-			storage[self.callsite] = {"vars": captured, "key": self.key}
+			if self.first_render:
+				captured = self._capture_new_locals()
+				assert self.callsite is not None, "callsite is None"
+				entry = InitEntry(vars=captured, key=self.key)
+				if scope is not None:
+					entry.effects = list(scope.effects)
+					entry.states = list(scope.states)
+				_init_hook().storage[self.callsite] = entry
+		elif scope is not None:
+			# The block raised partway through: dispose whatever it created.
+			InitEntry(
+				vars={}, key=self.key, effects=scope.effects, states=scope.states
+			).dispose_owned()
 		self.frame = None
 		return False
 
@@ -674,10 +707,28 @@ def _resolve_init_bindings(func: Callable[..., Any]) -> tuple[set[str], set[str]
 	return init_names, init_modules
 
 
+@dataclass(slots=True)
+class InitEntry:
+	"""Saved variables plus the effects/states a `ps.init()` block created."""
+
+	vars: dict[str, Any]
+	key: str | None
+	effects: list[Effect] = field(default_factory=list)
+	states: list[Disposable] = field(default_factory=list)
+
+	def dispose_owned(self) -> None:
+		owned: list[Disposable] = [*self.effects, *self.states]
+		self.effects = []
+		self.states = []
+		dispose_owned_collection("a ps.init() block", owned)
+
+
 class InitState(HookState):
 	def __init__(self) -> None:
-		self.storage: dict[tuple[Any, int], dict[str, Any]] = {}
+		self.storage: dict[tuple[Any, int], InitEntry] = {}
 
 	@override
 	def dispose(self) -> None:
+		for entry in self.storage.values():
+			entry.dispose_owned()
 		self.storage.clear()

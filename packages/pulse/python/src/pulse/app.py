@@ -278,6 +278,7 @@ class App:
 	session_timeout: float
 	connection_status: ConnectionStatusConfig
 	render_loop_limit: int
+	unowned_reactives: Literal["error", "warn", "ignore"]
 	prerender_queue_timeout: float
 	disconnect_queue_timeout: float
 
@@ -303,6 +304,7 @@ class App:
 		disconnect_queue_timeout: float = 300.0,
 		connection_status: ConnectionStatusConfig | None = None,
 		render_loop_limit: int = 50,
+		unowned_reactives: Literal["error", "warn", "ignore"] = "error",
 	):
 		# Resolve mode from environment and expose on the app instance
 		self.env = envvars.pulse_env
@@ -361,6 +363,9 @@ class App:
 		self.disconnect_queue_timeout = disconnect_queue_timeout
 		self.connection_status = connection_status or ConnectionStatusConfig()
 		self.render_loop_limit = render_loop_limit
+		# Policy for Effects/States constructed during a component render
+		# without an owner (ps.init / ps.setup / ps.state / a State).
+		self.unowned_reactives = unowned_reactives
 
 		self.codegen = Codegen(
 			self.routes,

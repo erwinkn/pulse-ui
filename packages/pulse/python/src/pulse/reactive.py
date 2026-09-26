@@ -464,8 +464,10 @@ class Effect(Disposable):
 			child.dispose()
 		if self.cleanup_fn:
 			self.cleanup_fn()
+			self.cleanup_fn = None
 		for dep in self.deps:
 			dep.obs.remove(self)
+		self.deps = {}
 		if self.parent and self in self.parent.children:
 			self.parent.children.remove(self)
 
@@ -699,10 +701,12 @@ class Effect(Disposable):
 
 	@contextmanager
 	def capture_deps(self, update_deps: bool | None = None):
+		"""Capture dependencies for this effect; yields the tracking Scope so
+		callers can inspect what else (effects, states) was created within."""
 		scope = Scope()
 		try:
 			with scope:
-				yield
+				yield scope
 		finally:
 			self.set_deps(scope.deps, update_deps=update_deps)
 
@@ -888,10 +892,48 @@ class AsyncEffect(Effect):
 			child.dispose()
 		if self.cleanup_fn:
 			self.cleanup_fn()
+			self.cleanup_fn = None  # pyright: ignore[reportUnannotatedClassAttribute]
 		for dep in self.deps:
 			dep.obs.remove(self)
+		self.deps = {}  # pyright: ignore[reportUnannotatedClassAttribute]
 		if self.parent and self in self.parent.children:
 			self.parent.children.remove(self)
+
+
+class RenderEffect(Effect):
+	"""Effect that re-renders a single component subtree.
+
+	The renderer attaches the component's runtime (duck-typed: anything with a
+	`path` attribute) so batches can order render effects parents-first.
+
+	Dependencies are managed exclusively by the renderer via `capture_deps`
+	around each render pass, so executing the effect does not open a tracking
+	scope of its own (the render pass shields itself with Untrack anyway).
+	"""
+
+	runtime: Any = None
+
+	@property
+	def depth(self) -> int:
+		path = getattr(self.runtime, "path", "")
+		if not path:
+			return 0
+		return path.count(".") + 1
+
+	@override
+	def _execute(self) -> None:
+		execution_epoch = epoch()
+		# Clear batch *before* running as the render may update a signal that
+		# causes this effect to be rescheduled.
+		self.batch = None  # pyright: ignore[reportUnannotatedClassAttribute]
+		try:
+			self.cleanup_fn = self.fn()  # pyright: ignore[reportUnannotatedClassAttribute]
+		except Exception as e:
+			self.handle_error(e)
+		self.runs += 1  # pyright: ignore[reportUnannotatedClassAttribute]
+		self.last_run = execution_epoch  # pyright: ignore[reportUnannotatedClassAttribute]
+		if self._interval is not None and self._interval_handle is None:
+			self._schedule_interval()
 
 
 class Batch:
@@ -961,8 +1003,22 @@ class Batch:
 			current_effects = self.effects
 			self.effects = []
 
+			# Clear batch references upfront so that cancelling or rescheduling an
+			# effect from within another effect's run targets the new queue.
 			for effect in current_effects:
 				effect.batch = None
+			# Run render effects after other effects, parents before children: a
+			# parent re-render refreshes its children's dependency snapshots, so
+			# their queued runs become no-ops instead of duplicate renders.
+			current_effects.sort(
+				key=lambda e: (1, e.depth) if isinstance(e, RenderEffect) else (0, 0)
+			)
+
+			for effect in current_effects:
+				# An earlier effect in this flush may have disposed or paused
+				# this one (e.g. a parent re-render unmounting a child).
+				if effect.__disposed__ or effect.paused:
+					continue
 				if not effect.should_run():
 					continue
 				try:
@@ -1049,6 +1105,7 @@ class Scope:
 	Attributes:
 		deps: Tracked dependencies mapping Signal/Computed to last_change epoch.
 		effects: Effects created in this scope.
+		states: State instances created in this scope.
 
 	Example:
 
@@ -1065,11 +1122,16 @@ class Scope:
 		# Dict preserves insertion order. Maps dependency -> last_change
 		self.deps: dict[Signal[Any] | Computed[Any], int] = {}
 		self.effects: list[Effect] = []
+		self.states: list[Any] = []
 		self._token: "Token[ReactiveContext] | None" = None
 
 	def register_effect(self, effect: "Effect"):
 		if effect not in self.effects:
 			self.effects.append(effect)
+
+	def register_state(self, state: Any):
+		# Each State registers exactly once (at construction), so no dedupe.
+		self.states.append(state)
 
 	def register_dep(self, value: "Signal[Any] | Computed[Any]"):
 		self.deps[value] = value.last_change

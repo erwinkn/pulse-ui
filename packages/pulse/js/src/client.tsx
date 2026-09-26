@@ -13,6 +13,7 @@ import type {
 	ServerError,
 	ServerJsExecMessage,
 	ServerMessage,
+	ServerNavigateResultMessage,
 	ServerResumeMessage,
 } from "./messages";
 import type { PulsePrerenderView } from "./pulse";
@@ -93,6 +94,15 @@ export class PulseSocketIOClient {
 	#pendingResumeId: string | null = null;
 	#resumeSnapshotViews: Set<string> = new Set();
 	#resumeSnapshotChannels: Set<string> = new Set();
+	#nextNavId = 0;
+	#pendingNavigations: Map<
+		string,
+		{
+			resolve: (result: ServerNavigateResultMessage) => void;
+			reject: (error: Error) => void;
+			timer: ReturnType<typeof setTimeout>;
+		}
+	> = new Map();
 
 	constructor(
 		url: string,
@@ -239,7 +249,8 @@ export class PulseSocketIOClient {
 					}
 					if (
 						payload.type === "channel_connect" ||
-						payload.type === "channel_disconnect"
+						payload.type === "channel_disconnect" ||
+						payload.type === "navigate"
 					) {
 						continue;
 					}
@@ -472,6 +483,10 @@ export class PulseSocketIOClient {
 				this.#handleServerResume(message);
 				break;
 			}
+			case "navigate_result": {
+				this.#handleNavigateResult(message);
+				break;
+			}
 			case "attach_ack": {
 				this.#handleAttachAck(message.view, message.attachId);
 				break;
@@ -556,6 +571,49 @@ export class PulseSocketIOClient {
 		this.#queueCallback(message);
 	}
 
+	/**
+	 * Ask the server to render the views for a navigation (or prefetch them).
+	 * Rejects when the socket is down — callers fall back to HTTP prerender.
+	 */
+	public navigateViews(
+		routeInfo: RouteInfo,
+		options: { prefetch?: boolean; timeoutMs?: number } = {},
+	): Promise<ServerNavigateResultMessage> {
+		if (!this.isConnected() || this.#resumePending) {
+			return Promise.reject(new Error("Pulse socket is not connected"));
+		}
+		const nav = `nav-${++this.#nextNavId}`;
+		const promise = new Promise<ServerNavigateResultMessage>((resolve, reject) => {
+			const timer = setTimeout(() => {
+				this.#pendingNavigations.delete(nav);
+				reject(new Error("Navigation request timed out"));
+			}, options.timeoutMs ?? 15_000);
+			this.#pendingNavigations.set(nav, { resolve, reject, timer });
+		});
+		this.sendMessage({
+			type: "navigate",
+			nav,
+			routeInfo,
+			...(options.prefetch ? { prefetch: true } : {}),
+		});
+		return promise;
+	}
+
+	#handleNavigateResult(message: ServerNavigateResultMessage): void {
+		const pending = this.#pendingNavigations.get(message.nav);
+		if (!pending) return;
+		this.#pendingNavigations.delete(message.nav);
+		clearTimeout(pending.timer);
+		pending.resolve(message);
+	}
+
+	#rejectPendingNavigations(reason: string): void {
+		for (const pending of this.#pendingNavigations.values()) {
+			clearTimeout(pending.timer);
+			pending.reject(new Error(reason));
+		}
+		this.#pendingNavigations.clear();
+	}
 
 	#handleJsExec(message: ServerJsExecMessage) {
 		const view = this.#activeViews.get(message.view);
@@ -617,6 +675,7 @@ export class PulseSocketIOClient {
 		this.#ackedAttachIds.clear();
 		this.#resumePending = false;
 		this.#pendingResumeId = null;
+		this.#rejectPendingNavigations("Connection lost");
 		for (const entry of this.#channels.values()) {
 			entry.bridge.handleDisconnect(new PulseChannelResetError("Connection lost"));
 		}
@@ -738,6 +797,7 @@ export class PulseSocketIOClient {
 		if (
 			payload.type === "attach" ||
 			payload.type === "update" ||
+			payload.type === "navigate" ||
 			payload.type === "channel_connect" ||
 			payload.type === "client_resume"
 		) {

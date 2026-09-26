@@ -490,3 +490,27 @@ async def test_channel_pending_cancelled_on_render_close():
 	real_render.close()
 	with pytest.raises(ChannelClosed):
 		await pending
+
+
+def test_resume_accepts_unbound_channel():
+	app, render, session = make_route_render()
+	sent: list[dict[str, Any]] = []
+	render.send = sent.append  # pyright: ignore[reportAttributeAccessIssue]
+	with ps.PulseContext(app=app, session=session, render=render):
+		channel = render.channels.create("session-channel", bind_view=False)
+	connect_channel(render, channel)
+
+	ok = render.resume(
+		"resume-unbound",
+		[],
+		[{"channel": channel.id, "view": ""}],
+	)
+
+	assert ok is True
+	assert sent[-1] == {
+		"type": "server_resume",
+		"resumeId": "resume-unbound",
+		"status": "ok",
+		"views": [],
+		"channels": [{"channel": channel.id, "view": ""}],
+	}

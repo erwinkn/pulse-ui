@@ -17,7 +17,7 @@ import {
 import { type ConnectionStatus, type Directives, PulseSocketIOClient } from "./client";
 import { buildRouteInfo, type RouteInfo } from "./helpers";
 import { replayPreHydrationInputs } from "./hydration";
-import type { ServerError, ServerInitMessage } from "./messages";
+import type { ServerError, ServerInitMessage, ServerNavigateResultMessage } from "./messages";
 import { VDOMRenderer } from "./renderer";
 import {
 	type NavigationTarget,
@@ -374,6 +374,10 @@ export interface PulseAppProps {
 }
 
 const DIRECTIVES_KEY = "__PULSE_DIRECTIVES";
+// Client-side cache lifetime for prefetched views. Must stay below the
+// server's pending-view TTL (60s) so a consumed prefetch always attaches to a
+// live view.
+const PREFETCH_TTL_MS = 30_000;
 
 function readStoredDirectives(): Directives {
 	if (!inBrowser || typeof sessionStorage === "undefined") {
@@ -472,9 +476,10 @@ function PulseFrameworkNavigationBinder({ client }: { client: PulseSocketIOClien
 /**
  * The Pulse application shell: router + socket client + route views.
  *
- * Navigation is server-driven: link clicks fetch the target's views from the
- * Python server via HTTP prerender, and the result commits atomically with
- * the location change.
+ * Navigation is server-driven: link clicks ask the Python server for the
+ * target's views over the WebSocket (falling back to HTTP prerender when the
+ * socket is down), and hovering a link prefetches both the route's JS chunks
+ * and its server-rendered views.
  */
 export function PulseApp({ routes, routeLoaders, config, prerender, url }: PulseAppProps) {
 	const [current, setCurrent] = useState(prerender);
@@ -499,6 +504,10 @@ export function PulseApp({ routes, routeLoaders, config, prerender, url }: Pulse
 		[config.serverAddress, config.connectionStatus],
 	);
 
+	const prefetches = useRef(
+		new Map<string, { at: number; promise: Promise<ServerNavigateResultMessage> }>(),
+	);
+
 	const requestViews = useCallback(
 		async (target: NavigationTarget): Promise<NavigationViews> => {
 			const routeInfo = buildRouteInfo(
@@ -506,15 +515,38 @@ export function PulseApp({ routes, routeLoaders, config, prerender, url }: Pulse
 				target.match.params,
 				target.match.catchall,
 			);
+			if (client.isConnected()) {
+				try {
+					return await client.navigateViews(routeInfo);
+				} catch {
+					// Socket unusable (resume in flight, dropped mid-request,
+					// timeout) - fall through to the HTTP prerender.
+				}
+			}
 			const paths = target.match.matches.map((route) => route.id);
 			return fetchPrerenderViews(config, paths, routeInfo);
 		},
-		[config],
+		[client, config],
 	);
 
 	const handleNavigate = useCallback(
 		async (target: NavigationTarget) => {
-			let result = await requestViews(target);
+			const key = target.location.pathname + target.location.search;
+			let result: NavigationViews | null = null;
+			const cached = prefetches.current.get(key);
+			if (cached) {
+				prefetches.current.delete(key);
+				if (Date.now() - cached.at < PREFETCH_TTL_MS) {
+					try {
+						result = await cached.promise;
+					} catch {
+						result = null;
+					}
+				}
+			}
+			if (result === null || result.status === "error") {
+				result = await requestViews(target);
+			}
 			if (result.status === "redirect") {
 				if (inBrowser) {
 					window.location.assign(result.redirect || "/");
@@ -553,6 +585,35 @@ export function PulseApp({ routes, routeLoaders, config, prerender, url }: Pulse
 		[requestViews],
 	);
 
+	const handlePrefetch = useCallback(
+		(target: NavigationTarget) => {
+			if (!client.isConnected()) {
+				return;
+			}
+			const now = Date.now();
+			for (const [staleKey, entry] of prefetches.current) {
+				if (now - entry.at >= PREFETCH_TTL_MS) {
+					prefetches.current.delete(staleKey);
+				}
+			}
+			const key = target.location.pathname + target.location.search;
+			const existing = prefetches.current.get(key);
+			if (existing && now - existing.at < PREFETCH_TTL_MS) {
+				return;
+			}
+			const routeInfo = buildRouteInfo(
+				target.location,
+				target.match.params,
+				target.match.catchall,
+			);
+			const promise = client.navigateViews(routeInfo, { prefetch: true });
+			promise.catch(() => {
+				prefetches.current.delete(key);
+			});
+			prefetches.current.set(key, { at: Date.now(), promise });
+		},
+		[client],
+	);
 
 	return (
 		<PulseRouterProvider
@@ -560,6 +621,7 @@ export function PulseApp({ routes, routeLoaders, config, prerender, url }: Pulse
 			routeLoaders={routeLoaders}
 			initialUrl={url}
 			onNavigate={handleNavigate}
+			onPrefetch={handlePrefetch}
 		>
 			<PulseFrameworkNavigationBinder client={client} />
 			<PulseProvider client={client} prerender={current}>
